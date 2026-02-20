@@ -13,14 +13,20 @@ import {
   setMessage,
 } from './tether_renderer.js';
 import { bindInputHandlers } from './tether_input.js';
-import { checkCompletion, evaluateHints, evaluateRPS, evaluateStitches, evaluateIsolation } from './tether_rules.js';
+import {
+  checkCompletion,
+  evaluateBlockedCells,
+  evaluateHints,
+  evaluateRPS,
+  evaluateStitches,
+} from './tether_rules.js';
 
 function makeEvaluators(snapshot) {
   return {
     hintStatus: evaluateHints(snapshot),
     stitchStatus: evaluateStitches(snapshot),
     rpsStatus: evaluateRPS(snapshot),
-    isolationStatus: evaluateIsolation(snapshot),
+    blockedStatus: evaluateBlockedCells(snapshot),
   };
 }
 

@@ -1,11 +1,40 @@
 import { CELL_TYPES, HINT_CODES, RPS_CODES, RPS_WIN_ORDER } from './tether_config.js';
-import { inBounds, keyOf, keyV } from './tether_utils.js';
+import { inBounds, keyOf } from './tether_utils.js';
 
 const isHintCode = (ch) => HINT_CODES.has(ch);
 const isRpsCode = (ch) => RPS_CODES.has(ch);
+const isWall = (ch) => ch === CELL_TYPES.WALL || ch === CELL_TYPES.MOVABLE_WALL;
+
+const makeEndpointSet = (path) => {
+  if (path.length === 0) return new Set();
+  return new Set([
+    keyOf(path[0].r, path[0].c),
+    keyOf(path[path.length - 1].r, path[path.length - 1].c),
+  ]);
+};
+
+const hasCrossStitch = (snapshot, r1, c1, r2, c2) => {
+  if (!inBounds(snapshot.rows, snapshot.cols, r2, c2)) return false;
+  const vr = Math.max(r1, r2);
+  const vc = Math.max(c1, c2);
+  return snapshot.stitchSet && snapshot.stitchSet.has(keyOf(vr, vc));
+};
 
 const evalHintAtIndex = (i, clue, path, isComplete) => {
   if (i === 0 || i === path.length - 1) {
+    if (isComplete) return { state: 'bad', clue };
+
+    if (i > 0) {
+      const prev = path[i - 1];
+      const cur = path[i];
+      const vin = { dr: cur.r - prev.r, dc: cur.c - prev.c };
+      const isHoriz = vin.dr === 0 && Math.abs(vin.dc) === 1;
+      const isVert = vin.dc === 0 && Math.abs(vin.dr) === 1;
+
+      if (clue === CELL_TYPES.HINT_HORIZONTAL) return { state: isHoriz ? 'pending' : 'bad', clue };
+      if (clue === CELL_TYPES.HINT_VERTICAL) return { state: isVert ? 'pending' : 'bad', clue };
+    }
+
     return isComplete ? { state: 'bad', clue } : { state: 'pending', clue };
   }
 
@@ -85,6 +114,73 @@ export function evaluateHints(snapshot) {
     summary,
     goodKeys,
     badKeys,
+  };
+}
+
+export function evaluateBlockedCells(snapshot) {
+  const blockedKeys = [];
+  const path = snapshot.path;
+  const visited = snapshot.visited;
+  const endpointKeys = makeEndpointSet(path);
+
+  for (let r = 0; r < snapshot.rows; r++) {
+    for (let c = 0; c < snapshot.cols; c++) {
+      const code = snapshot.gridData[r][c];
+      const k = keyOf(r, c);
+
+      if (isWall(code) || visited.has(k)) continue;
+
+      const isBlockedNeighbor = (nr, nc) => {
+        if (!inBounds(snapshot.rows, snapshot.cols, nr, nc)) return true;
+        const nk = keyOf(nr, nc);
+        const nCode = snapshot.gridData[nr][nc];
+        if (isWall(nCode)) return true;
+        if (visited.has(nk) && !endpointKeys.has(nk)) return true;
+        return false;
+      };
+
+      const noOrthAccess =
+        isBlockedNeighbor(r - 1, c) &&
+        isBlockedNeighbor(r + 1, c) &&
+        isBlockedNeighbor(r, c - 1) &&
+        isBlockedNeighbor(r, c + 1);
+
+      if (!noOrthAccess) continue;
+
+      let hasDiagonalAccess = false;
+      const diagonalMoves = [
+        [-1, -1],
+        [-1, 1],
+        [1, -1],
+        [1, 1],
+      ];
+
+      for (const [dr, dc] of diagonalMoves) {
+        const nr = r + dr;
+        const nc = c + dc;
+
+        if (!hasCrossStitch(snapshot, r, c, nr, nc)) continue;
+
+        if (!inBounds(snapshot.rows, snapshot.cols, nr, nc)) continue;
+        const nk = keyOf(nr, nc);
+        const nCode = snapshot.gridData[nr][nc];
+        if (isWall(nCode)) continue;
+        if (visited.has(nk) && !endpointKeys.has(nk)) continue;
+
+        hasDiagonalAccess = true;
+        break;
+      }
+
+      if (!hasDiagonalAccess) {
+        blockedKeys.push(k);
+      }
+    }
+  }
+
+  return {
+    bad: blockedKeys.length,
+    badKeys: blockedKeys,
+    summary: blockedKeys.length === 0 ? '—' : `${blockedKeys.length} blocked`,
   };
 }
 
@@ -223,111 +319,28 @@ export function evaluateRPS(snapshot) {
   };
 }
 
-export function evaluateIsolation(snapshot) {
-  const badKeys = [];
-  if (snapshot.path.length <= 1) return { badKeys, totalIsolated: 0 };
-
-  const isUsable = (r, c) => {
-    if (!inBounds(snapshot.rows, snapshot.cols, r, c)) return false;
-    const code = snapshot.gridData[r][c];
-    return code !== CELL_TYPES.WALL && code !== CELL_TYPES.MOVABLE_WALL;
-  };
-
-  const getNeighbors = (r, c) => {
-    const neighbors = [];
-    [[1, 0], [-1, 0], [0, 1], [0, -1]].forEach(([dr, dc]) => {
-      const nr = r + dr;
-      const nc = c + dc;
-      if (isUsable(nr, nc)) neighbors.push({ r: nr, c: nc });
-    });
-    if (snapshot.stitchSet) {
-      [[1, 1], [1, -1], [-1, 1], [-1, -1]].forEach(([dr, dc]) => {
-        const nr = r + dr;
-        const nc = c + dc;
-        if (isUsable(nr, nc)) {
-          const vr = Math.max(r, nr);
-          const vc = Math.max(c, nc);
-          if (snapshot.stitchSet.has(keyV(vr, vc))) {
-            neighbors.push({ r: nr, c: nc });
-          }
-        }
-      });
-    }
-    return neighbors;
-  };
-
-  const pathKeys = new Set(snapshot.path.map((p) => keyOf(p.r, p.c)));
-  const head = snapshot.path[0];
-  const tail = snapshot.path[snapshot.path.length - 1];
-
-  const queue = [];
-  const reachable = new Set();
-
-  const startNodes = [head, tail];
-  if (head.r === tail.r && head.c === tail.c) startNodes.pop();
-
-  startNodes.forEach((node) => {
-    getNeighbors(node.r, node.c).forEach((n) => {
-      const nk = keyOf(n.r, n.c);
-      if (!pathKeys.has(nk) && !reachable.has(nk)) {
-        reachable.add(nk);
-        queue.push(n);
-      }
-    });
-  });
-
-  let headIdx = 0;
-  while (headIdx < queue.length) {
-    const curr = queue[headIdx++];
-    getNeighbors(curr.r, curr.c).forEach((n) => {
-      const nk = keyOf(n.r, n.c);
-      if (!pathKeys.has(nk) && !reachable.has(nk)) {
-        reachable.add(nk);
-        queue.push(n);
-      }
-    });
-  }
-
-  for (let r = 0; r < snapshot.rows; r++) {
-    for (let c = 0; c < snapshot.cols; c++) {
-      if (isUsable(r, c)) {
-        const k = keyOf(r, c);
-        if (!pathKeys.has(k) && !reachable.has(k)) {
-          badKeys.push(k);
-        }
-      }
-    }
-  }
-
-  return { badKeys, totalIsolated: badKeys.length };
-}
-
 export function checkCompletion(snapshot, forced = {}) {
   const hintStatus = forced.hintStatus || evaluateHints(snapshot);
   const stitchStatus = forced.stitchStatus || evaluateStitches(snapshot);
   const rpsStatus = forced.rpsStatus || evaluateRPS(snapshot);
-  const isolationStatus = forced.isolationStatus || evaluateIsolation(snapshot);
 
   const allVisited = snapshot.path.length === snapshot.totalUsable;
 
   const hintsOk = hintStatus.total === 0 ? true : (hintStatus.bad === 0 && hintStatus.good === hintStatus.total);
   const stitchesOk = stitchStatus.total === 0 ? true : (stitchStatus.bad === 0 && stitchStatus.good === stitchStatus.total);
   const rpsOk = rpsStatus.total === 0 ? true : rpsStatus.bad === 0;
-  const isolatedOk = isolationStatus.totalIsolated === 0;
 
-  if (allVisited && hintsOk && stitchesOk && rpsOk && isolatedOk) {
+  if (allVisited && hintsOk && stitchesOk && rpsOk) {
     return {
       allVisited,
       hintsOk,
       stitchesOk,
       rpsOk,
-      isolatedOk,
       kind: 'good',
       message: '완료 ✅ 모든 칸 방문 + 모든 제약 만족',
       hintStatus,
       stitchStatus,
       rpsStatus,
-      isolationStatus,
     };
   }
 
@@ -336,21 +349,18 @@ export function checkCompletion(snapshot, forced = {}) {
   parts.push(hintsOk ? '힌트: OK' : `힌트: 충돌 ${hintStatus.bad}개`);
   parts.push(stitchesOk ? '스티치: OK' : `스티치: 충돌 ${stitchStatus.bad}개`);
   parts.push(rpsOk ? 'RPS: OK' : `RPS: 충돌 ${rpsStatus.bad}개`);
-  if (!isolatedOk) parts.push(`고립: ${isolationStatus.totalIsolated}칸`);
 
-  const kind = (!hintsOk || !stitchesOk || !rpsOk || !isolatedOk) ? 'bad' : null;
+  const kind = (!hintsOk || !stitchesOk || !rpsOk) ? 'bad' : null;
 
   return {
     allVisited,
     hintsOk,
     stitchesOk,
     rpsOk,
-    isolatedOk,
     kind,
     message: parts.join(' · '),
     hintStatus,
     stitchStatus,
     rpsStatus,
-    isolationStatus,
   };
 }

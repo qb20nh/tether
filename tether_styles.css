@@ -246,7 +246,9 @@ button:active{ transform: translateY(1px); }
 .cell.pathEnd{
   cursor: grab;
 }
-.cell.badHint{
+.cell.badHint,
+.cell.badBlocked,
+.cell.badRps{
   border-color: rgba(255,92,92,0.95) !important;
   background: linear-gradient(180deg, rgba(255,92,92,0.18) 0%, rgba(138,35,45,0.30) 100%);
   box-shadow: 0 0 0 3px rgba(255,92,92,0.28) inset, 0 0 0 2px rgba(255,92,92,0.16);
@@ -255,11 +257,6 @@ button:active{ transform: translateY(1px); }
   border-color: rgba(46,204,113,0.95) !important;
   background: linear-gradient(180deg, rgba(46,204,113,0.16) 0%, rgba(22,106,65,0.26) 100%);
   box-shadow: 0 0 0 3px rgba(46,204,113,0.28) inset, 0 0 0 2px rgba(46,204,113,0.16);
-}
-.cell.badRps{
-  border-color: rgba(255,92,92,0.95) !important;
-  background: linear-gradient(180deg, rgba(255,92,92,0.16) 0%, rgba(138,35,45,0.30) 100%);
-  box-shadow: 0 0 0 3px rgba(255,92,92,0.28) inset, 0 0 0 2px rgba(255,92,92,0.16);
 }
 .cell.goodRps{
   border-color: rgba(46,204,113,0.95) !important;

@@ -212,6 +212,7 @@ const clearCellState = (cell) => {
     'pathEnd',
     'badHint',
     'goodHint',
+    'badBlocked',
     'badRps',
     'goodRps',
     'dropTarget',
@@ -226,7 +227,7 @@ const clearCellState = (cell) => {
 };
 
 export function updateCells(snapshot, results, refs) {
-  const { hintStatus, stitchStatus, rpsStatus, isolationStatus } = results;
+  const { hintStatus, stitchStatus, rpsStatus, blockedStatus } = results;
 
   for (let r = 0; r < snapshot.rows; r++) {
     for (let c = 0; c < snapshot.cols; c++) {
@@ -280,10 +281,10 @@ export function updateCells(snapshot, results, refs) {
     });
   }
 
-  if (isolationStatus) {
-    isolationStatus.badKeys.forEach((k) => {
+  if (blockedStatus) {
+    blockedStatus.badKeys.forEach((k) => {
       const [r, c] = k.split(',').map(Number);
-      if (gridCells[r]?.[c]) gridCells[r][c].classList.add('badHint');
+      if (gridCells[r]?.[c]) gridCells[r][c].classList.add('badBlocked');
     });
   }
 
