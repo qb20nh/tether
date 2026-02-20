@@ -1,0 +1,227 @@
+import { CELL_TYPES } from './tether_config.js';
+import {
+  clearDropTarget,
+  setDropTarget,
+  showWallDragGhost,
+  moveWallDragGhost,
+  hideWallDragGhost,
+} from './tether_renderer.js';
+import { cellCenter, isAdjacentMove, getCellSize } from './tether_utils.js';
+
+export function bindInputHandlers(refs, state, onStateChange = () => { }) {
+  let dragMode = null;
+  let activePointerId = null;
+  let wallDrag = null;
+  let pathDrag = null;
+
+  const cellFromPoint = (x, y) => {
+    const el = document.elementFromPoint(x, y);
+    if (!el) return null;
+    const cell = el.closest('.cell');
+    if (!cell) return null;
+    return {
+      r: parseInt(cell.dataset.r, 10),
+      c: parseInt(cell.dataset.c, 10),
+    };
+  };
+
+  const isUsableCell = (snapshot, r, c) => {
+    const ch = snapshot.gridData[r]?.[c];
+    return ch && ch !== CELL_TYPES.WALL && ch !== CELL_TYPES.MOVABLE_WALL;
+  };
+
+  const onPointerDown = (e) => {
+    const snapshot = state.getSnapshot();
+    const cell = cellFromPoint(e.clientX, e.clientY);
+    if (!cell) return;
+
+    const ch = snapshot.gridData?.[cell.r]?.[cell.c];
+
+    if (ch === CELL_TYPES.MOVABLE_WALL) {
+      dragMode = 'wall';
+      activePointerId = e.pointerId;
+      wallDrag = {
+        from: { r: cell.r, c: cell.c },
+        hover: null,
+      };
+      showWallDragGhost(e.clientX, e.clientY);
+      refs.gridEl.setPointerCapture(e.pointerId);
+      e.preventDefault();
+      return;
+    }
+
+    if (!isUsableCell(snapshot, cell.r, cell.c)) return;
+
+    if (snapshot.path.length === 0) {
+      if (!state.startOrTryStep(cell.r, cell.c)) return;
+      dragMode = 'path';
+      pathDrag = {
+        side: 'end',
+        moved: false,
+        origin: { r: cell.r, c: cell.c },
+      };
+      activePointerId = e.pointerId;
+      refs.gridEl.setPointerCapture(e.pointerId);
+      onStateChange(false, { rebuildGrid: false });
+      e.preventDefault();
+      return;
+    }
+
+    const tail = snapshot.path[snapshot.path.length - 1];
+    const head = snapshot.path[0];
+    const isTail = tail.r === cell.r && tail.c === cell.c;
+    const isHead = head.r === cell.r && head.c === cell.c;
+    if (!isTail && !isHead) return;
+
+    pathDrag = {
+      side: isHead ? 'start' : 'end',
+      moved: false,
+      origin: { r: cell.r, c: cell.c },
+    };
+
+    dragMode = 'path';
+    activePointerId = e.pointerId;
+    refs.gridEl.setPointerCapture(e.pointerId);
+    e.preventDefault();
+  };
+
+  const onPointerMove = (e) => {
+    if (activePointerId === null || e.pointerId !== activePointerId) return;
+
+    if (dragMode === 'path') {
+      let cell = cellFromPoint(e.clientX, e.clientY);
+
+      if (cell && pathDrag) {
+        const snapshotForInput = state.getSnapshot();
+        const headNode = pathDrag.side === 'start'
+          ? snapshotForInput.path[0]
+          : snapshotForInput.path[snapshotForInput.path.length - 1];
+
+        if (headNode) {
+          const drRaw = Math.abs(cell.r - headNode.r);
+          const dcRaw = Math.abs(cell.c - headNode.c);
+
+          if (drRaw <= 1 && dcRaw <= 1) {
+            const rect = refs.gridEl.getBoundingClientRect();
+            const px = e.clientX - rect.left;
+            const py = e.clientY - rect.top;
+
+            const candidates = [];
+            for (let dr = -1; dr <= 1; dr++) {
+              for (let dc = -1; dc <= 1; dc++) {
+                const nr = headNode.r + dr;
+                const nc = headNode.c + dc;
+                if (nr >= 0 && nr < snapshotForInput.rows && nc >= 0 && nc < snapshotForInput.cols) {
+                  candidates.push({ r: nr, c: nc });
+                }
+              }
+            }
+
+            let bestCell = cell; // fallback to whatever original gives
+            let bestDist = Infinity;
+            const size = typeof getCellSize === 'function' ? getCellSize() : 56;
+
+            candidates.forEach(cand => {
+              const center = cellCenter(cand.r, cand.c, refs.gridEl);
+              let dist = Math.hypot(px - center.x, py - center.y);
+
+              // Boost diagonal moves if they are valid bridge crossings
+              const isDiag = Math.abs(cand.r - headNode.r) === 1 && Math.abs(cand.c - headNode.c) === 1;
+              if (isDiag && isAdjacentMove(snapshotForInput, headNode, cand)) {
+                dist -= size * 0.45;
+              }
+
+              if (dist < bestDist) {
+                bestDist = dist;
+                bestCell = cand;
+              }
+            });
+
+            cell = bestCell;
+          }
+        }
+      }
+
+      if (!cell) return;
+
+      if (pathDrag && !pathDrag.moved) {
+        if (pathDrag.origin.r === cell.r && pathDrag.origin.c === cell.c) return;
+        pathDrag.moved = true;
+      }
+
+      let touched = false;
+
+      if (pathDrag && pathDrag.side === 'start') {
+        touched = state.startOrTryStepFromStart(cell.r, cell.c);
+      } else {
+        touched = state.startOrTryStep(cell.r, cell.c);
+      }
+
+      if (touched) {
+        onStateChange(false, { rebuildGrid: false });
+      }
+      e.preventDefault();
+      return;
+    }
+
+    if (dragMode === 'wall') {
+      moveWallDragGhost(e.clientX, e.clientY);
+      const cell = cellFromPoint(e.clientX, e.clientY);
+      if (!cell) {
+        wallDrag.hover = null;
+        clearDropTarget();
+        e.preventDefault();
+        return;
+      }
+      if (state.canDropWall(wallDrag.from, cell)) {
+        wallDrag.hover = { r: cell.r, c: cell.c };
+        setDropTarget(cell.r, cell.c);
+      } else {
+        wallDrag.hover = null;
+        clearDropTarget();
+      }
+      e.preventDefault();
+    }
+  };
+
+  const onPointerUp = (e) => {
+    if (activePointerId === null || e.pointerId !== activePointerId) return;
+    const finalMode = dragMode;
+    const hadWallMove = dragMode === 'wall' && wallDrag && wallDrag.hover;
+
+    if (dragMode === 'wall') {
+      clearDropTarget();
+      if (wallDrag && wallDrag.hover) {
+        state.moveWall(wallDrag.from, wallDrag.hover);
+      }
+    }
+
+    dragMode = null;
+    activePointerId = null;
+    wallDrag = null;
+    pathDrag = null;
+    hideWallDragGhost();
+    if (finalMode === 'path' && state.finalizePathAfterPointerUp) {
+      state.finalizePathAfterPointerUp();
+    }
+
+    onStateChange(
+      hadWallMove || finalMode === 'path',
+      {
+        rebuildGrid: hadWallMove,
+      },
+    );
+    e.preventDefault();
+  };
+
+  refs.gridEl.addEventListener('pointerdown', onPointerDown);
+  refs.gridEl.addEventListener('pointermove', onPointerMove, { passive: false });
+  refs.gridEl.addEventListener('pointerup', onPointerUp, { passive: false });
+  refs.gridEl.addEventListener('pointercancel', onPointerUp, { passive: false });
+
+  return {
+    onPointerDown,
+    onPointerMove,
+    onPointerUp,
+  };
+}
