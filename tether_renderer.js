@@ -7,12 +7,314 @@ let lastDropTargetKey = null;
 let wallGhostEl = null;
 let cachedBoardWrap = null;
 let activeBoardSize = { rows: 0, cols: 0 };
+let pathAnimationOffset = 0;
+let pathAnimationFrame = 0;
+let pathAnimationLastTs = 0;
+let latestPathSnapshot = null;
+let latestPathRefs = null;
+let latestPathStatuses = null;
+
+const PATH_FLOW_SPEED = -32;
+const PATH_FLOW_CYCLE = 128;
+const PATH_FLOW_PULSE = 64;
+const PATH_FLOW_GLOW_ALPHA = 0.24;
+const PATH_FLOW_GLOW = `rgba(255, 255, 255, ${PATH_FLOW_GLOW_ALPHA})`;
+const PATH_FLOW_GLOW_SOFT = 'rgba(255, 255, 255, 0)';
+const PATH_FLOW_RISE = 0.82;
+const PATH_FLOW_DROP = 0.83;
+const FLOW_STOP_EPSILON = 1e-4;
+const TAU = Math.PI * 2;
+
+const pointsMatch = (a, b) => a && b && a.r === b.r && a.c === b.c;
+const cellDistance = (a, b) => {
+  if (!a || !b) return 1;
+  return Math.hypot(a.r - b.r, a.c - b.c);
+};
+
+const normalizeFlowOffset = (value) => {
+  if (!Number.isFinite(value)) return 0;
+  const mod = value % PATH_FLOW_CYCLE;
+  return mod >= 0 ? mod : mod + PATH_FLOW_CYCLE;
+};
+
+const normalizeModulo = (value, modulus) => {
+  if (!Number.isFinite(value) || !Number.isFinite(modulus) || modulus <= 0) return 0;
+  const mod = value % modulus;
+  return mod >= 0 ? mod : mod + modulus;
+};
+
+const normalizeAngle = (angle) => {
+  const normalized = angle % TAU;
+  return normalized >= 0 ? normalized : normalized + TAU;
+};
+
+const angleDeltaSigned = (from, to) => {
+  const delta = normalizeAngle(to - from);
+  return delta > Math.PI ? delta - TAU : delta;
+};
+
+const flowColorFromAlpha = (alpha) => {
+  const clampedAlpha = Math.max(0, Math.min(PATH_FLOW_GLOW_ALPHA, alpha));
+  if (clampedAlpha <= 0.0005) return PATH_FLOW_GLOW_SOFT;
+  if (clampedAlpha >= PATH_FLOW_GLOW_ALPHA - 0.0005) return PATH_FLOW_GLOW;
+  return `rgba(255, 255, 255, ${clampedAlpha.toFixed(4)})`;
+};
+
+const flowAlphaAtPhase = (phase, pulse) => {
+  if (!Number.isFinite(phase) || !Number.isFinite(pulse) || pulse <= 0 || phase >= pulse) {
+    return 0;
+  }
+
+  const rise = Math.max(0.001, Math.min(0.995, PATH_FLOW_RISE));
+  const drop = Math.max(rise + 0.001, Math.min(0.999, PATH_FLOW_DROP));
+  const unit = phase / pulse;
+
+  if (unit <= rise) {
+    return PATH_FLOW_GLOW_ALPHA * (unit / rise);
+  }
+  if (unit <= drop) {
+    const t = (unit - rise) / (drop - rise);
+    return PATH_FLOW_GLOW_ALPHA * (1 - t);
+  }
+  return 0;
+};
+
+const flowAlphaAtTravel = (travel, flowOffset, cycle, pulse) => {
+  const phase = normalizeModulo(travel + flowOffset, cycle);
+  return flowAlphaAtPhase(phase, pulse);
+};
+
+const addOrderedGradientStops = (gradient, stops) => {
+  if (!stops || stops.length === 0) {
+    gradient.addColorStop(0, PATH_FLOW_GLOW_SOFT);
+    gradient.addColorStop(1, PATH_FLOW_GLOW_SOFT);
+    return;
+  }
+
+  const ordered = stops
+    .filter((stop) => stop && Number.isFinite(stop.position))
+    .map((stop) => ({
+      position: Math.max(0, Math.min(1, stop.position)),
+      color: stop.color || PATH_FLOW_GLOW_SOFT,
+    }))
+    .sort((a, b) => a.position - b.position);
+
+  if (ordered.length === 0) {
+    gradient.addColorStop(0, PATH_FLOW_GLOW_SOFT);
+    gradient.addColorStop(1, PATH_FLOW_GLOW_SOFT);
+    return;
+  }
+
+  const merged = [];
+  for (const stop of ordered) {
+    const last = merged[merged.length - 1];
+    if (last && Math.abs(stop.position - last.position) < FLOW_STOP_EPSILON) {
+      last.color = stop.color;
+    } else {
+      merged.push({ ...stop });
+    }
+  }
+
+  const first = merged[0];
+  const last = merged[merged.length - 1];
+  if (first.position > 0) gradient.addColorStop(0, first.color);
+  for (const stop of merged) {
+    gradient.addColorStop(stop.position, stop.color);
+  }
+  if (last.position < 1) gradient.addColorStop(1, last.color);
+};
+
+const buildFlowGradientStops = (travelStart, travelEnd, flowOffset, cycle, pulse) => {
+  const length = travelEnd - travelStart;
+  if (!Number.isFinite(length) || length <= 0) {
+    return [
+      { position: 0, color: PATH_FLOW_GLOW_SOFT },
+      { position: 1, color: PATH_FLOW_GLOW_SOFT },
+    ];
+  }
+
+  const pushStops = [];
+  const addStopAtTravel = (travel) => {
+    if (!Number.isFinite(travel)) return;
+    if (travel < travelStart - 1e-6 || travel > travelEnd + 1e-6) return;
+    const position = Math.max(0, Math.min(1, (travel - travelStart) / length));
+    const alpha = flowAlphaAtTravel(travel, flowOffset, cycle, pulse);
+    pushStops.push({ position, alpha });
+  };
+
+  addStopAtTravel(travelStart);
+  addStopAtTravel(travelEnd);
+
+  const riseDist = pulse * Math.max(0, Math.min(1, PATH_FLOW_RISE));
+  const dropDist = pulse * Math.max(0, Math.min(1, PATH_FLOW_DROP));
+  const boundaries = [0, riseDist, dropDist, pulse];
+
+  const shiftedStart = travelStart + flowOffset;
+  const shiftedEnd = travelEnd + flowOffset;
+
+  for (const boundary of boundaries) {
+    const nStart = Math.floor((shiftedStart - boundary) / cycle);
+    const nEnd = Math.floor((shiftedEnd - boundary) / cycle);
+    for (let n = nStart; n <= nEnd; n++) {
+      const travel = n * cycle + boundary - flowOffset;
+      addStopAtTravel(travel);
+    }
+  }
+
+  pushStops.sort((a, b) => a.position - b.position);
+  const merged = [];
+  for (const stop of pushStops) {
+    const last = merged[merged.length - 1];
+    if (last && Math.abs(stop.position - last.position) < FLOW_STOP_EPSILON) {
+      last.alpha = stop.alpha;
+    } else {
+      merged.push({ ...stop });
+    }
+  }
+
+  if (merged.length === 0) {
+    return [
+      { position: 0, color: PATH_FLOW_GLOW_SOFT },
+      { position: 1, color: PATH_FLOW_GLOW_SOFT },
+    ];
+  }
+
+  if (merged[0].position > 0) {
+    merged.unshift({ position: 0, alpha: merged[0].alpha });
+  }
+
+  const tail = merged[merged.length - 1];
+  if (tail.position < 1) {
+    merged.push({ position: 1, alpha: tail.alpha });
+  }
+
+  return merged.map((stop) => ({
+    position: stop.position,
+    color: flowColorFromAlpha(stop.alpha),
+  }));
+};
+
+const getHeadShiftDelta = (nextPath, previousPath, refs = {}, offset = { x: 0, y: 0 }) => {
+  const { gridEl } = refs;
+  if (!nextPath || !previousPath) return 0;
+  const nextLen = nextPath.length;
+  const prevLen = previousPath.length;
+  const stepDistance = (path) => {
+    if (!path || path.length < 2) return 0;
+    const a = getCellPoint(path[0].r, path[0].c, { gridEl }, offset);
+    const b = getCellPoint(path[1].r, path[1].c, { gridEl }, offset);
+    return Math.hypot(a.x - b.x, a.y - b.y);
+  };
+  const fallbackStep = Math.max(
+    1,
+    cellDistance(previousPath?.[0], previousPath?.[1]) * getCellSize(gridEl),
+  );
+
+  if (nextLen === prevLen + 1 && nextLen >= 2) {
+    let shared = true;
+    for (let i = 0; i < prevLen; i++) {
+      if (!pointsMatch(nextPath[i + 1], previousPath[i])) {
+        shared = false;
+        break;
+      }
+    }
+    if (shared) {
+      const shifted = stepDistance(nextPath);
+      return -(shifted > 0 ? shifted : fallbackStep);
+    }
+  }
+
+  if (nextLen === prevLen - 1 && prevLen >= 2) {
+    let shared = true;
+    for (let i = 0; i < nextLen; i++) {
+      if (!pointsMatch(previousPath[i + 1], nextPath[i])) {
+        shared = false;
+        break;
+      }
+    }
+    if (shared) {
+      const shifted = stepDistance(previousPath);
+      return shifted > 0 ? shifted : fallbackStep;
+    }
+  }
+
+  return 0;
+};
+
+const shouldAnimatePathFlow = (snapshot) => {
+  if (!snapshot || snapshot.path.length <= 1) return false;
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return true;
+  return !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+};
+
+const stopPathAnimation = () => {
+  if (!pathAnimationFrame) return;
+  cancelAnimationFrame(pathAnimationFrame);
+  pathAnimationFrame = 0;
+  pathAnimationLastTs = 0;
+};
+
+const animatePathFlow = (timestamp) => {
+  pathAnimationFrame = 0;
+
+  if (!latestPathSnapshot || !latestPathRefs) {
+    stopPathAnimation();
+    return;
+  }
+
+  if (!shouldAnimatePathFlow(latestPathSnapshot)) {
+    stopPathAnimation();
+    drawAllInternal(latestPathSnapshot, latestPathRefs, latestPathStatuses, 0);
+    return;
+  }
+
+  if (pathAnimationLastTs > 0) {
+    const dt = Math.max(0, (timestamp - pathAnimationLastTs) / 1000);
+    if (Number.isFinite(dt)) {
+      pathAnimationOffset = (pathAnimationOffset + dt * PATH_FLOW_SPEED) % PATH_FLOW_CYCLE;
+    }
+  }
+
+  pathAnimationLastTs = timestamp;
+  if (latestPathSnapshot && latestPathRefs) {
+    drawAllInternal(latestPathSnapshot, latestPathRefs, latestPathStatuses, pathAnimationOffset);
+  }
+
+  pathAnimationFrame = requestAnimationFrame(animatePathFlow);
+};
+
+const schedulePathAnimation = () => {
+  if (pathAnimationFrame) return;
+  pathAnimationLastTs = 0;
+  pathAnimationFrame = requestAnimationFrame(animatePathFlow);
+};
 
 const clampNumber = (value, min, max) => Math.max(min, Math.min(max, value));
 
 const parsePx = (value) => {
   const parsed = parseFloat(value);
   return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const forceOpaqueColor = (color) => {
+  if (typeof color !== 'string') return '#ffffff';
+  const trimmed = color.trim();
+
+  const rgba = trimmed.match(
+    /^rgba\s*\(\s*([+\-]?\d*\.?\d+)\s*,\s*([+\-]?\d*\.?\d+)\s*,\s*([+\-]?\d*\.?\d+)\s*,\s*([+\-]?\d*\.?\d+)\s*\)$/i,
+  );
+  if (rgba) {
+    return `rgb(${rgba[1]}, ${rgba[2]}, ${rgba[3]})`;
+  }
+
+  const hsla = trimmed.match(
+    /^hsla\s*\(\s*([+\-]?\d*\.?\d+(?:deg|rad|turn)?)\s*,\s*([+\-]?\d*\.?\d+%)\s*,\s*([+\-]?\d*\.?\d+%)\s*,\s*([+\-]?\d*\.?\d+)\s*\)$/i,
+  );
+  if (hsla) {
+    return `hsl(${hsla[1]}, ${hsla[2]}, ${hsla[3]})`;
+  }
+
+  return trimmed;
 };
 
 const syncBoardCellSize = (refs, rows = activeBoardSize.rows, cols = activeBoardSize.cols) => {
@@ -55,7 +357,7 @@ export function cacheElements() {
   const get = (id) => document.getElementById(id);
 
   const result = {
-   app: get(ELEMENT_IDS.APP),
+    app: get(ELEMENT_IDS.APP),
     levelLabel: get(ELEMENT_IDS.LEVEL_LABEL),
     levelSel: get(ELEMENT_IDS.LEVEL_SEL),
     langLabel: get(ELEMENT_IDS.LANG_LABEL),
@@ -354,6 +656,27 @@ export function updateCells(snapshot, results, refs) {
 }
 
 export function drawAll(snapshot, refs, statuses) {
+  const previousPath = latestPathSnapshot?.path || null;
+  const shift = getHeadShiftDelta(snapshot.path, previousPath, refs);
+  if (shift !== 0) {
+    pathAnimationOffset = normalizeFlowOffset(pathAnimationOffset + shift);
+  }
+
+  latestPathSnapshot = snapshot;
+  latestPathRefs = refs;
+  latestPathStatuses = statuses;
+
+  const offset = shouldAnimatePathFlow(snapshot) ? pathAnimationOffset : 0;
+  drawAllInternal(snapshot, refs, statuses, offset);
+
+  if (shouldAnimatePathFlow(snapshot)) {
+    schedulePathAnimation();
+  } else {
+    stopPathAnimation();
+  }
+}
+
+function drawAllInternal(snapshot, refs, statuses, flowOffset = 0) {
   const { ctx, canvas, symbolCtx, symbolCanvas } = refs;
   if (!ctx || !canvas || !symbolCtx || !symbolCanvas) return;
 
@@ -363,7 +686,7 @@ export function drawAll(snapshot, refs, statuses) {
   ctx.clearRect(0, 0, w, h);
   symbolCtx.clearRect(0, 0, symbolCanvas.width / dpr, symbolCanvas.height / dpr);
 
-  drawPathLine(snapshot, refs, ctx);
+  drawPathLine(snapshot, refs, ctx, flowOffset);
   drawCornerCounts(snapshot, refs, symbolCtx, statuses?.hintStatus?.cornerVertexStatus);
   drawCrossStitches(snapshot, refs, symbolCtx, statuses?.stitchStatus?.vertexStatus);
 }
@@ -464,7 +787,7 @@ function drawCrossStitches(snapshot, refs, ctx, vertexStatus = new Map()) {
   }
 }
 
-function drawPathLine(snapshot, refs, ctx) {
+function drawPathLine(snapshot, refs, ctx, flowOffset = 0) {
   if (snapshot.path.length === 0) return;
 
   const previousAlpha = ctx.globalAlpha;
@@ -473,20 +796,24 @@ function drawPathLine(snapshot, refs, ctx) {
   const size = getCellSize(refs.gridEl);
   const width = Math.max(7, Math.floor(size * 0.15));
   const arrowLength = Math.max(Math.floor(size * 0.24), 13);
+  const startRadius = Math.max(Math.floor(width * 0.9), 6);
+  const halfHeadWidth = Math.max(6, Math.floor(width * 0.95));
 
-  const colorMain = getComputedStyle(document.documentElement).getPropertyValue('--line').trim();
+  const colorMain = forceOpaqueColor(
+    getComputedStyle(document.documentElement).getPropertyValue('--line').trim(),
+  );
 
-  ctx.lineCap = 'butt';
+  ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
 
-  if (snapshot.path.length > 1) {
-    const adjustedPoints = [];
-    for (let i = 0; i < snapshot.path.length; i++) {
-      const p = snapshot.path[i];
-      const pnt = getCellPoint(p.r, p.c, refs, offset);
-      adjustedPoints.push(pnt);
-    }
+  const adjustedPoints = [];
+  for (let i = 0; i < snapshot.path.length; i++) {
+    const p = snapshot.path[i];
+    const pnt = getCellPoint(p.r, p.c, refs, offset);
+    adjustedPoints.push(pnt);
+  }
 
+  if (snapshot.path.length > 1) {
     ctx.strokeStyle = colorMain;
     ctx.lineWidth = width;
     ctx.beginPath();
@@ -496,11 +823,20 @@ function drawPathLine(snapshot, refs, ctx) {
       else ctx.lineTo(x, y);
     }
     ctx.stroke();
+
+    if (shouldAnimatePathFlow(snapshot)) {
+      drawFlowRibbon(adjustedPoints, ctx, width, flowOffset, {
+        startRadius,
+        arrowLength,
+        endHalfWidth: halfHeadWidth,
+        drawMain: true,
+        drawTips: false,
+      });
+    }
   }
 
   const head = snapshot.path[0];
   const { x: hx, y: hy } = getCellPoint(head.r, head.c, refs, offset);
-  const startRadius = Math.max(Math.floor(width * 0.9), 6);
   ctx.fillStyle = colorMain;
   ctx.beginPath();
   ctx.arc(hx, hy, startRadius, 0, Math.PI * 2);
@@ -517,7 +853,6 @@ function drawPathLine(snapshot, refs, ctx) {
     const ux = dx / dist;
     const uy = dy / dist;
     const angle = Math.atan2(uy, ux);
-    const halfHeadWidth = Math.max(6, Math.floor(width * 0.95));
 
     ctx.fillStyle = colorMain;
     ctx.beginPath();
@@ -532,7 +867,320 @@ function drawPathLine(snapshot, refs, ctx) {
     ctx.fill();
   }
 
+  if (snapshot.path.length > 1 && shouldAnimatePathFlow(snapshot)) {
+    drawFlowRibbon(adjustedPoints, ctx, width, flowOffset, {
+      startRadius,
+      arrowLength,
+      endHalfWidth: halfHeadWidth,
+      drawMain: false,
+      drawTips: true,
+    });
+  }
+
   ctx.globalAlpha = previousAlpha;
+}
+
+function drawFlowRibbon(points, ctx, width, flowOffset, tipOptions = {}) {
+  if (points.length < 2 || !Number.isFinite(flowOffset)) return;
+
+  const cycle = Math.max(18, PATH_FLOW_CYCLE);
+  const pulse = Math.max(6, Math.min(PATH_FLOW_PULSE, cycle));
+  const flowWidth = width;
+  const drawMain = tipOptions.drawMain !== false;
+  const drawTips = tipOptions.drawTips !== false;
+  const startTipRadius = Number.isFinite(tipOptions.startRadius) ? Math.max(0, tipOptions.startRadius) : 0;
+  const endTipLength = Number.isFinite(tipOptions.arrowLength) ? Math.max(0, tipOptions.arrowLength) : 0;
+  const endTipHalfWidth = Number.isFinite(tipOptions.endHalfWidth)
+    ? Math.max(0, tipOptions.endHalfWidth)
+    : Math.max(6, Math.floor(flowWidth * 0.95));
+  const canUseConic = typeof ctx.createConicGradient === 'function';
+  const segmentCount = points.length - 1;
+  const segmentLengths = new Array(Math.max(0, segmentCount)).fill(0);
+  const segmentUx = new Array(Math.max(0, segmentCount)).fill(0);
+  const segmentUy = new Array(Math.max(0, segmentCount)).fill(0);
+  const cornerTurns = new Array(points.length).fill(null);
+  const linearPrimitives = [];
+  const cornerPrimitives = [];
+
+  const cornerRadius = Math.max(1.2, flowWidth * 0.5);
+  const cornerAbsTurn = Math.PI / 2;
+  const angleTolerance = 1e-4;
+
+  for (let i = 0; i < points.length - 1; i++) {
+    const start = points[i];
+    const end = points[i + 1];
+    const dx = end.x - start.x;
+    const dy = end.y - start.y;
+    const len = Math.hypot(dx, dy);
+    if (len > 0) {
+      segmentLengths[i] = len;
+      segmentUx[i] = dx / len;
+      segmentUy[i] = dy / len;
+    } else {
+      segmentLengths[i] = 0;
+      segmentUx[i] = 0;
+      segmentUy[i] = 0;
+    }
+  }
+
+  for (let i = 1; i < points.length - 1; i++) {
+    const prev = points[i - 1];
+    const corner = points[i];
+    const next = points[i + 1];
+
+    const inDx = corner.x - prev.x;
+    const inDy = corner.y - prev.y;
+    const outDx = next.x - corner.x;
+    const outDy = next.y - corner.y;
+    const inLen = Math.hypot(inDx, inDy);
+    const outLen = Math.hypot(outDx, outDy);
+    if (inLen <= 0 || outLen <= 0) continue;
+
+    const inAngle = Math.atan2(inDy, inDx);
+    const outAngle = Math.atan2(outDy, outDx);
+    const cornerStartAngle = normalizeAngle(inAngle + Math.PI);
+    const cornerEndAngle = normalizeAngle(outAngle);
+    const turnAngle = angleDeltaSigned(cornerStartAngle, cornerEndAngle);
+    const absTurn = Math.abs(turnAngle);
+    if (Math.abs(absTurn - cornerAbsTurn) > angleTolerance) continue;
+
+    cornerTurns[i] = {
+      turnStartAngle: cornerStartAngle,
+      turnEndAngle: cornerEndAngle,
+      turnAngle,
+      arcLength: Math.max(0, absTurn * cornerRadius),
+    };
+  }
+
+  let firstSegmentIndex = -1;
+  let lastSegmentIndex = -1;
+  for (let i = 0; i < segmentCount; i++) {
+    if (segmentLengths[i] <= 0) continue;
+    if (firstSegmentIndex < 0) firstSegmentIndex = i;
+    lastSegmentIndex = i;
+  }
+
+  let flowTravel = 0;
+  for (let i = 0; i < segmentCount; i++) {
+    const len = segmentLengths[i];
+    const hasStartCorner = canUseConic && Boolean(cornerTurns[i]);
+    const hasEndCorner = canUseConic && Boolean(cornerTurns[i + 1]);
+    const trimStart = hasStartCorner ? cornerRadius : 0;
+    const trimEnd = hasEndCorner ? cornerRadius : 0;
+    const drawableStart = Math.min(trimStart, len);
+    const drawableEnd = Math.max(drawableStart, len - trimEnd);
+    const drawableLength = drawableEnd - drawableStart;
+
+    if (drawableLength > 0) {
+      linearPrimitives.push({
+        segmentIndex: i,
+        localStart: drawableStart,
+        localEnd: drawableEnd,
+        travelStart: flowTravel,
+        travelEnd: flowTravel + drawableLength,
+      });
+      flowTravel += drawableLength;
+    }
+
+    if (hasEndCorner && cornerTurns[i + 1]) {
+      const arcLength = cornerTurns[i + 1].arcLength;
+      if (arcLength > 0) {
+        cornerPrimitives.push({
+          cornerIndex: i + 1,
+          travelStart: flowTravel,
+          travelEnd: flowTravel + arcLength,
+        });
+        flowTravel += arcLength;
+      }
+    }
+  }
+
+  ctx.save();
+  ctx.lineCap = 'butt';
+  ctx.lineJoin = 'round';
+  ctx.globalAlpha = 1;
+
+  const fillGradientWithClip = (clipPath, bounds, x1, y1, x2, y2, travelStart, travelEnd) => {
+    if (!clipPath || !bounds) return;
+    const travelSpan = travelEnd - travelStart;
+    if (!Number.isFinite(travelSpan) || travelSpan <= 0) return;
+
+    const gradient = ctx.createLinearGradient(x1, y1, x2, y2);
+    const flowStops = buildFlowGradientStops(
+      travelStart,
+      travelEnd,
+      flowOffset,
+      cycle,
+      pulse,
+    );
+    addOrderedGradientStops(gradient, flowStops);
+
+    ctx.save();
+    ctx.clip(clipPath);
+    ctx.fillStyle = gradient;
+    ctx.fillRect(bounds.x, bounds.y, bounds.w, bounds.h);
+    ctx.restore();
+  };
+
+  const drawStartTipGradient = () => {
+    if (!(startTipRadius > 0 && firstSegmentIndex >= 0)) return;
+    const head = points[0];
+    const ux = segmentUx[firstSegmentIndex];
+    const uy = segmentUy[firstSegmentIndex];
+    const startClip = new Path2D();
+    startClip.arc(head.x, head.y, startTipRadius, 0, TAU);
+    fillGradientWithClip(
+      startClip,
+      {
+        x: head.x - startTipRadius - 1,
+        y: head.y - startTipRadius - 1,
+        w: startTipRadius * 2 + 2,
+        h: startTipRadius * 2 + 2,
+      },
+      head.x - ux * startTipRadius,
+      head.y - uy * startTipRadius,
+      head.x + ux * startTipRadius,
+      head.y + uy * startTipRadius,
+      -startTipRadius,
+      startTipRadius,
+    );
+  };
+
+  if (drawMain) {
+    for (const primitive of linearPrimitives) {
+      const i = primitive.segmentIndex;
+      const start = points[i];
+      const ux = segmentUx[i];
+      const uy = segmentUy[i];
+      const x1 = start.x + ux * primitive.localStart;
+      const y1 = start.y + uy * primitive.localStart;
+      const x2 = start.x + ux * primitive.localEnd;
+      const y2 = start.y + uy * primitive.localEnd;
+      const flow = ctx.createLinearGradient(x1, y1, x2, y2);
+      const flowStops = buildFlowGradientStops(
+        primitive.travelStart,
+        primitive.travelEnd,
+        flowOffset,
+        cycle,
+        pulse,
+      );
+      addOrderedGradientStops(flow, flowStops);
+
+      ctx.strokeStyle = flow;
+      ctx.lineWidth = flowWidth;
+      ctx.beginPath();
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x2, y2);
+      ctx.stroke();
+    }
+  }
+
+  if (drawTips && endTipLength > 0 && lastSegmentIndex >= 0) {
+    const tail = points[points.length - 1];
+    const ux = segmentUx[lastSegmentIndex];
+    const uy = segmentUy[lastSegmentIndex];
+    const perpX = -uy;
+    const perpY = ux;
+    const apexX = tail.x + ux * endTipLength;
+    const apexY = tail.y + uy * endTipLength;
+    const leftX = tail.x - perpX * endTipHalfWidth;
+    const leftY = tail.y - perpY * endTipHalfWidth;
+    const rightX = tail.x + perpX * endTipHalfWidth;
+    const rightY = tail.y + perpY * endTipHalfWidth;
+    const minX = Math.min(apexX, leftX, rightX) - 1;
+    const maxX = Math.max(apexX, leftX, rightX) + 1;
+    const minY = Math.min(apexY, leftY, rightY) - 1;
+    const maxY = Math.max(apexY, leftY, rightY) + 1;
+
+    const endClip = new Path2D();
+    endClip.moveTo(apexX, apexY);
+    endClip.lineTo(leftX, leftY);
+    endClip.lineTo(rightX, rightY);
+    endClip.closePath();
+
+    fillGradientWithClip(
+      endClip,
+      {
+        x: minX,
+        y: minY,
+        w: maxX - minX,
+        h: maxY - minY,
+      },
+      tail.x,
+      tail.y,
+      apexX,
+      apexY,
+      flowTravel,
+      flowTravel + endTipLength,
+    );
+  }
+
+  if (!canUseConic) {
+    if (drawTips) drawStartTipGradient();
+    ctx.restore();
+    return;
+  }
+
+  if (drawMain) {
+    for (const primitive of cornerPrimitives) {
+      const i = primitive.cornerIndex;
+      const corner = cornerTurns[i];
+      if (!corner) continue;
+
+      const turnAngle = corner.turnAngle;
+      const turnAbs = Math.abs(turnAngle);
+      const cornerArcLength = Math.max(0, turnAbs * cornerRadius);
+      if (cornerArcLength <= 0) continue;
+
+      const turnStart = corner.turnStartAngle;
+      const turnSigned = turnAngle < 0 ? -1 : 1;
+      const endAngle = corner.turnEndAngle;
+      const spanNorm = turnAbs / TAU;
+      const conicStartAngle = normalizeAngle((turnSigned > 0 ? turnStart : endAngle) + Math.PI);
+      const innerCornerAngle = normalizeAngle(turnStart + turnAngle * 0.5);
+      const halfTurn = Math.max(1e-6, turnAbs * 0.5);
+      const centerShift = cornerRadius / Math.sin(halfTurn);
+      const baseCx = points[i].x;
+      const baseCy = points[i].y;
+      const shiftX = Math.cos(innerCornerAngle) * centerShift;
+      const shiftY = Math.sin(innerCornerAngle) * centerShift;
+      const cx = baseCx + shiftX;
+      const cy = baseCy + shiftY;
+      const tangentInX = baseCx + Math.cos(turnStart) * cornerRadius;
+      const tangentInY = baseCy + Math.sin(turnStart) * cornerRadius;
+      const tangentOutX = baseCx + Math.cos(endAngle) * cornerRadius;
+      const tangentOutY = baseCy + Math.sin(endAngle) * cornerRadius;
+      const cornerGradient = ctx.createConicGradient(conicStartAngle, cx, cy);
+      const flowStops = buildFlowGradientStops(
+        primitive.travelStart,
+        primitive.travelEnd,
+        flowOffset,
+        cycle,
+        pulse,
+      );
+      const conicStops = flowStops.map((stop) => ({
+        position: turnSigned > 0 ? (1 - stop.position) * spanNorm : stop.position * spanNorm,
+        color: stop.color,
+      }));
+      addOrderedGradientStops(cornerGradient, conicStops);
+
+      const cornerConnector = new Path2D();
+      cornerConnector.moveTo(tangentInX, tangentInY);
+      cornerConnector.lineTo(baseCx, baseCy);
+      cornerConnector.lineTo(tangentOutX, tangentOutY);
+
+      ctx.save();
+      ctx.strokeStyle = cornerGradient;
+      ctx.lineWidth = flowWidth;
+      ctx.lineCap = 'butt';
+      ctx.lineJoin = 'round';
+      ctx.stroke(cornerConnector);
+      ctx.restore();
+    }
+  }
+
+  if (drawTips) drawStartTipGradient();
+  ctx.restore();
 }
 
 function drawCornerCounts(snapshot, refs, ctx, cornerVertexStatus = new Map()) {
