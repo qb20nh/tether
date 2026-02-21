@@ -4,9 +4,8 @@ export const APP_SHELL_TEMPLATE = `
   <div class="app">
     <header>
       <div style="display:flex; align-items:baseline; gap:10px;">
-        <h1>TETHER <span class="subtitle">v3 (RPS + movable wall)</span></h1>
+        <h1>TETHER <span class="subtitle">v3</span></h1>
       </div>
-      <div class="small">빈 칸에서 시작 → 드래그로 확장</div>
     </header>
 
     <section class="panel">
@@ -15,18 +14,20 @@ export const APP_SHELL_TEMPLATE = `
           <label class="small" for="${ELEMENT_IDS.LEVEL_SEL}">레벨</label>
           <select id="${ELEMENT_IDS.LEVEL_SEL}" aria-label="레벨 선택"></select>
           <button id="${ELEMENT_IDS.RESET_BTN}" title="경로 초기화">Reset</button>
-          <button id="${ELEMENT_IDS.UNDO_BTN}" title="한 칸 되돌리기">Undo</button>
           <button id="${ELEMENT_IDS.REVERSE_BTN}" title="경로 방향 뒤집기">Reverse</button>
-          <button id="${ELEMENT_IDS.TOGGLE_IDX_BTN}" title="방문 순서 표시 토글">Show #</button>
-        </div>
-        <div class="right stat">
-          <span class="pill"><small>Visited</small> <span id="${ELEMENT_IDS.VISITED_TEXT}">0/0</span></span>
-          <span class="pill"><small>Hint</small> <span id="${ELEMENT_IDS.HINT_TEXT}">—</span></span>
-          <span class="pill"><small>Stitch</small> <span id="${ELEMENT_IDS.STITCH_TEXT}">—</span></span>
-          <span class="pill"><small>RPS</small> <span id="${ELEMENT_IDS.RPS_TEXT}">—</span></span>
         </div>
       </div>
-      <div id="${ELEMENT_IDS.MSG}" class="msg"></div>
+      <div class="panelBlock" id="${ELEMENT_IDS.GUIDE_PANEL}">
+        <div class="panelHead">
+          <span class="panelTitle">가이드</span>
+          <button id="${ELEMENT_IDS.GUIDE_TOGGLE_BTN}" class="miniBtn" type="button" aria-controls="${ELEMENT_IDS.GUIDE_PANEL}">
+            숨기기
+          </button>
+        </div>
+        <div class="panelBody">
+          <div id="${ELEMENT_IDS.MSG}" class="msg"></div>
+        </div>
+      </div>
     </section>
 
     <section class="layout">
@@ -38,7 +39,17 @@ export const APP_SHELL_TEMPLATE = `
       </div>
 
       <aside class="panel">
-        <div id="${ELEMENT_IDS.LEGEND}" class="legend"></div>
+        <div class="panelBlock" id="${ELEMENT_IDS.LEGEND_PANEL}">
+          <div class="panelHead">
+            <span class="panelTitle">힌트 / 제약</span>
+            <button id="${ELEMENT_IDS.LEGEND_TOGGLE_BTN}" class="miniBtn" type="button" aria-controls="${ELEMENT_IDS.LEGEND}">
+              숨기기
+            </button>
+          </div>
+          <div class="panelBody">
+            <div id="${ELEMENT_IDS.LEGEND}" class="legend"></div>
+          </div>
+        </div>
       </aside>
     </section>
   </div>

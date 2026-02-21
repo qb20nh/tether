@@ -1,5 +1,5 @@
 import { ELEMENT_IDS } from './tether_config.js';
-import { cellCenter, keyOf, vertexPos } from './tether_utils.js';
+import { cellCenter, getCellSize, keyOf, vertexPos } from './tether_utils.js';
 import { ICONS } from './tether_icons.js';
 
 let gridCells = [];
@@ -14,12 +14,10 @@ export function cacheElements() {
     app: get(ELEMENT_IDS.APP),
     levelSel: get(ELEMENT_IDS.LEVEL_SEL),
     resetBtn: get(ELEMENT_IDS.RESET_BTN),
-    undoBtn: get(ELEMENT_IDS.UNDO_BTN),
-    toggleIdxBtn: get(ELEMENT_IDS.TOGGLE_IDX_BTN),
-    visitedText: get(ELEMENT_IDS.VISITED_TEXT),
-    hintText: get(ELEMENT_IDS.HINT_TEXT),
-    stitchText: get(ELEMENT_IDS.STITCH_TEXT),
-    rpsText: get(ELEMENT_IDS.RPS_TEXT),
+    guidePanel: get(ELEMENT_IDS.GUIDE_PANEL),
+    guideToggleBtn: get(ELEMENT_IDS.GUIDE_TOGGLE_BTN),
+    legendPanel: get(ELEMENT_IDS.LEGEND_PANEL),
+    legendToggleBtn: get(ELEMENT_IDS.LEGEND_TOGGLE_BTN),
     msgEl: get(ELEMENT_IDS.MSG),
     gridEl: get(ELEMENT_IDS.GRID),
     boardWrap: get(ELEMENT_IDS.BOARD_WRAP),
@@ -58,9 +56,11 @@ const getGridCanvasOffset = (refs) => {
   if (!refs.gridEl || !refs.boardWrap) return { x: 0, y: 0 };
   const gridRect = refs.gridEl.getBoundingClientRect();
   const boardRect = refs.boardWrap.getBoundingClientRect();
+  const innerLeft = boardRect.left + refs.boardWrap.clientLeft;
+  const innerTop = boardRect.top + refs.boardWrap.clientTop;
   return {
-    x: gridRect.left - boardRect.left,
-    y: gridRect.top - boardRect.top,
+    x: gridRect.left - innerLeft,
+    y: gridRect.top - innerTop,
   };
 };
 
@@ -93,8 +93,10 @@ export const showWallDragGhost = (x, y) => {
 export const moveWallDragGhost = (x, y) => {
   if (!wallGhostEl || !cachedBoardWrap) return;
   const rect = cachedBoardWrap.getBoundingClientRect();
-  wallGhostEl.style.left = `${x - rect.left}px`;
-  wallGhostEl.style.top = `${y - rect.top}px`;
+  const innerLeft = rect.left + cachedBoardWrap.clientLeft;
+  const innerTop = rect.top + cachedBoardWrap.clientTop;
+  wallGhostEl.style.left = `${x - innerLeft}px`;
+  wallGhostEl.style.top = `${y - innerTop}px`;
 };
 
 export const hideWallDragGhost = () => {
@@ -130,13 +132,21 @@ export function setLegendIcons(icons, refs, iconX) {
 }
 
 export function buildGrid(snapshot, refs, icons, iconX) {
-  const { gridEl } = refs;
+  const { boardWrap, gridEl } = refs;
+
+  if (boardWrap) {
+    boardWrap.style.setProperty('--grid-cols', String(snapshot.cols));
+    boardWrap.style.setProperty('--grid-rows', String(snapshot.rows));
+  } else {
+    gridEl.style.setProperty('--grid-cols', String(snapshot.cols));
+    gridEl.style.setProperty('--grid-rows', String(snapshot.rows));
+  }
 
   gridCells = Array.from({ length: snapshot.rows }, () => Array(snapshot.cols).fill(null));
 
   gridEl.innerHTML = '';
-  gridEl.style.gridTemplateColumns = `repeat(${snapshot.cols}, var(--cell))`;
-  gridEl.style.gridTemplateRows = `repeat(${snapshot.rows}, var(--cell))`;
+  gridEl.style.gridTemplateColumns = `repeat(var(--grid-cols), var(--cell))`;
+  gridEl.style.gridTemplateRows = `repeat(var(--grid-rows), var(--cell))`;
 
   for (let r = 0; r < snapshot.rows; r++) {
     for (let c = 0; c < snapshot.cols; c++) {
@@ -288,11 +298,6 @@ export function updateCells(snapshot, results, refs) {
     });
   }
 
-  refs.visitedText.textContent = `${snapshot.path.length}/${snapshot.totalUsable}`;
-  refs.hintText.textContent = hintStatus?.summary || '—';
-  refs.stitchText.textContent = stitchStatus?.summary || '—';
-  refs.rpsText.textContent = rpsStatus?.summary || '—';
-
   drawAll(snapshot, refs, { hintStatus, stitchStatus, rpsStatus });
 }
 
@@ -311,7 +316,7 @@ export function drawAll(snapshot, refs, statuses) {
 
 function drawCrossStitches(snapshot, refs, ctx, vertexStatus = new Map()) {
   const offset = getGridCanvasOffset(refs);
-  const size = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--cell').trim(), 10) || 56;
+  const size = getCellSize(refs.gridEl);
   const lineHalf = Math.max(8, Math.floor(size * 0.18));
   const width = Math.max(2, Math.floor(size * 0.06));
 
@@ -341,7 +346,7 @@ function drawPathLine(snapshot, refs, ctx) {
   if (snapshot.path.length === 0) return;
 
   const offset = getGridCanvasOffset(refs);
-  const size = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--cell').trim(), 10) || 56;
+  const size = getCellSize(refs.gridEl);
   const width = Math.max(7, Math.floor(size * 0.15));
   const arrowLength = Math.max(Math.floor(size * 0.24), 13);
 
@@ -410,12 +415,17 @@ export function resizeCanvas(refs) {
   if (!boardWrap || !canvas || !ctx) return;
 
   const wrapRect = boardWrap.getBoundingClientRect();
-  const cw = Math.round(wrapRect.width);
-  const ch = Math.round(wrapRect.height);
+  const styles = getComputedStyle(boardWrap);
+  const borderLeft = parseFloat(styles.borderLeftWidth || '0') || 0;
+  const borderRight = parseFloat(styles.borderRightWidth || '0') || 0;
+  const borderTop = parseFloat(styles.borderTopWidth || '0') || 0;
+  const borderBottom = parseFloat(styles.borderBottomWidth || '0') || 0;
+  const cw = Math.max(0, wrapRect.width - borderLeft - borderRight);
+  const ch = Math.max(0, wrapRect.height - borderTop - borderBottom);
   const dpr = window.devicePixelRatio || 1;
 
-  canvas.width = Math.max(1, Math.floor(cw * dpr));
-  canvas.height = Math.max(1, Math.floor(ch * dpr));
+  canvas.width = Math.max(1, Math.ceil(cw * dpr));
+  canvas.height = Math.max(1, Math.ceil(ch * dpr));
   canvas.style.width = `${cw}px`;
   canvas.style.height = `${ch}px`;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);

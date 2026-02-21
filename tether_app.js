@@ -21,6 +21,48 @@ import {
   evaluateStitches,
 } from './tether_rules.js';
 
+const GUIDE_KEY = 'tetherGuideHidden';
+const LEGEND_KEY = 'tetherLegendHidden';
+
+const getHiddenState = (key) => {
+  try {
+    const value = window.localStorage.getItem(key);
+    if (value === null) return false;
+    return value === '1';
+  } catch {
+    return false;
+  }
+};
+
+const setHiddenState = (key, value) => {
+  try {
+    window.localStorage.setItem(key, value ? '1' : '0');
+  } catch {
+    // localStorage might be unavailable in restricted environments.
+  }
+};
+
+const applyPanelVisibility = (panelEl, buttonEl, isHidden, labels) => {
+  if (!panelEl || !buttonEl) return;
+  panelEl.classList.toggle('is-hidden', isHidden);
+  buttonEl.textContent = isHidden ? labels.show : labels.hide;
+  buttonEl.setAttribute('aria-expanded', String(!isHidden));
+};
+
+const wirePanelToggle = (panelEl, buttonEl, storageKey, labels, onToggle = () => { }) => {
+  if (!panelEl || !buttonEl) return;
+
+  const initialHidden = getHiddenState(storageKey);
+  applyPanelVisibility(panelEl, buttonEl, initialHidden, labels);
+
+  buttonEl.addEventListener('click', () => {
+    const nextHidden = !panelEl.classList.contains('is-hidden');
+    applyPanelVisibility(panelEl, buttonEl, nextHidden, labels);
+    setHiddenState(storageKey, nextHidden);
+    onToggle(nextHidden);
+  });
+};
+
 function makeEvaluators(snapshot) {
   return {
     hintStatus: evaluateHints(snapshot),
@@ -65,21 +107,58 @@ export function initTetherApp() {
     setMessage(refs.msgEl, null, baseGoalText(LEVELS[levelIndex]));
   };
 
+  const runBoardLayout = (validate = false) => {
+    const snapshot = state.getSnapshot();
+    resizeCanvas(refs);
+    refresh(snapshot, validate);
+  };
+
+  let layoutQueued = false;
+  let pendingValidate = false;
+  const queueBoardLayout = (validate = false) => {
+    pendingValidate = pendingValidate || Boolean(validate);
+    if (layoutQueued) return;
+    layoutQueued = true;
+
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        layoutQueued = false;
+        const shouldValidate = pendingValidate;
+        pendingValidate = false;
+        runBoardLayout(shouldValidate);
+      });
+    });
+  };
+
+  wirePanelToggle(refs.guidePanel, refs.guideToggleBtn, GUIDE_KEY, {
+    show: '보이기',
+    hide: '숨기기',
+  }, () => {
+    queueBoardLayout(false);
+  });
+  wirePanelToggle(refs.legendPanel, refs.legendToggleBtn, LEGEND_KEY, {
+    show: '보이기',
+    hide: '숨기기',
+  }, () => {
+    queueBoardLayout(false);
+  });
+
   const loadLevel = (idx) => {
     refs.levelSel.value = String(idx);
     state.loadLevel(idx);
     const snapshot = state.getSnapshot();
 
     buildGrid(snapshot, refs, ICONS, ICON_X);
-    resizeCanvas(refs);
-    refresh(snapshot, false);
     showLevelGoal(idx);
+    queueBoardLayout(false);
   };
 
   bindInputHandlers(refs, state, (shouldValidate, options = {}) => {
     if (options.rebuildGrid) {
       const snapshotForGrid = state.getSnapshot();
       buildGrid(snapshotForGrid, refs, ICONS, ICON_X);
+      queueBoardLayout(Boolean(shouldValidate));
+      return;
     }
 
     const snapshot = state.getSnapshot();
@@ -97,28 +176,26 @@ export function initTetherApp() {
     showLevelGoal(parseInt(refs.levelSel.value, 10));
   });
 
-  refs.undoBtn.addEventListener('click', () => {
-    state.undo();
-    const snapshot = state.getSnapshot();
-    refresh(snapshot, false);
-  });
-
   refs.reverseBtn.addEventListener('click', () => {
     state.reversePath();
     const snapshot = state.getSnapshot();
     refresh(snapshot, true);
   });
 
-  refs.toggleIdxBtn.addEventListener('click', () => {
-    document.body.classList.toggle('showIdx');
-  });
+  let boardResizeObserver = null;
+  if (typeof ResizeObserver !== 'undefined' && refs.boardWrap) {
+    boardResizeObserver = new ResizeObserver(() => {
+      queueBoardLayout(false);
+    });
+    boardResizeObserver.observe(refs.boardWrap);
+
+    window.addEventListener('beforeunload', () => {
+      if (boardResizeObserver) boardResizeObserver.disconnect();
+    }, { once: true });
+  }
 
   window.addEventListener('resize', () => {
-    requestAnimationFrame(() => {
-      resizeCanvas(refs);
-      const snapshot = state.getSnapshot();
-      refresh(snapshot, false);
-    });
+    queueBoardLayout(false);
   });
 
   loadLevel(DEFAULT_LEVEL_INDEX);

@@ -20,17 +20,54 @@ export const parseLevel = (level) => {
   return { g, rows, cols, usable, stitches: (level.stitches || []).map((p) => [p[0], p[1]]) };
 };
 
-export const getCellSize = () =>
-  parseInt(getComputedStyle(document.documentElement).getPropertyValue('--cell').trim(), 10) || 56;
+export const getCellSize = (scope = document.documentElement) => {
+  const source =
+    scope && scope instanceof Element ? scope : document.documentElement;
 
-export const getGridGap = (gridEl) =>
-  parseInt((getComputedStyle(gridEl).gap || '0').trim(), 10) || 0;
+  if (source instanceof Element) {
+    const probe =
+      source.classList.contains('cell')
+        ? source
+        : source.querySelector('.cell');
+    if (probe) {
+      const measured = probe.getBoundingClientRect().width;
+      if (Number.isFinite(measured) && measured > 0) return measured;
+    }
 
-export const getGridPadding = (gridEl) =>
-  parseInt((getComputedStyle(gridEl).padding || '0').trim(), 10) || 0;
+    const gridEl =
+      source.id === 'grid'
+        ? source
+        : source.querySelector('#grid');
+    if (gridEl) {
+      const styles = getComputedStyle(gridEl);
+      const cols = parseFloat(styles.getPropertyValue('--grid-cols').trim()) || 0;
+      const gap = parseFloat(styles.columnGap || styles.gap || '0') || 0;
+      const pad = parseFloat(styles.paddingLeft || styles.padding || '0') || 0;
+      if (cols > 0) {
+        const gridW = gridEl.getBoundingClientRect().width;
+        const inferred = (gridW - pad * 2 - gap * (cols - 1)) / cols;
+        if (Number.isFinite(inferred) && inferred > 0) return inferred;
+      }
+    }
+  }
+
+  const raw = getComputedStyle(source).getPropertyValue('--cell').trim();
+  const parsed = parseFloat(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 56;
+};
+
+export const getGridGap = (gridEl) => {
+  const styles = getComputedStyle(gridEl);
+  return parseFloat((styles.columnGap || styles.gap || '0').trim()) || 0;
+};
+
+export const getGridPadding = (gridEl) => {
+  const styles = getComputedStyle(gridEl);
+  return parseFloat((styles.paddingLeft || styles.padding || '0').trim()) || 0;
+};
 
 export const cellCenter = (r, c, gridEl) => {
-  const size = getCellSize();
+  const size = getCellSize(gridEl);
   const gap = getGridGap(gridEl);
   const pad = getGridPadding(gridEl);
   return {
@@ -40,7 +77,7 @@ export const cellCenter = (r, c, gridEl) => {
 };
 
 export const vertexPos = (vr, vc, gridEl) => {
-  const size = getCellSize();
+  const size = getCellSize(gridEl);
   const gap = getGridGap(gridEl);
   const pad = getGridPadding(gridEl);
   return {

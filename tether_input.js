@@ -96,6 +96,9 @@ export function bindInputHandlers(refs, state, onStateChange = () => { }) {
         const headNode = pathDrag.side === 'start'
           ? snapshotForInput.path[0]
           : snapshotForInput.path[snapshotForInput.path.length - 1];
+        const backtrackNode = pathDrag.side === 'start'
+          ? snapshotForInput.path[1]
+          : snapshotForInput.path[snapshotForInput.path.length - 2];
 
         if (headNode) {
           const drRaw = Math.abs(cell.r - headNode.r);
@@ -105,39 +108,61 @@ export function bindInputHandlers(refs, state, onStateChange = () => { }) {
             const rect = refs.gridEl.getBoundingClientRect();
             const px = e.clientX - rect.left;
             const py = e.clientY - rect.top;
+            const size = getCellSize(refs.gridEl);
+            const holdCell = { r: headNode.r, c: headNode.c };
 
             const candidates = [];
             for (let dr = -1; dr <= 1; dr++) {
               for (let dc = -1; dc <= 1; dc++) {
+                if (dr === 0 && dc === 0) continue;
                 const nr = headNode.r + dr;
                 const nc = headNode.c + dc;
-                if (nr >= 0 && nr < snapshotForInput.rows && nc >= 0 && nc < snapshotForInput.cols) {
-                  candidates.push({ r: nr, c: nc });
-                }
+                if (nr < 0 || nr >= snapshotForInput.rows || nc < 0 || nc >= snapshotForInput.cols) continue;
+
+                const cand = { r: nr, c: nc };
+                if (!isAdjacentMove(snapshotForInput, headNode, cand)) continue;
+                if (!isUsableCell(snapshotForInput, cand.r, cand.c)) continue;
+
+                const isBacktrack =
+                  Boolean(backtrackNode) &&
+                  cand.r === backtrackNode.r &&
+                  cand.c === backtrackNode.c;
+                const k = `${cand.r},${cand.c}`;
+                if (!isBacktrack && snapshotForInput.visited.has(k)) continue;
+
+                candidates.push({ ...cand, isBacktrack });
               }
             }
 
-            let bestCell = cell; // fallback to whatever original gives
-            let bestDist = Infinity;
-            const size = typeof getCellSize === 'function' ? getCellSize() : 56;
+            const holdCenter = cellCenter(holdCell.r, holdCell.c, refs.gridEl);
+            const holdDist = Math.hypot(px - holdCenter.x, py - holdCenter.y);
 
-            candidates.forEach(cand => {
+            let bestMoveCell = null;
+            let bestMoveDist = Infinity;
+
+            candidates.forEach((cand) => {
               const center = cellCenter(cand.r, cand.c, refs.gridEl);
               let dist = Math.hypot(px - center.x, py - center.y);
 
-              // Boost diagonal moves if they are valid bridge crossings
               const isDiag = Math.abs(cand.r - headNode.r) === 1 && Math.abs(cand.c - headNode.c) === 1;
-              if (isDiag && isAdjacentMove(snapshotForInput, headNode, cand)) {
-                dist -= size * 0.45;
+              if (isDiag) {
+                dist -= size * 0.18;
               }
 
-              if (dist < bestDist) {
-                bestDist = dist;
-                bestCell = cand;
+              if (dist < bestMoveDist) {
+                bestMoveDist = dist;
+                bestMoveCell = cand;
               }
             });
 
-            cell = bestCell;
+            if (!bestMoveCell) {
+              cell = holdCell;
+            } else {
+              const hysteresis = bestMoveCell.isBacktrack ? size * 0.24 : size * 0.12;
+              cell = bestMoveDist + hysteresis < holdDist
+                ? { r: bestMoveCell.r, c: bestMoveCell.c }
+                : holdCell;
+            }
           }
         }
       }
