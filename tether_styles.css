@@ -1,11 +1,9 @@
 :root{
   --cell: 56px;
   --gap: 2px;
-  --hint-mark: clamp(12px, calc(var(--cell) * 0.66), 64px);
-  --hint-mark-svg: clamp(10px, calc(var(--cell) * 0.58), 58px);
-  --hint-badge: clamp(22px, calc(var(--cell) * 0.52), 60px);
-  --hint-badge-svg: clamp(14px, calc(var(--cell) * 0.45), 50px);
-  --hint-ghost-mark: clamp(12px, calc(var(--cell) * 0.56), 56px);
+  --hint-badge: 36px;
+  --hint-badge-svg: 28px;
+  --guide-icon-size: 1rem;
   --bg: #0b0f14;
   --panel: #121a23;
   --panel2: #0f1620;
@@ -17,7 +15,7 @@
   --bad: #ff5c5c;
   --warn: #ffb14a;
   --accent: #6aa6ff;
-  --line: rgba(120, 190, 255, 0.95);
+  --line: rgb(120, 190, 255);
   --lineShadow: rgba(120, 190, 255, 0.25);
   --stitchIdle: rgba(231,238,247,0.25);
   --app-pad-inline: 6px;
@@ -45,6 +43,9 @@ body{
   background-position: top center;
   color: var(--text);
   font-size: 17px;
+}
+[dir='rtl'] body{
+  font-family: Inter, "Noto Sans Arabic", "Noto Kufi Arabic", ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, "Noto Sans KR", Arial, sans-serif;
 }
 .app{
   --app-max-inline: 1040px;
@@ -187,22 +188,8 @@ button:active{ transform: translateY(1px); }
   touch-action:none;
   --grid-cols: 7;
   --grid-rows: 7;
-  --fit-inline: max(
-    120px,
-    calc(
-      var(--app-inline)
-      - (var(--app-pad-inline) * 2)
-      - (var(--panel-padding) * 2)
-      - (var(--panel-border) * 2)
-      - (var(--board-border) * 2)
-    )
-  );
-  --fit-block: max(120px, calc(100dvh - var(--ui-reserve)));
-  --cell-fit-inline: calc((var(--fit-inline) - ((var(--grid-cols) - 1) * var(--gap)) - (var(--gap) * 2)) / var(--grid-cols));
-  --cell-fit-block: calc((var(--fit-block) - ((var(--grid-rows) - 1) * var(--gap)) - (var(--gap) * 2)) / var(--grid-rows));
-  --cell-min: 8px;
-  --cell-max: min(184px, calc(880px / var(--grid-cols)), calc(880px / var(--grid-rows)));
-  --cell: clamp(var(--cell-min), min(var(--cell-fit-inline), var(--cell-fit-block)), var(--cell-max));
+  --cell: 56px;
+  isolation: isolate;
   border-radius: 12px;
   overflow:hidden;
   border: var(--board-border) solid rgba(255,255,255,0.10);
@@ -235,7 +222,6 @@ button:active{ transform: translateY(1px); }
 .cell.wall{
   background: linear-gradient(180deg, #070a10 0%, #0a0f18 100%);
   border-color: rgba(255,255,255,0.06);
-  opacity: 0.95;
 }
 .cell.wall.movable{
   background: linear-gradient(180deg, rgba(20,30,45,1) 0%, rgba(10,15,26,1) 100%);
@@ -249,15 +235,16 @@ button:active{ transform: translateY(1px); }
   display:flex;
   align-items:center;
   justify-content:center;
-  width: var(--hint-mark);
-  height: var(--hint-mark);
-  color: rgba(231,238,247,0.92);
+  width: 66%;
+  height: 66%;
+  color: #e7eef7;
+  mix-blend-mode: overlay;
   filter: drop-shadow(0 2px 6px rgba(0,0,0,0.25));
   pointer-events: none;
 }
 .cell .mark svg{
-  width: var(--hint-mark-svg);
-  height: var(--hint-mark-svg);
+  width: 100%;
+  height: 100%;
   position: relative;
   z-index: 2;
 }
@@ -267,13 +254,14 @@ button:active{ transform: translateY(1px); }
   display:flex;
   align-items:center;
   justify-content:center;
-  color: rgba(231,238,247,0.32);
+  color: #e7eef7;
   pointer-events: none;
   z-index: 0;
+  mix-blend-mode: overlay;
 }
 .wallGhostPreviewMarker svg{
-  width: var(--hint-mark-svg);
-  height: var(--hint-mark-svg);
+  width: 56%;
+  height: 56%;
   transform: scale(0.86);
 }
 
@@ -287,6 +275,10 @@ button:active{ transform: translateY(1px); }
   display:none;
   user-select:none;
   pointer-events: none;
+}
+[dir='rtl'] .cell .idx{
+  left: auto;
+  right: 8px;
 }
 .showIdx .cell.visited .idx{ display:block; }
 
@@ -396,18 +388,19 @@ button:active{ transform: translateY(1px); }
   justify-content:center;
   transform: translate(-50%, -50%);
   pointer-events:none;
-  opacity: 0.35;
   z-index: 6;
+  mix-blend-mode: overlay;
 }
 .wallDragGhostMark{
-  width: var(--hint-ghost-mark);
-  height: var(--hint-ghost-mark);
-  color: rgba(231,238,247,0.72);
+  width: 56%;
+  height: 56%;
+  color: #e7eef7;
   filter: drop-shadow(0 2px 6px rgba(0,0,0,0.28));
+  mix-blend-mode: overlay;
 }
 .wallDragGhostMark svg{
-  width: var(--hint-ghost-mark);
-  height: var(--hint-ghost-mark);
+  width: 100%;
+  height: 100%;
 }
 
 #pathCanvas{
@@ -415,6 +408,7 @@ button:active{ transform: translateY(1px); }
   inset:0;
   z-index: 3;
   pointer-events:none;
+  mix-blend-mode: overlay;
 }
 
 .legend{

@@ -37,6 +37,9 @@ export const RPS_WIN_ORDER = {
 export const ELEMENT_IDS = Object.freeze({
   APP: 'app',
   LEVEL_SEL: 'levelSel',
+  LEVEL_LABEL: 'levelLabel',
+  LANG_LABEL: 'langLabel',
+  LANG_SEL: 'langSel',
   RESET_BTN: 'resetBtn',
   REVERSE_BTN: 'reverseBtn',
   GUIDE_PANEL: 'guidePanel',
@@ -61,10 +64,14 @@ export const ELEMENT_IDS = Object.freeze({
   B_MOVE_WALL: 'bMoveWall',
 });
 
-const GOAL_INTRO =
-  '<b>목표</b>: 벽이 아닌 모든 칸을 <b>정확히 1번씩</b> 방문하는 연속 경로를 만드세요.';
+export function baseGoalText(level, t = (key) => key) {
+  const translate = typeof t === 'function' ? t : (key) => key;
+  const descText = level?.descKey ? translate(level.descKey) : '';
+  const desc = descText !== level?.descKey
+    ? `${translate('goal.thisLevelPrefix')}${descText}`
+    : level?.desc
+      ? `${translate('goal.thisLevelPrefix')}${level.desc}`
+      : '';
 
-export function baseGoalText(level) {
-  const desc = level && level.desc ? `<br><b>이 레벨</b>: ${level.desc}` : '';
-  return `${GOAL_INTRO}${desc}`;
+  return `${translate('goal.intro')}${desc}`;
 }

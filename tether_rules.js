@@ -394,7 +394,8 @@ export function evaluateRPS(snapshot) {
   };
 }
 
-export function checkCompletion(snapshot, forced = {}) {
+export function checkCompletion(snapshot, forced = {}, translate = (k) => k) {
+  const t = typeof translate === 'function' ? translate : (k) => k;
   const hintStatus = forced.hintStatus || evaluateHints(snapshot);
   const stitchStatus = forced.stitchStatus || evaluateStitches(snapshot);
   const rpsStatus = forced.rpsStatus || evaluateRPS(snapshot);
@@ -412,7 +413,7 @@ export function checkCompletion(snapshot, forced = {}) {
       stitchesOk,
       rpsOk,
       kind: 'good',
-      message: '완료 ✅ 모든 칸 방문 + 모든 제약 만족',
+      message: t('completion.completed'),
       hintStatus,
       stitchStatus,
       rpsStatus,
@@ -420,10 +421,10 @@ export function checkCompletion(snapshot, forced = {}) {
   }
 
   const parts = [];
-  parts.push(allVisited ? '모든 칸 방문: OK' : `${snapshot.totalUsable - snapshot.path.length}칸 남음`);
-  parts.push(hintsOk ? '힌트: OK' : `힌트: 충돌 ${hintStatus.bad}개`);
-  parts.push(stitchesOk ? '스티치: OK' : `스티치: 충돌 ${stitchStatus.bad}개`);
-  parts.push(rpsOk ? 'RPS: OK' : `RPS: 충돌 ${rpsStatus.bad}개`);
+  parts.push(allVisited ? t('completion.allVisitedOk') : t('completion.cellsLeft', { count: snapshot.totalUsable - snapshot.path.length }));
+  parts.push(hintsOk ? t('completion.hintsOk') : t('completion.hintsConflict', { count: hintStatus.bad }));
+  parts.push(stitchesOk ? t('completion.stitchesOk') : t('completion.stitchesConflict', { count: stitchStatus.bad }));
+  parts.push(rpsOk ? t('completion.rpsOk') : t('completion.rpsConflict', { count: rpsStatus.bad }));
 
   const kind = (!hintsOk || !stitchesOk || !rpsOk) ? 'bad' : null;
 

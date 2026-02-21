@@ -6,13 +6,60 @@ let gridCells = [];
 let lastDropTargetKey = null;
 let wallGhostEl = null;
 let cachedBoardWrap = null;
+let activeBoardSize = { rows: 0, cols: 0 };
+
+const clampNumber = (value, min, max) => Math.max(min, Math.min(max, value));
+
+const parsePx = (value) => {
+  const parsed = parseFloat(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const syncBoardCellSize = (refs, rows = activeBoardSize.rows, cols = activeBoardSize.cols) => {
+  if (!refs.boardWrap || !refs.gridEl) return;
+  if (!rows || !cols || rows <= 0 || cols <= 0) return;
+
+  const gap = parsePx(getComputedStyle(refs.boardWrap).getPropertyValue('--gap')) || 2;
+  const parent = refs.boardWrap.parentElement;
+  const maxInline = parent ? parent.clientWidth : refs.boardWrap.clientWidth;
+  const maxBlock = (() => {
+    const viewportHeight = window.visualViewport?.height || window.innerHeight || document.documentElement.clientHeight || 0;
+    const top = refs.gridEl.getBoundingClientRect().top;
+    return Math.max(120, viewportHeight - top - 20);
+  })();
+
+  if (!Number.isFinite(maxInline) || maxInline <= 0 || !Number.isFinite(maxBlock) || maxBlock <= 0) return;
+
+  const widthBudget = maxInline - (gap * 2) - (cols - 1) * gap;
+  const heightBudget = maxBlock - (gap * 2) - (rows - 1) * gap;
+  if (widthBudget <= 0 || heightBudget <= 0) return;
+
+  const minByGrid = Math.min(
+    880 / cols,
+    880 / rows,
+    184,
+  );
+  const byInline = widthBudget / cols;
+  const byBlock = heightBudget / rows;
+  const nextCell = clampNumber(Math.min(byInline, byBlock), 8, minByGrid);
+  const nextCellPx = `${Math.round(nextCell)}px`;
+
+  const currentCell = refs.boardWrap.style.getPropertyValue('--cell') || '';
+  if (currentCell !== nextCellPx) {
+    refs.boardWrap.style.setProperty('--cell', nextCellPx);
+    refs.gridEl.style.setProperty('--cell', nextCellPx);
+  }
+};
 
 export function cacheElements() {
   const get = (id) => document.getElementById(id);
 
   const result = {
-    app: get(ELEMENT_IDS.APP),
+   app: get(ELEMENT_IDS.APP),
+    levelLabel: get(ELEMENT_IDS.LEVEL_LABEL),
     levelSel: get(ELEMENT_IDS.LEVEL_SEL),
+    langLabel: get(ELEMENT_IDS.LANG_LABEL),
+    langSel: get(ELEMENT_IDS.LANG_SEL),
     resetBtn: get(ELEMENT_IDS.RESET_BTN),
     guidePanel: get(ELEMENT_IDS.GUIDE_PANEL),
     guideToggleBtn: get(ELEMENT_IDS.GUIDE_TOGGLE_BTN),
@@ -133,14 +180,15 @@ export function setLegendIcons(icons, refs, iconX) {
 
 export function buildGrid(snapshot, refs, icons, iconX) {
   const { boardWrap, gridEl } = refs;
+  activeBoardSize = { rows: snapshot.rows, cols: snapshot.cols };
+  syncBoardCellSize(refs);
 
   if (boardWrap) {
     boardWrap.style.setProperty('--grid-cols', String(snapshot.cols));
     boardWrap.style.setProperty('--grid-rows', String(snapshot.rows));
-  } else {
-    gridEl.style.setProperty('--grid-cols', String(snapshot.cols));
-    gridEl.style.setProperty('--grid-rows', String(snapshot.rows));
   }
+  gridEl.style.setProperty('--grid-cols', String(snapshot.cols));
+  gridEl.style.setProperty('--grid-rows', String(snapshot.rows));
 
   gridCells = Array.from({ length: snapshot.rows }, () => Array(snapshot.cols).fill(null));
 
@@ -317,9 +365,9 @@ export function drawAll(snapshot, refs, statuses) {
 
 function drawCrossStitches(snapshot, refs, ctx, vertexStatus = new Map()) {
   const offset = getGridCanvasOffset(refs);
-  const size = getCellSize(refs.gridEl);
-  const lineHalf = Math.max(8, Math.floor(size * 0.18));
-  const width = Math.max(2, Math.floor(size * 0.06));
+  const cell = getCellSize(refs.gridEl);
+  const stitchLineHalf = Math.max(2, cell * 0.18);
+  const stitchWidth = Math.max(1, cell * 0.06);
 
   const goodColor = getComputedStyle(document.documentElement).getPropertyValue('--good').trim();
   const badColor = getComputedStyle(document.documentElement).getPropertyValue('--bad').trim();
@@ -330,15 +378,15 @@ function drawCrossStitches(snapshot, refs, ctx, vertexStatus = new Map()) {
     const status = vertexStatus.get(vk) || 'pending';
     ctx.strokeStyle =
       status === 'good' ? goodColor : status === 'bad' ? badColor : idleColor;
-    ctx.lineWidth = width;
+    ctx.lineWidth = stitchWidth;
     ctx.lineCap = 'round';
 
     const { x, y } = getVertexPoint(vr, vc, refs, offset);
     ctx.beginPath();
-    ctx.moveTo(x - lineHalf, y - lineHalf);
-    ctx.lineTo(x + lineHalf, y + lineHalf);
-    ctx.moveTo(x + lineHalf, y - lineHalf);
-    ctx.lineTo(x - lineHalf, y + lineHalf);
+    ctx.moveTo(x - stitchLineHalf, y - stitchLineHalf);
+    ctx.lineTo(x + stitchLineHalf, y + stitchLineHalf);
+    ctx.moveTo(x + stitchLineHalf, y - stitchLineHalf);
+    ctx.lineTo(x - stitchLineHalf, y + stitchLineHalf);
     ctx.stroke();
   }
 }
@@ -346,6 +394,8 @@ function drawCrossStitches(snapshot, refs, ctx, vertexStatus = new Map()) {
 function drawPathLine(snapshot, refs, ctx) {
   if (snapshot.path.length === 0) return;
 
+  const previousAlpha = ctx.globalAlpha;
+  ctx.globalAlpha = 1;
   const offset = getGridCanvasOffset(refs);
   const size = getCellSize(refs.gridEl);
   const width = Math.max(7, Math.floor(size * 0.15));
@@ -409,16 +459,17 @@ function drawPathLine(snapshot, refs, ctx) {
     ctx.fill();
   }
 
+  ctx.globalAlpha = previousAlpha;
 }
 
 function drawCornerCounts(snapshot, refs, ctx, cornerVertexStatus = new Map()) {
   if (!snapshot.cornerCounts || snapshot.cornerCounts.length === 0) return;
 
   const offset = getGridCanvasOffset(refs);
-  const size = getCellSize(refs.gridEl);
-  const radius = Math.max(8, Math.floor(size * 0.17));
-  const lineWidth = Math.max(1.5, size * 0.04);
-  const fontSize = Math.max(11, Math.floor(size * 0.22));
+  const cell = getCellSize(refs.gridEl);
+  const cornerRadius = Math.max(6, cell * 0.17);
+  const cornerLineWidth = Math.max(1, cell * 0.04);
+  const cornerFontSize = Math.max(12, Math.floor(cell * 0.22));
 
   const rootStyles = getComputedStyle(document.documentElement);
   const goodColor = rootStyles.getPropertyValue('--good').trim();
@@ -428,7 +479,7 @@ function drawCornerCounts(snapshot, refs, ctx, cornerVertexStatus = new Map()) {
   ctx.save();
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.font = `700 ${fontSize}px Inter, ui-sans-serif, system-ui, sans-serif`;
+  ctx.font = `700 ${cornerFontSize}px Inter, ui-sans-serif, system-ui, sans-serif`;
 
   for (const [vr, vc, target] of snapshot.cornerCounts) {
     const vk = keyOf(vr, vc);
@@ -442,11 +493,11 @@ function drawCornerCounts(snapshot, refs, ctx, cornerVertexStatus = new Map()) {
 
     ctx.beginPath();
     ctx.fillStyle = 'rgba(11, 15, 20, 0.88)';
-    ctx.arc(x, y, radius, 0, Math.PI * 2);
+    ctx.arc(x, y, cornerRadius, 0, Math.PI * 2);
     ctx.fill();
 
     ctx.strokeStyle = accentColor;
-    ctx.lineWidth = lineWidth;
+    ctx.lineWidth = cornerLineWidth;
     ctx.stroke();
 
     ctx.fillStyle = accentColor;
@@ -459,6 +510,7 @@ function drawCornerCounts(snapshot, refs, ctx, cornerVertexStatus = new Map()) {
 export function resizeCanvas(refs) {
   const { boardWrap, canvas, ctx } = refs;
   if (!boardWrap || !canvas || !ctx) return;
+  syncBoardCellSize(refs);
 
   const wrapRect = boardWrap.getBoundingClientRect();
   const styles = getComputedStyle(boardWrap);
