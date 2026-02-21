@@ -62,11 +62,9 @@ export const ELEMENT_IDS = Object.freeze({
 });
 
 const GOAL_INTRO =
-  '<b>목표</b>: 벽(#)이 아닌 모든 칸을 <b>정확히 1번씩</b> 방문하는 연속 경로를 만드세요. 시작/끝은 표시되지 않습니다.';
-const DEPENDENCY =
-  '<span class="small">CW/CCW 및 RPS는 “그리는 방향(시작→끝)”에 의존합니다. 반대로 시작하면 제약이 뒤집히니, Reverse 버튼으로 시작점을 쉽게 바꿔보세요.</span>';
+  '<b>목표</b>: 벽이 아닌 모든 칸을 <b>정확히 1번씩</b> 방문하는 연속 경로를 만드세요.';
 
 export function baseGoalText(level) {
   const desc = level && level.desc ? `<br><b>이 레벨</b>: ${level.desc}` : '';
-  return `${GOAL_INTRO}${desc}<br>${DEPENDENCY}`;
+  return `${GOAL_INTRO}${desc}`;
 }

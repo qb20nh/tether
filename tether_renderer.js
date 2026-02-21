@@ -312,6 +312,7 @@ export function drawAll(snapshot, refs, statuses) {
 
   drawCrossStitches(snapshot, refs, ctx, statuses?.stitchStatus?.vertexStatus);
   drawPathLine(snapshot, refs, ctx);
+  drawCornerCounts(snapshot, refs, ctx, statuses?.hintStatus?.cornerVertexStatus);
 }
 
 function drawCrossStitches(snapshot, refs, ctx, vertexStatus = new Map()) {
@@ -408,6 +409,51 @@ function drawPathLine(snapshot, refs, ctx) {
     ctx.fill();
   }
 
+}
+
+function drawCornerCounts(snapshot, refs, ctx, cornerVertexStatus = new Map()) {
+  if (!snapshot.cornerCounts || snapshot.cornerCounts.length === 0) return;
+
+  const offset = getGridCanvasOffset(refs);
+  const size = getCellSize(refs.gridEl);
+  const radius = Math.max(8, Math.floor(size * 0.17));
+  const lineWidth = Math.max(1.5, size * 0.04);
+  const fontSize = Math.max(11, Math.floor(size * 0.22));
+
+  const rootStyles = getComputedStyle(document.documentElement);
+  const goodColor = rootStyles.getPropertyValue('--good').trim();
+  const badColor = rootStyles.getPropertyValue('--bad').trim();
+  const pendingColor = rootStyles.getPropertyValue('--muted').trim();
+
+  ctx.save();
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.font = `700 ${fontSize}px Inter, ui-sans-serif, system-ui, sans-serif`;
+
+  for (const [vr, vc, target] of snapshot.cornerCounts) {
+    const vk = keyOf(vr, vc);
+    const status = cornerVertexStatus.get(vk) || 'pending';
+    const accentColor = status === 'good'
+      ? goodColor
+      : status === 'bad'
+        ? badColor
+        : pendingColor;
+    const { x, y } = getVertexPoint(vr, vc, refs, offset);
+
+    ctx.beginPath();
+    ctx.fillStyle = 'rgba(11, 15, 20, 0.88)';
+    ctx.arc(x, y, radius, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = accentColor;
+    ctx.lineWidth = lineWidth;
+    ctx.stroke();
+
+    ctx.fillStyle = accentColor;
+    ctx.fillText(String(target), x, y + 0.5);
+  }
+
+  ctx.restore();
 }
 
 export function resizeCanvas(refs) {

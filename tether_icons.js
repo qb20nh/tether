@@ -121,6 +121,12 @@ export const BADGE_DEFINITIONS = [
     html: '<strong>Cross stitch (x)</strong>: 십자수',
   },
   {
+    badgeId: 'bCornerCount',
+    iconCode: 'cornerCount',
+    badgeText: '0-3',
+    html: '<strong>Corner count</strong>: 꼭짓점 주변 4칸 사이 연결 수(0~3)를 강제',
+  },
+  {
     badgeId: 'bMoveWall',
     iconCode: 'm',
     html: '<strong>Movable wall (m)</strong>: 드래그로 이동',

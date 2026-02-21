@@ -70,7 +70,9 @@ export const buildLegendTemplate = (definitions, icons, iconX) =>
       }
 
       const iconCode = item.iconCode;
-      const iconMarkup = iconCode === 'x' ? iconX : icons[iconCode] || '';
+      const iconMarkup = iconCode === 'x'
+        ? iconX
+        : icons[iconCode] || item.badgeText || '';
       return `<div class="row"><div class="badge" id="${item.badgeId}">${iconMarkup}</div><div>${item.html}</div></div>`;
     })
     .join('');

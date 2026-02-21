@@ -14,6 +14,7 @@ export function createGameState(levels) {
   let stitches = [];
   let stitchSet = new Set();
   let stitchReq = new Map();
+  let cornerCounts = [];
 
   const isWall = (r, c) => {
     const ch = gridData[r][c];
@@ -47,6 +48,7 @@ export function createGameState(levels) {
     cols = parsed.cols;
     totalUsable = parsed.usable;
     stitches = parsed.stitches;
+    cornerCounts = parsed.cornerCounts;
     levelIndex = index;
 
     buildStitches();
@@ -70,6 +72,7 @@ export function createGameState(levels) {
       visited: new Set(visited),
       gridData: gridCopy,
       stitches: stitches.map((p) => [p[0], p[1]]),
+      cornerCounts: cornerCounts.map((entry) => [entry[0], entry[1], entry[2]]),
       stitchSet: new Set(stitchSet),
       stitchReq: stitchReqCopy,
     };

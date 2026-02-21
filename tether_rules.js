@@ -4,6 +4,11 @@ import { inBounds, keyOf } from './tether_utils.js';
 const isHintCode = (ch) => HINT_CODES.has(ch);
 const isRpsCode = (ch) => RPS_CODES.has(ch);
 const isWall = (ch) => ch === CELL_TYPES.WALL || ch === CELL_TYPES.MOVABLE_WALL;
+const edgeKey = (a, b) => {
+  const ka = keyOf(a.r, a.c);
+  const kb = keyOf(b.r, b.c);
+  return ka < kb ? `${ka}|${kb}` : `${kb}|${ka}`;
+};
 
 const makeEndpointSet = (path) => {
   if (path.length === 0) return new Set();
@@ -64,6 +69,33 @@ const evalHintAtIndex = (i, clue, path, isComplete) => {
   return { state: ok ? 'good' : 'bad', clue };
 };
 
+const buildOrthEdgeSet = (path) => {
+  const edges = new Set();
+  for (let i = 1; i < path.length; i++) {
+    const a = path[i - 1];
+    const b = path[i];
+    const dr = Math.abs(a.r - b.r);
+    const dc = Math.abs(a.c - b.c);
+    if (dr + dc !== 1) continue;
+    edges.add(edgeKey(a, b));
+  }
+  return edges;
+};
+
+const countCornerOrthConnections = (vr, vc, orthEdges) => {
+  const nw = { r: vr - 1, c: vc - 1 };
+  const ne = { r: vr - 1, c: vc };
+  const sw = { r: vr, c: vc - 1 };
+  const se = { r: vr, c: vc };
+
+  let count = 0;
+  if (orthEdges.has(edgeKey(nw, ne))) count++;
+  if (orthEdges.has(edgeKey(nw, sw))) count++;
+  if (orthEdges.has(edgeKey(ne, se))) count++;
+  if (orthEdges.has(edgeKey(sw, se))) count++;
+  return count;
+};
+
 export function evaluateHints(snapshot) {
   const isComplete = snapshot.path.length === snapshot.totalUsable;
   const idxByKey = new Map();
@@ -77,6 +109,7 @@ export function evaluateHints(snapshot) {
   let pending = 0;
   const goodKeys = [];
   const badKeys = [];
+  const cornerVertexStatus = new Map();
 
   for (let r = 0; r < snapshot.rows; r++) {
     for (let c = 0; c < snapshot.cols; c++) {
@@ -104,6 +137,28 @@ export function evaluateHints(snapshot) {
     }
   }
 
+  const orthEdges = buildOrthEdgeSet(snapshot.path);
+  for (const [vr, vc, target] of snapshot.cornerCounts || []) {
+    total++;
+    const vk = keyOf(vr, vc);
+    const actual = countCornerOrthConnections(vr, vc, orthEdges);
+
+    let state = 'pending';
+    if (isComplete) {
+      state = actual === target ? 'good' : 'bad';
+    } else if (actual > target) {
+      state = 'bad';
+    } else if (actual === target) {
+      state = 'good';
+    }
+
+    cornerVertexStatus.set(vk, state);
+
+    if (state === 'good') good++;
+    else if (state === 'bad') bad++;
+    else pending++;
+  }
+
   const summary = total === 0 ? '—' : `${good}/${total}${bad ? ` (✗${bad})` : ''}`;
 
   return {
@@ -114,6 +169,7 @@ export function evaluateHints(snapshot) {
     summary,
     goodKeys,
     badKeys,
+    cornerVertexStatus,
   };
 }
 
@@ -121,59 +177,78 @@ export function evaluateBlockedCells(snapshot) {
   const blockedKeys = [];
   const path = snapshot.path;
   const visited = snapshot.visited;
+  if (path.length === 0) {
+    return {
+      bad: 0,
+      badKeys: [],
+      summary: '—',
+    };
+  }
+
   const endpointKeys = makeEndpointSet(path);
+  const canTraverse = (r, c) => {
+    if (!inBounds(snapshot.rows, snapshot.cols, r, c)) return false;
+    const code = snapshot.gridData[r][c];
+    if (isWall(code)) return false;
+    const k = keyOf(r, c);
+    if (visited.has(k) && !endpointKeys.has(k)) return false;
+    return true;
+  };
+
+  const reachable = new Set();
+  const queue = [];
+  let qHead = 0;
+  const enqueue = (r, c) => {
+    const k = keyOf(r, c);
+    if (reachable.has(k)) return;
+    reachable.add(k);
+    queue.push({ r, c });
+  };
+
+  const startPoints = [path[0]];
+  if (path.length > 1) startPoints.push(path[path.length - 1]);
+  for (const p of startPoints) {
+    if (canTraverse(p.r, p.c)) enqueue(p.r, p.c);
+  }
+
+  const orthMoves = [
+    [-1, 0],
+    [1, 0],
+    [0, -1],
+    [0, 1],
+  ];
+  const diagonalMoves = [
+    [-1, -1],
+    [-1, 1],
+    [1, -1],
+    [1, 1],
+  ];
+
+  while (qHead < queue.length) {
+    const cur = queue[qHead++];
+
+    for (const [dr, dc] of orthMoves) {
+      const nr = cur.r + dr;
+      const nc = cur.c + dc;
+      if (!canTraverse(nr, nc)) continue;
+      enqueue(nr, nc);
+    }
+
+    for (const [dr, dc] of diagonalMoves) {
+      const nr = cur.r + dr;
+      const nc = cur.c + dc;
+      if (!hasCrossStitch(snapshot, cur.r, cur.c, nr, nc)) continue;
+      if (!canTraverse(nr, nc)) continue;
+      enqueue(nr, nc);
+    }
+  }
 
   for (let r = 0; r < snapshot.rows; r++) {
     for (let c = 0; c < snapshot.cols; c++) {
-      const code = snapshot.gridData[r][c];
       const k = keyOf(r, c);
-
+      const code = snapshot.gridData[r][c];
       if (isWall(code) || visited.has(k)) continue;
-
-      const isBlockedNeighbor = (nr, nc) => {
-        if (!inBounds(snapshot.rows, snapshot.cols, nr, nc)) return true;
-        const nk = keyOf(nr, nc);
-        const nCode = snapshot.gridData[nr][nc];
-        if (isWall(nCode)) return true;
-        if (visited.has(nk) && !endpointKeys.has(nk)) return true;
-        return false;
-      };
-
-      const noOrthAccess =
-        isBlockedNeighbor(r - 1, c) &&
-        isBlockedNeighbor(r + 1, c) &&
-        isBlockedNeighbor(r, c - 1) &&
-        isBlockedNeighbor(r, c + 1);
-
-      if (!noOrthAccess) continue;
-
-      let hasDiagonalAccess = false;
-      const diagonalMoves = [
-        [-1, -1],
-        [-1, 1],
-        [1, -1],
-        [1, 1],
-      ];
-
-      for (const [dr, dc] of diagonalMoves) {
-        const nr = r + dr;
-        const nc = c + dc;
-
-        if (!hasCrossStitch(snapshot, r, c, nr, nc)) continue;
-
-        if (!inBounds(snapshot.rows, snapshot.cols, nr, nc)) continue;
-        const nk = keyOf(nr, nc);
-        const nCode = snapshot.gridData[nr][nc];
-        if (isWall(nCode)) continue;
-        if (visited.has(nk) && !endpointKeys.has(nk)) continue;
-
-        hasDiagonalAccess = true;
-        break;
-      }
-
-      if (!hasDiagonalAccess) {
-        blockedKeys.push(k);
-      }
+      if (!reachable.has(k)) blockedKeys.push(k);
     }
   }
 

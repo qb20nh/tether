@@ -23,14 +23,18 @@ import {
 
 const GUIDE_KEY = 'tetherGuideHidden';
 const LEGEND_KEY = 'tetherLegendHidden';
+const DEFAULT_HIDDEN_BY_KEY = {
+  [GUIDE_KEY]: false,
+  [LEGEND_KEY]: true,
+};
 
 const getHiddenState = (key) => {
   try {
     const value = window.localStorage.getItem(key);
-    if (value === null) return false;
+    if (value === null) return DEFAULT_HIDDEN_BY_KEY[key] === true;
     return value === '1';
   } catch {
-    return false;
+    return DEFAULT_HIDDEN_BY_KEY[key] === true;
   }
 };
 
