@@ -69,6 +69,7 @@ export function cacheElements() {
     gridEl: get(ELEMENT_IDS.GRID),
     boardWrap: get(ELEMENT_IDS.BOARD_WRAP),
     canvas: get(ELEMENT_IDS.CANVAS),
+    symbolCanvas: get(ELEMENT_IDS.SYMBOL_CANVAS),
     legend: get(ELEMENT_IDS.LEGEND),
     bTurn: get(ELEMENT_IDS.B_TURN),
     bCW: get(ELEMENT_IDS.B_CW),
@@ -86,6 +87,9 @@ export function cacheElements() {
 
   if (result.canvas) {
     result.ctx = result.canvas.getContext('2d');
+  }
+  if (result.symbolCanvas) {
+    result.symbolCtx = result.symbolCanvas.getContext('2d');
   }
   cachedBoardWrap = result.boardWrap;
 
@@ -350,17 +354,18 @@ export function updateCells(snapshot, results, refs) {
 }
 
 export function drawAll(snapshot, refs, statuses) {
-  const { ctx, canvas } = refs;
-  if (!ctx || !canvas) return;
+  const { ctx, canvas, symbolCtx, symbolCanvas } = refs;
+  if (!ctx || !canvas || !symbolCtx || !symbolCanvas) return;
 
   const dpr = window.devicePixelRatio || 1;
   const w = canvas.width / dpr;
   const h = canvas.height / dpr;
   ctx.clearRect(0, 0, w, h);
+  symbolCtx.clearRect(0, 0, symbolCanvas.width / dpr, symbolCanvas.height / dpr);
 
-  drawCrossStitches(snapshot, refs, ctx, statuses?.stitchStatus?.vertexStatus);
   drawPathLine(snapshot, refs, ctx);
-  drawCornerCounts(snapshot, refs, ctx, statuses?.hintStatus?.cornerVertexStatus);
+  drawCornerCounts(snapshot, refs, symbolCtx, statuses?.hintStatus?.cornerVertexStatus);
+  drawCrossStitches(snapshot, refs, symbolCtx, statuses?.stitchStatus?.vertexStatus);
 }
 
 function drawCrossStitches(snapshot, refs, ctx, vertexStatus = new Map()) {
@@ -368,25 +373,93 @@ function drawCrossStitches(snapshot, refs, ctx, vertexStatus = new Map()) {
   const cell = getCellSize(refs.gridEl);
   const stitchLineHalf = Math.max(2, cell * 0.18);
   const stitchWidth = Math.max(1, cell * 0.06);
+  const shadowColor = getComputedStyle(document.documentElement)
+    .getPropertyValue('--stitchShadow')
+    .trim();
 
   const goodColor = getComputedStyle(document.documentElement).getPropertyValue('--good').trim();
   const badColor = getComputedStyle(document.documentElement).getPropertyValue('--bad').trim();
   const idleColor = getComputedStyle(document.documentElement).getPropertyValue('--stitchIdle').trim();
 
+  const resolveDiagStatus = (entry, key) => {
+    if (typeof entry === 'string') return entry;
+    return entry?.[key] || 'pending';
+  };
+
+  const colorForStatus = (status) =>
+    status === 'good' ? goodColor : status === 'bad' ? badColor : idleColor;
+
+  const lineData = [];
+
+  const collectLine = (x1, y1, x2, y2, status) => {
+    lineData.push({ x1, y1, x2, y2, state: status || 'pending' });
+  };
+
+  const drawShadowLine = (x1, y1, x2, y2) => {
+    const bgColor = shadowColor || '#0a111b';
+    ctx.strokeStyle = bgColor;
+    ctx.lineWidth = stitchWidth * 1.85;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(x1, y1);
+    ctx.lineTo(x2, y2);
+    ctx.stroke();
+  };
+
   for (const [vr, vc] of snapshot.stitches) {
     const vk = keyOf(vr, vc);
-    const status = vertexStatus.get(vk) || 'pending';
-    ctx.strokeStyle =
-      status === 'good' ? goodColor : status === 'bad' ? badColor : idleColor;
+    const entry = vertexStatus.get(vk) || 'pending';
+    const diagAState = resolveDiagStatus(entry, 'diagA');
+    const diagBState = resolveDiagStatus(entry, 'diagB');
+    const { x, y } = getVertexPoint(vr, vc, refs, offset);
+    collectLine(x - stitchLineHalf, y - stitchLineHalf, x + stitchLineHalf, y + stitchLineHalf, diagAState);
+    collectLine(x + stitchLineHalf, y - stitchLineHalf, x - stitchLineHalf, y + stitchLineHalf, diagBState);
+  }
+
+  for (const line of lineData) {
+    drawShadowLine(line.x1, line.y1, line.x2, line.y2);
+  }
+
+  const pendingLines = [];
+  const goodLines = [];
+  const badLines = [];
+
+  for (const line of lineData) {
+    if (line.state === 'bad') badLines.push(line);
+    else if (line.state === 'good') goodLines.push(line);
+    else pendingLines.push(line);
+  }
+
+  for (const line of pendingLines) {
+    const color = colorForStatus(line.state);
+    ctx.strokeStyle = color;
     ctx.lineWidth = stitchWidth;
     ctx.lineCap = 'round';
-
-    const { x, y } = getVertexPoint(vr, vc, refs, offset);
     ctx.beginPath();
-    ctx.moveTo(x - stitchLineHalf, y - stitchLineHalf);
-    ctx.lineTo(x + stitchLineHalf, y + stitchLineHalf);
-    ctx.moveTo(x + stitchLineHalf, y - stitchLineHalf);
-    ctx.lineTo(x - stitchLineHalf, y + stitchLineHalf);
+    ctx.moveTo(line.x1, line.y1);
+    ctx.lineTo(line.x2, line.y2);
+    ctx.stroke();
+  }
+
+  for (const line of goodLines) {
+    const color = colorForStatus(line.state);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = stitchWidth;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(line.x1, line.y1);
+    ctx.lineTo(line.x2, line.y2);
+    ctx.stroke();
+  }
+
+  for (const line of badLines) {
+    const color = colorForStatus(line.state);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = stitchWidth;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(line.x1, line.y1);
+    ctx.lineTo(line.x2, line.y2);
     ctx.stroke();
   }
 }
@@ -508,8 +581,8 @@ function drawCornerCounts(snapshot, refs, ctx, cornerVertexStatus = new Map()) {
 }
 
 export function resizeCanvas(refs) {
-  const { boardWrap, canvas, ctx } = refs;
-  if (!boardWrap || !canvas || !ctx) return;
+  const { boardWrap, canvas, ctx, symbolCanvas, symbolCtx } = refs;
+  if (!boardWrap || !canvas || !ctx || !symbolCanvas || !symbolCtx) return;
   syncBoardCellSize(refs);
 
   const wrapRect = boardWrap.getBoundingClientRect();
@@ -527,4 +600,10 @@ export function resizeCanvas(refs) {
   canvas.style.width = `${cw}px`;
   canvas.style.height = `${ch}px`;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+  symbolCanvas.width = Math.max(1, Math.ceil(cw * dpr));
+  symbolCanvas.height = Math.max(1, Math.ceil(ch * dpr));
+  symbolCanvas.style.width = `${cw}px`;
+  symbolCanvas.style.height = `${ch}px`;
+  symbolCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
 }

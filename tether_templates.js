@@ -56,6 +56,7 @@ export const APP_SHELL_TEMPLATE = (t = (k) => k, localeOptions = [], currentLoca
       <div class="panel">
         <div class="boardWrap" id="${ELEMENT_IDS.BOARD_WRAP}">
           <canvas id="${ELEMENT_IDS.CANVAS}"></canvas>
+          <canvas id="${ELEMENT_IDS.SYMBOL_CANVAS}"></canvas>
           <div id="${ELEMENT_IDS.GRID}" role="application" aria-label="${t('ui.puzzleGridAria')}" data-i18n-aria-label="ui.puzzleGridAria"></div>
         </div>
       </div>

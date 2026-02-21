@@ -17,7 +17,8 @@
   --accent: #6aa6ff;
   --line: rgb(120, 190, 255);
   --lineShadow: rgba(120, 190, 255, 0.25);
-  --stitchIdle: rgba(231,238,247,0.25);
+  --stitchIdle: #8f9cac;
+  --stitchShadow: #0a111b;
   --app-pad-inline: 6px;
   --panel-border: 1px;
   --panel-padding: 8px;
@@ -409,6 +410,14 @@ button:active{ transform: translateY(1px); }
   z-index: 3;
   pointer-events:none;
   mix-blend-mode: overlay;
+}
+
+#symbolCanvas{
+  position:absolute;
+  inset:0;
+  z-index: 4;
+  pointer-events:none;
+  mix-blend-mode: normal;
 }
 
 .legend{

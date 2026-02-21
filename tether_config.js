@@ -50,6 +50,7 @@ export const ELEMENT_IDS = Object.freeze({
   GRID: 'grid',
   BOARD_WRAP: 'boardWrap',
   CANVAS: 'pathCanvas',
+  SYMBOL_CANVAS: 'symbolCanvas',
   LEGEND: 'legend',
   B_TURN: 'bTurn',
   B_CW: 'bCW',

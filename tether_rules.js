@@ -276,7 +276,7 @@ export function evaluateStitches(snapshot) {
     const req = snapshot.stitchReq.get(vk);
 
     if (!req) {
-      vertexStatus.set(vk, 'bad');
+      vertexStatus.set(vk, { diagA: 'bad', diagB: 'bad' });
       badPairs += 2;
       continue;
     }
@@ -290,7 +290,7 @@ export function evaluateStitches(snapshot) {
     });
 
     if (!allIn || !allUsable) {
-      vertexStatus.set(vk, 'bad');
+      vertexStatus.set(vk, { diagA: 'bad', diagB: 'bad' });
       badPairs += 2;
       continue;
     }
@@ -334,13 +334,9 @@ export function evaluateStitches(snapshot) {
     if (bad1) badPairs++;
     if (bad2) badPairs++;
 
-    if (bad1 || bad2) {
-      vertexStatus.set(vk, 'bad');
-    } else if (ok1 && ok2) {
-      vertexStatus.set(vk, 'good');
-    } else {
-      vertexStatus.set(vk, 'pending');
-    }
+    const diagAStatus = has1a && has1b ? (ok1 ? 'good' : 'bad') : (bad1 ? 'bad' : 'pending');
+    const diagBStatus = has2a && has2b ? (ok2 ? 'good' : 'bad') : (bad2 ? 'bad' : 'pending');
+    vertexStatus.set(vk, { diagA: diagAStatus, diagB: diagBStatus });
   }
 
   const summary = snapshot.stitches.length === 0 ? '—' : `${goodPairs}/${totalPairs}${badPairs ? ` (✗${badPairs})` : ''}`;

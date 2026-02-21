@@ -46,7 +46,7 @@ export const LEVELS = [
     "descKey": "level.tutorial_6.desc",
     "grid": ["....", "....", "....", "...."],
     "stitches": [],
-    "cornerCounts": [[1, 1, 2], [2, 2, 1]],
+    "cornerCounts": [[1, 1, 2], [1, 3, 1]],
   },
   {
     "name": "튜토리얼 7) 가위/바위/보 순서",
@@ -85,7 +85,7 @@ export const LEVELS = [
     "nameKey": "level.pilot_3.name",
     "desc": "방향성 꺾임 + 벽 조합.",
     "descKey": "level.pilot_3.desc",
-    "grid": ["l.##.", "..l#.", "...l.", ".lr..", "...r."],
+    "grid": ["..##.", "..l#.", "...l.", ".lr..", "...r."],
     "stitches": [],
   },
   {
@@ -109,7 +109,7 @@ export const LEVELS = [
     "nameKey": "level.pilot_6.name",
     "desc": "벽이 많을 때 스티치가 만드는 강제 분기.",
     "descKey": "level.pilot_6.desc",
-    "grid": ["......", "....tt", "#t.t..", "##..t.", "th.#..", ".##..."],
+    "grid": ["......", "....t.", "#t.t..", "##..t.", "th.#..", ".##..."],
     "stitches": [[2, 4]],
   },
   {
@@ -143,6 +143,24 @@ export const LEVELS = [
     "descKey": "level.pilot_10.desc",
     "grid": ["......", "..m...", "..t#..", ".h....", "...m..", "......"],
     "stitches": [],
+  },
+  {
+    "name": "파일럿 11) Corner Weave (6x6)",
+    "nameKey": "level.pilot_11.name",
+    "desc": "Corner count + 방향성 힌트 + 스티치 조합. 제약을 만족하는 순서가 다른 해법이 2개 이상 존재합니다.",
+    "descKey": "level.pilot_11.desc",
+    "grid": [".....r", "..l...", ".r....", "......", ".s.tv.", "..r..."],
+    "stitches": [[2, 2], [2, 4], [4, 3]],
+    "cornerCounts": [[1, 2, 3], [3, 2, 2], [5, 4, 2]],
+  },
+  {
+    "name": "파일럿 12) Stress Corners (7x7)",
+    "nameKey": "level.pilot_12.name",
+    "desc": "Stress 패턴에 corner count를 추가한 고난도. 서로 다른 순서로 제약을 달성하는 복수 해법이 존재합니다.",
+    "descKey": "level.pilot_12.desc",
+    "grid": ["..#l...", ".......", ".#v....", "v...##.", "..#s#..", "rr#....", "..h..#."],
+    "stitches": [[5, 1], [1, 5]],
+    "cornerCounts": [[2, 2, 2], [4, 4, 1], [6, 4, 3]],
   },
 ];
 
