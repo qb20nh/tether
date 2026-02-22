@@ -1,5 +1,5 @@
-import enUsMessages from './locales/en-US.js';
-import enGbMessages from './locales/en-GB.js';
+import enMessages from './locales/en.js';
+import itMessages from './locales/it.js';
 import zhHansMessages from './locales/zh-Hans.js';
 import zhHantMessages from './locales/zh-Hant.js';
 import es419Messages from './locales/es-419.js';
@@ -13,8 +13,10 @@ import frFrMessages from './locales/fr-FR.js';
 const LOCALE_LABELS = {
   ko: '한국어',
   en: 'English',
-  'en-US': 'English (US)',
-  'en-GB': 'English (UK)',
+  'en-US': 'English',
+  'en-GB': 'English',
+  it: 'Italiano',
+  'it-IT': 'Italiano',
   'zh-Hans': '中文（简体）',
   'zh-Hant': '中文（繁體）',
   'es-419': 'Español (Latinoamérica)',
@@ -27,8 +29,8 @@ const LOCALE_LABELS = {
 };
 
 export const SUPPORTED_LOCALES = [
-  'en-US',
-  'en-GB',
+  'en',
+  'it',
   'zh-Hans',
   'zh-Hant',
   'es-419',
@@ -40,12 +42,12 @@ export const SUPPORTED_LOCALES = [
   'fr-FR',
 ];
 export const DEFAULT_LOCALE = 'ko-KR';
-export const FALLBACK_EN_LOCALE = 'en-US';
+export const FALLBACK_EN_LOCALE = 'en';
 export const LOCALE_STORAGE_KEY = 'tetherLocale';
 
 const LOCALE_MAP = {
-  'en-US': enUsMessages,
-  'en-GB': enGbMessages,
+  en: enMessages,
+  it: itMessages,
   'zh-Hans': zhHansMessages,
   'zh-Hant': zhHantMessages,
   'es-419': es419Messages,
@@ -58,10 +60,12 @@ const LOCALE_MAP = {
 };
 
 const LOCALE_ALIASES = {
-  'en': 'en-US',
-  'en-us': 'en-US',
-  'en-gb': 'en-GB',
-  'en-uk': 'en-GB',
+  'en': 'en',
+  'en-us': 'en',
+  'en-gb': 'en',
+  'en-uk': 'en',
+  it: 'it',
+  'it-it': 'it',
   'zh': 'zh-Hans',
   'zh-hans': 'zh-Hans',
   'zh-hant': 'zh-Hant',
@@ -87,7 +91,8 @@ const LOCALE_ALIASES = {
 };
 
 const FALLBACK_BY_BASE = {
-  en: 'en-US',
+  en: 'en',
+  it: 'it',
   zh: 'zh-Hans',
   es: 'es-419',
   pt: 'pt-BR',

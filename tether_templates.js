@@ -11,9 +11,9 @@ const buildOptionList = (localeOptions, currentLocale) =>
 export const APP_SHELL_TEMPLATE = (t = (k) => k, localeOptions = [], currentLocale = 'ko') => `
   <div class="app">
     <header>
-      <div style="display:flex; align-items:baseline; gap:10px;">
+      <div class="topbarRow">
         <h1>TETHER <span class="subtitle">v3</span></h1>
-        <div style="margin-inline-start:auto; display:flex; align-items:center; gap:8px;">
+        <div class="langPicker">
           <label id="${ELEMENT_IDS.LANG_LABEL}" class="small" for="${ELEMENT_IDS.LANG_SEL}" data-i18n="ui.language">${t(
             'ui.language',
           )}</label>

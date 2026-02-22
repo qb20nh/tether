@@ -104,6 +104,20 @@ header .subtitle {
   font-weight: 500;
 }
 
+.topbarRow {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  width: 100%;
+}
+
+.langPicker {
+  margin-inline-start: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .panel {
   background: linear-gradient(180deg, var(--panel) 0%, var(--panel2) 100%);
   border: var(--panel-border) solid rgba(255, 255, 255, 0.08);
