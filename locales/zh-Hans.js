@@ -43,21 +43,6 @@ export default {
     "cornerCount": "<strong>拐角计数</strong>：限制某顶点周围 4 格之间的连接数量（0~3）",
     "movableWall": "<strong>可移动墙 (m)</strong>：拖动可移动"
   },
-  "lang": {
-    "ko": "한국어",
-    "en": "English",
-    "en-US": "English (US)",
-    "en-GB": "English (UK)",
-    "zh-Hans": "中文（简体）",
-    "zh-Hant": "中文（繁體）",
-    "es-419": "Español (Latinoamérica)",
-    "pt-BR": "Português (Brasil)",
-    "ar": "العربية",
-    "ja-JP": "日本語",
-    "ko-KR": "한국어",
-    "de-DE": "Deutsch",
-    "fr-FR": "Français"
-  },
   "level": {
     "tutorial_1": {
       "name": "教程1）基础 (3x3)",

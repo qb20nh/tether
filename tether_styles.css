@@ -99,6 +99,7 @@ header .subtitle{
   border-radius: 11px;
   padding: var(--panel-padding);
   box-shadow: 0 10px 30px rgba(0,0,0,0.35);
+  min-width: 0;
 }
 .controls{
   display:flex;
@@ -177,7 +178,7 @@ button:active{ transform: translateY(1px); }
 .layout{
   display:grid;
   gap: 6px;
-  grid-template-columns: 1fr;
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .boardWrap{

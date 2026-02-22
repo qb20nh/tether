@@ -43,21 +43,6 @@ export default {
     "cornerCount": "<strong>Corner count</strong>: forces the number of 0~3 connections around a vertex",
     "movableWall": "<strong>Movable wall (m)</strong>: drag to move"
   },
-  "lang": {
-    "ko": "한국어",
-    "en": "English",
-    "en-US": "English (US)",
-    "en-GB": "English (UK)",
-    "zh-Hans": "中文（简体）",
-    "zh-Hant": "中文（繁體）",
-    "es-419": "Español (Latinoamérica)",
-    "pt-BR": "Português (Brasil)",
-    "ar": "العربية",
-    "ja-JP": "日本語",
-    "ko-KR": "한국어",
-    "de-DE": "Deutsch",
-    "fr-FR": "Français"
-  },
   "level": {
     "tutorial_1": {
       "name": "Tutorial 1) Basic (3x3)",

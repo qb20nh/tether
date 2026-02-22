@@ -217,17 +217,18 @@ const getHeadLeadTravel = (path, refs = {}, offset = { x: 0, y: 0 }) => {
 
   const inAngle = Math.atan2(inDy, inDx);
   const outAngle = Math.atan2(outDy, outDx);
-  const turnStartAngle = normalizeAngle(inAngle + Math.PI);
-  const turnEndAngle = normalizeAngle(outAngle);
-  const turnAngle = angleDeltaSigned(turnStartAngle, turnEndAngle);
-  const absTurn = Math.abs(turnAngle);
-  const cornerAbsTurn = Math.PI / 2;
+  const headingTurn = angleDeltaSigned(inAngle, outAngle);
+  const absTurn = Math.abs(headingTurn);
   const angleTolerance = 1e-4;
-  if (Math.abs(absTurn - cornerAbsTurn) > angleTolerance) return firstSegmentLength;
+  if (absTurn <= angleTolerance || absTurn >= Math.PI - angleTolerance) return firstSegmentLength;
 
   const flowWidth = Math.max(7, Math.floor(getCellSize(gridEl) * 0.15));
   const cornerRadius = Math.max(1.2, flowWidth * 0.5);
-  return firstSegmentLength + cornerRadius * (absTurn - 2);
+  const tangentOffset = cornerRadius * Math.tan(absTurn * 0.5);
+  if (!(tangentOffset > 0) || !Number.isFinite(tangentOffset)) return firstSegmentLength;
+  const leadLinear = Math.max(0, firstSegmentLength - tangentOffset);
+  const cornerArcLength = cornerRadius * absTurn;
+  return leadLinear + cornerArcLength - tangentOffset;
 };
 
 const getHeadShiftDelta = (nextPath, previousPath, refs = {}, offset = { x: 0, y: 0 }) => {
@@ -324,6 +325,39 @@ const parsePx = (value) => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
+const getCanvasScale = (ctx) => {
+  const fallback = window.devicePixelRatio || 1;
+  if (!ctx || typeof ctx.getTransform !== 'function') {
+    return { x: fallback, y: fallback };
+  }
+
+  const transform = ctx.getTransform();
+  const sx = Number.isFinite(transform.a) && transform.a !== 0 ? transform.a : fallback;
+  const sy = Number.isFinite(transform.d) && transform.d !== 0 ? transform.d : fallback;
+  return { x: sx, y: sy };
+};
+
+const configureHiDPICanvas = (canvas, ctx, cssWidth, cssHeight) => {
+  const safeCssWidth = Math.max(1, cssWidth);
+  const safeCssHeight = Math.max(1, cssHeight);
+  const dpr = window.devicePixelRatio || 1;
+  const pixelWidth = Math.max(1, Math.round(safeCssWidth * dpr));
+  const pixelHeight = Math.max(1, Math.round(safeCssHeight * dpr));
+  const scaleX = pixelWidth / safeCssWidth;
+  const scaleY = pixelHeight / safeCssHeight;
+
+  if (canvas.width !== pixelWidth) canvas.width = pixelWidth;
+  if (canvas.height !== pixelHeight) canvas.height = pixelHeight;
+
+  const cssWidthPx = `${safeCssWidth}px`;
+  const cssHeightPx = `${safeCssHeight}px`;
+  if (canvas.style.width !== cssWidthPx) canvas.style.width = cssWidthPx;
+  if (canvas.style.height !== cssHeightPx) canvas.style.height = cssHeightPx;
+
+  ctx.setTransform(scaleX, 0, 0, scaleY, 0, 0);
+  ctx.imageSmoothingEnabled = false;
+};
+
 const forceOpaqueColor = (color) => {
   if (typeof color !== 'string') return '#ffffff';
   const trimmed = color.trim();
@@ -349,9 +383,32 @@ const syncBoardCellSize = (refs, rows = activeBoardSize.rows, cols = activeBoard
   if (!refs.boardWrap || !refs.gridEl) return;
   if (!rows || !cols || rows <= 0 || cols <= 0) return;
 
-  const gap = parsePx(getComputedStyle(refs.boardWrap).getPropertyValue('--gap')) || 2;
+  const boardStyles = getComputedStyle(refs.boardWrap);
+  const gap = parsePx(boardStyles.getPropertyValue('--gap')) || 2;
+  const boardBorderInline =
+    parsePx(boardStyles.borderLeftWidth) + parsePx(boardStyles.borderRightWidth);
   const parent = refs.boardWrap.parentElement;
-  const maxInline = parent ? parent.clientWidth : refs.boardWrap.clientWidth;
+  const parentInline = (() => {
+    if (!parent) return refs.boardWrap.clientWidth;
+    const styles = getComputedStyle(parent);
+    return Math.max(
+      0,
+      parent.clientWidth - parsePx(styles.paddingLeft) - parsePx(styles.paddingRight),
+    );
+  })();
+  const appInline = (() => {
+    if (!refs.app) return Infinity;
+    const styles = getComputedStyle(refs.app);
+    return Math.max(
+      0,
+      refs.app.clientWidth - parsePx(styles.paddingLeft) - parsePx(styles.paddingRight),
+    );
+  })();
+  const viewportInline = Math.max(
+    0,
+    (window.visualViewport?.width || window.innerWidth || document.documentElement.clientWidth || 0) - 12,
+  );
+  const maxInline = Math.min(parentInline, appInline, viewportInline);
   const maxBlock = (() => {
     const viewportHeight = window.visualViewport?.height || window.innerHeight || document.documentElement.clientHeight || 0;
     const top = refs.gridEl.getBoundingClientRect().top;
@@ -360,7 +417,7 @@ const syncBoardCellSize = (refs, rows = activeBoardSize.rows, cols = activeBoard
 
   if (!Number.isFinite(maxInline) || maxInline <= 0 || !Number.isFinite(maxBlock) || maxBlock <= 0) return;
 
-  const widthBudget = maxInline - (gap * 2) - (cols - 1) * gap;
+  const widthBudget = maxInline - boardBorderInline - (gap * 2) - (cols - 1) * gap;
   const heightBudget = maxBlock - (gap * 2) - (rows - 1) * gap;
   if (widthBudget <= 0 || heightBudget <= 0) return;
 
@@ -708,11 +765,12 @@ function drawAllInternal(snapshot, refs, statuses, flowOffset = 0) {
   const { ctx, canvas, symbolCtx, symbolCanvas } = refs;
   if (!ctx || !canvas || !symbolCtx || !symbolCanvas) return;
 
-  const dpr = window.devicePixelRatio || 1;
-  const w = canvas.width / dpr;
-  const h = canvas.height / dpr;
+  const pathScale = getCanvasScale(ctx);
+  const symbolScale = getCanvasScale(symbolCtx);
+  const w = canvas.width / pathScale.x;
+  const h = canvas.height / pathScale.y;
   ctx.clearRect(0, 0, w, h);
-  symbolCtx.clearRect(0, 0, symbolCanvas.width / dpr, symbolCanvas.height / dpr);
+  symbolCtx.clearRect(0, 0, symbolCanvas.width / symbolScale.x, symbolCanvas.height / symbolScale.y);
 
   drawPathLine(snapshot, refs, ctx, flowOffset);
   drawCornerCounts(snapshot, refs, symbolCtx, statuses?.hintStatus?.cornerVertexStatus);
@@ -931,7 +989,6 @@ function drawFlowRibbon(points, ctx, width, flowOffset, tipOptions = {}) {
   const cornerPrimitives = [];
 
   const cornerRadius = Math.max(1.2, flowWidth * 0.5);
-  const cornerAbsTurn = Math.PI / 2;
   const angleTolerance = 1e-4;
 
   for (let i = 0; i < points.length - 1; i++) {
@@ -966,17 +1023,45 @@ function drawFlowRibbon(points, ctx, width, flowOffset, tipOptions = {}) {
 
     const inAngle = Math.atan2(inDy, inDx);
     const outAngle = Math.atan2(outDy, outDx);
-    const cornerStartAngle = normalizeAngle(inAngle + Math.PI);
-    const cornerEndAngle = normalizeAngle(outAngle);
-    const turnAngle = angleDeltaSigned(cornerStartAngle, cornerEndAngle);
-    const absTurn = Math.abs(turnAngle);
-    if (Math.abs(absTurn - cornerAbsTurn) > angleTolerance) continue;
+    const headingTurn = angleDeltaSigned(inAngle, outAngle);
+    const absTurn = Math.abs(headingTurn);
+    if (absTurn <= angleTolerance || absTurn >= Math.PI - angleTolerance) continue;
+
+    const tangentOffset = cornerRadius * Math.tan(absTurn * 0.5);
+    if (!(tangentOffset > 0) || !Number.isFinite(tangentOffset)) continue;
+    const inUx = inDx / inLen;
+    const inUy = inDy / inLen;
+    const outUx = outDx / outLen;
+    const outUy = outDy / outLen;
+    const baseCx = corner.x;
+    const baseCy = corner.y;
+    const tangentInX = baseCx - inUx * tangentOffset;
+    const tangentInY = baseCy - inUy * tangentOffset;
+    const tangentOutX = baseCx + outUx * tangentOffset;
+    const tangentOutY = baseCy + outUy * tangentOffset;
+    const inNormalX = headingTurn > 0 ? -inUy : inUy;
+    const inNormalY = headingTurn > 0 ? inUx : -inUx;
+    const cx = tangentInX + inNormalX * cornerRadius;
+    const cy = tangentInY + inNormalY * cornerRadius;
+    const angleIn = normalizeAngle(Math.atan2(tangentInY - cy, tangentInX - cx));
+    const angleOut = normalizeAngle(Math.atan2(tangentOutY - cy, tangentOutX - cx));
+    const centerSweep = angleDeltaSigned(angleIn, angleOut);
+    const centerSweepAbs = Math.abs(centerSweep);
+    if (centerSweepAbs <= angleTolerance) continue;
 
     cornerTurns[i] = {
-      turnStartAngle: cornerStartAngle,
-      turnEndAngle: cornerEndAngle,
-      turnAngle,
-      arcLength: Math.max(0, absTurn * cornerRadius),
+      centerAngleIn: angleIn,
+      centerAngleOut: angleOut,
+      turnSigned: centerSweep < 0 ? -1 : 1,
+      absTurn: centerSweepAbs,
+      tangentOffset,
+      arcLength: Math.max(0, centerSweepAbs * cornerRadius),
+      cx,
+      cy,
+      tangentInX,
+      tangentInY,
+      tangentOutX,
+      tangentOutY,
     };
   }
 
@@ -991,10 +1076,12 @@ function drawFlowRibbon(points, ctx, width, flowOffset, tipOptions = {}) {
   let flowTravel = 0;
   for (let i = 0; i < segmentCount; i++) {
     const len = segmentLengths[i];
-    const hasStartCorner = canUseConic && Boolean(cornerTurns[i]);
-    const hasEndCorner = canUseConic && Boolean(cornerTurns[i + 1]);
-    const trimStart = hasStartCorner ? cornerRadius : 0;
-    const trimEnd = hasEndCorner ? cornerRadius : 0;
+    const startCorner = canUseConic ? cornerTurns[i] : null;
+    const endCorner = canUseConic ? cornerTurns[i + 1] : null;
+    const hasStartCorner = Boolean(startCorner);
+    const hasEndCorner = Boolean(endCorner);
+    const trimStart = hasStartCorner ? startCorner.tangentOffset : 0;
+    const trimEnd = hasEndCorner ? endCorner.tangentOffset : 0;
     const drawableStart = Math.min(trimStart, len);
     const drawableEnd = Math.max(drawableStart, len - trimEnd);
     const drawableLength = drawableEnd - drawableStart;
@@ -1155,29 +1242,21 @@ function drawFlowRibbon(points, ctx, width, flowOffset, tipOptions = {}) {
       const corner = cornerTurns[i];
       if (!corner) continue;
 
-      const turnAngle = corner.turnAngle;
-      const turnAbs = Math.abs(turnAngle);
+      const turnSigned = corner.turnSigned;
+      const turnAbs = corner.absTurn;
       const cornerArcLength = Math.max(0, turnAbs * cornerRadius);
       if (cornerArcLength <= 0) continue;
 
-      const turnStart = corner.turnStartAngle;
-      const turnSigned = turnAngle < 0 ? -1 : 1;
-      const endAngle = corner.turnEndAngle;
-      const spanNorm = turnAbs / TAU;
-      const conicStartAngle = normalizeAngle((turnSigned > 0 ? turnStart : endAngle) + Math.PI);
-      const innerCornerAngle = normalizeAngle(turnStart + turnAngle * 0.5);
-      const halfTurn = Math.max(1e-6, turnAbs * 0.5);
-      const centerShift = cornerRadius / Math.sin(halfTurn);
       const baseCx = points[i].x;
       const baseCy = points[i].y;
-      const shiftX = Math.cos(innerCornerAngle) * centerShift;
-      const shiftY = Math.sin(innerCornerAngle) * centerShift;
-      const cx = baseCx + shiftX;
-      const cy = baseCy + shiftY;
-      const tangentInX = baseCx + Math.cos(turnStart) * cornerRadius;
-      const tangentInY = baseCy + Math.sin(turnStart) * cornerRadius;
-      const tangentOutX = baseCx + Math.cos(endAngle) * cornerRadius;
-      const tangentOutY = baseCy + Math.sin(endAngle) * cornerRadius;
+      const cx = corner.cx;
+      const cy = corner.cy;
+      const tangentInX = corner.tangentInX;
+      const tangentInY = corner.tangentInY;
+      const tangentOutX = corner.tangentOutX;
+      const tangentOutY = corner.tangentOutY;
+      const spanNorm = turnAbs / TAU;
+      const conicStartAngle = turnSigned > 0 ? corner.centerAngleIn : corner.centerAngleOut;
       const cornerGradient = ctx.createConicGradient(conicStartAngle, cx, cy);
       const flowStops = buildFlowGradientStops(
         primitive.travelStart,
@@ -1187,7 +1266,7 @@ function drawFlowRibbon(points, ctx, width, flowOffset, tipOptions = {}) {
         pulse,
       );
       const conicStops = flowStops.map((stop) => ({
-        position: turnSigned > 0 ? (1 - stop.position) * spanNorm : stop.position * spanNorm,
+        position: turnSigned > 0 ? stop.position * spanNorm : (1 - stop.position) * spanNorm,
         color: stop.color,
       }));
       addOrderedGradientStops(cornerGradient, conicStops);
@@ -1269,17 +1348,7 @@ export function resizeCanvas(refs) {
   const borderBottom = parseFloat(styles.borderBottomWidth || '0') || 0;
   const cw = Math.max(0, wrapRect.width - borderLeft - borderRight);
   const ch = Math.max(0, wrapRect.height - borderTop - borderBottom);
-  const dpr = window.devicePixelRatio || 1;
 
-  canvas.width = Math.max(1, Math.ceil(cw * dpr));
-  canvas.height = Math.max(1, Math.ceil(ch * dpr));
-  canvas.style.width = `${cw}px`;
-  canvas.style.height = `${ch}px`;
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-
-  symbolCanvas.width = Math.max(1, Math.ceil(cw * dpr));
-  symbolCanvas.height = Math.max(1, Math.ceil(ch * dpr));
-  symbolCanvas.style.width = `${cw}px`;
-  symbolCanvas.style.height = `${ch}px`;
-  symbolCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  configureHiDPICanvas(canvas, ctx, cw, ch);
+  configureHiDPICanvas(symbolCanvas, symbolCtx, cw, ch);
 }

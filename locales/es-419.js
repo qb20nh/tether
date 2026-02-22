@@ -43,21 +43,6 @@ export default {
     "cornerCount": "<strong>Conteo de esquinas</strong>: fuerza el número de conexiones de 0~3 alrededor de un vértice",
     "movableWall": "<strong>Pared móvil (m)</strong>: arrastrar para mover"
   },
-  "lang": {
-    "ko": "한국어",
-    "en": "English",
-    "en-US": "English (US)",
-    "en-GB": "English (UK)",
-    "zh-Hans": "中文（简体）",
-    "zh-Hant": "中文（繁體）",
-    "es-419": "Español (Latinoamérica)",
-    "pt-BR": "Português (Brasil)",
-    "ar": "العربية",
-    "ja-JP": "日本語",
-    "ko-KR": "한국어",
-    "de-DE": "Deutsch",
-    "fr-FR": "Français"
-  },
   "level": {
     "tutorial_1": {
       "name": "Tutorial 1) Básico (3x3)",

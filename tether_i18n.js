@@ -10,6 +10,22 @@ import koKrMessages from './locales/ko-KR.js';
 import deDeMessages from './locales/de-DE.js';
 import frFrMessages from './locales/fr-FR.js';
 
+const LOCALE_LABELS = {
+  ko: '한국어',
+  en: 'English',
+  'en-US': 'English (US)',
+  'en-GB': 'English (UK)',
+  'zh-Hans': '中文（简体）',
+  'zh-Hant': '中文（繁體）',
+  'es-419': 'Español (Latinoamérica)',
+  'pt-BR': 'Português (Brasil)',
+  ar: 'العربية',
+  'ja-JP': '日本語',
+  'ko-KR': '한국어',
+  'de-DE': 'Deutsch',
+  'fr-FR': 'Français',
+};
+
 export const SUPPORTED_LOCALES = [
   'en-US',
   'en-GB',
@@ -167,9 +183,8 @@ export const t = (locale) => {
 export const getLocale = () => resolveLocale();
 
 export const getLocaleOptions = (locale) => {
-  const translate = t(locale);
   return SUPPORTED_LOCALES.map((code) => ({
     value: code,
-    label: translate(`lang.${code}`),
+    label: LOCALE_LABELS[code] || code,
   }));
 };

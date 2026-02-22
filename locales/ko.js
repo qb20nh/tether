@@ -43,10 +43,6 @@ export default {
     "cornerCount": "<strong>Corner count</strong>: 꼭짓점 주변 4칸 사이 연결 수(0~3)를 강제",
     "movableWall": "<strong>Movable wall (m)</strong>: 드래그로 이동"
   },
-  "lang": {
-    "ko": "한국어",
-    "en": "English"
-  },
   "level": {
     "tutorial_1": {
       "name": "튜토리얼 1) 기본 (3x3)",
