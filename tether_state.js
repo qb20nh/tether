@@ -57,10 +57,9 @@ export function createGameState(levels) {
   };
 
   const toSnapshot = () => {
-    const gridCopy = gridData.map((row) => row.slice());
-    const stitchReqCopy = new Map();
-    for (const [k, v] of stitchReq.entries()) {
-      stitchReqCopy.set(k, { ...v });
+    const idxByKey = new Map();
+    for (let i = 0; i < path.length; i++) {
+      idxByKey.set(keyOf(path[i].r, path[i].c), i);
     }
 
     return {
@@ -68,13 +67,14 @@ export function createGameState(levels) {
       rows,
       cols,
       totalUsable,
-      path: path.map((p) => ({ ...p })),
-      visited: new Set(visited),
-      gridData: gridCopy,
-      stitches: stitches.map((p) => [p[0], p[1]]),
-      cornerCounts: cornerCounts.map((entry) => [entry[0], entry[1], entry[2]]),
-      stitchSet: new Set(stitchSet),
-      stitchReq: stitchReqCopy,
+      path: path.slice(),
+      visited,
+      gridData,
+      stitches,
+      cornerCounts,
+      stitchSet,
+      stitchReq,
+      idxByKey,
     };
   };
 
@@ -112,11 +112,10 @@ export function createGameState(levels) {
       }
     }
 
-    if (!isAdjacentMove(toSnapshot(), last, next)) return false;
+    if (!isAdjacentMove({ stitchSet }, last, next)) return false;
     if (visited.has(nextKey)) return false;
 
-    path = [...path, next];
-    visited = new Set(visited);
+    path.push(next);
     visited.add(nextKey);
     return true;
   };
@@ -138,18 +137,16 @@ export function createGameState(levels) {
     if (path.length >= 2) {
       const nextFromStart = path[1];
       if (next.r === nextFromStart.r && next.c === nextFromStart.c) {
-        path = path.slice(1);
-        visited = new Set(visited);
+        path.shift();
         visited.delete(keyOf(head.r, head.c));
         return true;
       }
     }
 
-    if (!isAdjacentMove(toSnapshot(), next, head)) return false;
+    if (!isAdjacentMove({ stitchSet }, next, head)) return false;
     if (visited.has(nextKey)) return false;
 
-    path = [next, ...path];
-    visited = new Set(visited);
+    path.unshift(next);
     visited.add(nextKey);
     return true;
   };

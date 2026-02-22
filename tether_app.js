@@ -75,7 +75,7 @@ const applyPanelVisibility = (panelEl, buttonEl, isHidden, translate) => {
   buttonEl.setAttribute('aria-expanded', String(!isHidden));
 };
 
-const wirePanelToggle = (panelEl, buttonEl, storageKey, translate, onToggle = () => {}) => {
+const wirePanelToggle = (panelEl, buttonEl, storageKey, translate, onToggle = () => { }) => {
   if (!panelEl || !buttonEl) return;
 
   const initialHidden = getHiddenState(storageKey);
@@ -231,12 +231,10 @@ export function initTetherApp() {
     layoutQueued = true;
 
     requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        layoutQueued = false;
-        const shouldValidate = pendingValidate;
-        pendingValidate = false;
-        runBoardLayout(shouldValidate);
-      });
+      layoutQueued = false;
+      const shouldValidate = pendingValidate;
+      pendingValidate = false;
+      runBoardLayout(shouldValidate);
     });
   };
 

@@ -13,6 +13,8 @@ export const CELL_TYPES = {
   RPS_PAPER: 'p',
 };
 
+export const isObstacle = (ch) => ch === CELL_TYPES.WALL || ch === CELL_TYPES.MOVABLE_WALL;
+
 export const HINT_CODES = new Set([
   CELL_TYPES.HINT_TURN,
   CELL_TYPES.HINT_CW,
@@ -65,14 +67,14 @@ export const ELEMENT_IDS = Object.freeze({
   B_MOVE_WALL: 'bMoveWall',
 });
 
-export function baseGoalText(level, t = (key) => key) {
-  const translate = typeof t === 'function' ? t : (key) => key;
-  const descText = level?.descKey ? translate(level.descKey) : '';
-  const desc = descText !== level?.descKey
-    ? `${translate('goal.thisLevelPrefix')}${descText}`
-    : level?.desc
-      ? `${translate('goal.thisLevelPrefix')}${level.desc}`
-      : '';
+export function baseGoalText(level, translate = (k) => k) {
+  if (!level) return translate('goal.intro');
 
-  return `${translate('goal.intro')}${desc}`;
+  let desc = level.descKey ? translate(level.descKey) : '';
+  if (desc === level.descKey) {
+    desc = level.desc || '';
+  }
+
+  const prefix = desc ? translate('goal.thisLevelPrefix') : '';
+  return `${translate('goal.intro')}${prefix}${desc}`;
 }

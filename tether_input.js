@@ -6,7 +6,8 @@ import {
   moveWallDragGhost,
   hideWallDragGhost,
 } from './tether_renderer.js';
-import { cellCenter, isAdjacentMove, getCellSize } from './tether_utils.js';
+import { isAdjacentMove } from './tether_utils.js';
+import { cellCenter, getCellSize } from './tether_geometry.js';
 
 export function bindInputHandlers(refs, state, onStateChange = () => { }) {
   let dragMode = null;

@@ -1,5 +1,6 @@
 import { ELEMENT_IDS } from './tether_config.js';
-import { cellCenter, getCellSize, keyOf, vertexPos } from './tether_utils.js';
+import { keyOf } from './tether_utils.js';
+import { cellCenter, getCellSize, vertexPos } from './tether_geometry.js';
 import { ICONS } from './tether_icons.js';
 
 let gridCells = [];
@@ -306,7 +307,7 @@ const animatePathFlow = (timestamp) => {
 
   pathAnimationLastTs = timestamp;
   if (latestPathSnapshot && latestPathRefs) {
-    drawAllInternal(latestPathSnapshot, latestPathRefs, latestPathStatuses, pathAnimationOffset);
+    drawAnimatedPath(latestPathSnapshot, latestPathRefs, latestPathStatuses, pathAnimationOffset);
   }
 
   pathAnimationFrame = requestAnimationFrame(animatePathFlow);
@@ -669,88 +670,88 @@ export function setDropTarget(r, c) {
   }
 }
 
-const clearCellState = (cell) => {
-  cell.classList.remove(
-    'visited',
-    'tail',
-    'pathStart',
-    'pathEnd',
-    'badHint',
-    'goodHint',
-    'badBlocked',
-    'badRps',
-    'goodRps',
-    'dropTarget',
-    'wallDropPreview',
-  );
-
-  const preview = cell.querySelector('.wallGhostPreviewMarker');
-  if (preview) preview.remove();
-
-  const idx = cell.querySelector('.idx');
-  if (idx) idx.textContent = '';
-};
-
 export function updateCells(snapshot, results, refs) {
   const { hintStatus, stitchStatus, rpsStatus, blockedStatus } = results;
 
+  const desired = Array.from({ length: snapshot.rows }, () =>
+    Array.from({ length: snapshot.cols }, () => ({
+      classes: ['cell'],
+      idx: '',
+    }))
+  );
+
   for (let r = 0; r < snapshot.rows; r++) {
     for (let c = 0; c < snapshot.cols; c++) {
-      clearCellState(gridCells[r][c]);
+      const code = snapshot.gridData[r][c];
+      if (code === 'm') desired[r][c].classes.push('wall', 'movable');
+      else if (code === '#') desired[r][c].classes.push('wall');
     }
   }
 
   for (let i = 0; i < snapshot.path.length; i++) {
     const p = snapshot.path[i];
-    const cell = gridCells[p.r][p.c];
-    cell.classList.add('visited');
-    const idx = cell.querySelector('.idx');
-    if (idx) idx.textContent = String(i + 1);
+    desired[p.r][p.c].classes.push('visited');
+    desired[p.r][p.c].idx = String(i + 1);
   }
 
   if (snapshot.path.length > 0) {
     const head = snapshot.path[0];
-    const headCell = gridCells[head.r][head.c];
-    headCell.classList.add('pathStart');
+    desired[head.r][head.c].classes.push('pathStart');
 
     if (snapshot.path.length > 1) {
       const tail = snapshot.path[snapshot.path.length - 1];
-      const tailCell = gridCells[tail.r][tail.c];
-      tailCell.classList.add('pathEnd');
+      desired[tail.r][tail.c].classes.push('pathEnd');
     }
   }
 
   if (hintStatus) {
     hintStatus.badKeys.forEach((k) => {
       const [r, c] = k.split(',').map(Number);
-      if (gridCells[r]?.[c]) gridCells[r][c].classList.add('badHint');
+      if (desired[r]?.[c]) desired[r][c].classes.push('badHint');
     });
 
     hintStatus.goodKeys.forEach((k) => {
       const [r, c] = k.split(',').map(Number);
-      if (gridCells[r]?.[c]) gridCells[r][c].classList.add('goodHint');
+      if (desired[r]?.[c]) desired[r][c].classes.push('goodHint');
     });
   }
 
   if (rpsStatus) {
     rpsStatus.badKeys.forEach((k) => {
       const [r, c] = k.split(',').map(Number);
-      if (gridCells[r]?.[c]) gridCells[r][c].classList.add('badRps');
+      if (desired[r]?.[c]) desired[r][c].classes.push('badRps');
     });
 
     rpsStatus.goodKeys.forEach((k) => {
       const [r, c] = k.split(',').map(Number);
-      const cell = gridCells[r]?.[c];
-      if (!cell || cell.classList.contains('badRps')) return;
-      cell.classList.add('goodRps');
+      if (desired[r]?.[c] && !desired[r][c].classes.includes('badRps')) {
+        desired[r][c].classes.push('goodRps');
+      }
     });
   }
 
   if (blockedStatus) {
     blockedStatus.badKeys.forEach((k) => {
       const [r, c] = k.split(',').map(Number);
-      if (gridCells[r]?.[c]) gridCells[r][c].classList.add('badBlocked');
+      if (desired[r]?.[c]) desired[r][c].classes.push('badBlocked');
     });
+  }
+
+  for (let r = 0; r < snapshot.rows; r++) {
+    for (let c = 0; c < snapshot.cols; c++) {
+      const cell = gridCells[r][c];
+      const state = desired[r][c];
+      const targetStr = state.classes.join(' ');
+
+      if (cell.className !== targetStr) {
+        cell.className = targetStr;
+      }
+
+      const idxEl = cell.querySelector('.idx');
+      if (idxEl && idxEl.textContent !== state.idx) {
+        idxEl.textContent = state.idx;
+      }
+    }
   }
 
   drawAll(snapshot, refs, { hintStatus, stitchStatus, rpsStatus });
@@ -777,20 +778,30 @@ export function drawAll(snapshot, refs, statuses) {
   }
 }
 
-function drawAllInternal(snapshot, refs, statuses, flowOffset = 0) {
-  const { ctx, canvas, symbolCtx, symbolCanvas } = refs;
-  if (!ctx || !canvas || !symbolCtx || !symbolCanvas) return;
+export function drawStaticSymbols(snapshot, refs, statuses) {
+  const { symbolCtx, symbolCanvas } = refs;
+  if (!symbolCtx || !symbolCanvas) return;
 
-  const pathScale = getCanvasScale(ctx);
   const symbolScale = getCanvasScale(symbolCtx);
-  const w = canvas.width / pathScale.x;
-  const h = canvas.height / pathScale.y;
-  ctx.clearRect(0, 0, w, h);
   symbolCtx.clearRect(0, 0, symbolCanvas.width / symbolScale.x, symbolCanvas.height / symbolScale.y);
 
-  drawPathLine(snapshot, refs, ctx, flowOffset);
   drawCornerCounts(snapshot, refs, symbolCtx, statuses?.hintStatus?.cornerVertexStatus);
   drawCrossStitches(snapshot, refs, symbolCtx, statuses?.stitchStatus?.vertexStatus);
+}
+
+export function drawAnimatedPath(snapshot, refs, statuses, flowOffset = 0) {
+  const { ctx, canvas } = refs;
+  if (!ctx || !canvas) return;
+
+  const pathScale = getCanvasScale(ctx);
+  ctx.clearRect(0, 0, canvas.width / pathScale.x, canvas.height / pathScale.y);
+
+  drawPathLine(snapshot, refs, ctx, flowOffset);
+}
+
+function drawAllInternal(snapshot, refs, statuses, flowOffset = 0) {
+  drawStaticSymbols(snapshot, refs, statuses);
+  drawAnimatedPath(snapshot, refs, statuses, flowOffset);
 }
 
 function drawCrossStitches(snapshot, refs, ctx, vertexStatus = new Map()) {

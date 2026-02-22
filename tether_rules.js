@@ -5,9 +5,9 @@ const isHintCode = (ch) => HINT_CODES.has(ch);
 const isRpsCode = (ch) => RPS_CODES.has(ch);
 const isWall = (ch) => ch === CELL_TYPES.WALL || ch === CELL_TYPES.MOVABLE_WALL;
 const edgeKey = (a, b) => {
-  const ka = keyOf(a.r, a.c);
-  const kb = keyOf(b.r, b.c);
-  return ka < kb ? `${ka}|${kb}` : `${kb}|${ka}`;
+  const ka = a.r * 1000 + a.c;
+  const kb = b.r * 1000 + b.c;
+  return ka < kb ? ka * 1000000 + kb : kb * 1000000 + ka;
 };
 
 const makeEndpointSet = (path) => {
@@ -98,10 +98,7 @@ const countCornerOrthConnections = (vr, vc, orthEdges) => {
 
 export function evaluateHints(snapshot) {
   const isComplete = snapshot.path.length === snapshot.totalUsable;
-  const idxByKey = new Map();
-  for (let i = 0; i < snapshot.path.length; i++) {
-    idxByKey.set(keyOf(snapshot.path[i].r, snapshot.path[i].c), i);
-  }
+  const idxByKey = snapshot.idxByKey;
 
   let good = 0;
   let bad = 0;
@@ -260,10 +257,7 @@ export function evaluateBlockedCells(snapshot) {
 }
 
 export function evaluateStitches(snapshot) {
-  const idxByKey = new Map();
-  for (let i = 0; i < snapshot.path.length; i++) {
-    idxByKey.set(keyOf(snapshot.path[i].r, snapshot.path[i].c), i);
-  }
+  const idxByKey = snapshot.idxByKey;
 
   let goodPairs = 0;
   let badPairs = 0;
