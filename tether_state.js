@@ -97,7 +97,6 @@ export function createGameState(levels) {
     const nextKey = keyOf(r, c);
 
     if (path.length === 0) {
-      if (isHintCell(r, c)) return false;
       path = [next];
       visited = new Set([nextKey]);
       return true;
@@ -127,7 +126,6 @@ export function createGameState(levels) {
     const nextKey = keyOf(r, c);
 
     if (path.length === 0) {
-      if (isHintCell(r, c)) return false;
       path = [next];
       visited = new Set([nextKey]);
       return true;
@@ -159,18 +157,7 @@ export function createGameState(levels) {
       return true;
     }
 
-    let changed = false;
-    while (path.length > 1 && isHintCell(path[path.length - 1].r, path[path.length - 1].c)) {
-      undo();
-      changed = true;
-    }
-
-    if (path.length <= 1) {
-      resetPath();
-      return true;
-    }
-
-    return changed;
+    return false;
   };
 
   const reversePath = () => {

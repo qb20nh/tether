@@ -812,11 +812,12 @@ function drawCrossStitches(snapshot, refs, ctx, vertexStatus = new Map()) {
   const cell = getCellSize(refs.gridEl);
   const stitchLineHalf = Math.max(2, cell * 0.18);
   const stitchWidth = Math.max(1, cell * 0.06);
-  const shadowColor = getComputedStyle(document.documentElement)
-    .getPropertyValue('--stitchShadow')
-    .trim();
+  const styleDeclaration = getComputedStyle(document.documentElement);
+  const colorGood = forceOpaqueColor(styleDeclaration.getPropertyValue('--good').trim() || '#32bb70');
+  const colorBad = forceOpaqueColor(styleDeclaration.getPropertyValue('--bad').trim() || '#e85c5c');
+  const colorPending = '#ffffff';
 
-  const symbolColor = '#ffffff';
+  const shadowColor = styleDeclaration.getPropertyValue('--stitchShadow').trim();
   const shadowOpaque = forceOpaqueColor(shadowColor || '#0a111b');
 
   const resolveDiagStatus = (entry, key) => {
@@ -865,8 +866,7 @@ function drawCrossStitches(snapshot, refs, ctx, vertexStatus = new Map()) {
   }
 
   for (const line of pendingLines) {
-    const color = symbolColor;
-    ctx.strokeStyle = color;
+    ctx.strokeStyle = colorPending;
     ctx.lineWidth = stitchWidth;
     ctx.lineCap = 'round';
     ctx.beginPath();
@@ -876,8 +876,7 @@ function drawCrossStitches(snapshot, refs, ctx, vertexStatus = new Map()) {
   }
 
   for (const line of goodLines) {
-    const color = symbolColor;
-    ctx.strokeStyle = color;
+    ctx.strokeStyle = colorGood;
     ctx.lineWidth = stitchWidth;
     ctx.lineCap = 'round';
     ctx.beginPath();
@@ -887,8 +886,7 @@ function drawCrossStitches(snapshot, refs, ctx, vertexStatus = new Map()) {
   }
 
   for (const line of badLines) {
-    const color = symbolColor;
-    ctx.strokeStyle = color;
+    ctx.strokeStyle = colorBad;
     ctx.lineWidth = stitchWidth;
     ctx.lineCap = 'round';
     ctx.beginPath();
@@ -1332,9 +1330,18 @@ function drawCornerCounts(snapshot, refs, ctx, cornerVertexStatus = new Map()) {
   ctx.textBaseline = 'middle';
   ctx.font = `700 ${cornerFontSize}px Inter, ui-sans-serif, system-ui, sans-serif`;
 
+  const styleDeclaration = getComputedStyle(document.documentElement);
+  const colorGood = forceOpaqueColor(styleDeclaration.getPropertyValue('--good').trim() || '#32bb70');
+  const colorBad = forceOpaqueColor(styleDeclaration.getPropertyValue('--bad').trim() || '#e85c5c');
+  const colorPending = '#ffffff';
+
   for (const [vr, vc, target] of snapshot.cornerCounts) {
     const vk = keyOf(vr, vc);
-    const accentColor = '#ffffff';
+    const state = cornerVertexStatus.get(vk) || 'pending';
+    let accentColor = colorPending;
+    if (state === 'good') accentColor = colorGood;
+    else if (state === 'bad') accentColor = colorBad;
+
     const { x, y } = getVertexPoint(vr, vc, refs, offset);
 
     ctx.beginPath();

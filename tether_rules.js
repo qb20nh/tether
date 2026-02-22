@@ -27,20 +27,7 @@ const hasCrossStitch = (snapshot, r1, c1, r2, c2) => {
 
 const evalHintAtIndex = (i, clue, path, isComplete) => {
   if (i === 0 || i === path.length - 1) {
-    if (isComplete) return { state: 'bad', clue };
-
-    if (i > 0) {
-      const prev = path[i - 1];
-      const cur = path[i];
-      const vin = { dr: cur.r - prev.r, dc: cur.c - prev.c };
-      const isHoriz = vin.dr === 0 && Math.abs(vin.dc) === 1;
-      const isVert = vin.dc === 0 && Math.abs(vin.dr) === 1;
-
-      if (clue === CELL_TYPES.HINT_HORIZONTAL) return { state: isHoriz ? 'pending' : 'bad', clue };
-      if (clue === CELL_TYPES.HINT_VERTICAL) return { state: isVert ? 'pending' : 'bad', clue };
-    }
-
-    return isComplete ? { state: 'bad', clue } : { state: 'pending', clue };
+    return { state: 'bad', clue };
   }
 
   const prev = path[i - 1];
