@@ -406,7 +406,8 @@ button:active {
 
 .boardWrap {
   position: relative;
-  display: inline-block;
+  display: block;
+  margin-inline: auto;
   width: min-content;
   max-width: 100%;
   user-select: none;
