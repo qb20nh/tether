@@ -18,15 +18,7 @@ export default {
     "thisLevelPrefix": "<br><b>This level</b>: "
   },
   "completion": {
-    "completed": "Completed ✅ Every cell visited + all constraints satisfied",
-    "allVisitedOk": "All cells visited: OK",
-    "cellsLeft": "{{count}} cells left",
-    "hintsOk": "Hints: OK",
-    "hintsConflict": "Hints: {{count}} conflicts",
-    "stitchesOk": "Stitches: OK",
-    "stitchesConflict": "Stitches: {{count}} conflicts",
-    "rpsOk": "RPS: OK",
-    "rpsConflict": "RPS: {{count}} conflicts"
+    "completed": "Completed ✅ Every cell visited + all constraints satisfied"
   },
   "legend": {
     "controls": "Controls",
@@ -115,6 +107,14 @@ export default {
     "pilot_10": {
       "name": "Pilot 10) Movable Walls x2 (6x6)",
       "desc": "Two movable walls. Rearrange them before solving."
+    },
+    "pilot_11": {
+      "name": "Pilot 11) Corner Weave (6x6)",
+      "desc": "A mix of corner counts, directional hints, and stitches. More than one solution can satisfy the constraints."
+    },
+    "pilot_12": {
+      "name": "Pilot 12) Trinity Weave (7x7)",
+      "desc": "A hardest puzzle where Rock-Paper-Scissors constraints cross stitches."
     }
   }
 }

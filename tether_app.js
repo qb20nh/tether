@@ -121,7 +121,12 @@ function updateWithEvaluation(refs, snapshot, evaluateResult, shouldValidate, tr
   updateCells(snapshot, evaluateResult, refs);
   if (!shouldValidate) return;
   const completion = checkCompletion(snapshot, evaluateResult, translate);
-  setMessage(refs.msgEl, completion.kind, completion.message);
+  if (completion.kind === 'good') {
+    setMessage(refs.msgEl, completion.kind, completion.message);
+    return;
+  }
+
+  setMessage(refs.msgEl, null, baseGoalText(LEVELS[snapshot.levelIndex], translate));
 }
 
 export function initTetherApp() {

@@ -416,12 +416,6 @@ export function checkCompletion(snapshot, forced = {}, translate = (k) => k) {
     };
   }
 
-  const parts = [];
-  parts.push(allVisited ? t('completion.allVisitedOk') : t('completion.cellsLeft', { count: snapshot.totalUsable - snapshot.path.length }));
-  parts.push(hintsOk ? t('completion.hintsOk') : t('completion.hintsConflict', { count: hintStatus.bad }));
-  parts.push(stitchesOk ? t('completion.stitchesOk') : t('completion.stitchesConflict', { count: stitchStatus.bad }));
-  parts.push(rpsOk ? t('completion.rpsOk') : t('completion.rpsConflict', { count: rpsStatus.bad }));
-
   const kind = (!hintsOk || !stitchesOk || !rpsOk) ? 'bad' : null;
 
   return {
@@ -430,7 +424,7 @@ export function checkCompletion(snapshot, forced = {}, translate = (k) => k) {
     stitchesOk,
     rpsOk,
     kind,
-    message: parts.join(' · '),
+    message: '',
     hintStatus,
     stitchStatus,
     rpsStatus,

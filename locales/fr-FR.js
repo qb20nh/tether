@@ -18,15 +18,7 @@ export default {
     "thisLevelPrefix": "<br><b>Ce niveau</b> : "
   },
   "completion": {
-    "completed": "Terminé ✅ Toutes les cellules visitées + toutes les contraintes satisfaites",
-    "allVisitedOk": "Toutes les cellules visitées : OK",
-    "cellsLeft": "{{count}} cellules restantes",
-    "hintsOk": "Indices : OK",
-    "hintsConflict": "{{count}} conflits d’indices",
-    "stitchesOk": "Points de couture : OK",
-    "stitchesConflict": "Points de couture : {{count}} conflits",
-    "rpsOk": "PFC : OK",
-    "rpsConflict": "PFC : {{count}} conflits"
+    "completed": "Terminé ✅ Toutes les cellules visitées + toutes les contraintes satisfaites"
   },
   "legend": {
     "controls": "Contrôles",
@@ -115,6 +107,14 @@ export default {
     "pilot_10": {
       "name": "Pilote 10) Deux murs mobiles (6x6)",
       "desc": "Deux murs mobiles. Réorganisez-les avant de résoudre."
+    },
+    "pilot_11": {
+      "name": "Pilot 11) Corner Weave (6x6)",
+      "desc": "Un mélange de comptage des coins, d’indices directionnels et de points de couture. Plus d’une solution peut respecter les contraintes."
+    },
+    "pilot_12": {
+      "name": "Pilot 12) Trinity Weave (7x7)",
+      "desc": "Le puzzle le plus difficile : les contraintes RPS se croisent avec les points de couture."
     }
   }
 }

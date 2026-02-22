@@ -18,15 +18,7 @@ export default {
     "thisLevelPrefix": "<br><b>Este nivel</b>: "
   },
   "completion": {
-    "completed": "Completado ✅ Se visitaron todas las celdas + se satisfacen todas las restricciones",
-    "allVisitedOk": "Todas las celdas visitadas: OK",
-    "cellsLeft": "Quedan {{count}} celdas",
-    "hintsOk": "Pistas: OK",
-    "hintsConflict": "Pistas: {{count}} conflictos",
-    "stitchesOk": "Costuras: OK",
-    "stitchesConflict": "Costuras: {{count}} conflictos",
-    "rpsOk": "Piedra/Papel/Tijeras: OK",
-    "rpsConflict": "Piedra/Papel/Tijeras: {{count}} conflictos"
+    "completed": "Completado ✅ Se visitaron todas las celdas + se satisfacen todas las restricciones"
   },
   "legend": {
     "controls": "Controles",
@@ -115,6 +107,14 @@ export default {
     "pilot_10": {
       "name": "Piloto 10) Dos paredes móviles (6x6)",
       "desc": "Dos paredes móviles. Reacomódalas antes de resolver."
+    },
+    "pilot_11": {
+      "name": "Pilot 11) Corner Weave (6x6)",
+      "desc": "Una mezcla de conteo de esquinas, pistas de dirección y puntadas. Puede haber más de una solución que satisfaga las restricciones."
+    },
+    "pilot_12": {
+      "name": "Pilot 12) Trinity Weave (7x7)",
+      "desc": "El rompecabezas más difícil, donde las restricciones de Piedra-Papel-Tijeras se cruzan con las puntadas."
     }
   }
 }

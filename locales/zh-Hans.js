@@ -18,15 +18,7 @@ export default {
     "thisLevelPrefix": "<br><b>本关卡</b>："
   },
   "completion": {
-    "completed": "完成 ✅ 所有格子都已访问，约束全部满足",
-    "allVisitedOk": "全部格子访问：OK",
-    "cellsLeft": "还剩 {{count}} 个格子",
-    "hintsOk": "提示：OK",
-    "hintsConflict": "提示：{{count}} 个冲突",
-    "stitchesOk": "交叉约束：OK",
-    "stitchesConflict": "交叉约束：{{count}} 个冲突",
-    "rpsOk": "剪刀石头布：OK",
-    "rpsConflict": "剪刀石头布：{{count}} 个冲突"
+    "completed": "完成 ✅ 所有格子都已访问，约束全部满足"
   },
   "legend": {
     "controls": "操作",
@@ -115,6 +107,14 @@ export default {
     "pilot_10": {
       "name": "试炼10）两个可移动墙 (6x6)",
       "desc": "两个可移动墙。解题前先重新摆放。"
+    },
+    "pilot_11": {
+      "name": "Pilot 11) Corner Weave (6x6)",
+      "desc": "由角点计数、方向提示和缝线约束组成。可满足约束的不止一种解。"
+    },
+    "pilot_12": {
+      "name": "Pilot 12) Trinity Weave (7x7)",
+      "desc": "最高难度的谜题：石头剪刀布约束与缝线约束交叉。"
     }
   }
 }

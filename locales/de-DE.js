@@ -18,15 +18,7 @@ export default {
     "thisLevelPrefix": "<br><b>Dieses Level</b>: "
   },
   "completion": {
-    "completed": "Abgeschlossen ✅ Alle Zellen besucht + alle Bedingungen erfüllt",
-    "allVisitedOk": "Alle Zellen besucht: OK",
-    "cellsLeft": "{{count}} Zellen übrig",
-    "hintsOk": "Hinweise: OK",
-    "hintsConflict": "Hinweise: {{count}} Konflikte",
-    "stitchesOk": "Naht: OK",
-    "stitchesConflict": "Naht: {{count}} Konflikte",
-    "rpsOk": "RPS: OK",
-    "rpsConflict": "RPS: {{count}} Konflikte"
+    "completed": "Abgeschlossen ✅ Alle Zellen besucht + alle Bedingungen erfüllt"
   },
   "legend": {
     "controls": "Steuerung",
@@ -115,6 +107,14 @@ export default {
     "pilot_10": {
       "name": "Pilot 10) Zwei verschiebbare Wände (6x6)",
       "desc": "Zwei bewegliche Wände. Arrangiere sie vor dem Lösen neu an."
+    },
+    "pilot_11": {
+      "name": "Pilot 11) Corner Weave (6x6)",
+      "desc": "Eine Mischung aus Eckenzählungen, Richtungs-Hinweisen und Nähten. Es gibt mehr als eine Lösung, die alle Einschränkungen erfüllt."
+    },
+    "pilot_12": {
+      "name": "Pilot 12) Trinity Weave (7x7)",
+      "desc": "Das schwierigste Rätsel: Die RPS-Einschränkungen kreuzen sich mit Nähten."
     }
   }
 }

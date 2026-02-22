@@ -643,7 +643,35 @@ export const LEVELS = [
         1,
         5
       ]
-    ]
+    ],
+    "difficulty": {
+      "version": 1,
+      "profile": "standard256",
+      "score": 15,
+      "label": "Trivial",
+      "components": {
+        "backtracking": 10.245038,
+        "retries": 4.881819,
+        "volatility": 0
+      },
+      "metrics": {
+        "trials": 256,
+        "solvedTrials": 176,
+        "successRate": 0.6875,
+        "meanBacktracksSolved": 10783.823864,
+        "p90BacktracksSolved": 22350,
+        "expectedRetries": 0.454545,
+        "baselineMeanBacktracks": 4818.261538,
+        "baselineCvBacktracks": 1.387462,
+        "unsatProofStatus": "not_run",
+        "cvBacktracksSolved": 0.693641,
+        "uniqueWallPlacementsSampled": 1,
+        "meanNodeExpansions": 15258.828125,
+        "meanDeadEnds": 6357.28125,
+        "p90MaxDepth": 41,
+        "nodeCapHits": 80
+      }
+    }
   },
   {
     "name": "파일럿 8) RPS Spread (5x5)",
@@ -657,7 +685,35 @@ export const LEVELS = [
       ".....",
       "p...g"
     ],
-    "stitches": []
+    "stitches": [],
+    "difficulty": {
+      "version": 1,
+      "profile": "standard256",
+      "score": 31,
+      "label": "Easy",
+      "components": {
+        "backtracking": 29.435323,
+        "retries": 1.739758,
+        "volatility": 0
+      },
+      "metrics": {
+        "trials": 256,
+        "solvedTrials": 224,
+        "successRate": 0.875,
+        "meanBacktracksSolved": 6558.352679,
+        "p90BacktracksSolved": 19566,
+        "expectedRetries": 0.142857,
+        "baselineMeanBacktracks": 647.943548,
+        "baselineCvBacktracks": 1.774815,
+        "unsatProofStatus": "not_run",
+        "cvBacktracksSolved": 1.188683,
+        "uniqueWallPlacementsSampled": 1,
+        "meanNodeExpansions": 8885.910156,
+        "meanDeadEnds": 3422.121094,
+        "p90MaxDepth": 25,
+        "nodeCapHits": 32
+      }
+    }
   },
   {
     "name": "파일럿 9) RPS + Stitch (5x5)",
@@ -676,7 +732,35 @@ export const LEVELS = [
         2,
         2
       ]
-    ]
+    ],
+    "difficulty": {
+      "version": 1,
+      "profile": "standard256",
+      "score": 29,
+      "label": "Easy",
+      "components": {
+        "backtracking": 28.471291,
+        "retries": 0.256987,
+        "volatility": 0
+      },
+      "metrics": {
+        "trials": 256,
+        "solvedTrials": 251,
+        "successRate": 0.980469,
+        "meanBacktracksSolved": 6079.553785,
+        "p90BacktracksSolved": 14907,
+        "expectedRetries": 0.01992,
+        "baselineMeanBacktracks": 647.943548,
+        "baselineCvBacktracks": 1.774815,
+        "unsatProofStatus": "not_run",
+        "cvBacktracksSolved": 1.052906,
+        "uniqueWallPlacementsSampled": 1,
+        "meanNodeExpansions": 6474.417969,
+        "meanDeadEnds": 2554.691406,
+        "p90MaxDepth": 25,
+        "nodeCapHits": 5
+      }
+    }
   },
   {
     "name": "파일럿 10) Movable Walls x2 (6x6)",
@@ -691,7 +775,35 @@ export const LEVELS = [
       "...m..",
       "......"
     ],
-    "stitches": []
+    "stitches": [],
+    "difficulty": {
+      "version": 1,
+      "profile": "standard256",
+      "score": 23,
+      "label": "Easy",
+      "components": {
+        "backtracking": 9.445654,
+        "retries": 13.333564,
+        "volatility": 0
+      },
+      "metrics": {
+        "trials": 256,
+        "solvedTrials": 92,
+        "successRate": 0.359375,
+        "meanBacktracksSolved": 7697.25,
+        "p90BacktracksSolved": 17122,
+        "expectedRetries": 1.782609,
+        "baselineMeanBacktracks": 3662.294416,
+        "baselineCvBacktracks": 1.556524,
+        "unsatProofStatus": "not_run",
+        "cvBacktracksSolved": 0.913557,
+        "uniqueWallPlacementsSampled": 206,
+        "meanNodeExpansions": 18696.445313,
+        "meanDeadEnds": 7766.621094,
+        "p90MaxDepth": 33,
+        "nodeCapHits": 163
+      }
+    }
   },
   {
     "name": "파일럿 11) Corner Weave (6x6)",
@@ -736,7 +848,35 @@ export const LEVELS = [
         4,
         2
       ]
-    ]
+    ],
+    "difficulty": {
+      "version": 1,
+      "profile": "standard256",
+      "score": 45,
+      "label": "Medium",
+      "components": {
+        "backtracking": 14.502749,
+        "retries": 30,
+        "volatility": 0
+      },
+      "metrics": {
+        "trials": 256,
+        "solvedTrials": 8,
+        "successRate": 0.03125,
+        "meanBacktracksSolved": 11456.25,
+        "p90BacktracksSolved": 22330,
+        "expectedRetries": 31,
+        "baselineMeanBacktracks": 3662.294416,
+        "baselineCvBacktracks": 1.556524,
+        "unsatProofStatus": "not_run",
+        "cvBacktracksSolved": 0.66318,
+        "uniqueWallPlacementsSampled": 1,
+        "meanNodeExpansions": 24577.886719,
+        "meanDeadEnds": 10971.191406,
+        "p90MaxDepth": 36,
+        "nodeCapHits": 248
+      }
+    }
   },
   {
     "name": "파일럿 12) Trinity Weave (7x7)",
@@ -753,8 +893,39 @@ export const LEVELS = [
       "bh....."
     ],
     "stitches": [
-      [3, 3]
-    ]
+      [
+        3,
+        3
+      ]
+    ],
+    "difficulty": {
+      "version": 1,
+      "profile": "standard256",
+      "score": 2,
+      "label": "Trivial",
+      "components": {
+        "backtracking": 1.653789,
+        "retries": 0,
+        "volatility": 0
+      },
+      "metrics": {
+        "trials": 256,
+        "solvedTrials": 256,
+        "successRate": 1,
+        "meanBacktracksSolved": 5487.4375,
+        "p90BacktracksSolved": 10069,
+        "expectedRetries": 0,
+        "baselineMeanBacktracks": 4818.261538,
+        "baselineCvBacktracks": 1.387462,
+        "unsatProofStatus": "not_run",
+        "cvBacktracksSolved": 0.583113,
+        "uniqueWallPlacementsSampled": 1,
+        "meanNodeExpansions": 5537.519531,
+        "meanDeadEnds": 1824.6875,
+        "p90MaxDepth": 35,
+        "nodeCapHits": 0
+      }
+    }
   }
 ];
 

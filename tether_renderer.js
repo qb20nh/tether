@@ -17,7 +17,7 @@ let latestPathStatuses = null;
 const PATH_FLOW_SPEED = -32;
 const PATH_FLOW_CYCLE = 128;
 const PATH_FLOW_PULSE = 64;
-const PATH_FLOW_GLOW_ALPHA = 0.24;
+const PATH_FLOW_GLOW_ALPHA = 1;
 const PATH_FLOW_GLOW = `rgba(255, 255, 255, ${PATH_FLOW_GLOW_ALPHA})`;
 const PATH_FLOW_GLOW_SOFT = 'rgba(255, 255, 255, 0)';
 const PATH_FLOW_RISE = 0.82;
@@ -429,12 +429,28 @@ const syncBoardCellSize = (refs, rows = activeBoardSize.rows, cols = activeBoard
   const byInline = widthBudget / cols;
   const byBlock = heightBudget / rows;
   const nextCell = clampNumber(Math.min(byInline, byBlock), 8, minByGrid);
+  const nextCellBorder = clampNumber(nextCell * 0.02, 0.6, 2.4);
+  const nextBoardBorder = clampNumber(nextCell * 0.02, 0.6, 2.4);
   const nextCellPx = `${Math.round(nextCell)}px`;
+  const nextCellBorderPx = `${nextCellBorder.toFixed(2)}px`;
+  const nextBoardBorderPx = `${nextBoardBorder.toFixed(2)}px`;
 
   const currentCell = refs.boardWrap.style.getPropertyValue('--cell') || '';
   if (currentCell !== nextCellPx) {
     refs.boardWrap.style.setProperty('--cell', nextCellPx);
     refs.gridEl.style.setProperty('--cell', nextCellPx);
+  }
+
+  const currentCellBorder = refs.boardWrap.style.getPropertyValue('--cell-border') || '';
+  if (currentCellBorder !== nextCellBorderPx) {
+    refs.boardWrap.style.setProperty('--cell-border', nextCellBorderPx);
+    refs.gridEl.style.setProperty('--cell-border', nextCellBorderPx);
+  }
+
+  const currentBoardBorder = refs.boardWrap.style.getPropertyValue('--board-border') || '';
+  if (currentBoardBorder !== nextBoardBorderPx) {
+    refs.boardWrap.style.setProperty('--board-border', nextBoardBorderPx);
+    refs.gridEl.style.setProperty('--board-border', nextBoardBorderPx);
   }
 };
 
@@ -778,6 +794,9 @@ function drawAllInternal(snapshot, refs, statuses, flowOffset = 0) {
 }
 
 function drawCrossStitches(snapshot, refs, ctx, vertexStatus = new Map()) {
+  ctx.save();
+  ctx.globalAlpha = 1;
+
   const offset = getGridCanvasOffset(refs);
   const cell = getCellSize(refs.gridEl);
   const stitchLineHalf = Math.max(2, cell * 0.18);
@@ -786,17 +805,13 @@ function drawCrossStitches(snapshot, refs, ctx, vertexStatus = new Map()) {
     .getPropertyValue('--stitchShadow')
     .trim();
 
-  const goodColor = getComputedStyle(document.documentElement).getPropertyValue('--good').trim();
-  const badColor = getComputedStyle(document.documentElement).getPropertyValue('--bad').trim();
-  const idleColor = getComputedStyle(document.documentElement).getPropertyValue('--stitchIdle').trim();
+  const symbolColor = '#ffffff';
+  const shadowOpaque = forceOpaqueColor(shadowColor || '#0a111b');
 
   const resolveDiagStatus = (entry, key) => {
     if (typeof entry === 'string') return entry;
     return entry?.[key] || 'pending';
   };
-
-  const colorForStatus = (status) =>
-    status === 'good' ? goodColor : status === 'bad' ? badColor : idleColor;
 
   const lineData = [];
 
@@ -805,9 +820,8 @@ function drawCrossStitches(snapshot, refs, ctx, vertexStatus = new Map()) {
   };
 
   const drawShadowLine = (x1, y1, x2, y2) => {
-    const bgColor = shadowColor || '#0a111b';
-    ctx.strokeStyle = bgColor;
-    ctx.lineWidth = stitchWidth * 1.85;
+    ctx.strokeStyle = shadowOpaque;
+    ctx.lineWidth = stitchWidth * 2.0;
     ctx.lineCap = 'round';
     ctx.beginPath();
     ctx.moveTo(x1, y1);
@@ -840,7 +854,7 @@ function drawCrossStitches(snapshot, refs, ctx, vertexStatus = new Map()) {
   }
 
   for (const line of pendingLines) {
-    const color = colorForStatus(line.state);
+    const color = symbolColor;
     ctx.strokeStyle = color;
     ctx.lineWidth = stitchWidth;
     ctx.lineCap = 'round';
@@ -851,7 +865,7 @@ function drawCrossStitches(snapshot, refs, ctx, vertexStatus = new Map()) {
   }
 
   for (const line of goodLines) {
-    const color = colorForStatus(line.state);
+    const color = symbolColor;
     ctx.strokeStyle = color;
     ctx.lineWidth = stitchWidth;
     ctx.lineCap = 'round';
@@ -862,7 +876,7 @@ function drawCrossStitches(snapshot, refs, ctx, vertexStatus = new Map()) {
   }
 
   for (const line of badLines) {
-    const color = colorForStatus(line.state);
+    const color = symbolColor;
     ctx.strokeStyle = color;
     ctx.lineWidth = stitchWidth;
     ctx.lineCap = 'round';
@@ -871,6 +885,8 @@ function drawCrossStitches(snapshot, refs, ctx, vertexStatus = new Map()) {
     ctx.lineTo(line.x2, line.y2);
     ctx.stroke();
   }
+
+  ctx.restore();
 }
 
 function drawPathLine(snapshot, refs, ctx, flowOffset = 0) {
@@ -1299,28 +1315,19 @@ function drawCornerCounts(snapshot, refs, ctx, cornerVertexStatus = new Map()) {
   const cornerLineWidth = Math.max(1, cell * 0.04);
   const cornerFontSize = Math.max(12, Math.floor(cell * 0.22));
 
-  const rootStyles = getComputedStyle(document.documentElement);
-  const goodColor = rootStyles.getPropertyValue('--good').trim();
-  const badColor = rootStyles.getPropertyValue('--bad').trim();
-  const pendingColor = rootStyles.getPropertyValue('--muted').trim();
-
   ctx.save();
+  ctx.globalAlpha = 1;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.font = `700 ${cornerFontSize}px Inter, ui-sans-serif, system-ui, sans-serif`;
 
   for (const [vr, vc, target] of snapshot.cornerCounts) {
     const vk = keyOf(vr, vc);
-    const status = cornerVertexStatus.get(vk) || 'pending';
-    const accentColor = status === 'good'
-      ? goodColor
-      : status === 'bad'
-        ? badColor
-        : pendingColor;
+    const accentColor = '#ffffff';
     const { x, y } = getVertexPoint(vr, vc, refs, offset);
 
     ctx.beginPath();
-    ctx.fillStyle = 'rgba(11, 15, 20, 0.88)';
+    ctx.fillStyle = 'rgb(11, 15, 20)';
     ctx.arc(x, y, cornerRadius, 0, Math.PI * 2);
     ctx.fill();
 

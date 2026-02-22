@@ -18,15 +18,7 @@ export default {
     "thisLevelPrefix": "<br><b>Este nível</b>: "
   },
   "completion": {
-    "completed": "Concluído ✅ Todas as células visitadas + todas as restrições satisfeitas",
-    "allVisitedOk": "Todas as células visitadas: OK",
-    "cellsLeft": "Faltam {{count}} células",
-    "hintsOk": "Dicas: OK",
-    "hintsConflict": "Dicas: {{count}} conflitos",
-    "stitchesOk": "Costuras: OK",
-    "stitchesConflict": "Costuras: {{count}} conflitos",
-    "rpsOk": "Papel/Pedra/Tesoura: OK",
-    "rpsConflict": "Papel/Pedra/Tesoura: {{count}} conflitos"
+    "completed": "Concluído ✅ Todas as células visitadas + todas as restrições satisfeitas"
   },
   "legend": {
     "controls": "Controles",
@@ -115,6 +107,14 @@ export default {
     "pilot_10": {
       "name": "Piloto 10) Duas paredes móveis (6x6)",
       "desc": "Duas paredes móveis. Rearranje antes de resolver."
+    },
+    "pilot_11": {
+      "name": "Pilot 11) Corner Weave (6x6)",
+      "desc": "Uma mistura de contagem de cantos, dicas direcionais e costuras. Mais de uma solução pode satisfazer as restrições."
+    },
+    "pilot_12": {
+      "name": "Pilot 12) Trinity Weave (7x7)",
+      "desc": "O quebra-cabeça mais difícil, onde as restrições de Pedra, Papel e Tesoura cruzam as costuras."
     }
   }
 }

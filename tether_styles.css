@@ -18,11 +18,12 @@
   --line: rgb(120, 190, 255);
   --lineShadow: rgba(120, 190, 255, 0.25);
   --stitchIdle: #8f9cac;
-  --stitchShadow: #0a111b;
+  --stitchShadow: #080f1a;
   --app-pad-inline: 6px;
   --panel-border: 1px;
   --panel-padding: 8px;
   --board-border: 1px;
+  --cell-border: 1px;
 }
 
 *{ box-sizing: border-box; }
@@ -216,7 +217,7 @@ button:active{ transform: translateY(1px); }
   background: linear-gradient(180deg, var(--cellbg) 0%, var(--cellbg2) 100%);
   border-radius: 12px;
   position: relative;
-  border: 1px solid rgba(0,0,0,0.0);
+  border: var(--cell-border) solid rgba(0,0,0,0.0);
   transition: background 120ms ease, border-color 120ms ease, transform 60ms ease;
 }
 .cell:hover{ border-color: rgba(255,255,255,0.08); }
@@ -239,9 +240,9 @@ button:active{ transform: translateY(1px); }
   justify-content:center;
   width: 66%;
   height: 66%;
-  color: #e7eef7;
-  mix-blend-mode: overlay;
-  filter: drop-shadow(0 2px 6px rgba(0,0,0,0.25));
+  color: #ffffff;
+  mix-blend-mode: normal;
+  filter: drop-shadow(0 2px 6px rgba(0,0,0,0.38));
   pointer-events: none;
 }
 .cell .mark svg{
@@ -256,10 +257,10 @@ button:active{ transform: translateY(1px); }
   display:flex;
   align-items:center;
   justify-content:center;
-  color: #e7eef7;
+  color: #ffffff;
   pointer-events: none;
   z-index: 0;
-  mix-blend-mode: overlay;
+  mix-blend-mode: normal;
 }
 .wallGhostPreviewMarker svg{
   width: 56%;
@@ -396,9 +397,9 @@ button:active{ transform: translateY(1px); }
 .wallDragGhostMark{
   width: 56%;
   height: 56%;
-  color: #e7eef7;
-  filter: drop-shadow(0 2px 6px rgba(0,0,0,0.28));
-  mix-blend-mode: overlay;
+  color: #ffffff;
+  filter: drop-shadow(0 2px 6px rgba(0,0,0,0.4));
+  mix-blend-mode: normal;
 }
 .wallDragGhostMark svg{
   width: 100%;

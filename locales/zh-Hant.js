@@ -18,15 +18,7 @@ export default {
     "thisLevelPrefix": "<br><b>此關卡</b>："
   },
   "completion": {
-    "completed": "完成 ✅ 所有格子皆已走過，約束條件全部滿足",
-    "allVisitedOk": "全部格子走訪：OK",
-    "cellsLeft": "尚餘 {{count}} 個格子",
-    "hintsOk": "提示：OK",
-    "hintsConflict": "提示：{{count}} 個衝突",
-    "stitchesOk": "十字鉤：OK",
-    "stitchesConflict": "十字鉤：{{count}} 個衝突",
-    "rpsOk": "猜拳：OK",
-    "rpsConflict": "猜拳：{{count}} 個衝突"
+    "completed": "完成 ✅ 所有格子皆已走過，約束條件全部滿足"
   },
   "legend": {
     "controls": "操作",
@@ -115,6 +107,14 @@ export default {
     "pilot_10": {
       "name": "試煉10）雙可移動牆 (6x6)",
       "desc": "兩個可移動牆。解題前先重新擺放。"
+    },
+    "pilot_11": {
+      "name": "Pilot 11) Corner Weave (6x6)",
+      "desc": "由角落數、方向提示與交錯約束組成。可滿足約束的不止一種解法。"
+    },
+    "pilot_12": {
+      "name": "Pilot 12) Trinity Weave (7x7)",
+      "desc": "最高難度的謎題：石頭剪刀布約束與縫線約束交叉。"
     }
   }
 }

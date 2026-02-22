@@ -18,15 +18,7 @@ export default {
     "thisLevelPrefix": "<br><b>このステージ</b>: "
   },
   "completion": {
-    "completed": "クリア ✅ すべてのマスを訪問し、制約を満たしました",
-    "allVisitedOk": "全マス訪問: OK",
-    "cellsLeft": "残り {{count}} マス",
-    "hintsOk": "ヒント: OK",
-    "hintsConflict": "ヒント: {{count}} 箇所競合",
-    "stitchesOk": "ステッチ: OK",
-    "stitchesConflict": "ステッチ: 競合 {{count}} 箇所",
-    "rpsOk": "RPS: OK",
-    "rpsConflict": "RPS: {{count}} 箇所競合"
+    "completed": "クリア ✅ すべてのマスを訪問し、制約を満たしました"
   },
   "legend": {
     "controls": "操作",
@@ -115,6 +107,14 @@ export default {
     "pilot_10": {
       "name": "パイロット10) 可動壁2つ (6x6)",
       "desc": "可動壁2つ。解く前に並べ替えてください。"
+    },
+    "pilot_11": {
+      "name": "Pilot 11) Corner Weave (6x6)",
+      "desc": "角数、方向ヒント、ステッチ制約の組み合わせ。条件を満たす解は1つ以上存在します。"
+    },
+    "pilot_12": {
+      "name": "Pilot 12) Trinity Weave (7x7)",
+      "desc": "RPS（グー・チョキ・パー）制約とステッチが交差する最難関のパズルです。"
     }
   }
 }

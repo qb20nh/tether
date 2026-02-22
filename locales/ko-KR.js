@@ -18,15 +18,7 @@ export default {
     "thisLevelPrefix": "<br><b>이 레벨</b>: "
   },
   "completion": {
-    "completed": "완료 ✅ 모든 칸 방문 + 모든 제약 만족",
-    "allVisitedOk": "모든 칸 방문: OK",
-    "cellsLeft": "{{count}}칸 남음",
-    "hintsOk": "힌트: OK",
-    "hintsConflict": "힌트: 충돌 {{count}}개",
-    "stitchesOk": "스티치: OK",
-    "stitchesConflict": "스티치: 충돌 {{count}}개",
-    "rpsOk": "RPS: OK",
-    "rpsConflict": "RPS: 충돌 {{count}}개"
+    "completed": "완료 ✅ 모든 칸 방문 + 모든 제약 만족"
   },
   "legend": {
     "controls": "조작",
@@ -115,6 +107,14 @@ export default {
     "pilot_10": {
       "name": "파일럿 10) Movable Walls x2 (6x6)",
       "desc": "이동 가능한 벽 2개. 퍼즐을 풀기 전에 벽을 재배치해 보세요."
+    },
+    "pilot_11": {
+      "name": "Pilot 11) Corner Weave (6x6)",
+      "desc": "코너 카운트 + 방향성 힌트 + 스티치의 조합. 제약을 만족하는 해법이 2개 이상 존재합니다."
+    },
+    "pilot_12": {
+      "name": "Pilot 12) Trinity Weave (7x7)",
+      "desc": "가위바위보 제약과 스티치가 교차하는 최고 난이도 퍼즐입니다."
     }
   }
 }
