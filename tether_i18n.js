@@ -13,8 +13,6 @@ import frFrMessages from './locales/fr-FR.js';
 const LOCALE_LABELS = {
   ko: '한국어',
   en: 'English',
-  'en-US': 'English',
-  'en-GB': 'English',
   it: 'Italiano',
   'it-IT': 'Italiano',
   'zh-Hans': '中文（简体）',
@@ -257,7 +255,18 @@ export const getLocale = () => resolveLocale();
 
 export const getLocaleOptions = (locale) => {
   const localeList = shuffleBySeed(SUPPORTED_LOCALES, getLocaleOrderSeed());
-  return localeList.map((code) => ({
+  const preferred = resolveLocale(locale) || null;
+  const ordered = preferred ? [...localeList] : localeList;
+
+  if (preferred) {
+    const currentIndex = ordered.indexOf(preferred);
+    if (currentIndex > 0) {
+      ordered.splice(currentIndex, 1);
+      ordered.unshift(preferred);
+    }
+  }
+
+  return ordered.map((code) => ({
     value: code,
     label: LOCALE_LABELS[code] || code,
   }));

@@ -3,6 +3,14 @@ export default {
     "levelLabel": "المستوى",
     "levelSelectAria": "اختر المستوى",
     "language": "اللغة",
+    "theme": "المظهر",
+    "themeDark": "الوضع الداكن",
+    "themeLight": "الوضع الفاتح",
+    "themeSwitchTitle": "تغيير المظهر",
+    "themeSwitchPrompt": "التبديل إلى {{theme}}؟",
+    "themeSwitchConfirm": "تطبيق",
+    "cancel": "إلغاء",
+    "nextLevel": "المستوى التالي",
     "reset": "إعادة تعيين",
     "resetTitle": "إعادة تعيين المسار",
     "reverse": "عكس",
@@ -41,7 +49,7 @@ export default {
       "desc": "ابدأ من أي خانة وزُر كل خانة بالضبط مرة واحدة."
     },
     "tutorial_2": {
-      "name": "الدرس 2) التدوير(any)",
+      "name": "الدرس 2) التدوير (أي)",
       "desc": "رمز الالتفاف يفرض تغيير الاتجاه في تلك الخانة."
     },
     "tutorial_3": {

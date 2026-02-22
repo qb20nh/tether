@@ -1,7 +1,7 @@
 import { mountStyles } from './tether_styles.js';
 import { APP_SHELL_TEMPLATE, buildLegendTemplate } from './tether_templates.js';
 import { BADGE_DEFINITIONS, ICONS, ICON_X } from './tether_icons.js';
-import { DEFAULT_LEVEL_INDEX, LEVELS } from './tether_levels.js';
+import { LEVELS } from './tether_levels.js';
 import { baseGoalText, ELEMENT_IDS } from './tether_config.js';
 import { createGameState } from './tether_state.js';
 import {
@@ -30,10 +30,16 @@ import {
 
 const GUIDE_KEY = 'tetherGuideHidden';
 const LEGEND_KEY = 'tetherLegendHidden';
+const LEVEL_PROGRESS_KEY = 'tetherLevelProgress';
+const LEVEL_PROGRESS_VERSION = 1;
+const THEME_KEY = 'tetherTheme';
+const DEFAULT_THEME = 'dark';
 const DEFAULT_HIDDEN_BY_KEY = {
   [GUIDE_KEY]: false,
   [LEGEND_KEY]: true,
 };
+let levelProgress = null;
+let cachedTheme = null;
 
 const getHiddenState = (key) => {
   try {
@@ -51,6 +57,103 @@ const setHiddenState = (key, value) => {
   } catch {
     // localStorage might be unavailable in restricted environments.
   }
+};
+
+const normalizeTheme = (theme) => (theme === 'light' || theme === 'dark' ? theme : null);
+
+const detectSystemTheme = () => {
+  try {
+    if (window.matchMedia('(prefers-color-scheme: dark)').matches) return 'dark';
+    if (window.matchMedia('(prefers-color-scheme: light)').matches) return 'light';
+  } catch {
+    // No media access or unsupported browser.
+  }
+  return DEFAULT_THEME;
+};
+
+const readTheme = () => {
+  if (cachedTheme) return cachedTheme;
+  try {
+    const stored = window.localStorage.getItem(THEME_KEY);
+    const normalized = normalizeTheme(stored);
+    if (normalized) {
+      cachedTheme = normalized;
+      return cachedTheme;
+    }
+  } catch {
+    // localStorage might be unavailable in restricted environments.
+  }
+  cachedTheme = detectSystemTheme();
+  return cachedTheme;
+};
+
+const writeTheme = (theme) => {
+  try {
+    window.localStorage.setItem(THEME_KEY, theme);
+  } catch {
+    // localStorage might be unavailable in restricted environments.
+  }
+};
+
+const applyTheme = (theme) => {
+  const normalized = normalizeTheme(theme) || DEFAULT_THEME;
+  cachedTheme = normalized;
+  const root = document.documentElement;
+  root.dataset.theme = normalized;
+  root.classList.toggle('theme-light', normalized === 'light');
+  writeTheme(normalized);
+};
+
+const normalizeProgressState = (value) => {
+  if (!value || typeof value !== 'object') return 0;
+  if (Number.isInteger(value.latestLevel)) {
+    return Math.min(Math.max(value.latestLevel, 0), LEVELS.length - 1);
+  }
+  return 0;
+};
+
+const readLevelProgress = () => {
+  if (levelProgress !== null) return levelProgress;
+
+  try {
+    const raw = window.localStorage.getItem(LEVEL_PROGRESS_KEY);
+    if (!raw) {
+      levelProgress = 0;
+      return levelProgress;
+    }
+    const parsed = JSON.parse(raw);
+    levelProgress = normalizeProgressState(parsed);
+    return levelProgress;
+  } catch {
+    levelProgress = 0;
+    return levelProgress;
+  }
+};
+
+const writeLevelProgress = () => {
+  try {
+    const payload = { version: LEVEL_PROGRESS_VERSION, latestLevel: levelProgress };
+    window.localStorage.setItem(LEVEL_PROGRESS_KEY, JSON.stringify(payload));
+  } catch {
+    // localStorage might be unavailable in restricted environments.
+  }
+};
+
+const isLevelUnlocked = (index) => {
+  const progress = readLevelProgress();
+  return index <= progress;
+};
+
+const getLatestAvailableLevelIndex = () => {
+  const progress = readLevelProgress();
+  return Math.min(progress, LEVELS.length - 1);
+};
+
+const markLevelCleared = (index) => {
+  const nextProgress = Math.max(readLevelProgress(), index + 1);
+  if (nextProgress === levelProgress) return;
+  levelProgress = nextProgress;
+  writeLevelProgress();
 };
 
 const isRtlLocale = (locale) => /^ar/i.test(locale || '');
@@ -108,9 +211,9 @@ const applyDataAttributes = (appEl, translate) => {
   });
 };
 
-function makeEvaluators(snapshot) {
+function makeEvaluators(snapshot, evaluateOptions = {}) {
   return {
-    hintStatus: evaluateHints(snapshot),
+    hintStatus: evaluateHints(snapshot, evaluateOptions),
     stitchStatus: evaluateStitches(snapshot),
     rpsStatus: evaluateRPS(snapshot),
     blockedStatus: evaluateBlockedCells(snapshot),
@@ -122,11 +225,17 @@ function updateWithEvaluation(refs, snapshot, evaluateResult, shouldValidate, tr
   if (!shouldValidate) return;
   const completion = checkCompletion(snapshot, evaluateResult, translate);
   if (completion.kind === 'good') {
+    markLevelCleared(snapshot.levelIndex);
     setMessage(refs.msgEl, completion.kind, completion.message);
-    return;
+    if (refs.nextLevelBtn) {
+      refs.nextLevelBtn.hidden = snapshot.levelIndex >= LEVELS.length - 1;
+    }
+    return completion;
   }
 
   setMessage(refs.msgEl, null, baseGoalText(LEVELS[snapshot.levelIndex], translate));
+  if (refs.nextLevelBtn) refs.nextLevelBtn.hidden = true;
+  return completion;
 }
 
 export function initTetherApp() {
@@ -137,7 +246,9 @@ export function initTetherApp() {
 
   const initialLocale = resolveLocale();
   let activeLocale = initialLocale;
+  let activeTheme = readTheme();
   let translate = createTranslator(activeLocale);
+  applyTheme(activeTheme);
   document.documentElement.lang = activeLocale;
   applyTextDirection(activeLocale);
 
@@ -156,13 +267,60 @@ export function initTetherApp() {
   const refreshLevelOptions = () => {
     const currentIndex = state.getSnapshot().levelIndex;
     refs.levelSel.innerHTML = LEVELS.map(
-      (lv, i) => `<option value="${i}">${resolveLevelName(lv, translate)}</option>`,
+      (lv, i) => {
+        const disabled = !isLevelUnlocked(i);
+        return `<option value="${i}" ${disabled ? 'disabled' : ''}${i === currentIndex ? 'selected' : ''}>${resolveLevelName(
+          lv,
+          translate,
+        )}</option>`;
+      },
     ).join('');
     refs.levelSel.value = String(currentIndex);
   };
 
   const showLevelGoal = (levelIndex) => {
     setMessage(refs.msgEl, null, baseGoalText(LEVELS[levelIndex], translate));
+    if (refs.nextLevelBtn) refs.nextLevelBtn.hidden = true;
+  };
+
+  const applyThemeState = (nextTheme) => {
+    activeTheme = nextTheme;
+    applyTheme(activeTheme);
+    refreshThemeButton();
+  };
+
+  const setThemeSwitchPrompt = (nextTheme) => {
+    if (!refs.themeSwitchMessage) return;
+    const targetLabel = nextTheme === 'light' ? translate('ui.themeLight') : translate('ui.themeDark');
+    const fallback = targetLabel ? `Switch to ${targetLabel}?` : translate('ui.themeLight');
+    refs.themeSwitchMessage.textContent = translate('ui.themeSwitchPrompt', { theme: targetLabel || '' }) || fallback;
+  };
+
+  const requestLightThemeConfirmation = (targetTheme) => {
+    if (!refs.themeSwitchDialog || typeof refs.themeSwitchDialog.showModal !== 'function') {
+      return false;
+    }
+    if (refs.themeSwitchDialog.open) return true;
+
+    refs.themeSwitchDialog.dataset.pendingTheme = targetTheme;
+    setThemeSwitchPrompt(targetTheme);
+
+    try {
+      refs.themeSwitchDialog.showModal();
+      return true;
+    } catch {
+      delete refs.themeSwitchDialog.dataset.pendingTheme;
+      return false;
+    }
+  };
+
+  const refreshThemeButton = () => {
+    if (!refs.themeToggle) return;
+    const isDark = activeTheme === 'dark';
+    const nextLabel = isDark ? translate('ui.themeLight') : translate('ui.themeDark');
+    refs.themeToggle.textContent = nextLabel;
+    refs.themeToggle.setAttribute('aria-label', nextLabel);
+    refs.themeToggle.setAttribute('title', nextLabel);
   };
 
   const refreshStaticUiText = (opts = {}) => {
@@ -210,22 +368,43 @@ export function initTetherApp() {
         translate,
       );
     }
+
+    if (refs.themeSwitchMessage && refs.themeSwitchDialog) {
+      const pendingTheme = refs.themeSwitchDialog.dataset.pendingTheme;
+      if (pendingTheme === 'light' || pendingTheme === 'dark') {
+        setThemeSwitchPrompt(pendingTheme);
+      } else {
+        setThemeSwitchPrompt(activeTheme === 'dark' ? 'light' : 'dark');
+      }
+    }
+
+    refreshThemeButton();
   };
 
-  const refresh = (snapshot, validate = false) => {
-    const evaluateResult = makeEvaluators(snapshot);
-    updateWithEvaluation(refs, snapshot, evaluateResult, validate, translate);
+  const refresh = (snapshot, validate = false, options = {}) => {
+    const evaluateResult = makeEvaluators(snapshot, {
+      suppressEndpointRequirement: Boolean(options.isPathDragging),
+    });
+    const completion = updateWithEvaluation(refs, snapshot, evaluateResult, validate, translate);
+    if (completion?.kind === 'good') {
+      refreshLevelOptions();
+    }
   };
 
-  const runBoardLayout = (validate = false) => {
+  const runBoardLayout = (validate = false, options = {}) => {
     const snapshot = state.getSnapshot();
     resizeCanvas(refs);
-    refresh(snapshot, validate);
+    refresh(snapshot, validate, options);
   };
 
   let layoutQueued = false;
+  let queuedLayoutOptions = {};
   let pendingValidate = false;
-  const queueBoardLayout = (validate = false) => {
+  const queueBoardLayout = (validate = false, options = {}) => {
+    queuedLayoutOptions = {
+      ...queuedLayoutOptions,
+      ...options,
+    };
     pendingValidate = pendingValidate || Boolean(validate);
     if (layoutQueued) return;
     layoutQueued = true;
@@ -233,8 +412,10 @@ export function initTetherApp() {
     requestAnimationFrame(() => {
       layoutQueued = false;
       const shouldValidate = pendingValidate;
+      const nextOptions = queuedLayoutOptions;
       pendingValidate = false;
-      runBoardLayout(shouldValidate);
+      queuedLayoutOptions = {};
+      runBoardLayout(shouldValidate, nextOptions);
     });
   };
 
@@ -252,19 +433,21 @@ export function initTetherApp() {
 
     buildGrid(snapshot, refs, ICONS, ICON_X);
     showLevelGoal(idx);
+    refreshLevelOptions();
     queueBoardLayout(false);
   };
 
   bindInputHandlers(refs, state, (shouldValidate, options = {}) => {
+    const isPathDragging = Boolean(options.isPathDragging);
     if (options.rebuildGrid) {
       const snapshotForGrid = state.getSnapshot();
       buildGrid(snapshotForGrid, refs, ICONS, ICON_X);
-      queueBoardLayout(Boolean(shouldValidate));
+      queueBoardLayout(Boolean(shouldValidate), { isPathDragging });
       return;
     }
 
     const snapshot = state.getSnapshot();
-    refresh(snapshot, Boolean(shouldValidate));
+    queueBoardLayout(Boolean(shouldValidate), { isPathDragging });
   });
 
   refs.levelSel.addEventListener('change', (e) => {
@@ -278,6 +461,23 @@ export function initTetherApp() {
     refresh(snapshot, true);
   });
 
+  if (refs.themeSwitchDialog) {
+    refs.themeSwitchDialog.addEventListener('close', () => {
+      const targetTheme = refs.themeSwitchDialog?.dataset?.pendingTheme;
+      if (targetTheme === 'light' && refs.themeSwitchDialog.returnValue === 'confirm') {
+        applyThemeState(targetTheme);
+      }
+      delete refs.themeSwitchDialog.dataset.pendingTheme;
+      refs.themeSwitchDialog.returnValue = '';
+    });
+  }
+
+  refs.themeToggle?.addEventListener('click', () => {
+    const targetTheme = activeTheme === 'dark' ? 'light' : 'dark';
+    if (targetTheme === 'light' && requestLightThemeConfirmation(targetTheme)) return;
+    applyThemeState(targetTheme);
+  });
+
   refs.resetBtn.addEventListener('click', () => {
     state.resetPath();
     const snapshot = state.getSnapshot();
@@ -289,6 +489,14 @@ export function initTetherApp() {
     state.reversePath();
     const snapshot = state.getSnapshot();
     refresh(snapshot, true);
+  });
+
+  refs.nextLevelBtn?.addEventListener('click', () => {
+    const snapshot = state.getSnapshot();
+    const nextIndex = snapshot.levelIndex + 1;
+    if (nextIndex < LEVELS.length) {
+      loadLevel(nextIndex);
+    }
   });
 
   let boardResizeObserver = null;
@@ -309,7 +517,8 @@ export function initTetherApp() {
 
   refreshStaticUiText({ locale: getLocale() });
   refreshLevelOptions();
-  loadLevel(DEFAULT_LEVEL_INDEX);
+  const initialLevelIndex = getLatestAvailableLevelIndex();
+  loadLevel(initialLevelIndex);
 }
 
 initTetherApp();

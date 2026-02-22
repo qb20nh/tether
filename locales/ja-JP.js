@@ -3,6 +3,14 @@ export default {
     "levelLabel": "レベル",
     "levelSelectAria": "レベルを選択",
     "language": "言語",
+    "theme": "テーマ",
+    "themeDark": "ダークモード",
+    "themeLight": "ライトモード",
+    "themeSwitchTitle": "テーマを変更",
+    "themeSwitchPrompt": "{{theme}} に切り替えますか？",
+    "themeSwitchConfirm": "適用",
+    "cancel": "キャンセル",
+    "nextLevel": "次のステージ",
     "reset": "リセット",
     "resetTitle": "パスをリセット",
     "reverse": "反転",
@@ -41,7 +49,7 @@ export default {
       "desc": "任意のマスから開始し、すべてのマスを1回ずつ訪問します。"
     },
     "tutorial_2": {
-      "name": "チュートリアル2) ターン(any)",
+      "name": "チュートリアル2) ターン(任意)",
       "desc": "ターンアイコンはそのマスで方向転換を要求します。"
     },
     "tutorial_3": {
@@ -109,11 +117,11 @@ export default {
       "desc": "可動壁2つ。解く前に並べ替えてください。"
     },
     "pilot_11": {
-      "name": "Pilot 11) Corner Weave (6x6)",
+      "name": "パイロット11) コーナー編み (6x6)",
       "desc": "角数、方向ヒント、ステッチ制約の組み合わせ。条件を満たす解は1つ以上存在します。"
     },
     "pilot_12": {
-      "name": "Pilot 12) Trinity Weave (7x7)",
+      "name": "パイロット12) トリニティ編み (7x7)",
       "desc": "RPS（グー・チョキ・パー）制約とステッチが交差する最難関のパズルです。"
     }
   }

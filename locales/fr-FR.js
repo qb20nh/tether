@@ -3,6 +3,14 @@ export default {
     "levelLabel": "Niveau",
     "levelSelectAria": "Sélectionner un niveau",
     "language": "Langue",
+    "theme": "Thème",
+    "themeDark": "Mode sombre",
+    "themeLight": "Mode clair",
+    "themeSwitchTitle": "Changer le thème",
+    "themeSwitchPrompt": "Passer à {{theme}}?",
+    "themeSwitchConfirm": "Appliquer",
+    "cancel": "Annuler",
+    "nextLevel": "Niveau suivant",
     "reset": "Réinitialiser",
     "resetTitle": "Réinitialiser le chemin",
     "reverse": "Inverser",
@@ -41,7 +49,7 @@ export default {
       "desc": "Commencez sur n’importe quelle case et visitez chaque case exactement une fois."
     },
     "tutorial_2": {
-      "name": "Didacticiel 2) Tour (any)",
+      "name": "Didacticiel 2) Tour (n'importe quel)",
       "desc": "Le symbole de tour force un changement de direction sur cette case."
     },
     "tutorial_3": {
@@ -109,11 +117,11 @@ export default {
       "desc": "Deux murs mobiles. Réorganisez-les avant de résoudre."
     },
     "pilot_11": {
-      "name": "Pilot 11) Corner Weave (6x6)",
+      "name": "Pilote 11) Tissage d'angles (6x6)",
       "desc": "Un mélange de comptage des coins, d’indices directionnels et de points de couture. Plus d’une solution peut respecter les contraintes."
     },
     "pilot_12": {
-      "name": "Pilot 12) Trinity Weave (7x7)",
+      "name": "Pilote 12) Tissage trinaire (7x7)",
       "desc": "Le puzzle le plus difficile : les contraintes RPS se croisent avec les points de couture."
     }
   }

@@ -63,7 +63,7 @@ export function bindInputHandlers(refs, state, onStateChange = () => { }) {
       };
       activePointerId = e.pointerId;
       refs.gridEl.setPointerCapture(e.pointerId);
-      onStateChange(false, { rebuildGrid: false });
+      onStateChange(false, { rebuildGrid: false, isPathDragging: true });
       e.preventDefault();
       return;
     }
@@ -83,6 +83,7 @@ export function bindInputHandlers(refs, state, onStateChange = () => { }) {
     dragMode = 'path';
     activePointerId = e.pointerId;
     refs.gridEl.setPointerCapture(e.pointerId);
+    onStateChange(false, { rebuildGrid: false, isPathDragging: true });
     e.preventDefault();
   };
 
@@ -184,7 +185,7 @@ export function bindInputHandlers(refs, state, onStateChange = () => { }) {
       }
 
       if (touched) {
-        onStateChange(false, { rebuildGrid: false });
+        onStateChange(false, { rebuildGrid: false, isPathDragging: true });
       }
       e.preventDefault();
       return;
@@ -235,6 +236,7 @@ export function bindInputHandlers(refs, state, onStateChange = () => { }) {
       hadWallMove || finalMode === 'path',
       {
         rebuildGrid: hadWallMove,
+        isPathDragging: false,
       },
     );
     e.preventDefault();

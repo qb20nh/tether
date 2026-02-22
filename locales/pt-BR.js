@@ -3,6 +3,14 @@ export default {
     "levelLabel": "Nível",
     "levelSelectAria": "Selecionar nível",
     "language": "Idioma",
+    "theme": "Tema",
+    "themeDark": "Modo escuro",
+    "themeLight": "Modo claro",
+    "themeSwitchTitle": "Alterar tema",
+    "themeSwitchPrompt": "Mudar para {{theme}}?",
+    "themeSwitchConfirm": "Aplicar",
+    "cancel": "Cancelar",
+    "nextLevel": "Próximo nível",
     "reset": "Reiniciar",
     "resetTitle": "Reiniciar caminho",
     "reverse": "Inverter",
@@ -37,35 +45,35 @@ export default {
   },
   "level": {
     "tutorial_1": {
-      "name": "Tutorial 1) Básico (3x3)",
+      "name": "Lição 1) Básico (3x3)",
       "desc": "Comece em qualquer célula e visite cada célula exatamente uma vez."
     },
     "tutorial_2": {
-      "name": "Tutorial 2) Virada(any)",
+      "name": "Lição 2) Virada (qualquer)",
       "desc": "O ícone de virada exige uma mudança de direção nessa célula."
     },
     "tutorial_3": {
-      "name": "Tutorial 3) Reto + H/V",
+      "name": "Lição 3) Reto + H/V",
       "desc": "As pistas de reto/horizontal/vertical forçam um caminho reto naquela célula."
     },
     "tutorial_4": {
-      "name": "Tutorial 4) CW / CCW",
+      "name": "Lição 4) CW / CCW",
       "desc": "CW(r) significa que o movimento de anterior para próximo deve girar no sentido horário, CCW(l) no anti-horário."
     },
     "tutorial_5": {
-      "name": "Tutorial 5) Costura cruzada",
+      "name": "Lição 5) Costura cruzada",
       "desc": "No vértice em X, ambas as conexões diagonais (↘︎↖︎, ↙︎↗︎) são obrigatórias, logo o movimento diagonal é necessário."
     },
     "tutorial_6": {
-      "name": "Tutorial 6) Contagem de canto (0-3)",
+      "name": "Lição 6) Contagem de canto (0-3)",
       "desc": "O número indica quantas conexões existem entre as quatro células ao redor de um canto (0~3)."
     },
     "tutorial_7": {
-      "name": "Tutorial 7) Ordem Pedra/Papel/Tesoura",
+      "name": "Lição 7) Ordem Pedra/Papel/Tesoura",
       "desc": "A ordem de visita das células RPS deve seguir Tesoura→Pedra→Papel→Tesoura… em sequência."
     },
     "tutorial_8": {
-      "name": "Tutorial 8) Paredes móveis",
+      "name": "Lição 8) Paredes móveis",
       "desc": "Arraste a parede móvel para uma célula vazia. (Não pode ficar em dicas/tiles RPS)"
     },
     "pilot_1": {
@@ -109,11 +117,11 @@ export default {
       "desc": "Duas paredes móveis. Rearranje antes de resolver."
     },
     "pilot_11": {
-      "name": "Pilot 11) Corner Weave (6x6)",
+      "name": "Piloto 11) Tecido de cantos (6x6)",
       "desc": "Uma mistura de contagem de cantos, dicas direcionais e costuras. Mais de uma solução pode satisfazer as restrições."
     },
     "pilot_12": {
-      "name": "Pilot 12) Trinity Weave (7x7)",
+      "name": "Piloto 12) Tecido trinitário (7x7)",
       "desc": "O quebra-cabeça mais difícil, onde as restrições de Pedra, Papel e Tesoura cruzam as costuras."
     }
   }

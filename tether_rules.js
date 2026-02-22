@@ -25,8 +25,28 @@ const hasCrossStitch = (snapshot, r1, c1, r2, c2) => {
   return snapshot.stitchSet && snapshot.stitchSet.has(keyOf(vr, vc));
 };
 
-const evalHintAtIndex = (i, clue, path, isComplete) => {
-  if (i === 0 || i === path.length - 1) {
+const evalHintAtIndex = (i, clue, path, isComplete, suppressEndpointRequirement) => {
+  const isEndpoint = i === 0 || i === path.length - 1;
+  if (isEndpoint) {
+    if (suppressEndpointRequirement) {
+      if (path.length < 2) return { state: 'pending', clue };
+
+      const neighbor = i === 0 ? path[1] : path[path.length - 2];
+      if (!neighbor) return { state: 'pending', clue };
+
+      const direction = { dr: neighbor.r - path[i].r, dc: neighbor.c - path[i].c };
+      const isHoriz = direction.dr === 0;
+      const isVert = direction.dc === 0;
+
+      if (clue === CELL_TYPES.HINT_HORIZONTAL) {
+        return { state: isHoriz ? 'pending' : 'bad', clue };
+      }
+      if (clue === CELL_TYPES.HINT_VERTICAL) {
+        return { state: isVert ? 'pending' : 'bad', clue };
+      }
+
+      return { state: 'pending', clue };
+    }
     return { state: 'bad', clue };
   }
 
@@ -83,7 +103,8 @@ const countCornerOrthConnections = (vr, vc, orthEdges) => {
   return count;
 };
 
-export function evaluateHints(snapshot) {
+export function evaluateHints(snapshot, options = {}) {
+  const suppressEndpointRequirement = Boolean(options.suppressEndpointRequirement);
   const isComplete = snapshot.path.length === snapshot.totalUsable;
   const idxByKey = snapshot.idxByKey;
 
@@ -108,7 +129,7 @@ export function evaluateHints(snapshot) {
       }
 
       const i = idxByKey.get(k);
-      const res = evalHintAtIndex(i, clue, snapshot.path, isComplete);
+      const res = evalHintAtIndex(i, clue, snapshot.path, isComplete, suppressEndpointRequirement);
       if (res.state === 'good') {
         good++;
         goodKeys.push(k);

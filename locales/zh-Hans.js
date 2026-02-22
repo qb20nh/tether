@@ -3,6 +3,14 @@ export default {
     "levelLabel": "关卡",
     "levelSelectAria": "选择关卡",
     "language": "语言",
+    "theme": "主题",
+    "themeDark": "深色模式",
+    "themeLight": "浅色模式",
+    "themeSwitchTitle": "切换主题",
+    "themeSwitchPrompt": "切换到{{theme}}？",
+    "themeSwitchConfirm": "应用",
+    "cancel": "取消",
+    "nextLevel": "下一关",
     "reset": "重置",
     "resetTitle": "重置路径",
     "reverse": "反转",
@@ -41,7 +49,7 @@ export default {
       "desc": "从任意格子开始，访问每个格子恰好一次。"
     },
     "tutorial_2": {
-      "name": "教程2）转弯(any)",
+      "name": "教程2）转弯 (任意)",
       "desc": "转弯图标要求该格必须改变方向。"
     },
     "tutorial_3": {
@@ -109,11 +117,11 @@ export default {
       "desc": "两个可移动墙。解题前先重新摆放。"
     },
     "pilot_11": {
-      "name": "Pilot 11) Corner Weave (6x6)",
+      "name": "试炼11）角点编织 (6x6)",
       "desc": "由角点计数、方向提示和缝线约束组成。可满足约束的不止一种解。"
     },
     "pilot_12": {
-      "name": "Pilot 12) Trinity Weave (7x7)",
+      "name": "试炼12）三位一体编织 (7x7)",
       "desc": "最高难度的谜题：石头剪刀布约束与缝线约束交叉。"
     }
   }

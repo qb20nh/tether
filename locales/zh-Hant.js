@@ -3,6 +3,14 @@ export default {
     "levelLabel": "關卡",
     "levelSelectAria": "選擇關卡",
     "language": "語言",
+    "theme": "主題",
+    "themeDark": "深色模式",
+    "themeLight": "淺色模式",
+    "themeSwitchTitle": "切換主題",
+    "themeSwitchPrompt": "切換到{{theme}}？",
+    "themeSwitchConfirm": "套用",
+    "cancel": "取消",
+    "nextLevel": "下一關",
     "reset": "重置",
     "resetTitle": "重置路徑",
     "reverse": "反轉",
@@ -41,7 +49,7 @@ export default {
       "desc": "從任意格子開始，造訪每個格子恰好一次。"
     },
     "tutorial_2": {
-      "name": "教學2）轉彎(any)",
+      "name": "教學2）轉彎 (任意)",
       "desc": "轉彎圖示要求該格必須改變方向。"
     },
     "tutorial_3": {
@@ -109,11 +117,11 @@ export default {
       "desc": "兩個可移動牆。解題前先重新擺放。"
     },
     "pilot_11": {
-      "name": "Pilot 11) Corner Weave (6x6)",
+      "name": "試煉11）角落編織 (6x6)",
       "desc": "由角落數、方向提示與交錯約束組成。可滿足約束的不止一種解法。"
     },
     "pilot_12": {
-      "name": "Pilot 12) Trinity Weave (7x7)",
+      "name": "試煉12）三位一體編織 (7x7)",
       "desc": "最高難度的謎題：石頭剪刀布約束與縫線約束交叉。"
     }
   }

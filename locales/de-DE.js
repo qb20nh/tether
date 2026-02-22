@@ -3,6 +3,14 @@ export default {
     "levelLabel": "Ebene",
     "levelSelectAria": "Ebene auswählen",
     "language": "Sprache",
+    "theme": "Thema",
+    "themeDark": "Dunkelmodus",
+    "themeLight": "Hellmodus",
+    "themeSwitchTitle": "Thema wechseln",
+    "themeSwitchPrompt": "Zu {{theme}} wechseln?",
+    "themeSwitchConfirm": "Anwenden",
+    "cancel": "Abbrechen",
+    "nextLevel": "Nächstes Level",
     "reset": "Zurücksetzen",
     "resetTitle": "Pfad zurücksetzen",
     "reverse": "Umkehren",
@@ -37,35 +45,35 @@ export default {
   },
   "level": {
     "tutorial_1": {
-      "name": "Tutorial 1) Grundlagen (3x3)",
+      "name": "Anleitung 1) Grundlagen (3x3)",
       "desc": "Starte auf einem beliebigen Feld und besuche jedes Feld genau einmal."
     },
     "tutorial_2": {
-      "name": "Tutorial 2) Kurve (beliebig)",
+      "name": "Anleitung 2) Kurve (beliebig)",
       "desc": "Das Kurven-Symbol erzwingt eine Richtungsänderung auf diesem Feld."
     },
     "tutorial_3": {
-      "name": "Tutorial 3) Gerade + H/V",
+      "name": "Anleitung 3) Gerade + H/V",
       "desc": "Gerade-/horizontal-/vertikal-Hinweise erzwingen auf diesem Feld einen geraden Pfad."
     },
     "tutorial_4": {
-      "name": "Tutorial 4) CW / CCW",
+      "name": "Anleitung 4) CW / CCW",
       "desc": "CW(r) bedeutet Bewegung von vorher zu nachher im Uhrzeigersinn, CCW(l) gegen den Uhrzeigersinn."
     },
     "tutorial_5": {
-      "name": "Tutorial 5) Kreuznaht",
+      "name": "Anleitung 5) Kreuznaht",
       "desc": "An einem X-Eck werden beide diagonalen Verbindungen (↘︎↖︎, ↙︎↗︎) erzwungen, daher ist diagonaler Zug notwendig."
     },
     "tutorial_6": {
-      "name": "Tutorial 6) Eckenzählung (0-3)",
+      "name": "Anleitung 6) Eckenzählung (0-3)",
       "desc": "Die Zahl sagt, wie viele Pfadverbindungen es zwischen den vier Zellen an einer Ecke gibt (0~3)."
     },
     "tutorial_7": {
-      "name": "Tutorial 7) Schere / Stein / Papier Reihenfolge",
+      "name": "Anleitung 7) Schere / Stein / Papier Reihenfolge",
       "desc": "Die Besuchsreihenfolge für RPS-Felder muss Schere→Stein→Papier→Schere... folgen."
     },
     "tutorial_8": {
-      "name": "Tutorial 8) Bewegliche Wände",
+      "name": "Anleitung 8) Bewegliche Wände",
       "desc": "Ziehe die verschiebbare Wand auf ein leeres Feld. (Nicht auf Hinweis-/RPS-Felder legen)"
     },
     "pilot_1": {
@@ -109,11 +117,11 @@ export default {
       "desc": "Zwei bewegliche Wände. Arrangiere sie vor dem Lösen neu an."
     },
     "pilot_11": {
-      "name": "Pilot 11) Corner Weave (6x6)",
+      "name": "Pilot 11) Eckengeflecht (6x6)",
       "desc": "Eine Mischung aus Eckenzählungen, Richtungs-Hinweisen und Nähten. Es gibt mehr als eine Lösung, die alle Einschränkungen erfüllt."
     },
     "pilot_12": {
-      "name": "Pilot 12) Trinity Weave (7x7)",
+      "name": "Pilot 12) Trinitätsgeflecht (7x7)",
       "desc": "Das schwierigste Rätsel: Die RPS-Einschränkungen kreuzen sich mit Nähten."
     }
   }
