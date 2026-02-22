@@ -194,21 +194,49 @@ const buildFlowGradientStops = (travelStart, travelEnd, flowOffset, cycle, pulse
   }));
 };
 
+const getHeadLeadTravel = (path, refs = {}, offset = { x: 0, y: 0 }) => {
+  const { gridEl, ctx } = refs;
+  if (!path || path.length < 2) return 0;
+
+  const first = getCellPoint(path[0].r, path[0].c, { gridEl }, offset);
+  const second = getCellPoint(path[1].r, path[1].c, { gridEl }, offset);
+  const firstSegmentLength = Math.hypot(second.x - first.x, second.y - first.y);
+  if (!(firstSegmentLength > 0)) return 0;
+
+  const canUseConic = typeof ctx?.createConicGradient === 'function';
+  if (!canUseConic || path.length < 3) return firstSegmentLength;
+
+  const third = getCellPoint(path[2].r, path[2].c, { gridEl }, offset);
+  const inDx = second.x - first.x;
+  const inDy = second.y - first.y;
+  const outDx = third.x - second.x;
+  const outDy = third.y - second.y;
+  const inLen = Math.hypot(inDx, inDy);
+  const outLen = Math.hypot(outDx, outDy);
+  if (inLen <= 0 || outLen <= 0) return firstSegmentLength;
+
+  const inAngle = Math.atan2(inDy, inDx);
+  const outAngle = Math.atan2(outDy, outDx);
+  const turnStartAngle = normalizeAngle(inAngle + Math.PI);
+  const turnEndAngle = normalizeAngle(outAngle);
+  const turnAngle = angleDeltaSigned(turnStartAngle, turnEndAngle);
+  const absTurn = Math.abs(turnAngle);
+  const cornerAbsTurn = Math.PI / 2;
+  const angleTolerance = 1e-4;
+  if (Math.abs(absTurn - cornerAbsTurn) > angleTolerance) return firstSegmentLength;
+
+  const flowWidth = Math.max(7, Math.floor(getCellSize(gridEl) * 0.15));
+  const cornerRadius = Math.max(1.2, flowWidth * 0.5);
+  return firstSegmentLength + cornerRadius * (absTurn - 2);
+};
+
 const getHeadShiftDelta = (nextPath, previousPath, refs = {}, offset = { x: 0, y: 0 }) => {
   const { gridEl } = refs;
   if (!nextPath || !previousPath) return 0;
   const nextLen = nextPath.length;
   const prevLen = previousPath.length;
-  const stepDistance = (path) => {
-    if (!path || path.length < 2) return 0;
-    const a = getCellPoint(path[0].r, path[0].c, { gridEl }, offset);
-    const b = getCellPoint(path[1].r, path[1].c, { gridEl }, offset);
-    return Math.hypot(a.x - b.x, a.y - b.y);
-  };
-  const fallbackStep = Math.max(
-    1,
-    cellDistance(previousPath?.[0], previousPath?.[1]) * getCellSize(gridEl),
-  );
+  const fallbackStep = (path) =>
+    Math.max(1, cellDistance(path?.[0], path?.[1]) * getCellSize(gridEl));
 
   if (nextLen === prevLen + 1 && nextLen >= 2) {
     let shared = true;
@@ -219,8 +247,8 @@ const getHeadShiftDelta = (nextPath, previousPath, refs = {}, offset = { x: 0, y
       }
     }
     if (shared) {
-      const shifted = stepDistance(nextPath);
-      return -(shifted > 0 ? shifted : fallbackStep);
+      const shifted = getHeadLeadTravel(nextPath, refs, offset);
+      return -(shifted > 0 ? shifted : fallbackStep(nextPath));
     }
   }
 
@@ -233,8 +261,8 @@ const getHeadShiftDelta = (nextPath, previousPath, refs = {}, offset = { x: 0, y
       }
     }
     if (shared) {
-      const shifted = stepDistance(previousPath);
-      return shifted > 0 ? shifted : fallbackStep;
+      const shifted = getHeadLeadTravel(previousPath, refs, offset);
+      return shifted > 0 ? shifted : fallbackStep(previousPath);
     }
   }
 
