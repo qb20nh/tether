@@ -44,6 +44,7 @@ export const SUPPORTED_LOCALES = [
 export const DEFAULT_LOCALE = 'ko-KR';
 export const FALLBACK_EN_LOCALE = 'en';
 export const LOCALE_STORAGE_KEY = 'tetherLocale';
+const LOCALE_ORDER_SEED_KEY = 'tetherLocaleOrderSeed';
 
 const LOCALE_MAP = {
   en: enMessages,
@@ -101,6 +102,73 @@ const FALLBACK_BY_BASE = {
   ko: 'ko-KR',
   de: 'de-DE',
   fr: 'fr-FR',
+};
+
+const normalizeSeed = (value) => {
+  const candidate = Number.parseInt(value, 10);
+  if (!Number.isFinite(candidate)) return null;
+  return candidate >>> 0;
+};
+
+const generateLocaleOrderSeed = () => {
+  if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
+    const arr = new Uint32Array(1);
+    crypto.getRandomValues(arr);
+    return arr[0] >>> 0;
+  }
+  return (Math.random() * 0x100000000) >>> 0;
+};
+
+let cachedLocaleOrderSeed = null;
+
+const readLocaleOrderSeed = () => {
+  try {
+    return normalizeSeed(window.localStorage.getItem(LOCALE_ORDER_SEED_KEY));
+  } catch {
+    return null;
+  }
+};
+
+const writeLocaleOrderSeed = (seed) => {
+  try {
+    window.localStorage.setItem(LOCALE_ORDER_SEED_KEY, String(seed >>> 0));
+  } catch {
+    // localStorage might be unavailable in restricted contexts.
+  }
+};
+
+const getLocaleOrderSeed = () => {
+  if (cachedLocaleOrderSeed !== null) return cachedLocaleOrderSeed;
+
+  let seed = readLocaleOrderSeed();
+  if (seed === null) {
+    seed = generateLocaleOrderSeed();
+    writeLocaleOrderSeed(seed);
+  }
+  cachedLocaleOrderSeed = seed >>> 0;
+  return cachedLocaleOrderSeed;
+};
+
+const createSeededRng = (seed) => {
+  let state = seed >>> 0;
+  return () => {
+    state = (state + 0x6d2b79f5) >>> 0;
+    let t = Math.imul(state ^ (state >>> 15), 1 | state);
+    t ^= t + Math.imul(t ^ (t >>> 7), 61 | t);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+};
+
+const shuffleBySeed = (items, seed) => {
+  const copy = [...items];
+  const next = createSeededRng(seed);
+  for (let i = copy.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(next() * (i + 1));
+    const temp = copy[i];
+    copy[i] = copy[j];
+    copy[j] = temp;
+  }
+  return copy;
 };
 
 const resolvePath = (obj, keyPath) => {
@@ -188,7 +256,8 @@ export const t = (locale) => {
 export const getLocale = () => resolveLocale();
 
 export const getLocaleOptions = (locale) => {
-  return SUPPORTED_LOCALES.map((code) => ({
+  const localeList = shuffleBySeed(SUPPORTED_LOCALES, getLocaleOrderSeed());
+  return localeList.map((code) => ({
     value: code,
     label: LOCALE_LABELS[code] || code,
   }));
