@@ -1,4 +1,4 @@
-import { ELEMENT_IDS } from './tether_config.js';
+import { ELEMENT_IDS } from './config.js';
 
 const buildOptionList = (localeOptions, currentLocale) =>
   (localeOptions || [])

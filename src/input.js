@@ -1,13 +1,13 @@
-import { CELL_TYPES } from './tether_config.js';
+import { CELL_TYPES } from './config.js';
 import {
   clearDropTarget,
   setDropTarget,
   showWallDragGhost,
   moveWallDragGhost,
   hideWallDragGhost,
-} from './tether_renderer.js';
-import { isAdjacentMove } from './tether_utils.js';
-import { cellCenter, getCellSize } from './tether_geometry.js';
+} from './renderer.js';
+import { isAdjacentMove } from './utils.js';
+import { cellCenter, getCellSize } from './geometry.js';
 
 export function bindInputHandlers(refs, state, onStateChange = () => { }) {
   let dragMode = null;

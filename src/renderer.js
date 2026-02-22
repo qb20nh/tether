@@ -1,7 +1,7 @@
-import { ELEMENT_IDS } from './tether_config.js';
-import { keyOf } from './tether_utils.js';
-import { cellCenter, getCellSize, vertexPos } from './tether_geometry.js';
-import { ICONS } from './tether_icons.js';
+import { ELEMENT_IDS } from './config.js';
+import { keyOf } from './utils.js';
+import { cellCenter, getCellSize, vertexPos } from './geometry.js';
+import { ICONS } from './icons.js';
 
 let gridCells = [];
 let lastDropTargetKey = null;

@@ -1,9 +1,9 @@
-import { mountStyles } from './tether_styles.js';
-import { APP_SHELL_TEMPLATE, buildLegendTemplate } from './tether_templates.js';
-import { BADGE_DEFINITIONS, ICONS, ICON_X } from './tether_icons.js';
-import { LEVELS } from './tether_levels.js';
-import { baseGoalText, ELEMENT_IDS } from './tether_config.js';
-import { createGameState } from './tether_state.js';
+import { mountStyles } from './styles.js';
+import { APP_SHELL_TEMPLATE, buildLegendTemplate } from './templates.js';
+import { BADGE_DEFINITIONS, ICONS, ICON_X } from './icons.js';
+import { LEVELS } from './levels.js';
+import { baseGoalText, ELEMENT_IDS } from './config.js';
+import { createGameState } from './state.js';
 import {
   cacheElements,
   buildGrid,
@@ -11,22 +11,22 @@ import {
   setLegendIcons,
   resizeCanvas,
   setMessage,
-} from './tether_renderer.js';
-import { bindInputHandlers } from './tether_input.js';
+} from './renderer.js';
+import { bindInputHandlers } from './input.js';
 import {
   checkCompletion,
   evaluateBlockedCells,
   evaluateHints,
   evaluateRPS,
   evaluateStitches,
-} from './tether_rules.js';
+} from './rules.js';
 import {
   getLocaleOptions,
   getLocale,
   resolveLocale,
   setLocale,
   t as createTranslator,
-} from './tether_i18n.js';
+} from './i18n.js';
 
 const GUIDE_KEY = 'tetherGuideHidden';
 const LEGEND_KEY = 'tetherLegendHidden';

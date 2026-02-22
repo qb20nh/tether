@@ -1,5 +1,5 @@
-import { CELL_TYPES, HINT_CODES, RPS_CODES, RPS_WIN_ORDER } from './tether_config.js';
-import { inBounds, keyOf } from './tether_utils.js';
+import { CELL_TYPES, HINT_CODES, RPS_CODES, RPS_WIN_ORDER } from './config.js';
+import { inBounds, keyOf } from './utils.js';
 
 const isHintCode = (ch) => HINT_CODES.has(ch);
 const isRpsCode = (ch) => RPS_CODES.has(ch);

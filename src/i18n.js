@@ -1,14 +1,14 @@
-import enMessages from './locales/en.js';
-import itMessages from './locales/it.js';
-import zhHansMessages from './locales/zh-Hans.js';
-import zhHantMessages from './locales/zh-Hant.js';
-import es419Messages from './locales/es-419.js';
-import ptBrMessages from './locales/pt-BR.js';
-import arMessages from './locales/ar.js';
-import jaJPMessages from './locales/ja-JP.js';
-import koKrMessages from './locales/ko-KR.js';
-import deDeMessages from './locales/de-DE.js';
-import frFrMessages from './locales/fr-FR.js';
+import enMessages from '../locales/en.js';
+import itMessages from '../locales/it.js';
+import zhHansMessages from '../locales/zh-Hans.js';
+import zhHantMessages from '../locales/zh-Hant.js';
+import es419Messages from '../locales/es-419.js';
+import ptBrMessages from '../locales/pt-BR.js';
+import arMessages from '../locales/ar.js';
+import jaJPMessages from '../locales/ja-JP.js';
+import koKrMessages from '../locales/ko-KR.js';
+import deDeMessages from '../locales/de-DE.js';
+import frFrMessages from '../locales/fr-FR.js';
 
 const LOCALE_LABELS = {
   ko: '한국어',

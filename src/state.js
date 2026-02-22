@@ -1,5 +1,5 @@
-import { CELL_TYPES, HINT_CODES } from './tether_config.js';
-import { inBounds, isAdjacentMove, keyOf, parseLevel } from './tether_utils.js';
+import { CELL_TYPES, HINT_CODES } from './config.js';
+import { inBounds, isAdjacentMove, keyOf, parseLevel } from './utils.js';
 
 export function createGameState(levels) {
   let levelIndex = 0;

@@ -1,15 +1,15 @@
 #!/usr/bin/env node
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { DEFAULT_LEVEL_INDEX, LEVELS } from '../tether_levels.js';
-import { HINT_CODES } from '../tether_config.js';
-import { parseLevel, keyOf, keyV } from '../tether_utils.js';
+import { DEFAULT_LEVEL_INDEX, LEVELS } from '../src/levels.js';
+import { HINT_CODES } from '../src/config.js';
+import { parseLevel, keyOf, keyV } from '../src/utils.js';
 import {
   evaluateBlockedCells,
   evaluateHints,
   evaluateRPS,
   evaluateStitches,
-} from '../tether_rules.js';
+} from '../src/rules.js';
 
 const CONSTRAINT_CODES = new Set(['t', 'r', 'l', 's', 'h', 'v', 'g', 'b', 'p']);
 const ORTH_DIRS = [
@@ -29,7 +29,7 @@ const ALL_DIRS = [
 const UINT32 = 0x100000000;
 const GOLDEN_RATIO_32 = 0x9e3779b9;
 const DIFFICULTY_VERSION = 1;
-const LEVELS_FILE_PATH = fileURLToPath(new URL('../tether_levels.js', import.meta.url));
+const LEVELS_FILE_PATH = fileURLToPath(new URL('../src/levels.js', import.meta.url));
 const KNOWN_LEVEL_KEYS = [
   'name',
   'nameKey',

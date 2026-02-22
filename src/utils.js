@@ -1,4 +1,4 @@
-import { isObstacle } from './tether_config.js';
+import { isObstacle } from './config.js';
 
 export const keyOf = (r, c) => `${r},${c}`;
 export const keyV = (vr, vc) => `${vr},${vc}`;

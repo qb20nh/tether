@@ -1,5 +1,5 @@
 const STYLESHEET_ID = 'tether-styles';
-const STYLESHEET_NAME = './tether_styles.css';
+const STYLESHEET_NAME = './styles.css';
 
 export function mountStyles(root = document.head) {
   if (!root) return;
