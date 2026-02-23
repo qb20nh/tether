@@ -40,6 +40,8 @@ const DEFAULT_THEME = 'dark';
 const CAMPAIGN_LEVEL_COUNT = LEVELS.length;
 const MAX_INFINITE_INDEX = INFINITE_MAX_LEVELS - 1;
 const INFINITE_LEVEL_CACHE_LIMIT = 48;
+const PATH_BRACKET_TUTORIAL_LEVEL_INDEX = 0;
+const MOVABLE_BRACKET_TUTORIAL_LEVEL_INDEX = 7;
 const DEFAULT_HIDDEN_BY_KEY = {
   [GUIDE_KEY]: false,
   [LEGEND_KEY]: true,
@@ -543,6 +545,22 @@ export function initTetherApp() {
     syncInfiniteNavigation(levelIndex, currentLevelCleared);
   };
 
+  const resolveDraggedHintSuppressionKey = (snapshot, options = {}) => {
+    if (!options?.isPathDragging) return null;
+    const side = options.pathDragSide;
+    const cursor = options.pathDragCursor;
+    if (side !== 'start' && side !== 'end') return null;
+    if (!cursor || !Number.isInteger(cursor.r) || !Number.isInteger(cursor.c)) return null;
+    if (snapshot.path.length === 0) return null;
+
+    const endpoint = side === 'start'
+      ? snapshot.path[0]
+      : snapshot.path[snapshot.path.length - 1];
+    if (!endpoint || endpoint.r !== cursor.r || endpoint.c !== cursor.c) return null;
+
+    return `${cursor.r},${cursor.c}`;
+  };
+
   const applyThemeState = (nextTheme) => {
     activeTheme = nextTheme;
     applyTheme(activeTheme);
@@ -642,8 +660,10 @@ export function initTetherApp() {
   };
 
   const refresh = (snapshot, validate = false, options = {}) => {
+    const draggedHintSuppressionKey = resolveDraggedHintSuppressionKey(snapshot, options);
     const evaluateResult = makeEvaluators(snapshot, {
-      suppressEndpointRequirement: Boolean(options.isPathDragging),
+      suppressEndpointRequirement: Boolean(draggedHintSuppressionKey),
+      suppressEndpointKey: draggedHintSuppressionKey,
     });
     const completion = updateWithEvaluation(refs, snapshot, evaluateResult, validate, translate, {
       getLevelForIndex: getLevelAtIndex,
@@ -706,6 +726,17 @@ export function initTetherApp() {
     state.loadLevel(targetIndex);
     const snapshot = state.getSnapshot();
 
+    if (refs.boardWrap) {
+      refs.boardWrap.classList.toggle(
+        'tutorialPathBrackets',
+        snapshot.levelIndex === PATH_BRACKET_TUTORIAL_LEVEL_INDEX,
+      );
+      refs.boardWrap.classList.toggle(
+        'tutorialMovableBrackets',
+        snapshot.levelIndex === MOVABLE_BRACKET_TUTORIAL_LEVEL_INDEX,
+      );
+    }
+
     buildGrid(snapshot, refs, ICONS, ICON_X);
     showLevelGoal(targetIndex);
     refreshLevelOptions();
@@ -714,15 +745,19 @@ export function initTetherApp() {
 
   bindInputHandlers(refs, state, (shouldValidate, options = {}) => {
     const isPathDragging = Boolean(options.isPathDragging);
+    const dragEvaluateOptions = {
+      isPathDragging,
+      pathDragSide: options.pathDragSide ?? null,
+      pathDragCursor: options.pathDragCursor ?? null,
+    };
     if (options.rebuildGrid) {
       const snapshotForGrid = state.getSnapshot();
       buildGrid(snapshotForGrid, refs, ICONS, ICON_X);
-      queueBoardLayout(Boolean(shouldValidate), { isPathDragging });
+      queueBoardLayout(Boolean(shouldValidate), dragEvaluateOptions);
       return;
     }
 
-    const snapshot = state.getSnapshot();
-    queueBoardLayout(Boolean(shouldValidate), { isPathDragging });
+    queueBoardLayout(Boolean(shouldValidate), dragEvaluateOptions);
   });
 
   refs.levelSel.addEventListener('change', (e) => {

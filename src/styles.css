@@ -714,9 +714,9 @@ button:disabled:active {
   --interactive-corner-thickness: calc(var(--interactive-corner-inner) * 0.06);
 }
 
-.cell.pathStart::after,
-.cell.pathEnd::after,
-.cell.wall.movable::after {
+.boardWrap.tutorialPathBrackets .cell.pathStart::after,
+.boardWrap.tutorialPathBrackets .cell.pathEnd::after,
+.boardWrap.tutorialMovableBrackets .cell.wall.movable::after {
   content: '';
   position: absolute;
   inset: var(--interactive-corner-inset);
@@ -782,9 +782,9 @@ button:disabled:active {
     --interactive-pulse: 1;
   }
 
-  .cell.pathStart::after,
-  .cell.pathEnd::after,
-  .cell.wall.movable::after {
+  .boardWrap.tutorialPathBrackets .cell.pathStart::after,
+  .boardWrap.tutorialPathBrackets .cell.pathEnd::after,
+  .boardWrap.tutorialMovableBrackets .cell.wall.movable::after {
     opacity: 1;
     transform: none;
     filter: brightness(1.2);

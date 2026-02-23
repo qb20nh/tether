@@ -25,12 +25,16 @@ const hasCrossStitch = (snapshot, r1, c1, r2, c2) => {
   return snapshot.stitchSet && snapshot.stitchSet.has(keyOf(vr, vc));
 };
 
-const evalHintAtIndex = (i, clue, path, isComplete, suppressEndpointRequirement) => {
+const evalHintAtIndex = (i, clue, path, isComplete, suppressEndpointRequirement, suppressEndpointKey) => {
   const isEndpoint = i === 0 || i === path.length - 1;
   if (isEndpoint) {
     if (suppressEndpointRequirement) {
-      if (path.length < 2) return { state: 'pending', clue };
+      const endpointKey = keyOf(path[i].r, path[i].c);
+      if (suppressEndpointKey && endpointKey !== suppressEndpointKey) {
+        return { state: 'bad', clue };
+      }
 
+      if (path.length < 2) return { state: 'pending', clue };
       const neighbor = i === 0 ? path[1] : path[path.length - 2];
       if (!neighbor) return { state: 'pending', clue };
 
@@ -38,6 +42,7 @@ const evalHintAtIndex = (i, clue, path, isComplete, suppressEndpointRequirement)
       const isHoriz = direction.dr === 0;
       const isVert = direction.dc === 0;
 
+      // For h/v hints, wrong entrance must stay bad even during drag suppression.
       if (clue === CELL_TYPES.HINT_HORIZONTAL) {
         return { state: isHoriz ? 'pending' : 'bad', clue };
       }
@@ -105,6 +110,9 @@ const countCornerOrthConnections = (vr, vc, orthEdges) => {
 
 export function evaluateHints(snapshot, options = {}) {
   const suppressEndpointRequirement = Boolean(options.suppressEndpointRequirement);
+  const suppressEndpointKey = typeof options.suppressEndpointKey === 'string'
+    ? options.suppressEndpointKey
+    : '';
   const isComplete = snapshot.path.length === snapshot.totalUsable;
   const idxByKey = snapshot.idxByKey;
 
@@ -129,7 +137,14 @@ export function evaluateHints(snapshot, options = {}) {
       }
 
       const i = idxByKey.get(k);
-      const res = evalHintAtIndex(i, clue, snapshot.path, isComplete, suppressEndpointRequirement);
+      const res = evalHintAtIndex(
+        i,
+        clue,
+        snapshot.path,
+        isComplete,
+        suppressEndpointRequirement,
+        suppressEndpointKey,
+      );
       if (res.state === 'good') {
         good++;
         goodKeys.push(k);

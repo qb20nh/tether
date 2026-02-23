@@ -71,11 +71,17 @@ export function bindInputHandlers(refs, state, onStateChange = () => { }) {
         side: 'end',
         moved: false,
         origin: { r: cell.r, c: cell.c },
+        lastCursorKey: `${cell.r},${cell.c}`,
       };
       activePointerId = e.pointerId;
       setPathDraggingCursor(true);
       refs.gridEl.setPointerCapture(e.pointerId);
-      onStateChange(false, { rebuildGrid: false, isPathDragging: true });
+      onStateChange(false, {
+        rebuildGrid: false,
+        isPathDragging: true,
+        pathDragSide: pathDrag.side,
+        pathDragCursor: { r: cell.r, c: cell.c },
+      });
       e.preventDefault();
       return;
     }
@@ -90,13 +96,19 @@ export function bindInputHandlers(refs, state, onStateChange = () => { }) {
       side: isHead ? 'start' : 'end',
       moved: false,
       origin: { r: cell.r, c: cell.c },
+      lastCursorKey: `${cell.r},${cell.c}`,
     };
 
     dragMode = 'path';
     activePointerId = e.pointerId;
     setPathDraggingCursor(true);
     refs.gridEl.setPointerCapture(e.pointerId);
-    onStateChange(false, { rebuildGrid: false, isPathDragging: true });
+    onStateChange(false, {
+      rebuildGrid: false,
+      isPathDragging: true,
+      pathDragSide: pathDrag.side,
+      pathDragCursor: { r: cell.r, c: cell.c },
+    });
     e.preventDefault();
   };
 
@@ -197,8 +209,17 @@ export function bindInputHandlers(refs, state, onStateChange = () => { }) {
         touched = state.startOrTryStep(cell.r, cell.c);
       }
 
-      if (touched) {
-        onStateChange(false, { rebuildGrid: false, isPathDragging: true });
+      const cursorKey = `${cell.r},${cell.c}`;
+      const cursorChanged = pathDrag ? pathDrag.lastCursorKey !== cursorKey : false;
+
+      if (touched || cursorChanged) {
+        if (pathDrag) pathDrag.lastCursorKey = cursorKey;
+        onStateChange(false, {
+          rebuildGrid: false,
+          isPathDragging: true,
+          pathDragSide: pathDrag?.side || null,
+          pathDragCursor: { r: cell.r, c: cell.c },
+        });
       }
       e.preventDefault();
       return;
@@ -253,6 +274,8 @@ export function bindInputHandlers(refs, state, onStateChange = () => { }) {
         // Grid cell contents are updated incrementally, so full rebuild is unnecessary.
         rebuildGrid: false,
         isPathDragging: false,
+        pathDragSide: null,
+        pathDragCursor: null,
       },
     );
     e.preventDefault();
