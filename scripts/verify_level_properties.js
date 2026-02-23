@@ -487,6 +487,11 @@ function buildPlacementState(levelCtx, wallCells) {
 }
 
 function isValidPrefix(placement, path, visited) {
+  const idxByKey = new Map();
+  for (let i = 0; i < path.length; i++) {
+    idxByKey.set(keyOf(path[i].r, path[i].c), i);
+  }
+
   const snapshot = {
     rows: placement.rows,
     cols: placement.cols,
@@ -498,9 +503,10 @@ function isValidPrefix(placement, path, visited) {
     stitchSet: placement.stitchSet,
     stitchReq: placement.stitchReq,
     cornerCounts: placement.cornerCounts,
+    idxByKey,
   };
 
-  if (evaluateHints(snapshot).bad > 0) return false;
+  if (evaluateHints(snapshot, { suppressEndpointRequirement: true }).bad > 0) return false;
   if (evaluateStitches(snapshot).bad > 0) return false;
   if (evaluateRPS(snapshot).bad > 0) return false;
   if (evaluateBlockedCells(snapshot).bad > 0) return false;

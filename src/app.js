@@ -2,6 +2,7 @@ import { mountStyles } from './styles.js';
 import { APP_SHELL_TEMPLATE, buildLegendTemplate } from './templates.js';
 import { BADGE_DEFINITIONS, ICONS, ICON_X } from './icons.js';
 import { LEVELS } from './levels.js';
+import { generateInfiniteLevel } from './infinite.js';
 import { baseGoalText, ELEMENT_IDS } from './config.js';
 import { createGameState } from './state.js';
 import {
@@ -32,13 +33,17 @@ const GUIDE_KEY = 'tetherGuideHidden';
 const LEGEND_KEY = 'tetherLegendHidden';
 const LEVEL_PROGRESS_KEY = 'tetherLevelProgress';
 const LEVEL_PROGRESS_VERSION = 1;
+const INFINITE_PROGRESS_KEY = 'tetherInfiniteProgress';
+const INFINITE_PROGRESS_VERSION = 1;
 const THEME_KEY = 'tetherTheme';
 const DEFAULT_THEME = 'dark';
+const CAMPAIGN_LEVEL_COUNT = LEVELS.length;
 const DEFAULT_HIDDEN_BY_KEY = {
   [GUIDE_KEY]: false,
   [LEGEND_KEY]: true,
 };
 let levelProgress = null;
+let infiniteProgress = null;
 let cachedTheme = null;
 
 const getHiddenState = (key) => {
@@ -107,7 +112,7 @@ const applyTheme = (theme) => {
 const normalizeProgressState = (value) => {
   if (!value || typeof value !== 'object') return 0;
   if (Number.isInteger(value.latestLevel)) {
-    return Math.min(Math.max(value.latestLevel, 0), LEVELS.length - 1);
+    return Math.min(Math.max(value.latestLevel, 0), CAMPAIGN_LEVEL_COUNT);
   }
   return 0;
 };
@@ -139,22 +144,69 @@ const writeLevelProgress = () => {
   }
 };
 
-const isLevelUnlocked = (index) => {
+const normalizeInfiniteProgressState = (value) => {
+  if (!value || typeof value !== 'object') return 0;
+  if (Number.isInteger(value.latestLevel)) {
+    return Math.max(value.latestLevel, 0);
+  }
+  return 0;
+};
+
+const readInfiniteProgress = () => {
+  if (infiniteProgress !== null) return infiniteProgress;
+
+  try {
+    const raw = window.localStorage.getItem(INFINITE_PROGRESS_KEY);
+    if (!raw) {
+      infiniteProgress = 0;
+      return infiniteProgress;
+    }
+    const parsed = JSON.parse(raw);
+    infiniteProgress = normalizeInfiniteProgressState(parsed);
+    return infiniteProgress;
+  } catch {
+    infiniteProgress = 0;
+    return infiniteProgress;
+  }
+};
+
+const writeInfiniteProgress = () => {
+  try {
+    const payload = { version: INFINITE_PROGRESS_VERSION, latestLevel: infiniteProgress };
+    window.localStorage.setItem(INFINITE_PROGRESS_KEY, JSON.stringify(payload));
+  } catch {
+    // localStorage might be unavailable in restricted environments.
+  }
+};
+
+const isCampaignLevelUnlocked = (index) => {
   const progress = readLevelProgress();
   return index <= progress;
 };
 
-const getLatestAvailableLevelIndex = () => {
+const getLatestCampaignLevelIndex = () => {
   const progress = readLevelProgress();
-  return Math.min(progress, LEVELS.length - 1);
+  return Math.min(progress, CAMPAIGN_LEVEL_COUNT - 1);
 };
 
-const markLevelCleared = (index) => {
+const markCampaignLevelCleared = (index) => {
   const nextProgress = Math.max(readLevelProgress(), index + 1);
-  if (nextProgress === levelProgress) return;
-  levelProgress = nextProgress;
+  const clampedProgress = Math.min(nextProgress, CAMPAIGN_LEVEL_COUNT);
+  if (clampedProgress === levelProgress) return false;
+  levelProgress = clampedProgress;
   writeLevelProgress();
+  return true;
 };
+
+const markInfiniteLevelCleared = (infiniteIndex) => {
+  const nextProgress = Math.max(readInfiniteProgress(), infiniteIndex + 1);
+  if (nextProgress === infiniteProgress) return false;
+  infiniteProgress = nextProgress;
+  writeInfiniteProgress();
+  return true;
+};
+
+const isCampaignCompleted = () => readLevelProgress() >= CAMPAIGN_LEVEL_COUNT;
 
 const isRtlLocale = (locale) => /^ar/i.test(locale || '');
 
@@ -220,20 +272,27 @@ function makeEvaluators(snapshot, evaluateOptions = {}) {
   };
 }
 
-function updateWithEvaluation(refs, snapshot, evaluateResult, shouldValidate, translate) {
+function updateWithEvaluation(refs, snapshot, evaluateResult, shouldValidate, translate, options = {}) {
+  const {
+    getLevelForIndex = () => null,
+    onLevelCleared = () => { },
+    resolveNextButtonLabel = () => '',
+  } = options;
+
   updateCells(snapshot, evaluateResult, refs);
   if (!shouldValidate) return;
   const completion = checkCompletion(snapshot, evaluateResult, translate);
   if (completion.kind === 'good') {
-    markLevelCleared(snapshot.levelIndex);
+    onLevelCleared(snapshot.levelIndex);
     setMessage(refs.msgEl, completion.kind, completion.message);
     if (refs.nextLevelBtn) {
-      refs.nextLevelBtn.hidden = snapshot.levelIndex >= LEVELS.length - 1;
+      refs.nextLevelBtn.hidden = false;
+      refs.nextLevelBtn.textContent = resolveNextButtonLabel(snapshot.levelIndex);
     }
     return completion;
   }
 
-  setMessage(refs.msgEl, null, baseGoalText(LEVELS[snapshot.levelIndex], translate));
+  setMessage(refs.msgEl, null, baseGoalText(getLevelForIndex(snapshot.levelIndex), translate));
   if (refs.nextLevelBtn) refs.nextLevelBtn.hidden = true;
   return completion;
 }
@@ -261,26 +320,102 @@ export function initTetherApp() {
   );
 
   const refs = cacheElements();
-  const state = createGameState(LEVELS);
+  const runtimeLevels = [...LEVELS];
+
+  const isInfiniteAbsIndex = (index) => index >= CAMPAIGN_LEVEL_COUNT;
+  const toInfiniteIndex = (index) => index - CAMPAIGN_LEVEL_COUNT;
+
+  const ensureInfiniteLevel = (infiniteIndex) => {
+    const normalizedIndex = Number.isInteger(infiniteIndex) && infiniteIndex >= 0 ? infiniteIndex : 0;
+    const absIndex = CAMPAIGN_LEVEL_COUNT + normalizedIndex;
+    while (runtimeLevels.length <= absIndex) {
+      const nextInfiniteIndex = runtimeLevels.length - CAMPAIGN_LEVEL_COUNT;
+      runtimeLevels.push(generateInfiniteLevel(nextInfiniteIndex));
+    }
+    return absIndex;
+  };
+
+  const getLevelAtIndex = (index) => {
+    if (isInfiniteAbsIndex(index)) {
+      ensureInfiniteLevel(toInfiniteIndex(index));
+    }
+    return runtimeLevels[index] || null;
+  };
+
+  const resolveNextButtonLabel = (levelIndex) => {
+    if (isInfiniteAbsIndex(levelIndex)) return translate('ui.nextInfinite');
+    if (levelIndex >= CAMPAIGN_LEVEL_COUNT - 1 && isCampaignCompleted()) return translate('ui.startInfinite');
+    return translate('ui.nextLevel');
+  };
+
+  const syncInfiniteNavigation = (levelIndex) => {
+    if (!isInfiniteAbsIndex(levelIndex)) {
+      if (refs.prevInfiniteBtn) {
+        refs.prevInfiniteBtn.hidden = true;
+        refs.prevInfiniteBtn.disabled = false;
+      }
+      return;
+    }
+
+    const infiniteIndex = toInfiniteIndex(levelIndex);
+    const latestUnlockedInfiniteIndex = readInfiniteProgress();
+
+    if (refs.prevInfiniteBtn) {
+      refs.prevInfiniteBtn.hidden = false;
+      refs.prevInfiniteBtn.disabled = infiniteIndex <= 0;
+    }
+    if (refs.nextLevelBtn) {
+      refs.nextLevelBtn.textContent = resolveNextButtonLabel(levelIndex);
+      refs.nextLevelBtn.hidden = infiniteIndex >= latestUnlockedInfiniteIndex;
+    }
+  };
+
+  const onLevelCleared = (levelIndex) => {
+    if (isInfiniteAbsIndex(levelIndex)) {
+      markInfiniteLevelCleared(toInfiniteIndex(levelIndex));
+      return;
+    }
+    markCampaignLevelCleared(levelIndex);
+  };
+
+  const state = createGameState(runtimeLevels);
   setLegendIcons(ICONS, refs, ICON_X);
 
   const refreshLevelOptions = () => {
     const currentIndex = state.getSnapshot().levelIndex;
-    refs.levelSel.innerHTML = LEVELS.map(
+    let optionHtml = LEVELS.map(
       (lv, i) => {
-        const disabled = !isLevelUnlocked(i);
+        const disabled = !isCampaignLevelUnlocked(i);
         return `<option value="${i}" ${disabled ? 'disabled' : ''}${i === currentIndex ? 'selected' : ''}>${resolveLevelName(
           lv,
           translate,
         )}</option>`;
       },
     ).join('');
+
+    if (isCampaignCompleted()) {
+      const selectorInfiniteIndex = isInfiniteAbsIndex(currentIndex)
+        ? toInfiniteIndex(currentIndex)
+        : readInfiniteProgress();
+      const infiniteAbsIndex = ensureInfiniteLevel(selectorInfiniteIndex);
+      const translated = translate('ui.infiniteLevelOption', { n: selectorInfiniteIndex + 1 });
+      const fallback = resolveLevelName(getLevelAtIndex(infiniteAbsIndex), translate);
+      const infiniteLabel = translated === 'ui.infiniteLevelOption' ? fallback : translated;
+      optionHtml += `<option value="${infiniteAbsIndex}" ${infiniteAbsIndex === currentIndex ? 'selected' : ''}>${infiniteLabel}</option>`;
+    }
+
+    refs.levelSel.innerHTML = optionHtml;
     refs.levelSel.value = String(currentIndex);
   };
 
   const showLevelGoal = (levelIndex) => {
-    setMessage(refs.msgEl, null, baseGoalText(LEVELS[levelIndex], translate));
-    if (refs.nextLevelBtn) refs.nextLevelBtn.hidden = true;
+    setMessage(refs.msgEl, null, baseGoalText(getLevelAtIndex(levelIndex), translate));
+    if (refs.nextLevelBtn) {
+      refs.nextLevelBtn.textContent = resolveNextButtonLabel(levelIndex);
+      refs.nextLevelBtn.hidden = true;
+    }
+    if (refs.prevInfiniteBtn) refs.prevInfiniteBtn.hidden = true;
+    syncInfiniteNavigation(levelIndex);
   };
 
   const applyThemeState = (nextTheme) => {
@@ -385,7 +520,12 @@ export function initTetherApp() {
     const evaluateResult = makeEvaluators(snapshot, {
       suppressEndpointRequirement: Boolean(options.isPathDragging),
     });
-    const completion = updateWithEvaluation(refs, snapshot, evaluateResult, validate, translate);
+    const completion = updateWithEvaluation(refs, snapshot, evaluateResult, validate, translate, {
+      getLevelForIndex: getLevelAtIndex,
+      onLevelCleared,
+      resolveNextButtonLabel,
+    });
+    syncInfiniteNavigation(snapshot.levelIndex);
     if (completion?.kind === 'good') {
       refreshLevelOptions();
     }
@@ -427,12 +567,20 @@ export function initTetherApp() {
   });
 
   const loadLevel = (idx) => {
-    refs.levelSel.value = String(idx);
-    state.loadLevel(idx);
+    let targetIndex = Number.isInteger(idx) ? idx : 0;
+    if (targetIndex < 0) targetIndex = 0;
+
+    if (isInfiniteAbsIndex(targetIndex)) {
+      targetIndex = ensureInfiniteLevel(toInfiniteIndex(targetIndex));
+    } else {
+      targetIndex = Math.min(targetIndex, CAMPAIGN_LEVEL_COUNT - 1);
+    }
+
+    state.loadLevel(targetIndex);
     const snapshot = state.getSnapshot();
 
     buildGrid(snapshot, refs, ICONS, ICON_X);
-    showLevelGoal(idx);
+    showLevelGoal(targetIndex);
     refreshLevelOptions();
     queueBoardLayout(false);
   };
@@ -451,7 +599,9 @@ export function initTetherApp() {
   });
 
   refs.levelSel.addEventListener('change', (e) => {
-    loadLevel(parseInt(e.target.value, 10));
+    const selected = parseInt(e.target.value, 10);
+    if (!Number.isInteger(selected)) return;
+    loadLevel(selected);
   });
 
   refs.langSel.addEventListener('change', (e) => {
@@ -482,7 +632,7 @@ export function initTetherApp() {
     state.resetPath();
     const snapshot = state.getSnapshot();
     refresh(snapshot, false);
-    showLevelGoal(parseInt(refs.levelSel.value, 10));
+    showLevelGoal(snapshot.levelIndex);
   });
 
   refs.reverseBtn.addEventListener('click', () => {
@@ -493,10 +643,34 @@ export function initTetherApp() {
 
   refs.nextLevelBtn?.addEventListener('click', () => {
     const snapshot = state.getSnapshot();
-    const nextIndex = snapshot.levelIndex + 1;
-    if (nextIndex < LEVELS.length) {
-      loadLevel(nextIndex);
+    if (isInfiniteAbsIndex(snapshot.levelIndex)) {
+      const currentInfiniteIndex = toInfiniteIndex(snapshot.levelIndex);
+      const latestUnlockedInfiniteIndex = readInfiniteProgress();
+      const nextInfiniteIndex = Math.min(currentInfiniteIndex + 1, latestUnlockedInfiniteIndex);
+      if (nextInfiniteIndex <= currentInfiniteIndex) return;
+      loadLevel(ensureInfiniteLevel(nextInfiniteIndex));
+      return;
     }
+
+    const nextCampaignIndex = snapshot.levelIndex + 1;
+    if (nextCampaignIndex < CAMPAIGN_LEVEL_COUNT) {
+      loadLevel(nextCampaignIndex);
+      return;
+    }
+
+    if (isCampaignCompleted()) {
+      loadLevel(ensureInfiniteLevel(readInfiniteProgress()));
+    }
+  });
+
+  refs.prevInfiniteBtn?.addEventListener('click', () => {
+    const snapshot = state.getSnapshot();
+    if (!isInfiniteAbsIndex(snapshot.levelIndex)) return;
+
+    const currentInfiniteIndex = toInfiniteIndex(snapshot.levelIndex);
+    if (currentInfiniteIndex <= 0) return;
+
+    loadLevel(ensureInfiniteLevel(currentInfiniteIndex - 1));
   });
 
   let boardResizeObserver = null;
@@ -517,7 +691,9 @@ export function initTetherApp() {
 
   refreshStaticUiText({ locale: getLocale() });
   refreshLevelOptions();
-  const initialLevelIndex = getLatestAvailableLevelIndex();
+  const initialLevelIndex = isCampaignCompleted()
+    ? ensureInfiniteLevel(readInfiniteProgress())
+    : getLatestCampaignLevelIndex();
   loadLevel(initialLevelIndex);
 }
 

@@ -85,15 +85,26 @@ export const APP_SHELL_TEMPLATE = (t = (k) => k, localeOptions = [], currentLoca
         <div class="panelBody">
           <div class="msgWrap">
             <div id="${ELEMENT_IDS.MSG}" class="msg"></div>
-            <button
-              id="${ELEMENT_IDS.NEXT_LEVEL_BTN}"
-              class="nextLevelBtn"
-              type="button"
-              data-i18n="ui.nextLevel"
-              hidden
-            >
-              ${t('ui.nextLevel')}
-            </button>
+            <div class="progressNav">
+              <button
+                id="${ELEMENT_IDS.PREV_INFINITE_BTN}"
+                class="nextLevelBtn"
+                type="button"
+                data-i18n="ui.prevInfinite"
+                hidden
+              >
+                ${t('ui.prevInfinite')}
+              </button>
+              <button
+                id="${ELEMENT_IDS.NEXT_LEVEL_BTN}"
+                class="nextLevelBtn"
+                type="button"
+                data-i18n="ui.nextLevel"
+                hidden
+              >
+                ${t('ui.nextLevel')}
+              </button>
+            </div>
           </div>
         </div>
       </div>

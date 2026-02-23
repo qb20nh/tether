@@ -55,6 +55,7 @@ export const ELEMENT_IDS = Object.freeze({
   LEGEND_PANEL: 'legendPanel',
   LEGEND_TOGGLE_BTN: 'legendToggleBtn',
   MSG: 'msg',
+  PREV_INFINITE_BTN: 'prevInfiniteBtn',
   NEXT_LEVEL_BTN: 'nextLevelBtn',
   GRID: 'grid',
   BOARD_WRAP: 'boardWrap',

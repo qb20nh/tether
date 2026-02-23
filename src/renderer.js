@@ -476,6 +476,7 @@ export function cacheElements() {
     legendPanel: get(ELEMENT_IDS.LEGEND_PANEL),
     legendToggleBtn: get(ELEMENT_IDS.LEGEND_TOGGLE_BTN),
     msgEl: get(ELEMENT_IDS.MSG),
+    prevInfiniteBtn: get(ELEMENT_IDS.PREV_INFINITE_BTN),
     nextLevelBtn: get(ELEMENT_IDS.NEXT_LEVEL_BTN),
     gridEl: get(ELEMENT_IDS.GRID),
     boardWrap: get(ELEMENT_IDS.BOARD_WRAP),

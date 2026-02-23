@@ -386,6 +386,12 @@ button:active {
   padding-inline: 12px;
 }
 
+.progressNav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .msg.good {
   border-color: rgba(46, 204, 113, 0.35);
   color: var(--good);
