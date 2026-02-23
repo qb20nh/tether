@@ -457,8 +457,8 @@ const syncBoardCellSize = (refs, rows = activeBoardSize.rows, cols = activeBoard
   const byInline = widthBudget / cols;
   const byBlock = heightBudget / rows;
   const nextCell = clampNumber(Math.min(byInline, byBlock), 8, minByGrid);
-  const nextCellBorder = clampNumber(nextCell * 0.02, 0.6, 2.4);
-  const nextBoardBorder = clampNumber(nextCell * 0.02, 0.6, 2.4);
+  const nextCellBorder = clampNumber(nextCell * 0.024, 0.8, 2.8);
+  const nextBoardBorder = clampNumber(nextCell * 0.024, 0.8, 2.8);
   const nextCellPx = `${Math.round(nextCell)}px`;
   const nextCellBorderPx = `${nextCellBorder.toFixed(2)}px`;
   const nextBoardBorderPx = `${nextBoardBorder.toFixed(2)}px`;

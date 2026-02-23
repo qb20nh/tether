@@ -12,11 +12,14 @@ export const APP_SHELL_TEMPLATE = (t = (k) => k, localeOptions = [], currentLoca
   <div class="app">
   <header>
     <div class="topbarRow">
-      <h1>TETHER <span class="subtitle">v3</span></h1>
+      <h1 class="brandTitle">
+        <img class="brandLogo" src="./src/logo.svg" width="16" height="16" alt="" aria-hidden="true" />
+        <span>TETHER</span>
+      </h1>
         <div class="topbarControls">
           <label id="${ELEMENT_IDS.LANG_LABEL}" class="small" for="${ELEMENT_IDS.LANG_SEL}" data-i18n="ui.language">${t(
-            'ui.language',
-          )}</label>
+  'ui.language',
+)}</label>
           <select id="${ELEMENT_IDS.LANG_SEL}">
             ${buildOptionList(localeOptions, currentLocale)}
           </select>
@@ -50,8 +53,8 @@ export const APP_SHELL_TEMPLATE = (t = (k) => k, localeOptions = [], currentLoca
                 >
                   <span class="themeSwitchDialog__actionIcon" aria-hidden="true">✓</span>
                   <span class="themeSwitchDialog__actionText" data-i18n="ui.themeSwitchConfirm">${t(
-                    'ui.themeSwitchConfirm',
-                  )}</span>
+  'ui.themeSwitchConfirm',
+)}</span>
                 </button>
               </div>
             </form>
@@ -64,8 +67,8 @@ export const APP_SHELL_TEMPLATE = (t = (k) => k, localeOptions = [], currentLoca
       <div class="controls">
         <div class="left">
           <label id="${ELEMENT_IDS.LEVEL_LABEL}" class="small" for="${ELEMENT_IDS.LEVEL_SEL}" data-i18n="ui.levelLabel">${t(
-            'ui.levelLabel',
-          )}</label>
+  'ui.levelLabel',
+)}</label>
           <div id="${ELEMENT_IDS.LEVEL_SELECT_GROUP}" class="levelSelectGroup">
             <select id="${ELEMENT_IDS.LEVEL_SEL}" aria-label="${t('ui.levelSelectAria')}" data-i18n-aria-label="ui.levelSelectAria"></select>
             <select
@@ -77,11 +80,11 @@ export const APP_SHELL_TEMPLATE = (t = (k) => k, localeOptions = [], currentLoca
             ></select>
           </div>
           <button id="${ELEMENT_IDS.RESET_BTN}" title="${t('ui.resetTitle')}" data-i18n="ui.reset" data-i18n-title="ui.resetTitle">${t(
-            'ui.reset',
-          )}</button>
+  'ui.reset',
+)}</button>
           <button id="${ELEMENT_IDS.REVERSE_BTN}" title="${t('ui.reverseTitle')}" data-i18n="ui.reverse" data-i18n-title="ui.reverseTitle">${t(
-            'ui.reverse',
-          )}</button>
+  'ui.reverse',
+)}</button>
         </div>
       </div>
       <div class="panelBlock" id="${ELEMENT_IDS.GUIDE_PANEL}">
