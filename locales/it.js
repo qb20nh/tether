@@ -27,7 +27,9 @@ export default {
     "legend": "Suggerimenti / Vincoli",
     "show": "Mostra",
     "hide": "Nascondi",
-    "puzzleGridAria": "Griglia del puzzle"
+    "puzzleGridAria": "Griglia del puzzle",
+    "githubRepoAria": "Visualizza Tether su GitHub",
+    "githubRepoTitle": "Visualizza il codice sorgente su GitHub"
   },
   "goal": {
     "intro": "<b>Obiettivo</b>: disegna un percorso continuo che visita ogni cella senza muri <b>esattamente una volta</b>.",

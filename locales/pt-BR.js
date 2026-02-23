@@ -27,7 +27,9 @@ export default {
     "legend": "Dicas / Restrições",
     "show": "Mostrar",
     "hide": "Esconder",
-    "puzzleGridAria": "Grade do quebra-cabeça"
+    "puzzleGridAria": "Grade do quebra-cabeça",
+    "githubRepoAria": "Ver Tether no GitHub",
+    "githubRepoTitle": "Ver código-fonte no GitHub"
   },
   "goal": {
     "intro": "<b>Objetivo</b>: Desenhe um caminho contínuo que visite cada célula sem parede <b>exatamente uma vez</b>.",

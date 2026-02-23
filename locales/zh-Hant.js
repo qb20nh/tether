@@ -27,7 +27,9 @@ export default {
     "legend": "提示 / 約束",
     "show": "顯示",
     "hide": "隱藏",
-    "puzzleGridAria": "謎題網格"
+    "puzzleGridAria": "謎題網格",
+    "githubRepoAria": "在 GitHub 上檢視 Tether",
+    "githubRepoTitle": "在 GitHub 上檢視原始碼"
   },
   "goal": {
     "intro": "<b>目標</b>：繪製一條連續路徑，經過每個非牆格子<b>恰好一次</b>。",

@@ -27,7 +27,9 @@ export default {
     "legend": "Indices / Contraintes",
     "show": "Afficher",
     "hide": "Masquer",
-    "puzzleGridAria": "Grille du puzzle"
+    "puzzleGridAria": "Grille du puzzle",
+    "githubRepoAria": "Voir Tether sur GitHub",
+    "githubRepoTitle": "Voir le code source sur GitHub"
   },
   "goal": {
     "intro": "<b>Objectif</b> : Tracez un chemin continu qui visite chaque cellule non murale <b>exactement une fois</b>.",

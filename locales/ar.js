@@ -27,7 +27,9 @@ export default {
     "legend": "الإشارات / القيود",
     "show": "إظهار",
     "hide": "إخفاء",
-    "puzzleGridAria": "شبكة اللغز"
+    "puzzleGridAria": "شبكة اللغز",
+    "githubRepoAria": "عرض Tether على GitHub",
+    "githubRepoTitle": "عرض المصدر على GitHub"
   },
   "goal": {
     "intro": "<b>الهدف</b>: ارسم مسارًا متصلاً يزور كل خانة غير جدار <b>مرة واحدة بالضبط</b>.",

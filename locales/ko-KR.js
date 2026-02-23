@@ -27,7 +27,9 @@ export default {
     "legend": "힌트 / 제약",
     "show": "보이기",
     "hide": "숨기기",
-    "puzzleGridAria": "퍼즐 그리드"
+    "puzzleGridAria": "퍼즐 그리드",
+    "githubRepoAria": "GitHub에서 Tether 보기",
+    "githubRepoTitle": "GitHub에서 소스 보기"
   },
   "goal": {
     "intro": "<b>목표</b>: 벽이 아닌 모든 칸을 <b>정확히 1번씩</b> 방문하는 연속 경로를 만드세요.",

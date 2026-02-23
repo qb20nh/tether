@@ -601,6 +601,24 @@ export function initTetherApp() {
     refs.themeToggle.setAttribute('title', nextLabel);
   };
 
+  const setSettingsMenuOpen = (isOpen) => {
+    if (!refs.settingsPanel || !refs.settingsToggle) return;
+    refs.settingsPanel.hidden = !isOpen;
+    refs.settingsToggle.classList.toggle('isOpen', isOpen);
+    refs.settingsToggle.setAttribute('aria-expanded', String(isOpen));
+  };
+
+  const closeSettingsMenu = () => {
+    setSettingsMenuOpen(false);
+  };
+
+  const refreshSettingsToggle = () => {
+    if (!refs.settingsToggle) return;
+    const label = `${translate('ui.language')} / ${translate('ui.theme')}`;
+    refs.settingsToggle.setAttribute('aria-label', label);
+    refs.settingsToggle.setAttribute('title', label);
+  };
+
   const refreshStaticUiText = (opts = {}) => {
     const locale = opts.locale || activeLocale;
     document.documentElement.lang = locale;
@@ -657,6 +675,7 @@ export function initTetherApp() {
     }
 
     refreshThemeButton();
+    refreshSettingsToggle();
   };
 
   const refresh = (snapshot, validate = false, options = {}) => {
@@ -807,6 +826,7 @@ export function initTetherApp() {
   });
 
   refs.langSel.addEventListener('change', (e) => {
+    closeSettingsMenu();
     const nextLocale = setLocale(e.target.value);
     refreshStaticUiText({ locale: nextLocale });
     const snapshot = state.getSnapshot();
@@ -825,9 +845,28 @@ export function initTetherApp() {
   }
 
   refs.themeToggle?.addEventListener('click', () => {
+    closeSettingsMenu();
     const targetTheme = activeTheme === 'dark' ? 'light' : 'dark';
     if (targetTheme === 'light' && requestLightThemeConfirmation(targetTheme)) return;
     applyThemeState(targetTheme);
+  });
+
+  refs.settingsToggle?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const isOpen = refs.settingsPanel ? !refs.settingsPanel.hidden : false;
+    setSettingsMenuOpen(!isOpen);
+  });
+
+  refs.settingsPanel?.addEventListener('click', (e) => {
+    e.stopPropagation();
+  });
+
+  document.addEventListener('click', () => {
+    closeSettingsMenu();
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeSettingsMenu();
   });
 
   refs.resetBtn.addEventListener('click', () => {

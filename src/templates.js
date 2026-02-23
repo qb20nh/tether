@@ -17,14 +17,32 @@ export const APP_SHELL_TEMPLATE = (t = (k) => k, localeOptions = [], currentLoca
         <span>TETHER</span>
       </h1>
         <div class="topbarControls">
-          <label id="${ELEMENT_IDS.LANG_LABEL}" class="small" for="${ELEMENT_IDS.LANG_SEL}" data-i18n="ui.language">${t(
+          <button
+            id="${ELEMENT_IDS.SETTINGS_TOGGLE}"
+            class="settingsToggle"
+            type="button"
+            aria-haspopup="true"
+            aria-expanded="false"
+            aria-controls="${ELEMENT_IDS.SETTINGS_PANEL}"
+            aria-label="${t('ui.language')} / ${t('ui.theme')}"
+            title="${t('ui.language')} / ${t('ui.theme')}"
+          >
+            <span aria-hidden="true">⚙</span>
+          </button>
+          <div id="${ELEMENT_IDS.SETTINGS_PANEL}" class="settingsPanel" hidden>
+            <div class="settingsField">
+              <label id="${ELEMENT_IDS.LANG_LABEL}" class="small" for="${ELEMENT_IDS.LANG_SEL}" data-i18n="ui.language">${t(
   'ui.language',
 )}</label>
-          <select id="${ELEMENT_IDS.LANG_SEL}">
-            ${buildOptionList(localeOptions, currentLocale)}
-          </select>
-          <span id="${ELEMENT_IDS.THEME_LABEL}" class="small" data-i18n="ui.theme">${t('ui.theme')}</span>
-          <button id="${ELEMENT_IDS.THEME_TOGGLE}" type="button">${t('ui.themeDark')}</button>
+              <select id="${ELEMENT_IDS.LANG_SEL}">
+                ${buildOptionList(localeOptions, currentLocale)}
+              </select>
+            </div>
+            <div class="settingsField">
+              <span id="${ELEMENT_IDS.THEME_LABEL}" class="small" data-i18n="ui.theme">${t('ui.theme')}</span>
+              <button id="${ELEMENT_IDS.THEME_TOGGLE}" type="button">${t('ui.themeDark')}</button>
+            </div>
+          </div>
           <dialog id="${ELEMENT_IDS.THEME_SWITCH_DIALOG}">
             <form method="dialog" class="themeSwitchDialog">
               <div class="themeSwitchDialog__header">
@@ -145,6 +163,29 @@ export const APP_SHELL_TEMPLATE = (t = (k) => k, localeOptions = [], currentLoca
         </div>
       </aside>
     </section>
+
+    <footer class="appFooter">
+      <span class="appFooterCopyright">&copy; 2026 qb20nh</span>
+      <a
+        class="appFooterGithub"
+        href="https://github.com/qb20nh/tether"
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label="${t('ui.githubRepoAria')}"
+        title="${t('ui.githubRepoTitle')}"
+        data-i18n-aria-label="ui.githubRepoAria"
+        data-i18n-title="ui.githubRepoTitle"
+      >
+        <img
+          class="appFooterGithubIcon"
+          src="https://github.githubassets.com/favicons/favicon.svg"
+          alt=""
+          aria-hidden="true"
+          width="16"
+          height="16"
+        />
+      </a>
+    </footer>
   </div>
 `;
 

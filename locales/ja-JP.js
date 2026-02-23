@@ -27,7 +27,9 @@ export default {
     "legend": "ヒント / 制約",
     "show": "表示",
     "hide": "非表示",
-    "puzzleGridAria": "パズルグリッド"
+    "puzzleGridAria": "パズルグリッド",
+    "githubRepoAria": "GitHubでTetherを見る",
+    "githubRepoTitle": "GitHubでソースを見る"
   },
   "goal": {
     "intro": "<b>ゴール</b>：壁でないすべてのマスを<b>ちょうど1回ずつ</b>訪問する連続した線を描いてください。",

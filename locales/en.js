@@ -27,7 +27,9 @@ export default {
     "legend": "Hints / Constraints",
     "show": "Show",
     "hide": "Hide",
-    "puzzleGridAria": "Puzzle grid"
+    "puzzleGridAria": "Puzzle grid",
+    "githubRepoAria": "View Tether on GitHub",
+    "githubRepoTitle": "View source on GitHub"
   },
   "goal": {
     "intro": "<b>Goal</b>: Draw a continuous path that visits every non-wall cell <b>exactly once</b>.",

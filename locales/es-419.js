@@ -27,7 +27,9 @@ export default {
     "legend": "Pistas / Restricciones",
     "show": "Mostrar",
     "hide": "Ocultar",
-    "puzzleGridAria": "Cuadrícula del rompecabezas"
+    "puzzleGridAria": "Cuadrícula del rompecabezas",
+    "githubRepoAria": "Ver Tether en GitHub",
+    "githubRepoTitle": "Ver el código fuente en GitHub"
   },
   "goal": {
     "intro": "<b>Objetivo</b>: Dibuja un camino continuo que visite cada celda no pared <b>exactamente una vez</b>.",

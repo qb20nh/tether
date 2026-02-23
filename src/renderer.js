@@ -495,6 +495,8 @@ export function cacheElements() {
     langSel: get(ELEMENT_IDS.LANG_SEL),
     themeLabel: get(ELEMENT_IDS.THEME_LABEL),
     themeToggle: get(ELEMENT_IDS.THEME_TOGGLE),
+    settingsToggle: get(ELEMENT_IDS.SETTINGS_TOGGLE),
+    settingsPanel: get(ELEMENT_IDS.SETTINGS_PANEL),
     themeSwitchDialog: get(ELEMENT_IDS.THEME_SWITCH_DIALOG),
     themeSwitchMessage: get(ELEMENT_IDS.THEME_SWITCH_MESSAGE),
     themeSwitchCancelBtn: get(ELEMENT_IDS.THEME_SWITCH_CANCEL_BTN),

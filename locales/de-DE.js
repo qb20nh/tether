@@ -27,7 +27,9 @@ export default {
     "legend": "Hinweise / Einschränkungen",
     "show": "Anzeigen",
     "hide": "Ausblenden",
-    "puzzleGridAria": "Puzzle-Raster"
+    "puzzleGridAria": "Puzzle-Raster",
+    "githubRepoAria": "Tether auf GitHub ansehen",
+    "githubRepoTitle": "Quellcode auf GitHub ansehen"
   },
   "goal": {
     "intro": "<b>Ziel</b>: Zeichne einen durchgehenden Pfad, der jede nichtwandige Zelle <b>genau einmal</b> besucht.",

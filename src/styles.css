@@ -174,9 +174,70 @@ header h1.brandTitle {
 
 .topbarControls {
   margin-inline-start: auto;
+  position: relative;
   display: flex;
   align-items: center;
-  gap: 8px;
+  justify-content: flex-end;
+}
+
+.settingsToggle {
+  inline-size: 34px;
+  block-size: 34px;
+  border-radius: 10px;
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
+  font-size: 18px;
+  line-height: 1;
+  border: 1px solid var(--control-border);
+  background: var(--control-bg);
+  color: var(--text);
+}
+
+.settingsToggle:hover {
+  border-color: var(--control-border-hover);
+  background: var(--control-bg-hover);
+}
+
+.settingsToggle.isOpen {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent), transparent 85%);
+}
+
+.settingsPanel {
+  position: absolute;
+  top: calc(100% + 8px);
+  inset-inline-end: 0;
+  z-index: 20;
+  min-width: 190px;
+  width: min(240px, calc(100dvw - 24px));
+  display: grid;
+  gap: 9px;
+  padding: 9px;
+  border-radius: 11px;
+  border: var(--panel-border) solid var(--panel-outline);
+  background: linear-gradient(180deg, var(--panel) 0%, var(--panel2) 100%);
+  box-shadow: 0 10px 30px var(--panel-shadow);
+}
+
+.settingsPanel[hidden] {
+  display: none;
+}
+
+.settingsField {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.settingsField .small {
+  font-size: 12px;
+}
+
+.settingsField select,
+.settingsField button {
+  width: 100%;
+  min-width: 0;
 }
 
 [id='themeToggle'] {
@@ -1016,4 +1077,238 @@ button:disabled:active {
 .small {
   font-size: 14px;
   color: var(--muted);
+}
+
+.appFooter {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 2px 2px 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.appFooterCopyright {
+  line-height: 1;
+}
+
+.appFooterGithub {
+  inline-size: 30px;
+  block-size: 30px;
+  border-radius: 999px;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.15s ease;
+}
+
+.appFooterGithub:active {
+  transform: translateY(1px);
+}
+
+.appFooterGithub:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.appFooterGithubIcon {
+  inline-size: 16px;
+  block-size: 16px;
+  display: block;
+}
+
+@media (max-width: 380px) {
+  :root {
+    --app-pad-inline: 4px;
+    --panel-padding: 6px;
+    --hint-badge: 30px;
+    --hint-badge-svg: 22px;
+  }
+
+  body {
+    font-size: 15px;
+  }
+
+  .app {
+    --app-inline: min(calc(100dvw - 6px), var(--app-max-inline));
+    --app-pad-top: 4px;
+    --app-pad-bottom: 8px;
+    --ui-reserve: clamp(300px, 50dvh, 390px);
+    gap: 4px;
+  }
+
+  header {
+    gap: 6px;
+  }
+
+  header h1 {
+    font-size: 18px;
+  }
+
+  .brandLogo {
+    inline-size: 16px;
+    block-size: 16px;
+  }
+
+  .topbarRow {
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .topbarControls {
+    margin-inline-start: auto;
+    width: auto;
+    flex-wrap: nowrap;
+    justify-content: flex-end;
+    gap: 0;
+  }
+
+  .settingsToggle {
+    inline-size: 32px;
+    block-size: 32px;
+    font-size: 17px;
+  }
+
+  .settingsPanel {
+    min-width: 170px;
+    width: min(220px, calc(100dvw - 14px));
+    padding: 8px;
+    gap: 8px;
+  }
+
+  .small {
+    font-size: 12px;
+  }
+
+  [id='themeToggle'] {
+    padding: 6px 8px;
+    font-size: 13px;
+  }
+
+  select,
+  button {
+    font-size: 15px;
+    padding: 7px 9px;
+    border-radius: 9px;
+  }
+
+  select {
+    padding-inline-end: 24px;
+    background-position:
+      calc(100% - 13px) 1em,
+      calc(100% - 9px) 1em;
+    background-size: 5px 5px, 5px 5px;
+  }
+
+  .controls {
+    flex-wrap: wrap;
+    gap: 5px;
+  }
+
+  .controls .left,
+  .controls .right {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .controls .left {
+    overflow-x: visible;
+    overflow-y: visible;
+  }
+
+  #levelLabel {
+    flex: 0 0 auto;
+  }
+
+  .levelSelectGroup {
+    --level-select-total-width: 100%;
+    flex: 1 1 100%;
+    width: 100%;
+  }
+
+  .levelSelectGroup.isInfiniteActive {
+    flex: 1 1 100%;
+    width: 100%;
+  }
+
+  #resetBtn,
+  #reverseBtn {
+    flex: 1 1 calc(50% - 4px);
+    min-width: 0;
+  }
+
+  .panelTitle {
+    font-size: 14px;
+  }
+
+  .msg {
+    font-size: 14px;
+    padding: 8px 10px;
+  }
+
+  .progressNav {
+    gap: 6px;
+  }
+
+  .nextLevelBtn {
+    padding-inline: 10px;
+  }
+
+  .legend {
+    font-size: 14px;
+    line-height: 1.38;
+    gap: 5px;
+  }
+
+  .legend .row {
+    gap: 6px;
+    padding: 5px;
+    border-radius: 9px;
+  }
+
+  .kbd {
+    font-size: 14px;
+  }
+
+  .appFooter {
+    font-size: 12px;
+    gap: 4px;
+  }
+
+  .appFooterGithub {
+    inline-size: 28px;
+    block-size: 28px;
+  }
+
+  .appFooterGithubIcon {
+    inline-size: 15px;
+    block-size: 15px;
+  }
+}
+
+@media (max-width: 380px) and (max-height: 640px) {
+  .app {
+    --ui-reserve: clamp(320px, 56dvh, 390px);
+  }
+}
+
+@media (max-width: 420px) and (max-height: 700px) {
+  .app {
+    --ui-reserve: clamp(310px, 52dvh, 390px);
+  }
+
+  .controls .left > * {
+    max-width: 100%;
+  }
+
+  .progressNav .nextLevelBtn {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
 }
