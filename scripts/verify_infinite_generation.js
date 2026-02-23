@@ -1,6 +1,12 @@
 #!/usr/bin/env node
 import { performance } from 'node:perf_hooks';
-import { INFINITE_FEATURE_CYCLE, MIN_CONSTRAINT_DENSITY, generateInfiniteLevel } from '../src/infinite.js';
+import {
+  INFINITE_FEATURE_CYCLE,
+  INFINITE_MAX_LEVELS,
+  MIN_CONSTRAINT_DENSITY,
+  generateInfiniteLevel,
+} from '../src/infinite.js';
+import { canonicalConstraintSignature } from '../src/infinite_canonical.js';
 import { solveLevel } from './verify_level_properties.js';
 
 const HINT_CODES = new Set(['t', 'r', 'l', 's', 'h', 'v']);
@@ -12,8 +18,9 @@ const DEFAULT_FEATURE_UNIQUE_RATIO = Object.freeze(
 const DEFAULTS = {
   samples: 30,
   coverage: 30,
+  canonicalScan: INFINITE_MAX_LEVELS,
   solveTimeMs: 1200,
-  retrySolveTimeMs: 30000,
+  retrySolveTimeMs: 5000,
   perfRuns: 500,
   perfBudgetMsP95: 300,
   minUniqueRatio: 0.40,
@@ -97,6 +104,7 @@ const parseArgs = (argv) => {
 
     if (arg === '--samples') opts.samples = toInt('--samples', nextValue());
     else if (arg === '--coverage') opts.coverage = toInt('--coverage', nextValue());
+    else if (arg === '--canonical-scan') opts.canonicalScan = toInt('--canonical-scan', nextValue());
     else if (arg === '--solve-time-ms') opts.solveTimeMs = toInt('--solve-time-ms', nextValue());
     else if (arg === '--retry-solve-time-ms') opts.retrySolveTimeMs = toInt('--retry-solve-time-ms', nextValue());
     else if (arg === '--perf-runs') opts.perfRuns = toInt('--perf-runs', nextValue());
@@ -117,6 +125,7 @@ const parseArgs = (argv) => {
           'Options:',
           `  --samples <n>        Determinism + solvability sample size (default: ${DEFAULTS.samples})`,
           `  --coverage <n>       Feature-cycle coverage checks (default: ${DEFAULTS.coverage})`,
+          `  --canonical-scan <n> Canonical collision scan range from index 0 (default: ${DEFAULTS.canonicalScan})`,
           `  --solve-time-ms <n>  Per-level solve timeout (default: ${DEFAULTS.solveTimeMs})`,
           `  --retry-solve-time-ms <n>  Retry timeout for first-pass solver timeouts (default: ${DEFAULTS.retrySolveTimeMs})`,
           `  --perf-runs <n>      Number of generation runs for perf (default: ${DEFAULTS.perfRuns})`,
@@ -134,6 +143,10 @@ const parseArgs = (argv) => {
     }
   }
 
+  if (opts.canonicalScan > INFINITE_MAX_LEVELS) {
+    throw new Error(`--canonical-scan cannot exceed ${INFINITE_MAX_LEVELS}`);
+  }
+
   return opts;
 };
 
@@ -149,6 +162,7 @@ const analyzeFeatures = (level) => {
   let hasRps = false;
   let hasMovable = false;
   let hintCount = 0;
+  let rpsCount = 0;
   let constraintCellCount = 0;
 
   for (const row of level.grid || []) {
@@ -159,7 +173,10 @@ const analyzeFeatures = (level) => {
         hasHint = true;
         hintCount += 1;
       }
-      if (RPS_CODES.has(ch)) hasRps = true;
+      if (RPS_CODES.has(ch)) {
+        hasRps = true;
+        rpsCount += 1;
+      }
       if (ch === 'm') hasMovable = true;
     }
   }
@@ -175,6 +192,7 @@ const analyzeFeatures = (level) => {
     rps: hasRps,
     hint: hasHint,
     hintCount,
+    rpsCount,
     constraintCellCount,
     mixed: featureCount >= 2,
     featureCount,
@@ -212,6 +230,8 @@ function main() {
   const minimumFeatureMismatches = [];
   const rpsHintMinimumMismatches = [];
   const densityMismatches = [];
+  const singletonRpsMismatches = [];
+  const canonicalCollisions = [];
   const solvabilityFailures = [];
   const uniqueRatioMismatches = [];
 
@@ -327,6 +347,12 @@ function main() {
         detected: features,
       });
     }
+    if (features.rpsCount === 1) {
+      singletonRpsMismatches.push({
+        index: i,
+        detected: features,
+      });
+    }
   }
 
   if (coverageMismatches.length > 0) {
@@ -340,6 +366,36 @@ function main() {
   }
   if (densityMismatches.length > 0) {
     failures.push(`Constraint-density mismatches: ${densityMismatches.length}`);
+  }
+
+  const canonicalSeen = new Map();
+  for (let i = 0; i < opts.canonicalScan; i++) {
+    const level = generateInfiniteLevel(i);
+    const features = analyzeFeatures(level);
+    if (features.rpsCount === 1) {
+      singletonRpsMismatches.push({
+        index: i,
+        detected: features,
+      });
+    }
+    const canonicalSignature = canonicalConstraintSignature(level);
+    if (!canonicalSeen.has(canonicalSignature)) {
+      canonicalSeen.set(canonicalSignature, i);
+      continue;
+    }
+    canonicalCollisions.push({
+      firstIndex: canonicalSeen.get(canonicalSignature),
+      index: i,
+    });
+  }
+  if (canonicalCollisions.length > 0) {
+    failures.push(`Canonical collisions: ${canonicalCollisions.length}`);
+  }
+  const singletonRpsMismatchList = [...new Map(
+    singletonRpsMismatches.map((entry) => [entry.index, entry]),
+  ).values()].sort((a, b) => a.index - b.index);
+  if (singletonRpsMismatchList.length > 0) {
+    failures.push(`Singleton-RPS mismatches: ${singletonRpsMismatchList.length}`);
   }
 
   const solveOpts = {
@@ -465,6 +521,16 @@ function main() {
       requiredDensity: MIN_CONSTRAINT_DENSITY,
       mismatches: densityMismatches,
     },
+    singletonRps: {
+      checkedCoverage: opts.coverage,
+      checkedCanonicalScan: opts.canonicalScan,
+      mismatches: singletonRpsMismatchList,
+    },
+    canonicalUniqueness: {
+      scanned: opts.canonicalScan,
+      collisions: canonicalCollisions,
+      uniqueSignatures: opts.canonicalScan - canonicalCollisions.length,
+    },
     solvability: {
       checked: opts.samples,
       solved: solvedCount,
@@ -487,6 +553,7 @@ function main() {
       `Uniqueness: ${uniqueSignatureCount}/${opts.samples} unique signatures (${round(uniqueRatio)} ratio, threshold ${opts.minUniqueRatio})`,
     );
     console.log(`Coverage: ${opts.coverage - coverageMismatches.length}/${opts.coverage} satisfied expected feature`);
+    console.log(`Canonical scan: ${opts.canonicalScan - canonicalCollisions.length}/${opts.canonicalScan} unique`);
     console.log(
       `Solvability: ${solvedCount}/${opts.samples} solved (timeouts: ${timedOutCount}, retries resolved: ${retryResolvedCount}/${retriedCount})`,
     );

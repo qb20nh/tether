@@ -14,6 +14,16 @@ export function bindInputHandlers(refs, state, onStateChange = () => { }) {
   let activePointerId = null;
   let wallDrag = null;
   let pathDrag = null;
+  const WALL_DRAGGING_CLASS = 'isWallDragging';
+  const PATH_DRAGGING_CLASS = 'isPathDragging';
+
+  const setWallDraggingCursor = (isDragging) => {
+    document.body.classList.toggle(WALL_DRAGGING_CLASS, isDragging);
+  };
+
+  const setPathDraggingCursor = (isDragging) => {
+    document.body.classList.toggle(PATH_DRAGGING_CLASS, isDragging);
+  };
 
   const cellFromPoint = (x, y) => {
     const el = document.elementFromPoint(x, y);
@@ -45,6 +55,7 @@ export function bindInputHandlers(refs, state, onStateChange = () => { }) {
         from: { r: cell.r, c: cell.c },
         hover: null,
       };
+      setWallDraggingCursor(true);
       showWallDragGhost(e.clientX, e.clientY);
       refs.gridEl.setPointerCapture(e.pointerId);
       e.preventDefault();
@@ -62,6 +73,7 @@ export function bindInputHandlers(refs, state, onStateChange = () => { }) {
         origin: { r: cell.r, c: cell.c },
       };
       activePointerId = e.pointerId;
+      setPathDraggingCursor(true);
       refs.gridEl.setPointerCapture(e.pointerId);
       onStateChange(false, { rebuildGrid: false, isPathDragging: true });
       e.preventDefault();
@@ -82,6 +94,7 @@ export function bindInputHandlers(refs, state, onStateChange = () => { }) {
 
     dragMode = 'path';
     activePointerId = e.pointerId;
+    setPathDraggingCursor(true);
     refs.gridEl.setPointerCapture(e.pointerId);
     onStateChange(false, { rebuildGrid: false, isPathDragging: true });
     e.preventDefault();
@@ -227,6 +240,8 @@ export function bindInputHandlers(refs, state, onStateChange = () => { }) {
     activePointerId = null;
     wallDrag = null;
     pathDrag = null;
+    setWallDraggingCursor(false);
+    setPathDraggingCursor(false);
     hideWallDragGhost();
     if (finalMode === 'path' && state.finalizePathAfterPointerUp) {
       state.finalizePathAfterPointerUp();
@@ -235,7 +250,8 @@ export function bindInputHandlers(refs, state, onStateChange = () => { }) {
     onStateChange(
       hadWallMove || finalMode === 'path',
       {
-        rebuildGrid: hadWallMove,
+        // Grid cell contents are updated incrementally, so full rebuild is unnecessary.
+        rebuildGrid: false,
         isPathDragging: false,
       },
     );

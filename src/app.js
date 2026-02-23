@@ -2,7 +2,7 @@ import { mountStyles } from './styles.js';
 import { APP_SHELL_TEMPLATE, buildLegendTemplate } from './templates.js';
 import { BADGE_DEFINITIONS, ICONS, ICON_X } from './icons.js';
 import { LEVELS } from './levels.js';
-import { generateInfiniteLevel } from './infinite.js';
+import { INFINITE_MAX_LEVELS, generateInfiniteLevel } from './infinite.js';
 import { baseGoalText, ELEMENT_IDS } from './config.js';
 import { createGameState } from './state.js';
 import {
@@ -38,6 +38,8 @@ const INFINITE_PROGRESS_VERSION = 1;
 const THEME_KEY = 'tetherTheme';
 const DEFAULT_THEME = 'dark';
 const CAMPAIGN_LEVEL_COUNT = LEVELS.length;
+const MAX_INFINITE_INDEX = INFINITE_MAX_LEVELS - 1;
+const INFINITE_LEVEL_CACHE_LIMIT = 48;
 const DEFAULT_HIDDEN_BY_KEY = {
   [GUIDE_KEY]: false,
   [LEGEND_KEY]: true,
@@ -147,7 +149,7 @@ const writeLevelProgress = () => {
 const normalizeInfiniteProgressState = (value) => {
   if (!value || typeof value !== 'object') return 0;
   if (Number.isInteger(value.latestLevel)) {
-    return Math.max(value.latestLevel, 0);
+    return Math.min(Math.max(value.latestLevel, 0), MAX_INFINITE_INDEX);
   }
   return 0;
 };
@@ -199,7 +201,7 @@ const markCampaignLevelCleared = (index) => {
 };
 
 const markInfiniteLevelCleared = (infiniteIndex) => {
-  const nextProgress = Math.max(readInfiniteProgress(), infiniteIndex + 1);
+  const nextProgress = Math.min(MAX_INFINITE_INDEX, Math.max(readInfiniteProgress(), infiniteIndex + 1));
   if (nextProgress === infiniteProgress) return false;
   infiniteProgress = nextProgress;
   writeInfiniteProgress();
@@ -276,24 +278,18 @@ function updateWithEvaluation(refs, snapshot, evaluateResult, shouldValidate, tr
   const {
     getLevelForIndex = () => null,
     onLevelCleared = () => { },
-    resolveNextButtonLabel = () => '',
   } = options;
 
   updateCells(snapshot, evaluateResult, refs);
-  if (!shouldValidate) return;
+  if (!shouldValidate) return null;
   const completion = checkCompletion(snapshot, evaluateResult, translate);
   if (completion.kind === 'good') {
     onLevelCleared(snapshot.levelIndex);
     setMessage(refs.msgEl, completion.kind, completion.message);
-    if (refs.nextLevelBtn) {
-      refs.nextLevelBtn.hidden = false;
-      refs.nextLevelBtn.textContent = resolveNextButtonLabel(snapshot.levelIndex);
-    }
     return completion;
   }
 
   setMessage(refs.msgEl, null, baseGoalText(getLevelForIndex(snapshot.levelIndex), translate));
-  if (refs.nextLevelBtn) refs.nextLevelBtn.hidden = true;
   return completion;
 }
 
@@ -320,53 +316,137 @@ export function initTetherApp() {
   );
 
   const refs = cacheElements();
-  const runtimeLevels = [...LEVELS];
+  const infiniteLevelCache = new Map();
+  const INFINITE_PAGE_SIZE = 10;
+  const INFINITE_SELECTOR_ACTIONS = Object.freeze({
+    first: '__first__',
+    prev: '__prev_page__',
+    next: '__next_page__',
+    last: '__last__',
+  });
 
   const isInfiniteAbsIndex = (index) => index >= CAMPAIGN_LEVEL_COUNT;
   const toInfiniteIndex = (index) => index - CAMPAIGN_LEVEL_COUNT;
+  const clampInfiniteIndex = (index) => Math.min(Math.max(index, 0), MAX_INFINITE_INDEX);
+  const infinitePageStart = (index) => Math.floor(index / INFINITE_PAGE_SIZE) * INFINITE_PAGE_SIZE;
+
+  const getCachedInfiniteLevel = (infiniteIndex) => {
+    const cached = infiniteLevelCache.get(infiniteIndex);
+    if (!cached) return null;
+    infiniteLevelCache.delete(infiniteIndex);
+    infiniteLevelCache.set(infiniteIndex, cached);
+    return cached;
+  };
+
+  const putCachedInfiniteLevel = (infiniteIndex, level) => {
+    if (infiniteLevelCache.has(infiniteIndex)) {
+      infiniteLevelCache.delete(infiniteIndex);
+    }
+    infiniteLevelCache.set(infiniteIndex, level);
+    while (infiniteLevelCache.size > INFINITE_LEVEL_CACHE_LIMIT) {
+      const oldest = infiniteLevelCache.keys().next().value;
+      infiniteLevelCache.delete(oldest);
+    }
+  };
 
   const ensureInfiniteLevel = (infiniteIndex) => {
-    const normalizedIndex = Number.isInteger(infiniteIndex) && infiniteIndex >= 0 ? infiniteIndex : 0;
-    const absIndex = CAMPAIGN_LEVEL_COUNT + normalizedIndex;
-    while (runtimeLevels.length <= absIndex) {
-      const nextInfiniteIndex = runtimeLevels.length - CAMPAIGN_LEVEL_COUNT;
-      runtimeLevels.push(generateInfiniteLevel(nextInfiniteIndex));
+    const normalizedIndex = clampInfiniteIndex(Number.isInteger(infiniteIndex) ? infiniteIndex : 0);
+    const cached = getCachedInfiniteLevel(normalizedIndex);
+    if (!cached) {
+      putCachedInfiniteLevel(normalizedIndex, generateInfiniteLevel(normalizedIndex));
     }
-    return absIndex;
+    return CAMPAIGN_LEVEL_COUNT + normalizedIndex;
   };
 
   const getLevelAtIndex = (index) => {
-    if (isInfiniteAbsIndex(index)) {
-      ensureInfiniteLevel(toInfiniteIndex(index));
+    if (!isInfiniteAbsIndex(index)) {
+      return LEVELS[index] || null;
     }
-    return runtimeLevels[index] || null;
+    const infiniteIndex = clampInfiniteIndex(toInfiniteIndex(index));
+    const cached = getCachedInfiniteLevel(infiniteIndex);
+    if (cached) return cached;
+    const generated = generateInfiniteLevel(infiniteIndex);
+    putCachedInfiniteLevel(infiniteIndex, generated);
+    return generated;
   };
 
   const resolveNextButtonLabel = (levelIndex) => {
-    if (isInfiniteAbsIndex(levelIndex)) return translate('ui.nextInfinite');
+    if (isInfiniteAbsIndex(levelIndex)) {
+      if (toInfiniteIndex(levelIndex) >= MAX_INFINITE_INDEX) return translate('ui.infiniteComplete');
+      return translate('ui.nextInfinite');
+    }
     if (levelIndex >= CAMPAIGN_LEVEL_COUNT - 1 && isCampaignCompleted()) return translate('ui.startInfinite');
     return translate('ui.nextLevel');
   };
 
-  const syncInfiniteNavigation = (levelIndex) => {
+  const resolveInfiniteModeLabel = () => {
+    const raw = translate('ui.infiniteLevelOption', { n: '' });
+    return raw.replace(/\s*#\s*$/, '').trim();
+  };
+
+  const setDisabledReasonTitle = (buttonEl, reasonKey) => {
+    if (!buttonEl) return;
+    if (reasonKey) {
+      buttonEl.setAttribute('title', translate(reasonKey));
+      return;
+    }
+    buttonEl.removeAttribute('title');
+  };
+
+  const isNextLevelAvailable = (levelIndex) => {
+    if (isInfiniteAbsIndex(levelIndex)) {
+      const infiniteIndex = clampInfiniteIndex(toInfiniteIndex(levelIndex));
+      if (infiniteIndex >= MAX_INFINITE_INDEX) return false;
+      const latestUnlockedInfiniteIndex = clampInfiniteIndex(readInfiniteProgress());
+      return infiniteIndex + 1 <= latestUnlockedInfiniteIndex;
+    }
+
+    const nextCampaignIndex = levelIndex + 1;
+    if (nextCampaignIndex < CAMPAIGN_LEVEL_COUNT) return true;
+    return isCampaignCompleted();
+  };
+
+  const isLevelPreviouslyCleared = (levelIndex) => {
+    if (isInfiniteAbsIndex(levelIndex)) {
+      const infiniteIndex = clampInfiniteIndex(toInfiniteIndex(levelIndex));
+      return infiniteIndex < clampInfiniteIndex(readInfiniteProgress());
+    }
+    return levelIndex < readLevelProgress();
+  };
+
+  let currentLevelCleared = false;
+
+  const syncInfiniteNavigation = (levelIndex, isCleared = false) => {
     if (!isInfiniteAbsIndex(levelIndex)) {
       if (refs.prevInfiniteBtn) {
         refs.prevInfiniteBtn.hidden = true;
         refs.prevInfiniteBtn.disabled = false;
+        setDisabledReasonTitle(refs.prevInfiniteBtn, null);
       }
-      return;
+    } else {
+      const infiniteIndex = clampInfiniteIndex(toInfiniteIndex(levelIndex));
+      if (refs.prevInfiniteBtn) {
+        refs.prevInfiniteBtn.hidden = false;
+        refs.prevInfiniteBtn.disabled = infiniteIndex <= 0;
+        setDisabledReasonTitle(
+          refs.prevInfiniteBtn,
+          refs.prevInfiniteBtn.disabled ? 'ui.prevInfiniteDisabledFirst' : null,
+        );
+      }
     }
 
-    const infiniteIndex = toInfiniteIndex(levelIndex);
-    const latestUnlockedInfiniteIndex = readInfiniteProgress();
-
-    if (refs.prevInfiniteBtn) {
-      refs.prevInfiniteBtn.hidden = false;
-      refs.prevInfiniteBtn.disabled = infiniteIndex <= 0;
-    }
     if (refs.nextLevelBtn) {
+      const nextAvailable = isNextLevelAvailable(levelIndex);
+      const atInfiniteEnd = isInfiniteAbsIndex(levelIndex)
+        && clampInfiniteIndex(toInfiniteIndex(levelIndex)) >= MAX_INFINITE_INDEX;
+      let nextDisabledReasonKey = null;
+      if (!isCleared) nextDisabledReasonKey = 'ui.nextDisabledUncleared';
+      else if (!nextAvailable && atInfiniteEnd) nextDisabledReasonKey = 'ui.nextDisabledInfiniteEnd';
+
+      refs.nextLevelBtn.hidden = false;
       refs.nextLevelBtn.textContent = resolveNextButtonLabel(levelIndex);
-      refs.nextLevelBtn.hidden = infiniteIndex >= latestUnlockedInfiniteIndex;
+      refs.nextLevelBtn.disabled = !isCleared || !nextAvailable;
+      setDisabledReasonTitle(refs.nextLevelBtn, nextDisabledReasonKey);
     }
   };
 
@@ -378,7 +458,7 @@ export function initTetherApp() {
     markCampaignLevelCleared(levelIndex);
   };
 
-  const state = createGameState(runtimeLevels);
+  const state = createGameState(getLevelAtIndex);
   setLegendIcons(ICONS, refs, ICON_X);
 
   const refreshLevelOptions = () => {
@@ -395,10 +475,10 @@ export function initTetherApp() {
 
     if (isCampaignCompleted()) {
       const selectorInfiniteIndex = isInfiniteAbsIndex(currentIndex)
-        ? toInfiniteIndex(currentIndex)
-        : readInfiniteProgress();
+        ? clampInfiniteIndex(toInfiniteIndex(currentIndex))
+        : clampInfiniteIndex(readInfiniteProgress());
       const infiniteAbsIndex = ensureInfiniteLevel(selectorInfiniteIndex);
-      const translated = translate('ui.infiniteLevelOption', { n: selectorInfiniteIndex + 1 });
+      const translated = resolveInfiniteModeLabel();
       const fallback = resolveLevelName(getLevelAtIndex(infiniteAbsIndex), translate);
       const infiniteLabel = translated === 'ui.infiniteLevelOption' ? fallback : translated;
       optionHtml += `<option value="${infiniteAbsIndex}" ${infiniteAbsIndex === currentIndex ? 'selected' : ''}>${infiniteLabel}</option>`;
@@ -406,16 +486,61 @@ export function initTetherApp() {
 
     refs.levelSel.innerHTML = optionHtml;
     refs.levelSel.value = String(currentIndex);
+
+    if (refs.levelSelectGroup && refs.infiniteSel) {
+      const infiniteActive = isInfiniteAbsIndex(currentIndex);
+      refs.levelSelectGroup.classList.toggle('isInfiniteActive', infiniteActive);
+      refs.infiniteSel.hidden = !infiniteActive;
+      refs.infiniteSel.disabled = !infiniteActive;
+
+      if (!infiniteActive) {
+        refs.infiniteSel.innerHTML = '';
+      } else {
+        const currentInfiniteIndex = clampInfiniteIndex(toInfiniteIndex(currentIndex));
+        const latestUnlockedInfiniteIndex = Math.max(
+          clampInfiniteIndex(readInfiniteProgress()),
+          currentInfiniteIndex,
+        );
+        const pageStart = infinitePageStart(currentInfiniteIndex);
+        const pageEnd = Math.min(MAX_INFINITE_INDEX, pageStart + INFINITE_PAGE_SIZE - 1);
+        const prevPageStart = Math.max(0, pageStart - INFINITE_PAGE_SIZE);
+        const prevPageEnd = pageStart - 1;
+        const nextPageStart = pageStart + INFINITE_PAGE_SIZE;
+        const nextPageEnd = Math.min(MAX_INFINITE_INDEX, nextPageStart + INFINITE_PAGE_SIZE - 1);
+
+        let infiniteOptionHtml = '';
+        if (pageStart > 0) {
+          infiniteOptionHtml += `<option value="${INFINITE_SELECTOR_ACTIONS.first}">&laquo; #1</option>`;
+          infiniteOptionHtml += `<option value="${INFINITE_SELECTOR_ACTIONS.prev}">&lsaquo; #${prevPageStart + 1}-#${prevPageEnd + 1}</option>`;
+        }
+
+        for (let i = pageStart; i <= pageEnd; i += 1) {
+          const disabled = i > latestUnlockedInfiniteIndex ? 'disabled' : '';
+          infiniteOptionHtml += `<option value="${i}" ${i === currentInfiniteIndex ? 'selected' : ''} ${disabled}>${i + 1}</option>`;
+        }
+
+        if (pageEnd < MAX_INFINITE_INDEX) {
+          const nextDisabled = nextPageStart > latestUnlockedInfiniteIndex ? 'disabled' : '';
+          const lastDisabled = latestUnlockedInfiniteIndex <= pageEnd ? 'disabled' : '';
+          infiniteOptionHtml += `<option value="${INFINITE_SELECTOR_ACTIONS.next}" ${nextDisabled}>#${nextPageStart + 1}-#${nextPageEnd + 1} &rsaquo;</option>`;
+          infiniteOptionHtml += `<option value="${INFINITE_SELECTOR_ACTIONS.last}" ${lastDisabled}>#${latestUnlockedInfiniteIndex + 1} &raquo;</option>`;
+        }
+
+        refs.infiniteSel.innerHTML = infiniteOptionHtml;
+        refs.infiniteSel.value = String(currentInfiniteIndex);
+      }
+    }
   };
 
   const showLevelGoal = (levelIndex) => {
+    currentLevelCleared = isLevelPreviouslyCleared(levelIndex);
     setMessage(refs.msgEl, null, baseGoalText(getLevelAtIndex(levelIndex), translate));
     if (refs.nextLevelBtn) {
       refs.nextLevelBtn.textContent = resolveNextButtonLabel(levelIndex);
-      refs.nextLevelBtn.hidden = true;
+      refs.nextLevelBtn.hidden = false;
     }
     if (refs.prevInfiniteBtn) refs.prevInfiniteBtn.hidden = true;
-    syncInfiniteNavigation(levelIndex);
+    syncInfiniteNavigation(levelIndex, currentLevelCleared);
   };
 
   const applyThemeState = (nextTheme) => {
@@ -523,9 +648,11 @@ export function initTetherApp() {
     const completion = updateWithEvaluation(refs, snapshot, evaluateResult, validate, translate, {
       getLevelForIndex: getLevelAtIndex,
       onLevelCleared,
-      resolveNextButtonLabel,
     });
-    syncInfiniteNavigation(snapshot.levelIndex);
+    if (completion) {
+      currentLevelCleared = completion.kind === 'good' || isLevelPreviouslyCleared(snapshot.levelIndex);
+    }
+    syncInfiniteNavigation(snapshot.levelIndex, currentLevelCleared);
     if (completion?.kind === 'good') {
       refreshLevelOptions();
     }
@@ -571,7 +698,7 @@ export function initTetherApp() {
     if (targetIndex < 0) targetIndex = 0;
 
     if (isInfiniteAbsIndex(targetIndex)) {
-      targetIndex = ensureInfiniteLevel(toInfiniteIndex(targetIndex));
+      targetIndex = ensureInfiniteLevel(clampInfiniteIndex(toInfiniteIndex(targetIndex)));
     } else {
       targetIndex = Math.min(targetIndex, CAMPAIGN_LEVEL_COUNT - 1);
     }
@@ -602,6 +729,46 @@ export function initTetherApp() {
     const selected = parseInt(e.target.value, 10);
     if (!Number.isInteger(selected)) return;
     loadLevel(selected);
+  });
+
+  refs.infiniteSel?.addEventListener('change', (e) => {
+    const snapshot = state.getSnapshot();
+    if (!isInfiniteAbsIndex(snapshot.levelIndex)) return;
+
+    const selectedValue = String(e.target.value || '');
+    const currentInfiniteIndex = clampInfiniteIndex(toInfiniteIndex(snapshot.levelIndex));
+    const latestUnlockedInfiniteIndex = Math.max(
+      clampInfiniteIndex(readInfiniteProgress()),
+      currentInfiniteIndex,
+    );
+    const currentPageStart = infinitePageStart(currentInfiniteIndex);
+
+    let targetInfiniteIndex = null;
+    if (selectedValue === INFINITE_SELECTOR_ACTIONS.first) {
+      targetInfiniteIndex = 0;
+    } else if (selectedValue === INFINITE_SELECTOR_ACTIONS.prev) {
+      targetInfiniteIndex = Math.max(0, currentPageStart - INFINITE_PAGE_SIZE);
+    } else if (selectedValue === INFINITE_SELECTOR_ACTIONS.next) {
+      targetInfiniteIndex = Math.min(latestUnlockedInfiniteIndex, currentPageStart + INFINITE_PAGE_SIZE);
+    } else if (selectedValue === INFINITE_SELECTOR_ACTIONS.last) {
+      targetInfiniteIndex = latestUnlockedInfiniteIndex;
+    } else {
+      const parsed = parseInt(selectedValue, 10);
+      if (Number.isInteger(parsed)) targetInfiniteIndex = clampInfiniteIndex(parsed);
+    }
+
+    if (!Number.isInteger(targetInfiniteIndex)) {
+      refreshLevelOptions();
+      return;
+    }
+
+    const clampedTarget = Math.min(Math.max(targetInfiniteIndex, 0), latestUnlockedInfiniteIndex);
+    if (clampedTarget === currentInfiniteIndex) {
+      refreshLevelOptions();
+      return;
+    }
+
+    loadLevel(ensureInfiniteLevel(clampedTarget));
   });
 
   refs.langSel.addEventListener('change', (e) => {
@@ -644,9 +811,10 @@ export function initTetherApp() {
   refs.nextLevelBtn?.addEventListener('click', () => {
     const snapshot = state.getSnapshot();
     if (isInfiniteAbsIndex(snapshot.levelIndex)) {
-      const currentInfiniteIndex = toInfiniteIndex(snapshot.levelIndex);
-      const latestUnlockedInfiniteIndex = readInfiniteProgress();
-      const nextInfiniteIndex = Math.min(currentInfiniteIndex + 1, latestUnlockedInfiniteIndex);
+      const currentInfiniteIndex = clampInfiniteIndex(toInfiniteIndex(snapshot.levelIndex));
+      if (currentInfiniteIndex >= MAX_INFINITE_INDEX) return;
+      const latestUnlockedInfiniteIndex = clampInfiniteIndex(readInfiniteProgress());
+      const nextInfiniteIndex = Math.min(currentInfiniteIndex + 1, latestUnlockedInfiniteIndex, MAX_INFINITE_INDEX);
       if (nextInfiniteIndex <= currentInfiniteIndex) return;
       loadLevel(ensureInfiniteLevel(nextInfiniteIndex));
       return;
@@ -659,7 +827,7 @@ export function initTetherApp() {
     }
 
     if (isCampaignCompleted()) {
-      loadLevel(ensureInfiniteLevel(readInfiniteProgress()));
+      loadLevel(ensureInfiniteLevel(clampInfiniteIndex(readInfiniteProgress())));
     }
   });
 
@@ -667,7 +835,7 @@ export function initTetherApp() {
     const snapshot = state.getSnapshot();
     if (!isInfiniteAbsIndex(snapshot.levelIndex)) return;
 
-    const currentInfiniteIndex = toInfiniteIndex(snapshot.levelIndex);
+    const currentInfiniteIndex = clampInfiniteIndex(toInfiniteIndex(snapshot.levelIndex));
     if (currentInfiniteIndex <= 0) return;
 
     loadLevel(ensureInfiniteLevel(currentInfiniteIndex - 1));
@@ -692,7 +860,7 @@ export function initTetherApp() {
   refreshStaticUiText({ locale: getLocale() });
   refreshLevelOptions();
   const initialLevelIndex = isCampaignCompleted()
-    ? ensureInfiniteLevel(readInfiniteProgress())
+    ? ensureInfiniteLevel(clampInfiniteIndex(readInfiniteProgress()))
     : getLatestCampaignLevelIndex();
   loadLevel(initialLevelIndex);
 }

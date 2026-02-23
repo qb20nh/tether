@@ -39,6 +39,8 @@ export const RPS_WIN_ORDER = {
 export const ELEMENT_IDS = Object.freeze({
   APP: 'app',
   LEVEL_SEL: 'levelSel',
+  LEVEL_SELECT_GROUP: 'levelSelectGroup',
+  INFINITE_SEL: 'infiniteSel',
   LEVEL_LABEL: 'levelLabel',
   LANG_LABEL: 'langLabel',
   LANG_SEL: 'langSel',

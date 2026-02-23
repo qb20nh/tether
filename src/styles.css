@@ -66,6 +66,13 @@ body {
   color-scheme: var(--color-scheme);
 }
 
+body.isWallDragging,
+body.isWallDragging *,
+body.isPathDragging,
+body.isPathDragging * {
+  cursor: grabbing !important;
+}
+
 .theme-light {
   --bg: #f4f7fc;
   --panel: #ffffff;
@@ -270,18 +277,62 @@ header .subtitle {
 
 .controls {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 6px;
   align-items: center;
   justify-content: flex-start;
+  min-width: 0;
 }
 
 .controls .left,
 .controls .right {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 7px;
   align-items: center;
+  min-width: 0;
+}
+
+.controls .left {
+  flex: 1 1 auto;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+}
+
+.levelSelectGroup {
+  --level-select-total-width: clamp(280px, 44vw, 460px);
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex: 0 0 var(--level-select-total-width);
+  width: var(--level-select-total-width);
+  max-width: 100%;
+  min-width: 0;
+}
+
+.levelSelectGroup #levelSel,
+.levelSelectGroup #infiniteSel {
+  min-width: 0;
+}
+
+.levelSelectGroup #levelSel {
+  flex: 1 1 auto;
+  width: 100%;
+}
+
+.levelSelectGroup.isInfiniteActive {
+  flex: 0 0 var(--level-select-total-width);
+  width: var(--level-select-total-width);
+  max-width: 100%;
+  min-width: 0;
+}
+
+.levelSelectGroup.isInfiniteActive #levelSel,
+.levelSelectGroup.isInfiniteActive #infiniteSel {
+  flex: 1 1 0;
+  width: 0;
+  min-width: 0;
 }
 
 select,
@@ -329,6 +380,21 @@ button:hover {
 
 button:active {
   transform: translateY(1px);
+}
+
+button:disabled {
+  cursor: not-allowed;
+  color: var(--control-disabled);
+  border-color: var(--control-border);
+  background-color: var(--control-bg);
+  opacity: 0.62;
+}
+
+button:disabled:hover,
+button:disabled:active {
+  border-color: var(--control-border);
+  background-color: var(--control-bg);
+  transform: none;
 }
 
 [id='themeToggle']:hover {
@@ -384,6 +450,13 @@ button:active {
 .nextLevelBtn {
   align-self: flex-start;
   padding-inline: 12px;
+}
+
+.progressNav .nextLevelBtn:disabled {
+  opacity: 0.56;
+  filter: saturate(0.45);
+  text-decoration-thickness: 1px;
+  text-decoration-color: color-mix(in srgb, currentColor, transparent 38%);
 }
 
 .progressNav {
@@ -641,14 +714,15 @@ button:active {
   transform: translate(-50%, -50%);
   pointer-events: none;
   z-index: 6;
-  mix-blend-mode: overlay;
+  mix-blend-mode: normal;
+  opacity: 0.92;
 }
 
 .wallDragGhostMark {
-  width: 56%;
-  height: 56%;
+  width: 66%;
+  height: 66%;
   color: var(--text);
-  filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.4));
+  filter: drop-shadow(0 calc(var(--cell) * 0.036) calc(var(--cell) * 0.11) rgba(0, 0, 0, 0.4));
   mix-blend-mode: normal;
 }
 

@@ -14,6 +14,10 @@ export default {
     "startInfinite": "Start infinite",
     "nextInfinite": "Next infinite",
     "prevInfinite": "Previous infinite",
+    "infiniteComplete": "Infinite complete",
+    "nextDisabledUncleared": "Clear this level first to continue.",
+    "nextDisabledInfiniteEnd": "You are at the final infinite level.",
+    "prevInfiniteDisabledFirst": "You are at the first infinite level.",
     "infiniteLevelOption": "Infinite #{{n}}",
     "reset": "Reset",
     "resetTitle": "Reset path",
@@ -130,4 +134,4 @@ export default {
     }
   }
 }
-;
+  ;

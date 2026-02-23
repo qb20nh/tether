@@ -18,6 +18,7 @@ let latestPathStatuses = null;
 const PATH_FLOW_SPEED = -32;
 const PATH_FLOW_CYCLE = 128;
 const PATH_FLOW_PULSE = 64;
+const PATH_FLOW_BASE_CELL = 56;
 const PATH_FLOW_GLOW_ALPHA = 1;
 const PATH_FLOW_GLOW = `rgba(255, 255, 255, ${PATH_FLOW_GLOW_ALPHA})`;
 const PATH_FLOW_GLOW_SOFT = 'rgba(255, 255, 255, 0)';
@@ -32,10 +33,22 @@ const cellDistance = (a, b) => {
   return Math.hypot(a.r - b.r, a.c - b.c);
 };
 
-const normalizeFlowOffset = (value) => {
+const normalizeFlowOffset = (value, cycle = PATH_FLOW_CYCLE) => {
   if (!Number.isFinite(value)) return 0;
-  const mod = value % PATH_FLOW_CYCLE;
-  return mod >= 0 ? mod : mod + PATH_FLOW_CYCLE;
+  if (!Number.isFinite(cycle) || cycle <= 0) return 0;
+  const mod = value % cycle;
+  return mod >= 0 ? mod : mod + cycle;
+};
+
+const getPathFlowMetrics = (refs = latestPathRefs) => {
+  const cell = getCellSize(refs?.gridEl);
+  const scale = Number.isFinite(cell) && cell > 0
+    ? cell / PATH_FLOW_BASE_CELL
+    : 1;
+  const cycle = Math.max(18, PATH_FLOW_CYCLE * scale);
+  const pulse = Math.max(6, Math.min(PATH_FLOW_PULSE * scale, cycle));
+  const speed = PATH_FLOW_SPEED * scale;
+  return { cycle, pulse, speed };
 };
 
 const normalizeModulo = (value, modulus) => {
@@ -301,7 +314,8 @@ const animatePathFlow = (timestamp) => {
   if (pathAnimationLastTs > 0) {
     const dt = Math.max(0, (timestamp - pathAnimationLastTs) / 1000);
     if (Number.isFinite(dt)) {
-      pathAnimationOffset = (pathAnimationOffset + dt * PATH_FLOW_SPEED) % PATH_FLOW_CYCLE;
+      const flow = getPathFlowMetrics(latestPathRefs);
+      pathAnimationOffset = normalizeFlowOffset(pathAnimationOffset + dt * flow.speed, flow.cycle);
     }
   }
 
@@ -412,6 +426,19 @@ const syncBoardCellSize = (refs, rows = activeBoardSize.rows, cols = activeBoard
   const maxInline = Math.min(parentInline, appInline, viewportInline);
   const maxBlock = (() => {
     const viewportHeight = window.visualViewport?.height || window.innerHeight || document.documentElement.clientHeight || 0;
+    if (refs.app) {
+      const appStyles = getComputedStyle(refs.app);
+      const reservedUiBlock =
+        parsePx(appStyles.getPropertyValue('--ui-reserve')) +
+        parsePx(appStyles.paddingTop) +
+        parsePx(appStyles.paddingBottom) +
+        20;
+      if (reservedUiBlock > 0) {
+        return Math.max(120, viewportHeight - reservedUiBlock);
+      }
+    }
+
+    // Fallback for unexpected styling states.
     const top = refs.gridEl.getBoundingClientRect().top;
     return Math.max(120, viewportHeight - top - 20);
   })();
@@ -461,7 +488,9 @@ export function cacheElements() {
   const result = {
     app: get(ELEMENT_IDS.APP),
     levelLabel: get(ELEMENT_IDS.LEVEL_LABEL),
+    levelSelectGroup: get(ELEMENT_IDS.LEVEL_SELECT_GROUP),
     levelSel: get(ELEMENT_IDS.LEVEL_SEL),
+    infiniteSel: get(ELEMENT_IDS.INFINITE_SEL),
     langLabel: get(ELEMENT_IDS.LANG_LABEL),
     langSel: get(ELEMENT_IDS.LANG_SEL),
     themeLabel: get(ELEMENT_IDS.THEME_LABEL),
@@ -594,6 +623,12 @@ export function setLegendIcons(icons, refs, iconX) {
   });
 }
 
+const resolveCellMarkHtml = (code, icons = ICONS) => {
+  if (code === 'm') return icons.m || '';
+  if (code === '#') return '';
+  return icons[code] || '';
+};
+
 export function buildGrid(snapshot, refs, icons, iconX) {
   const { boardWrap, gridEl } = refs;
   activeBoardSize = { rows: snapshot.rows, cols: snapshot.cols };
@@ -630,12 +665,12 @@ export function buildGrid(snapshot, refs, icons, iconX) {
       const code = snapshot.gridData[r][c];
       if (code === 'm') {
         cell.classList.add('wall', 'movable');
-        mark.innerHTML = icons['m'];
+        mark.innerHTML = resolveCellMarkHtml(code, icons);
       } else if (code === '#') {
         cell.classList.add('wall');
-        mark.innerHTML = '';
+        mark.innerHTML = resolveCellMarkHtml(code, icons);
       } else {
-        mark.innerHTML = icons[code] || '';
+        mark.innerHTML = resolveCellMarkHtml(code, icons);
       }
 
       cell.appendChild(mark);
@@ -693,6 +728,7 @@ export function updateCells(snapshot, results, refs) {
       const code = snapshot.gridData[r][c];
       if (code === 'm') desired[r][c].classes.push('wall', 'movable');
       else if (code === '#') desired[r][c].classes.push('wall');
+      desired[r][c].markHtml = resolveCellMarkHtml(code);
     }
   }
 
@@ -755,9 +791,14 @@ export function updateCells(snapshot, results, refs) {
         cell.className = targetStr;
       }
 
-      const idxEl = cell.querySelector('.idx');
+      const idxEl = cell.firstElementChild;
       if (idxEl && idxEl.textContent !== state.idx) {
         idxEl.textContent = state.idx;
+      }
+
+      const markEl = idxEl?.nextElementSibling;
+      if (markEl && markEl.innerHTML !== state.markHtml) {
+        markEl.innerHTML = state.markHtml;
       }
     }
   }
@@ -769,7 +810,8 @@ export function drawAll(snapshot, refs, statuses) {
   const previousPath = latestPathSnapshot?.path || null;
   const shift = getHeadShiftDelta(snapshot.path, previousPath, refs);
   if (shift !== 0) {
-    pathAnimationOffset = normalizeFlowOffset(pathAnimationOffset + shift);
+    const flow = getPathFlowMetrics(refs);
+    pathAnimationOffset = normalizeFlowOffset(pathAnimationOffset + shift, flow.cycle);
   }
 
   latestPathSnapshot = snapshot;
@@ -921,6 +963,7 @@ function drawPathLine(snapshot, refs, ctx, flowOffset = 0) {
   const colorMain = forceOpaqueColor(
     getComputedStyle(document.documentElement).getPropertyValue('--line').trim(),
   );
+  const flowMetrics = getPathFlowMetrics(refs);
 
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
@@ -950,7 +993,7 @@ function drawPathLine(snapshot, refs, ctx, flowOffset = 0) {
         endHalfWidth: halfHeadWidth,
         drawMain: true,
         drawTips: false,
-      });
+      }, flowMetrics);
     }
   }
 
@@ -993,17 +1036,18 @@ function drawPathLine(snapshot, refs, ctx, flowOffset = 0) {
       endHalfWidth: halfHeadWidth,
       drawMain: false,
       drawTips: true,
-    });
+    }, flowMetrics);
   }
 
   ctx.globalAlpha = previousAlpha;
 }
 
-function drawFlowRibbon(points, ctx, width, flowOffset, tipOptions = {}) {
+function drawFlowRibbon(points, ctx, width, flowOffset, tipOptions = {}, flowMetrics = null) {
   if (points.length < 2 || !Number.isFinite(flowOffset)) return;
 
-  const cycle = Math.max(18, PATH_FLOW_CYCLE);
-  const pulse = Math.max(6, Math.min(PATH_FLOW_PULSE, cycle));
+  const resolvedMetrics = flowMetrics || getPathFlowMetrics();
+  const cycle = Math.max(18, resolvedMetrics.cycle);
+  const pulse = Math.max(6, Math.min(resolvedMetrics.pulse, cycle));
   const flowWidth = width;
   const drawMain = tipOptions.drawMain !== false;
   const drawTips = tipOptions.drawTips !== false;

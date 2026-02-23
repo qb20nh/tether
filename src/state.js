@@ -1,7 +1,11 @@
 import { CELL_TYPES, HINT_CODES } from './config.js';
 import { inBounds, isAdjacentMove, keyOf, parseLevel } from './utils.js';
 
-export function createGameState(levels) {
+export function createGameState(levelSource) {
+  const getLevelByIndex = typeof levelSource === 'function'
+    ? levelSource
+    : (index) => levelSource[index];
+
   let levelIndex = 0;
   let rows = 0;
   let cols = 0;
@@ -42,7 +46,9 @@ export function createGameState(levels) {
   };
 
   const loadLevel = (index) => {
-    const parsed = parseLevel(levels[index]);
+    const level = getLevelByIndex(index);
+    if (!level) throw new Error(`Missing level at index ${index}`);
+    const parsed = parseLevel(level);
     gridData = parsed.g;
     rows = parsed.rows;
     cols = parsed.cols;
@@ -183,7 +189,7 @@ export function createGameState(levels) {
     return true;
   };
 
-  const getCurrentLevel = () => levels[levelIndex];
+  const getCurrentLevel = () => getLevelByIndex(levelIndex);
 
   return {
     loadLevel,

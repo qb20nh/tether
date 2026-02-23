@@ -14,6 +14,10 @@ export default {
     "startInfinite": "무한 모드 시작",
     "nextInfinite": "다음 무한 레벨",
     "prevInfinite": "이전 무한 레벨",
+    "infiniteComplete": "무한 모드 완료",
+    "nextDisabledUncleared": "계속하려면 현재 레벨을 먼저 클리어하세요.",
+    "nextDisabledInfiniteEnd": "마지막 무한 레벨입니다.",
+    "prevInfiniteDisabledFirst": "현재 첫 번째 무한 레벨입니다.",
     "infiniteLevelOption": "무한 #{{n}}",
     "reset": "초기화",
     "resetTitle": "경로 초기화",
@@ -29,7 +33,7 @@ export default {
     "intro": "<b>목표</b>: 벽이 아닌 모든 칸을 <b>정확히 1번씩</b> 방문하는 연속 경로를 만드세요.",
     "thisLevelPrefix": "<br><b>이 레벨</b>: "
   },
-    "completion": {
+  "completion": {
     "completed": "완료 ✅ 모든 칸 방문 + 모든 제약 만족"
   },
   "legend": {
@@ -130,4 +134,4 @@ export default {
     }
   }
 }
-;
+  ;

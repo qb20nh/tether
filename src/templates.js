@@ -66,7 +66,16 @@ export const APP_SHELL_TEMPLATE = (t = (k) => k, localeOptions = [], currentLoca
           <label id="${ELEMENT_IDS.LEVEL_LABEL}" class="small" for="${ELEMENT_IDS.LEVEL_SEL}" data-i18n="ui.levelLabel">${t(
             'ui.levelLabel',
           )}</label>
-          <select id="${ELEMENT_IDS.LEVEL_SEL}" aria-label="${t('ui.levelSelectAria')}" data-i18n-aria-label="ui.levelSelectAria"></select>
+          <div id="${ELEMENT_IDS.LEVEL_SELECT_GROUP}" class="levelSelectGroup">
+            <select id="${ELEMENT_IDS.LEVEL_SEL}" aria-label="${t('ui.levelSelectAria')}" data-i18n-aria-label="ui.levelSelectAria"></select>
+            <select
+              id="${ELEMENT_IDS.INFINITE_SEL}"
+              aria-label="${t('ui.levelSelectAria')}"
+              data-i18n-aria-label="ui.levelSelectAria"
+              hidden
+              disabled
+            ></select>
+          </div>
           <button id="${ELEMENT_IDS.RESET_BTN}" title="${t('ui.resetTitle')}" data-i18n="ui.reset" data-i18n-title="ui.resetTitle">${t(
             'ui.reset',
           )}</button>

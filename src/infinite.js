@@ -1,4 +1,6 @@
 import { LEVELS } from './levels.js';
+import { canonicalConstraintFingerprint } from './infinite_canonical.js';
+import { INFINITE_OVERRIDE_BY_INDEX } from './infinite_overrides.js';
 
 export const INFINITE_GLOBAL_SEED = 'TETHER_INFINITE_V1';
 export const INFINITE_FEATURE_CYCLE = Object.freeze([
@@ -9,6 +11,9 @@ export const INFINITE_FEATURE_CYCLE = Object.freeze([
   'hint',
   'mixed',
 ]);
+export const INFINITE_MAX_LEVELS = 30000;
+export const INFINITE_CANDIDATE_VARIANTS = 4;
+const INFINITE_VARIANT_RESCUE_PROBES = 64;
 export const MIN_CONSTRAINT_DENSITY = 0.15;
 
 const HINT_CODES = new Set(['t', 'r', 'l', 's', 'h', 'v']);
@@ -29,6 +34,9 @@ const TRANSFORMS = Object.freeze([
   { id: 'transpose', swapAxes: true, mirrorsOrientation: true },
   { id: 'anti_transpose', swapAxes: true, mirrorsOrientation: true },
 ]);
+
+const BASE_PICK_WINDOW = 8;
+const MAX_BASE_ATTEMPTS = 6;
 
 const hashString32 = (input) => {
   let h = 0x811c9dc5;
@@ -63,6 +71,7 @@ const makeRng = (seedInput) => {
 };
 
 const intFromRng = (rng, maxExclusive) => Math.floor(rng() * maxExclusive);
+
 const weightedPick = (entries, weights, rng) => {
   if (!entries || entries.length === 0) return null;
   let total = 0;
@@ -79,6 +88,21 @@ const weightedPick = (entries, weights, rng) => {
 
 const deriveSeed = (rootSeed, label) => mix32(rootSeed ^ hashString32(label));
 
+const assertInfiniteIndex = (infiniteIndex) => {
+  if (!Number.isInteger(infiniteIndex) || infiniteIndex < 0) {
+    throw new Error(`infiniteIndex must be a non-negative integer, got: ${infiniteIndex}`);
+  }
+  if (infiniteIndex >= INFINITE_MAX_LEVELS) {
+    throw new Error(`infiniteIndex out of range: ${infiniteIndex} (max ${INFINITE_MAX_LEVELS - 1})`);
+  }
+};
+
+const assertVariantId = (variantId) => {
+  if (!Number.isInteger(variantId) || variantId < 0) {
+    throw new Error(`variantId must be a non-negative integer, got: ${variantId}`);
+  }
+};
+
 const deepCloneLevelShape = (level) => ({
   grid: level.grid.map((row) => String(row)),
   stitches: (level.stitches || []).map((entry) => [entry[0], entry[1]]),
@@ -90,6 +114,7 @@ const analyzeFeatures = (level) => {
   let hasRps = false;
   let hasMovable = false;
   let hintCount = 0;
+  let rpsCount = 0;
   let wallCount = 0;
   let constraintCellCount = 0;
 
@@ -101,7 +126,10 @@ const analyzeFeatures = (level) => {
         hasHint = true;
         hintCount += 1;
       }
-      if (RPS_CODES.has(ch)) hasRps = true;
+      if (RPS_CODES.has(ch)) {
+        hasRps = true;
+        rpsCount += 1;
+      }
       if (ch === 'm') hasMovable = true;
       if (ch === '#') wallCount += 1;
     }
@@ -118,6 +146,7 @@ const analyzeFeatures = (level) => {
     rps: hasRps,
     hint: hasHint,
     hintCount,
+    rpsCount,
     wallCount,
     constraintCellCount,
     mixed: featureCount >= 2,
@@ -155,13 +184,13 @@ const FEATURE_POOLS = Object.fromEntries(
       .filter((entry) => {
         const hasDensity = entry.constraintDensity >= MIN_CONSTRAINT_DENSITY;
         if (feature === 'rps') {
-          return hasDensity && entry.features.rps && entry.features.mixed;
+          return hasDensity && entry.features.rps && entry.features.hintCount >= 2;
         }
         if (feature === 'hint') {
           return hasDensity && entry.features.hint && entry.features.mixed;
         }
         if (feature === 'corner') {
-          return entry.features.corner;
+          return hasDensity && entry.features.corner && entry.features.mixed;
         }
         if (feature === 'movable') {
           const canProvideMovable = entry.features.movable || entry.features.wallCount > 0;
@@ -175,9 +204,6 @@ const FEATURE_POOLS = Object.fromEntries(
       .sort((a, b) => (a.difficultyScore - b.difficultyScore) || (a.index - b.index)),
   ]),
 );
-
-const BASE_PICK_WINDOW = 8;
-const MAX_BASE_ATTEMPTS = 6;
 
 const transformedDimensions = (rows, cols, transformIndex) => {
   const meta = TRANSFORMS[transformIndex];
@@ -318,28 +344,101 @@ const collectHintCells = (grid) => {
   return cells;
 };
 
-const thinHints = (grid, rng, minKeep) => {
-  if (rng() >= 0.6) return;
-  const hints = collectHintCells(grid);
-  let remaining = hints.length;
-  for (let i = 0; i < hints.length; i++) {
-    if (remaining <= minKeep) break;
-    if (rng() < 0.38) {
-      const cell = hints[i];
-      grid[cell.r][cell.c] = '.';
-      remaining -= 1;
+const collectRpsCells = (grid) => {
+  const cells = [];
+  for (let r = 0; r < grid.length; r++) {
+    for (let c = 0; c < grid[r].length; c++) {
+      const ch = grid[r][c];
+      if (RPS_CODES.has(ch)) {
+        cells.push({ r, c, ch });
+      }
     }
+  }
+  return cells;
+};
+
+const collectWallCells = (grid) => {
+  const cells = [];
+  for (let r = 0; r < grid.length; r++) {
+    for (let c = 0; c < grid[r].length; c++) {
+      const ch = grid[r][c];
+      if (ch === '#' || ch === 'm') cells.push({ r, c, ch });
+    }
+  }
+  return cells;
+};
+
+const shuffleInPlace = (items, rng) => {
+  for (let i = items.length - 1; i > 0; i--) {
+    const j = intFromRng(rng, i + 1);
+    const tmp = items[i];
+    items[i] = items[j];
+    items[j] = tmp;
+  }
+};
+
+const chooseTargetKeep = (count, minKeep, rng, floorRatio = 0) => {
+  if (count <= 0) return 0;
+  const clampedMin = Math.min(Math.max(minKeep, 0), count);
+  const floor = Math.min(count, Math.max(clampedMin, Math.ceil(count * floorRatio)));
+  const range = Math.max(1, count - floor + 1);
+  return floor + intFromRng(rng, range);
+};
+
+const thinHints = (grid, rng, minKeep) => {
+  const hints = collectHintCells(grid).slice();
+  if (hints.length <= minKeep) return;
+  shuffleInPlace(hints, rng);
+  const targetKeep = chooseTargetKeep(hints.length, minKeep, rng, 0.2);
+  for (let i = targetKeep; i < hints.length; i++) {
+    const cell = hints[i];
+    grid[cell.r][cell.c] = '.';
+  }
+};
+
+const thinRps = (grid, rng, minKeep) => {
+  const rpsCells = collectRpsCells(grid).slice();
+  if (rpsCells.length <= minKeep) return;
+  shuffleInPlace(rpsCells, rng);
+  let targetKeep = chooseTargetKeep(rpsCells.length, minKeep, rng, 0);
+  if (targetKeep === 1 && minKeep === 0) targetKeep = 0;
+  for (let i = targetKeep; i < rpsCells.length; i++) {
+    const cell = rpsCells[i];
+    grid[cell.r][cell.c] = '.';
   }
 };
 
 const thinCornerCounts = (cornerCounts, rng, minKeep) => {
-  if (rng() >= 0.6) return cornerCounts;
   const next = cornerCounts.slice();
-  for (let i = next.length - 1; i >= 0; i--) {
-    if (next.length <= minKeep) break;
-    if (rng() < 0.38) next.splice(i, 1);
+  if (next.length <= minKeep) return next;
+  shuffleInPlace(next, rng);
+  const targetKeep = chooseTargetKeep(next.length, minKeep, rng, 0);
+  while (next.length > targetKeep) {
+    next.pop();
   }
-  return next;
+  return sortCornerCounts(next);
+};
+
+const thinStitches = (stitches, rng, minKeep) => {
+  const next = stitches.slice();
+  if (next.length <= minKeep) return next;
+  shuffleInPlace(next, rng);
+  const targetKeep = chooseTargetKeep(next.length, minKeep, rng, 0);
+  while (next.length > targetKeep) {
+    next.pop();
+  }
+  return sortPairs(next);
+};
+
+const thinWalls = (grid, rng, minKeep) => {
+  const walls = collectWallCells(grid);
+  if (walls.length <= minKeep) return;
+  shuffleInPlace(walls, rng);
+  const targetKeep = chooseTargetKeep(walls.length, minKeep, rng, 0.25);
+  for (let i = targetKeep; i < walls.length; i++) {
+    const cell = walls[i];
+    grid[cell.r][cell.c] = '.';
+  }
 };
 
 const tuneWallMutability = (grid, rng, minMovable, maxMovable) => {
@@ -383,6 +482,42 @@ const tuneWallMutability = (grid, rng, minMovable, maxMovable) => {
   }
 };
 
+const setMovableWallCount = (grid, targetCount) => {
+  const movableCells = [];
+  const staticWallCells = [];
+
+  for (let r = 0; r < grid.length; r++) {
+    for (let c = 0; c < grid[r].length; c++) {
+      const ch = grid[r][c];
+      if (ch === 'm') movableCells.push({ r, c });
+      else if (ch === '#') staticWallCells.push({ r, c });
+    }
+  }
+
+  const totalWalls = movableCells.length + staticWallCells.length;
+  if (totalWalls === 0) return;
+
+  const clampedTarget = Math.min(Math.max(targetCount, 0), totalWalls);
+  let movableCount = movableCells.length;
+
+  if (movableCount > clampedTarget) {
+    for (let i = 0; i < movableCells.length && movableCount > clampedTarget; i++) {
+      const cell = movableCells[i];
+      grid[cell.r][cell.c] = '#';
+      movableCount -= 1;
+    }
+    return;
+  }
+
+  if (movableCount < clampedTarget) {
+    for (let i = 0; i < staticWallCells.length && movableCount < clampedTarget; i++) {
+      const cell = staticWallCells[i];
+      grid[cell.r][cell.c] = 'm';
+      movableCount += 1;
+    }
+  }
+};
+
 const toGridMatrix = (grid) => grid.map((row) => row.split(''));
 const toGridStrings = (grid) => grid.map((row) => row.join(''));
 
@@ -391,6 +526,7 @@ const restoreHintFromSource = (targetGrid, sourceGrid) => {
     for (let c = 0; c < sourceGrid[r].length; c++) {
       const sourceCode = sourceGrid[r][c];
       if (!HINT_CODES.has(sourceCode)) continue;
+      if (HINT_CODES.has(targetGrid[r][c])) continue;
       targetGrid[r][c] = sourceCode;
       return true;
     }
@@ -403,6 +539,7 @@ const restoreRpsFromSource = (targetGrid, sourceGrid) => {
     for (let c = 0; c < sourceGrid[r].length; c++) {
       const sourceCode = sourceGrid[r][c];
       if (!RPS_CODES.has(sourceCode)) continue;
+      if (RPS_CODES.has(targetGrid[r][c])) continue;
       targetGrid[r][c] = sourceCode;
       return true;
     }
@@ -415,6 +552,16 @@ const countHintCells = (grid) => {
   for (let r = 0; r < grid.length; r++) {
     for (let c = 0; c < grid[r].length; c++) {
       if (HINT_CODES.has(grid[r][c])) count += 1;
+    }
+  }
+  return count;
+};
+
+const countRpsCells = (grid) => {
+  let count = 0;
+  for (let r = 0; r < grid.length; r++) {
+    for (let c = 0; c < grid[r].length; c++) {
+      if (RPS_CODES.has(grid[r][c])) count += 1;
     }
   }
   return count;
@@ -442,18 +589,6 @@ const restoreMovableFromSource = (targetGrid, sourceGrid) => {
   return false;
 };
 
-const injectSyntheticRps = (targetGrid) => {
-  for (let r = 0; r < targetGrid.length; r++) {
-    for (let c = 0; c < targetGrid[r].length; c++) {
-      if (targetGrid[r][c] === '.') {
-        targetGrid[r][c] = 'g';
-        return true;
-      }
-    }
-  }
-  return false;
-};
-
 const injectSyntheticHint = (targetGrid, rng) => {
   const empties = [];
   for (let r = 0; r < targetGrid.length; r++) {
@@ -469,7 +604,39 @@ const injectSyntheticHint = (targetGrid, rng) => {
   return true;
 };
 
-const ensureMinimumFeatureFamilies = (target, source, minCount = 2) => {
+const injectSyntheticRpsPair = (targetGrid) => {
+  const empties = [];
+  for (let r = 0; r < targetGrid.length; r++) {
+    for (let c = 0; c < targetGrid[r].length; c++) {
+      if (targetGrid[r][c] === '.') empties.push({ r, c });
+    }
+  }
+  if (empties.length < 2) return false;
+  targetGrid[empties[0].r][empties[0].c] = 'g';
+  targetGrid[empties[1].r][empties[1].c] = 'b';
+  return true;
+};
+
+const injectSyntheticRpsPairRandom = (targetGrid, rng) => {
+  const empties = [];
+  for (let r = 0; r < targetGrid.length; r++) {
+    for (let c = 0; c < targetGrid[r].length; c++) {
+      if (targetGrid[r][c] === '.') empties.push({ r, c });
+    }
+  }
+  if (empties.length < 2) return false;
+  const firstIndex = intFromRng(rng, empties.length);
+  let secondIndex = intFromRng(rng, empties.length - 1);
+  if (secondIndex >= firstIndex) secondIndex += 1;
+
+  const first = empties[firstIndex];
+  const second = empties[secondIndex];
+  targetGrid[first.r][first.c] = 'g';
+  targetGrid[second.r][second.c] = 'b';
+  return true;
+};
+
+const ensureMinimumFeatureFamilies = (target, source, rng, requiredFeature, minCount = 2) => {
   const sourceGrid = toGridMatrix(source.grid);
   const targetGrid = toGridMatrix(target.grid);
 
@@ -524,9 +691,18 @@ const ensureMinimumFeatureFamilies = (target, source, minCount = 2) => {
     features = currentFeatures();
   }
 
-  if (features.featureCount < minCount && !features.rps) {
-    injectSyntheticRps(targetGrid);
+  if (features.featureCount < minCount && !features.movable) {
+    restoreMovableFromSource(targetGrid, sourceGrid);
     features = currentFeatures();
+  }
+
+  if (features.featureCount < minCount && !features.hint) {
+    injectSyntheticHint(targetGrid, rng);
+    features = currentFeatures();
+  }
+
+  if (features.featureCount < minCount && !features.rps && requiredFeature !== 'hint') {
+    injectSyntheticRpsPairRandom(targetGrid, rng);
   }
 
   target.grid = toGridStrings(targetGrid);
@@ -554,6 +730,59 @@ const ensureMinimumHintCount = (target, source, minHints = 2) => {
     if (HINT_CODES.has(targetGrid[cell.r][cell.c])) continue;
     targetGrid[cell.r][cell.c] = cell.code;
     hintCount += 1;
+  }
+
+  target.grid = toGridStrings(targetGrid);
+};
+
+const ensureMinimumRpsCount = (target, source, minRps = 2, rng = null) => {
+  const sourceGrid = toGridMatrix(source.grid);
+  const targetGrid = toGridMatrix(target.grid);
+
+  const sourceRpsCells = [];
+  for (let r = 0; r < sourceGrid.length; r++) {
+    for (let c = 0; c < sourceGrid[r].length; c++) {
+      const code = sourceGrid[r][c];
+      if (RPS_CODES.has(code)) {
+        sourceRpsCells.push({ r, c, code });
+      }
+    }
+  }
+
+  let rpsCount = countRpsCells(targetGrid);
+  for (let i = 0; i < sourceRpsCells.length && rpsCount < minRps; i++) {
+    const cell = sourceRpsCells[i];
+    if (RPS_CODES.has(targetGrid[cell.r][cell.c])) continue;
+    targetGrid[cell.r][cell.c] = cell.code;
+    rpsCount += 1;
+  }
+
+  while (rpsCount < minRps) {
+    if (rng) {
+      if (!injectSyntheticRpsPairRandom(targetGrid, rng)) break;
+    } else if (!injectSyntheticRpsPair(targetGrid)) {
+      break;
+    }
+    rpsCount = countRpsCells(targetGrid);
+  }
+
+  target.grid = toGridStrings(targetGrid);
+};
+
+const normalizeRpsCardinality = (target, source, requiredFeature, rng = null) => {
+  const targetGrid = toGridMatrix(target.grid);
+  let rpsCells = collectRpsCells(targetGrid);
+  if (rpsCells.length === 1 && requiredFeature !== 'rps') {
+    const only = rpsCells[0];
+    targetGrid[only.r][only.c] = '.';
+    target.grid = toGridStrings(targetGrid);
+    return;
+  }
+
+  if (rpsCells.length === 1 && requiredFeature === 'rps') {
+    target.grid = toGridStrings(targetGrid);
+    ensureMinimumRpsCount(target, source, 2, rng);
+    return;
   }
 
   target.grid = toGridStrings(targetGrid);
@@ -651,24 +880,16 @@ const ensureMinimumConstraintDensity = (target, source, minDensity = MIN_CONSTRA
   return density >= minDensity;
 };
 
-const ensureRequiredFeature = (target, source, requiredFeature) => {
+const ensureRequiredFeature = (target, source, requiredFeature, rng) => {
   const sourceGrid = toGridMatrix(source.grid);
   const targetGrid = toGridMatrix(target.grid);
 
-  const ensureHint = () => restoreHintFromSource(targetGrid, sourceGrid);
+  const ensureHint = () => restoreHintFromSource(targetGrid, sourceGrid) || injectSyntheticHint(targetGrid, rng);
   const ensureRps = () => {
-    let hasRps = false;
-    for (let r = 0; r < targetGrid.length; r++) {
-      for (let c = 0; c < targetGrid[r].length; c++) {
-        if (RPS_CODES.has(targetGrid[r][c])) {
-          hasRps = true;
-          break;
-        }
-      }
-      if (hasRps) break;
-    }
+    const hasRps = countRpsCells(targetGrid) > 0;
     if (hasRps) return true;
-    return restoreRpsFromSource(targetGrid, sourceGrid) || injectSyntheticRps(targetGrid);
+    if (restoreRpsFromSource(targetGrid, sourceGrid)) return true;
+    return injectSyntheticRpsPair(targetGrid);
   };
   const ensureCorner = () => {
     if ((target.cornerCounts || []).length > 0) return true;
@@ -726,13 +947,15 @@ const validatePostconditions = (level, requiredFeature) => {
   const density = levelConstraintDensity(level, features);
   const requiredFeatureOk = Boolean(features[requiredFeature]);
   const minimumFeaturesOk = features.featureCount >= 2;
+  const rpsPairOk = features.rpsCount === 0 || features.rpsCount >= 2;
   const rpsHintMinimumOk = requiredFeature !== 'rps' || features.hintCount >= 2;
   const densityOk = density >= MIN_CONSTRAINT_DENSITY;
 
   return {
-    ok: requiredFeatureOk && minimumFeaturesOk && rpsHintMinimumOk && densityOk,
+    ok: requiredFeatureOk && minimumFeaturesOk && rpsPairOk && rpsHintMinimumOk && densityOk,
     requiredFeatureOk,
     minimumFeaturesOk,
+    rpsPairOk,
     rpsHintMinimumOk,
     densityOk,
     density,
@@ -741,42 +964,47 @@ const validatePostconditions = (level, requiredFeature) => {
 };
 
 const enforceDeterministicFallback = (target, source, requiredFeature, rng) => {
-  ensureRequiredFeature(target, source, requiredFeature);
-  ensureMinimumFeatureFamilies(target, source, 2);
+  ensureRequiredFeature(target, source, requiredFeature, rng);
+  ensureMinimumFeatureFamilies(target, source, rng, requiredFeature, 2);
   if (requiredFeature === 'rps') {
     ensureMinimumHintCount(target, source, 2);
+    ensureMinimumRpsCount(target, source, 2, rng);
   }
+  normalizeRpsCardinality(target, source, requiredFeature, rng);
   ensureMinimumConstraintDensity(target, source, MIN_CONSTRAINT_DENSITY);
 
   let validation = validatePostconditions(target, requiredFeature);
-  if (validation.requiredFeatureOk && validation.minimumFeaturesOk && validation.rpsHintMinimumOk && validation.densityOk) {
+  if (validation.requiredFeatureOk && validation.minimumFeaturesOk && validation.rpsPairOk && validation.rpsHintMinimumOk && validation.densityOk) {
     return validation;
   }
 
   const grid = toGridMatrix(target.grid);
 
   if (!validation.requiredFeatureOk && requiredFeature === 'rps') {
-    injectSyntheticRps(grid);
+    ensureMinimumRpsCount(target, source, 2, rng);
   } else if (!validation.requiredFeatureOk && requiredFeature === 'hint') {
     injectSyntheticHint(grid, rng);
+    target.grid = toGridStrings(grid);
   }
 
   if (!validation.minimumFeaturesOk) {
-    if (!validation.features.rps) injectSyntheticRps(grid);
-    if (!validation.features.hint) injectSyntheticHint(grid, rng);
+    target.grid = toGridStrings(grid);
+    ensureMinimumFeatureFamilies(target, source, rng, requiredFeature, 2);
+  }
+
+  if (!validation.rpsPairOk) {
+    target.grid = toGridStrings(grid);
+    normalizeRpsCardinality(target, source, requiredFeature, rng);
   }
 
   if (!validation.rpsHintMinimumOk) {
-    while (countHintCells(grid) < 2) {
-      if (!injectSyntheticHint(grid, rng)) break;
-    }
+    ensureMinimumHintCount(target, source, 2);
   }
 
   target.grid = toGridStrings(grid);
   target.stitches = sortPairs(target.stitches || []);
   target.cornerCounts = sortCornerCounts(target.cornerCounts || []);
 
-  // Density repair is explicit: succeed here or let caller retry another transform/base.
   if (!ensureMinimumConstraintDensity(target, source, MIN_CONSTRAINT_DENSITY)) {
     validation = validatePostconditions(target, requiredFeature);
     return validation;
@@ -791,64 +1019,64 @@ const mutateSafely = (transformed, rng, requiredFeature) => {
   const sourceGrid = transformed.grid.map((row) => row);
 
   applyRpsShift(grid, intFromRng(rng, 3));
+  thinWalls(grid, rng, requiredFeature === 'movable' ? 1 : 0);
   thinHints(grid, rng, requiredFeature === 'rps' ? 2 : (requiredFeature === 'hint' ? 1 : 0));
+  thinRps(grid, rng, requiredFeature === 'rps' ? 2 : 0);
+  if (rng() < (requiredFeature === 'rps' ? 0.08 : 0.12)) {
+    injectSyntheticRpsPairRandom(grid, rng);
+  }
 
-  let cornerCounts = thinCornerCounts(
+  const cornerCounts = thinCornerCounts(
     transformed.cornerCounts || [],
     rng,
-    requiredFeature === 'corner' ? 2 : 0,
+    requiredFeature === 'corner' ? 1 : 0,
+  );
+  const stitches = thinStitches(
+    transformed.stitches || [],
+    rng,
+    requiredFeature === 'stitch' ? 1 : 0,
   );
 
-  const maxMovableWalls = requiredFeature === 'rps' ? 1 : 2;
-  tuneWallMutability(grid, rng, requiredFeature === 'movable' ? 1 : 0, maxMovableWalls);
+  tuneWallMutability(grid, rng, requiredFeature === 'movable' ? 1 : 0, 6);
+  const totalWalls = (() => {
+    let count = 0;
+    for (let r = 0; r < grid.length; r++) {
+      for (let c = 0; c < grid[r].length; c++) {
+        if (grid[r][c] === '#' || grid[r][c] === 'm') count += 1;
+      }
+    }
+    return count;
+  })();
+  if (totalWalls > 0) {
+    const minMovable = requiredFeature === 'movable' ? 1 : 0;
+    const maxMovable = Math.min(totalWalls, requiredFeature === 'movable' ? totalWalls : 12);
+    const movableRange = maxMovable - minMovable + 1;
+    const targetMovable = minMovable + intFromRng(rng, Math.max(1, movableRange));
+    setMovableWallCount(grid, targetMovable);
+  }
 
   const out = {
     grid: toGridStrings(grid),
-    stitches: sortPairs((transformed.stitches || []).slice()),
+    stitches,
     cornerCounts: sortCornerCounts(cornerCounts),
   };
 
-  ensureRequiredFeature(
-    out,
-    {
-      grid: sourceGrid,
-      stitches: transformed.stitches || [],
-      cornerCounts: transformed.cornerCounts || [],
-    },
-    requiredFeature,
-  );
+  const source = {
+    grid: sourceGrid,
+    stitches: transformed.stitches || [],
+    cornerCounts: transformed.cornerCounts || [],
+  };
 
-  ensureMinimumFeatureFamilies(
-    out,
-    {
-      grid: sourceGrid,
-      stitches: transformed.stitches || [],
-      cornerCounts: transformed.cornerCounts || [],
-    },
-    2,
-  );
+  ensureRequiredFeature(out, source, requiredFeature, rng);
+  ensureMinimumFeatureFamilies(out, source, rng, requiredFeature, 2);
 
   if (requiredFeature === 'rps') {
-    ensureMinimumHintCount(
-      out,
-      {
-        grid: sourceGrid,
-        stitches: transformed.stitches || [],
-        cornerCounts: transformed.cornerCounts || [],
-      },
-      2,
-    );
+    ensureMinimumHintCount(out, source, 2);
+    ensureMinimumRpsCount(out, source, 2, rng);
   }
 
-  ensureMinimumConstraintDensity(
-    out,
-    {
-      grid: sourceGrid,
-      stitches: transformed.stitches || [],
-      cornerCounts: transformed.cornerCounts || [],
-    },
-    MIN_CONSTRAINT_DENSITY,
-  );
+  normalizeRpsCardinality(out, source, requiredFeature, rng);
+  ensureMinimumConstraintDensity(out, source, MIN_CONSTRAINT_DENSITY);
   return out;
 };
 
@@ -904,13 +1132,12 @@ const featureLabel = (feature) => {
   }
 };
 
-export function generateInfiniteLevel(infiniteIndex) {
-  if (!Number.isInteger(infiniteIndex) || infiniteIndex < 0) {
-    throw new Error(`infiniteIndex must be a non-negative integer, got: ${infiniteIndex}`);
-  }
+const generateInfiniteLevelCore = (infiniteIndex, variantId) => {
+  assertInfiniteIndex(infiniteIndex);
+  assertVariantId(variantId);
 
   const requiredFeature = INFINITE_FEATURE_CYCLE[infiniteIndex % INFINITE_FEATURE_CYCLE.length];
-  const seed = mix32(hashString32(`${INFINITE_GLOBAL_SEED}:${infiniteIndex}`));
+  const seed = mix32(hashString32(`${INFINITE_GLOBAL_SEED}:${infiniteIndex}:variant:${variantId}`));
   const pool = FEATURE_POOLS[requiredFeature];
   const baseAttemptLimit = Math.max(
     1,
@@ -919,8 +1146,11 @@ export function generateInfiniteLevel(infiniteIndex) {
   let failureContext = null;
 
   for (let baseAttempt = 0; baseAttempt < baseAttemptLimit; baseAttempt++) {
-    const base = pickBaseEntry(requiredFeature, infiniteIndex, seed, baseAttempt);
-    const transformStartSeed = deriveSeed(seed, `transform-start:${infiniteIndex}:${baseAttempt}:${base.index}`);
+    const base = pickBaseEntry(requiredFeature, infiniteIndex, seed, baseAttempt + variantId);
+    const transformStartSeed = deriveSeed(
+      seed,
+      `transform-start:${infiniteIndex}:${variantId}:${baseAttempt}:${base.index}`,
+    );
     const transformStart = transformStartSeed % TRANSFORMS.length;
 
     for (let transformAttempt = 0; transformAttempt < TRANSFORMS.length; transformAttempt++) {
@@ -928,11 +1158,11 @@ export function generateInfiniteLevel(infiniteIndex) {
       const transformed = applyTransform(base, transformIndex);
       const mutateSeed = deriveSeed(
         seed,
-        `mutate:${infiniteIndex}:${baseAttempt}:${transformIndex}:${base.index}`,
+        `mutate:${infiniteIndex}:${variantId}:${baseAttempt}:${transformIndex}:${base.index}`,
       );
       const fallbackSeed = deriveSeed(
         seed,
-        `fallback:${infiniteIndex}:${baseAttempt}:${transformIndex}:${base.index}`,
+        `fallback:${infiniteIndex}:${variantId}:${baseAttempt}:${transformIndex}:${base.index}`,
       );
       const mutated = mutateSafely(transformed, makeRng(mutateSeed), requiredFeature);
       const validation = enforceDeterministicFallback(
@@ -947,20 +1177,19 @@ export function generateInfiniteLevel(infiniteIndex) {
       );
 
       if (validation.ok) {
-        const displayIndex = infiniteIndex + 1;
         return {
-          name: `Infinite #${displayIndex}`,
-          desc: `Deterministic ${TRANSFORMS[transformIndex].id} remix focused on ${featureLabel(requiredFeature)}.`,
-          grid: mutated.grid,
-          stitches: mutated.stitches,
-          cornerCounts: mutated.cornerCounts,
-          infiniteMeta: {
-            version: 1,
-            index: infiniteIndex,
+          level: {
+            grid: mutated.grid,
+            stitches: mutated.stitches,
+            cornerCounts: mutated.cornerCounts,
+          },
+          meta: {
+            version: 2,
             requiredFeature,
             transform: TRANSFORMS[transformIndex].id,
             baseLevelIndex: base.index,
             seed,
+            variantId,
           },
         };
       }
@@ -974,9 +1203,105 @@ export function generateInfiniteLevel(infiniteIndex) {
   }
 
   throw new Error(
-    `Failed to generate infinite level ${infiniteIndex} after deterministic retries` +
+    `Failed to generate infinite level ${infiniteIndex} (variant ${variantId}) after deterministic retries` +
     (failureContext
       ? ` (required=${requiredFeature}, base=${failureContext.baseIndex}, transform=${failureContext.transform}, density=${failureContext.validation.density.toFixed(3)})`
       : ''),
   );
+};
+
+const decorateInfiniteLevel = (infiniteIndex, core) => {
+  const displayIndex = infiniteIndex + 1;
+  return {
+    name: `Infinite #${displayIndex}`,
+    desc: `Deterministic ${core.meta.transform} remix focused on ${featureLabel(core.meta.requiredFeature)}.`,
+    grid: core.level.grid,
+    stitches: core.level.stitches,
+    cornerCounts: core.level.cornerCounts,
+    infiniteMeta: {
+      ...core.meta,
+      index: infiniteIndex,
+    },
+  };
+};
+
+export const generateInfiniteLevelFromVariant = (infiniteIndex, variantId) =>
+  decorateInfiniteLevel(infiniteIndex, generateInfiniteLevelCore(infiniteIndex, variantId));
+
+export const selectDefaultInfiniteCandidate = (infiniteIndex) => {
+  assertInfiniteIndex(infiniteIndex);
+
+  let best = null;
+  let firstError = null;
+  const rankSeed = mix32(hashString32(`${INFINITE_GLOBAL_SEED}:rank:${infiniteIndex}`));
+  const considerVariant = (variantId) => {
+    let level = null;
+    try {
+      level = generateInfiniteLevelFromVariant(infiniteIndex, variantId);
+    } catch (error) {
+      if (!firstError) firstError = error;
+      return;
+    }
+    const fingerprint = canonicalConstraintFingerprint(level);
+    const saltedRank = mix32(hashString32(fingerprint.key) ^ rankSeed);
+    const rankKey = `${saltedRank.toString(16).padStart(8, '0')}:${fingerprint.laneA}:${fingerprint.laneB}`;
+
+    if (
+      best === null ||
+      rankKey < best.rankKey ||
+      (rankKey === best.rankKey && variantId < best.variantId)
+    ) {
+      best = {
+        variantId,
+        level,
+        rankKey,
+        canonicalSignature: fingerprint.signature,
+      };
+    }
+  };
+
+  for (let variantId = 0; variantId < INFINITE_CANDIDATE_VARIANTS; variantId++) {
+    considerVariant(variantId);
+  }
+
+  if (!best) {
+    for (
+      let variantId = INFINITE_CANDIDATE_VARIANTS;
+      variantId < INFINITE_CANDIDATE_VARIANTS + INFINITE_VARIANT_RESCUE_PROBES;
+      variantId++
+    ) {
+      considerVariant(variantId);
+      if (best) break;
+    }
+  }
+
+  if (!best) {
+    throw (firstError || new Error(`Unable to materialize default variants for infinite level ${infiniteIndex}`));
+  }
+
+  return best;
+};
+
+export const selectDefaultInfiniteVariant = (infiniteIndex) =>
+  selectDefaultInfiniteCandidate(infiniteIndex).variantId;
+
+const resolveOverrideVariantId = (infiniteIndex) => {
+  const override = INFINITE_OVERRIDE_BY_INDEX?.[infiniteIndex];
+  if (Number.isInteger(override) && override >= 0) return override;
+  return null;
+};
+
+export function generateInfiniteLevel(infiniteIndex) {
+  assertInfiniteIndex(infiniteIndex);
+
+  const overrideVariantId = resolveOverrideVariantId(infiniteIndex);
+  if (overrideVariantId !== null) {
+    try {
+      return generateInfiniteLevelFromVariant(infiniteIndex, overrideVariantId);
+    } catch {
+      // Ignore broken/stale override entry and use default variant selection.
+    }
+  }
+
+  return selectDefaultInfiniteCandidate(infiniteIndex).level;
 }
