@@ -116,6 +116,7 @@ export function bindInputHandlers(refs, state, onStateChange = () => { }) {
     if (activePointerId === null || e.pointerId !== activePointerId) return;
 
     if (dragMode === 'path') {
+      if (e.cancelable) e.preventDefault();
       let cell = cellFromPoint(e.clientX, e.clientY);
 
       if (pathDrag) {
@@ -222,17 +223,16 @@ export function bindInputHandlers(refs, state, onStateChange = () => { }) {
           pathDragCursor: { r: cell.r, c: cell.c },
         });
       }
-      e.preventDefault();
       return;
     }
 
     if (dragMode === 'wall') {
+      if (e.cancelable) e.preventDefault();
       moveWallDragGhost(e.clientX, e.clientY);
       const cell = cellFromPoint(e.clientX, e.clientY);
       if (!cell) {
         wallDrag.hover = null;
         clearDropTarget();
-        e.preventDefault();
         return;
       }
       if (state.canDropWall(wallDrag.from, cell)) {
@@ -242,7 +242,6 @@ export function bindInputHandlers(refs, state, onStateChange = () => { }) {
         wallDrag.hover = null;
         clearDropTarget();
       }
-      e.preventDefault();
     }
   };
 
