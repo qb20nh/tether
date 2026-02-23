@@ -128,11 +128,11 @@ export default {
     },
     "pilot_11": {
       "name": "Pilot 11) Corner Weave (6x6)",
-      "desc": "A mix of corner counts, directional hints, and stitches. More than one solution can satisfy the constraints."
+      "desc": "A mix of corner counts, directional hints, and stitches."
     },
     "pilot_12": {
       "name": "Pilot 12) Trinity Weave (7x7)",
-      "desc": "A hardest puzzle where Rock-Paper-Scissors constraints cross stitches."
+      "desc": "A puzzle where Rock-Paper-Scissors constraints cross stitches."
     }
   }
 }

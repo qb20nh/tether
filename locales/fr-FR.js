@@ -128,11 +128,11 @@ export default {
     },
     "pilot_11": {
       "name": "Pilote 11) Tissage d'angles (6x6)",
-      "desc": "Un mélange de comptage des coins, d’indices directionnels et de points de couture. Plus d’une solution peut respecter les contraintes."
+      "desc": "Un mélange de comptage des coins, d’indices directionnels et de points de couture."
     },
     "pilot_12": {
       "name": "Pilote 12) Tissage trinaire (7x7)",
-      "desc": "Le puzzle le plus difficile : les contraintes RPS se croisent avec les points de couture."
+      "desc": "Un puzzle où les contraintes RPS se croisent avec les points de couture."
     }
   }
 }

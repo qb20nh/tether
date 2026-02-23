@@ -128,11 +128,11 @@ export default {
     },
     "pilot_11": {
       "name": "Pilot 11) Eckengeflecht (6x6)",
-      "desc": "Eine Mischung aus Eckenzählungen, Richtungs-Hinweisen und Nähten. Es gibt mehr als eine Lösung, die alle Einschränkungen erfüllt."
+      "desc": "Eine Mischung aus Eckenzählungen, Richtungs-Hinweisen und Nähten."
     },
     "pilot_12": {
       "name": "Pilot 12) Trinitätsgeflecht (7x7)",
-      "desc": "Das schwierigste Rätsel: Die RPS-Einschränkungen kreuzen sich mit Nähten."
+      "desc": "Ein Rätsel, in dem sich RPS-Einschränkungen mit Nähten kreuzen."
     }
   }
 }

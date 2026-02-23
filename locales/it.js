@@ -128,11 +128,11 @@ export default {
     },
     "pilot_11": {
       "name": "Pilota 11) Intreccio d'angoli (6x6)",
-      "desc": "Un mix di conteggi d'angolo, suggerimenti direzionali e cuciture. Più soluzioni possono soddisfare i vincoli."
+      "desc": "Un mix di conteggi d'angolo, suggerimenti direzionali e cuciture."
     },
     "pilot_12": {
       "name": "Pilota 12) Trama trinitaria (7x7)",
-      "desc": "Il rompicapo più difficile, dove i vincoli RPS si incrociano con le cuciture."
+      "desc": "Un rompicapo in cui i vincoli RPS si incrociano con le cuciture."
     }
   }
 }

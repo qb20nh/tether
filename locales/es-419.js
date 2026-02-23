@@ -128,11 +128,11 @@ export default {
     },
     "pilot_11": {
       "name": "Piloto 11) Tejido de esquinas (6x6)",
-      "desc": "Una mezcla de conteo de esquinas, pistas de dirección y puntadas. Puede haber más de una solución que satisfaga las restricciones."
+      "desc": "Una mezcla de conteo de esquinas, pistas de dirección y puntadas."
     },
     "pilot_12": {
       "name": "Piloto 12) Tejido trinitario (7x7)",
-      "desc": "El rompecabezas más difícil, donde las restricciones de Piedra-Papel-Tijeras se cruzan con las puntadas."
+      "desc": "Un rompecabezas donde las restricciones de Piedra-Papel-Tijeras se cruzan con las puntadas."
     }
   }
 }

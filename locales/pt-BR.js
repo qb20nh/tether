@@ -128,11 +128,11 @@ export default {
     },
     "pilot_11": {
       "name": "Piloto 11) Tecido de cantos (6x6)",
-      "desc": "Uma mistura de contagem de cantos, dicas direcionais e costuras. Mais de uma solução pode satisfazer as restrições."
+      "desc": "Uma mistura de contagem de cantos, dicas direcionais e costuras."
     },
     "pilot_12": {
       "name": "Piloto 12) Tecido trinitário (7x7)",
-      "desc": "O quebra-cabeça mais difícil, onde as restrições de Pedra, Papel e Tesoura cruzam as costuras."
+      "desc": "Um quebra-cabeça em que as restrições de Pedra, Papel e Tesoura cruzam as costuras."
     }
   }
 }
