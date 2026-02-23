@@ -118,7 +118,7 @@ export function bindInputHandlers(refs, state, onStateChange = () => { }) {
     if (dragMode === 'path') {
       let cell = cellFromPoint(e.clientX, e.clientY);
 
-      if (cell && pathDrag) {
+      if (pathDrag) {
         const snapshotForInput = state.getSnapshot();
         const headNode = pathDrag.side === 'start'
           ? snapshotForInput.path[0]
@@ -128,10 +128,11 @@ export function bindInputHandlers(refs, state, onStateChange = () => { }) {
           : snapshotForInput.path[snapshotForInput.path.length - 2];
 
         if (headNode) {
-          const drRaw = Math.abs(cell.r - headNode.r);
-          const dcRaw = Math.abs(cell.c - headNode.c);
+          const drRaw = cell ? Math.abs(cell.r - headNode.r) : 0;
+          const dcRaw = cell ? Math.abs(cell.c - headNode.c) : 0;
+          const shouldResolveByPointer = !cell || (drRaw <= 1 && dcRaw <= 1);
 
-          if (drRaw <= 1 && dcRaw <= 1) {
+          if (shouldResolveByPointer) {
             const rect = refs.gridEl.getBoundingClientRect();
             const px = e.clientX - rect.left;
             const py = e.clientY - rect.top;
