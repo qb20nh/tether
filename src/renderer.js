@@ -14,6 +14,7 @@ let pathAnimationLastTs = 0;
 let latestPathSnapshot = null;
 let latestPathRefs = null;
 let latestPathStatuses = null;
+let latestPathMainFlowTravel = 0;
 
 const PATH_FLOW_SPEED = -32;
 const PATH_FLOW_CYCLE = 128;
@@ -31,6 +32,16 @@ const pointsMatch = (a, b) => a && b && a.r === b.r && a.c === b.c;
 const cellDistance = (a, b) => {
   if (!a || !b) return 1;
   return Math.hypot(a.r - b.r, a.c - b.c);
+};
+
+const isPathReversed = (nextPath, previousPath) => {
+  if (!Array.isArray(nextPath) || !Array.isArray(previousPath)) return false;
+  if (nextPath.length !== previousPath.length || nextPath.length < 2) return false;
+
+  for (let i = 0; i < nextPath.length; i++) {
+    if (!pointsMatch(nextPath[i], previousPath[previousPath.length - 1 - i])) return false;
+  }
+  return true;
 };
 
 const normalizeFlowOffset = (value, cycle = PATH_FLOW_CYCLE) => {
@@ -138,7 +149,13 @@ const addOrderedGradientStops = (gradient, stops) => {
   if (last.position < 1) gradient.addColorStop(1, last.color);
 };
 
-const buildFlowGradientStops = (travelStart, travelEnd, flowOffset, cycle, pulse) => {
+const buildFlowGradientStops = (
+  travelStart,
+  travelEnd,
+  flowOffset,
+  cycle,
+  pulse,
+) => {
   const length = travelEnd - travelStart;
   if (!Number.isFinite(length) || length <= 0) {
     return [
@@ -162,15 +179,17 @@ const buildFlowGradientStops = (travelStart, travelEnd, flowOffset, cycle, pulse
   const riseDist = pulse * Math.max(0, Math.min(1, PATH_FLOW_RISE));
   const dropDist = pulse * Math.max(0, Math.min(1, PATH_FLOW_DROP));
   const boundaries = [0, riseDist, dropDist, pulse];
-
-  const shiftedStart = travelStart + flowOffset;
-  const shiftedEnd = travelEnd + flowOffset;
+  const phaseStart = travelStart + flowOffset;
+  const phaseEnd = travelEnd + flowOffset;
+  const phaseMin = Math.min(phaseStart, phaseEnd);
+  const phaseMax = Math.max(phaseStart, phaseEnd);
 
   for (const boundary of boundaries) {
-    const nStart = Math.floor((shiftedStart - boundary) / cycle);
-    const nEnd = Math.floor((shiftedEnd - boundary) / cycle);
+    const nStart = Math.ceil((phaseMin - boundary) / cycle);
+    const nEnd = Math.floor((phaseMax - boundary) / cycle);
     for (let n = nStart; n <= nEnd; n++) {
-      const travel = n * cycle + boundary - flowOffset;
+      const phase = (n * cycle) + boundary;
+      const travel = phase - flowOffset;
       addStopAtTravel(travel);
     }
   }
@@ -315,7 +334,10 @@ const animatePathFlow = (timestamp) => {
     const dt = Math.max(0, (timestamp - pathAnimationLastTs) / 1000);
     if (Number.isFinite(dt)) {
       const flow = getPathFlowMetrics(latestPathRefs);
-      pathAnimationOffset = normalizeFlowOffset(pathAnimationOffset + dt * flow.speed, flow.cycle);
+      pathAnimationOffset = normalizeFlowOffset(
+        pathAnimationOffset + dt * flow.speed,
+        flow.cycle,
+      );
     }
   }
 
@@ -810,10 +832,29 @@ export function updateCells(snapshot, results, refs) {
 
 export function drawAll(snapshot, refs, statuses) {
   const previousPath = latestPathSnapshot?.path || null;
-  const shift = getHeadShiftDelta(snapshot.path, previousPath, refs);
-  if (shift !== 0) {
-    const flow = getPathFlowMetrics(refs);
-    pathAnimationOffset = normalizeFlowOffset(pathAnimationOffset + shift, flow.cycle);
+  const flow = getPathFlowMetrics(refs);
+
+  if (isPathReversed(snapshot.path, previousPath)) {
+    const reverseTravel = latestPathMainFlowTravel;
+    if (reverseTravel > 0) {
+      const transitionAnchorUnit = Math.max(
+        0,
+        Math.min(1, (PATH_FLOW_RISE + PATH_FLOW_DROP) * 0.5),
+      );
+      const transitionAnchor = flow.pulse * transitionAnchorUnit;
+      pathAnimationOffset = normalizeFlowOffset(
+        (2 * transitionAnchor) - reverseTravel - pathAnimationOffset,
+        flow.cycle,
+      );
+    }
+  } else {
+    const shift = getHeadShiftDelta(snapshot.path, previousPath, refs);
+    if (shift !== 0) {
+      pathAnimationOffset = normalizeFlowOffset(
+        pathAnimationOffset + shift,
+        flow.cycle,
+      );
+    }
   }
 
   latestPathSnapshot = snapshot;
@@ -951,7 +992,10 @@ function drawCrossStitches(snapshot, refs, ctx, vertexStatus = new Map()) {
 }
 
 function drawPathLine(snapshot, refs, ctx, flowOffset = 0) {
-  if (snapshot.path.length === 0) return;
+  if (snapshot.path.length === 0) {
+    latestPathMainFlowTravel = 0;
+    return;
+  }
 
   const previousAlpha = ctx.globalAlpha;
   ctx.globalAlpha = 1;
@@ -989,13 +1033,15 @@ function drawPathLine(snapshot, refs, ctx, flowOffset = 0) {
     ctx.stroke();
 
     if (shouldAnimatePathFlow(snapshot)) {
-      drawFlowRibbon(adjustedPoints, ctx, width, flowOffset, {
+      latestPathMainFlowTravel = drawFlowRibbon(adjustedPoints, ctx, width, flowOffset, {
         startRadius,
         arrowLength,
         endHalfWidth: halfHeadWidth,
         drawMain: true,
         drawTips: false,
       }, flowMetrics);
+    } else {
+      latestPathMainFlowTravel = 0;
     }
   }
 
@@ -1045,7 +1091,7 @@ function drawPathLine(snapshot, refs, ctx, flowOffset = 0) {
 }
 
 function drawFlowRibbon(points, ctx, width, flowOffset, tipOptions = {}, flowMetrics = null) {
-  if (points.length < 2 || !Number.isFinite(flowOffset)) return;
+  if (points.length < 2 || !Number.isFinite(flowOffset)) return 0;
 
   const resolvedMetrics = flowMetrics || getPathFlowMetrics();
   const cycle = Math.max(18, resolvedMetrics.cycle);
@@ -1312,7 +1358,7 @@ function drawFlowRibbon(points, ctx, width, flowOffset, tipOptions = {}, flowMet
   if (!canUseConic) {
     if (drawTips) drawStartTipGradient();
     ctx.restore();
-    return;
+    return flowTravel;
   }
 
   if (drawMain) {
@@ -1367,6 +1413,7 @@ function drawFlowRibbon(points, ctx, width, flowOffset, tipOptions = {}, flowMet
 
   if (drawTips) drawStartTipGradient();
   ctx.restore();
+  return flowTravel;
 }
 
 function drawCornerCounts(snapshot, refs, ctx, cornerVertexStatus = new Map()) {
