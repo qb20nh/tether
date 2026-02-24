@@ -162,11 +162,19 @@ export function evaluateHints(snapshot, options = {}) {
     total++;
     const vk = keyOf(vr, vc);
     const actual = countCornerOrthConnections(vr, vc, orthEdges);
+    const allAdjacentVisited = (
+      snapshot.visited.has(keyOf(vr - 1, vc - 1))
+      && snapshot.visited.has(keyOf(vr - 1, vc))
+      && snapshot.visited.has(keyOf(vr, vc - 1))
+      && snapshot.visited.has(keyOf(vr, vc))
+    );
 
     let state = 'pending';
     if (isComplete) {
       state = actual === target ? 'good' : 'bad';
     } else if (actual > target) {
+      state = 'bad';
+    } else if (allAdjacentVisited && actual !== target) {
       state = 'bad';
     } else if (actual === target) {
       state = 'good';
