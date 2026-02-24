@@ -14,6 +14,7 @@ export function createGameState(levelSource) {
   let path = [];
   let visited = new Set();
   let gridData = [];
+  let baseGridData = [];
 
   let stitches = [];
   let stitchSet = new Set();
@@ -49,7 +50,8 @@ export function createGameState(levelSource) {
     const level = getLevelByIndex(index);
     if (!level) throw new Error(`Missing level at index ${index}`);
     const parsed = parseLevel(level);
-    gridData = parsed.g;
+    baseGridData = parsed.g.map((row) => row.slice());
+    gridData = baseGridData.map((row) => row.slice());
     rows = parsed.rows;
     cols = parsed.cols;
     totalUsable = parsed.usable;
@@ -60,6 +62,137 @@ export function createGameState(levelSource) {
     buildStitches();
     path = [];
     visited = new Set();
+  };
+
+  const restoreMutableState = (saved) => {
+    if (!saved || typeof saved !== 'object') return false;
+    if (rows <= 0 || cols <= 0) return false;
+    const parsePair = (entry) => {
+      const r = Array.isArray(entry) ? entry[0] : entry?.r;
+      const c = Array.isArray(entry) ? entry[1] : entry?.c;
+      if (!Number.isInteger(r) || !Number.isInteger(c)) return null;
+      return [r, c];
+    };
+
+    const buildGridFromMovableWalls = (rawMovableWalls = null) => {
+      const baseMovableWalls = [];
+      const nextGrid = baseGridData.map((row) => row.slice());
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+          if (baseGridData[r][c] === CELL_TYPES.MOVABLE_WALL) {
+            baseMovableWalls.push([r, c]);
+            nextGrid[r][c] = CELL_TYPES.EMPTY;
+          }
+        }
+      }
+
+      let movableEntries = rawMovableWalls;
+      if (movableEntries === null || movableEntries === undefined) {
+        movableEntries = baseMovableWalls;
+      }
+      if (!Array.isArray(movableEntries)) return null;
+
+      const nextMovableWalls = [];
+      const seen = new Set();
+      for (let i = 0; i < movableEntries.length; i++) {
+        const pair = parsePair(movableEntries[i]);
+        if (!pair) return null;
+
+        const [r, c] = pair;
+        if (!inBounds(rows, cols, r, c)) return null;
+
+        const k = keyOf(r, c);
+        if (seen.has(k)) return null;
+        seen.add(k);
+
+        const baseCell = baseGridData[r][c];
+        if (baseCell !== CELL_TYPES.EMPTY && baseCell !== CELL_TYPES.MOVABLE_WALL) return null;
+
+        nextMovableWalls.push(pair);
+      }
+
+      if (nextMovableWalls.length !== baseMovableWalls.length) return null;
+      for (let i = 0; i < nextMovableWalls.length; i++) {
+        const [r, c] = nextMovableWalls[i];
+        nextGrid[r][c] = CELL_TYPES.MOVABLE_WALL;
+      }
+
+      return nextGrid;
+    };
+
+    const buildGridFromLegacyState = (rawGrid) => {
+      if (!Array.isArray(rawGrid) || rawGrid.length !== rows) return null;
+
+      const nextGrid = [];
+      let movableCount = 0;
+      let baseMovableCount = 0;
+
+      for (let r = 0; r < rows; r++) {
+        const rawRow = rawGrid[r];
+        if (typeof rawRow !== 'string' || rawRow.length !== cols) return null;
+        const row = rawRow.split('');
+        for (let c = 0; c < cols; c++) {
+          const baseCell = baseGridData[r][c];
+          const candidateCell = row[c];
+          const canChange = baseCell === CELL_TYPES.EMPTY || baseCell === CELL_TYPES.MOVABLE_WALL;
+
+          if (baseCell === CELL_TYPES.MOVABLE_WALL) baseMovableCount += 1;
+          if (candidateCell === CELL_TYPES.MOVABLE_WALL) movableCount += 1;
+
+          if (canChange) {
+            if (candidateCell !== CELL_TYPES.EMPTY && candidateCell !== CELL_TYPES.MOVABLE_WALL) return null;
+          } else if (candidateCell !== baseCell) {
+            return null;
+          }
+        }
+        nextGrid.push(row);
+      }
+
+      if (movableCount !== baseMovableCount) return null;
+      return nextGrid;
+    };
+
+    let nextGrid = null;
+    if (Array.isArray(saved.movableWalls)) {
+      nextGrid = buildGridFromMovableWalls(saved.movableWalls);
+    } else if (Array.isArray(saved.grid)) {
+      nextGrid = buildGridFromLegacyState(saved.grid);
+    } else {
+      nextGrid = buildGridFromMovableWalls(null);
+    }
+    if (!nextGrid) return false;
+
+    const rawPath = Array.isArray(saved.path) ? saved.path : [];
+    const nextPath = [];
+    const nextVisited = new Set();
+
+    const isPathUsable = (r, c) => {
+      if (!inBounds(rows, cols, r, c)) return false;
+      const ch = nextGrid[r][c];
+      return ch !== CELL_TYPES.WALL && ch !== CELL_TYPES.MOVABLE_WALL;
+    };
+
+    for (let i = 0; i < rawPath.length; i++) {
+      const pair = parsePair(rawPath[i]);
+      if (!pair) return false;
+      const [r, c] = pair;
+      if (!isPathUsable(r, c)) return false;
+
+      const point = { r, c };
+      const k = keyOf(r, c);
+      if (nextVisited.has(k)) return false;
+
+      const prev = nextPath[nextPath.length - 1];
+      if (prev && !isAdjacentMove({ stitchSet }, prev, point)) return false;
+
+      nextPath.push(point);
+      nextVisited.add(k);
+    }
+
+    gridData = nextGrid;
+    path = nextPath;
+    visited = nextVisited;
+    return true;
   };
 
   const toSnapshot = () => {
@@ -193,6 +326,7 @@ export function createGameState(levelSource) {
 
   return {
     loadLevel,
+    restoreMutableState,
     resetPath,
     undo,
     startOrTryStep,

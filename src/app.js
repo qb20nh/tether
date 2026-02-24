@@ -36,9 +36,14 @@ const LEVEL_PROGRESS_VERSION = 1;
 const INFINITE_PROGRESS_KEY = 'tetherInfiniteProgress';
 const INFINITE_PROGRESS_VERSION = 1;
 const THEME_KEY = 'tetherTheme';
+const SESSION_SAVE_KEY = 'tetherSessionSave';
+const SESSION_SEAL_KEY = 'tetherSessionSeal';
+const SESSION_SAVE_VERSION = 2;
+const SESSION_SIG_HEX_LEN = 24;
 const DEFAULT_THEME = 'dark';
 const CAMPAIGN_LEVEL_COUNT = LEVELS.length;
 const MAX_INFINITE_INDEX = INFINITE_MAX_LEVELS - 1;
+const MAX_ABSOLUTE_LEVEL_INDEX = CAMPAIGN_LEVEL_COUNT + MAX_INFINITE_INDEX;
 const INFINITE_LEVEL_CACHE_LIMIT = 48;
 const PATH_BRACKET_TUTORIAL_LEVEL_INDEX = 0;
 const MOVABLE_BRACKET_TUTORIAL_LEVEL_INDEX = 7;
@@ -180,6 +185,318 @@ const writeInfiniteProgress = () => {
     window.localStorage.setItem(INFINITE_PROGRESS_KEY, JSON.stringify(payload));
   } catch {
     // localStorage might be unavailable in restricted environments.
+  }
+};
+
+const isSavedLevelAllowed = (levelIndex) => {
+  if (!Number.isInteger(levelIndex)) return false;
+
+  if (levelIndex < CAMPAIGN_LEVEL_COUNT) {
+    return levelIndex <= readLevelProgress();
+  }
+
+  if (readLevelProgress() < CAMPAIGN_LEVEL_COUNT) return false;
+  const infiniteIndex = levelIndex - CAMPAIGN_LEVEL_COUNT;
+  if (!Number.isInteger(infiniteIndex) || infiniteIndex < 0) return false;
+  return infiniteIndex <= Math.min(Math.max(readInfiniteProgress(), 0), MAX_INFINITE_INDEX);
+};
+
+const clampSavedLevelIndex = (value) => {
+  if (!Number.isInteger(value)) return null;
+  return Math.min(Math.max(value, 0), MAX_ABSOLUTE_LEVEL_INDEX);
+};
+
+const hashString32 = (input) => {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < input.length; i++) {
+    h ^= input.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return h >>> 0;
+};
+
+const mix32 = (input) => {
+  let x = input >>> 0;
+  x ^= x >>> 16;
+  x = Math.imul(x, 0x7feb352d) >>> 0;
+  x ^= x >>> 15;
+  x = Math.imul(x, 0x846ca68b) >>> 0;
+  x ^= x >>> 16;
+  return x >>> 0;
+};
+
+const toHex32 = (value) => (value >>> 0).toString(16).padStart(8, '0');
+
+const secureEqual = (a, b) => {
+  if (typeof a !== 'string' || typeof b !== 'string') return false;
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) {
+    diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  }
+  return diff === 0;
+};
+
+const randomHex = (byteLength = 16) => {
+  if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
+    const bytes = new Uint8Array(byteLength);
+    crypto.getRandomValues(bytes);
+    return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+  }
+
+  let out = '';
+  for (let i = 0; i < byteLength * 2; i++) {
+    out += Math.floor(Math.random() * 16).toString(16);
+  }
+  return out;
+};
+
+let cachedSessionSeal = null;
+let volatileSessionSeal = null;
+
+const getSessionSeal = () => {
+  if (cachedSessionSeal) return cachedSessionSeal;
+
+  const isHex = (value) => typeof value === 'string' && /^[0-9a-f]{16,128}$/i.test(value);
+  try {
+    const stored = window.localStorage.getItem(SESSION_SEAL_KEY);
+    if (isHex(stored)) {
+      cachedSessionSeal = stored.toLowerCase();
+      return cachedSessionSeal;
+    }
+
+    const created = randomHex(24);
+    window.localStorage.setItem(SESSION_SEAL_KEY, created);
+    cachedSessionSeal = created;
+    return cachedSessionSeal;
+  } catch {
+    if (!volatileSessionSeal) volatileSessionSeal = randomHex(24);
+    return volatileSessionSeal;
+  }
+};
+
+const normalizeSavedPathEntry = (entry) => {
+  const r = Array.isArray(entry) ? entry[0] : entry?.r;
+  const c = Array.isArray(entry) ? entry[1] : entry?.c;
+  if (!Number.isInteger(r) || !Number.isInteger(c)) return null;
+  return [r, c];
+};
+
+const PATH_DIR_FROM_DELTA = Object.freeze({
+  '-1,0': 'u',
+  '1,0': 'd',
+  '0,-1': 'l',
+  '0,1': 'r',
+  '-1,-1': 'q',
+  '-1,1': 'e',
+  '1,-1': 'z',
+  '1,1': 'c',
+});
+
+const PATH_DELTA_FROM_DIR = Object.freeze({
+  u: [-1, 0],
+  d: [1, 0],
+  l: [0, -1],
+  r: [0, 1],
+  q: [-1, -1],
+  e: [-1, 1],
+  z: [1, -1],
+  c: [1, 1],
+});
+
+const encodePathCompact = (path) => {
+  if (!Array.isArray(path) || path.length === 0) return '';
+
+  const first = normalizeSavedPathEntry(path[0]);
+  if (!first) return '';
+
+  const [startR, startC] = first;
+  let encodedDirs = '';
+  let prevR = startR;
+  let prevC = startC;
+
+  for (let i = 1; i < path.length; i++) {
+    const point = normalizeSavedPathEntry(path[i]);
+    if (!point) return '';
+    const [r, c] = point;
+    const dr = r - prevR;
+    const dc = c - prevC;
+    const dir = PATH_DIR_FROM_DELTA[`${dr},${dc}`];
+    if (!dir) return '';
+    encodedDirs += dir;
+    prevR = r;
+    prevC = c;
+  }
+
+  return `${startR.toString(36)}.${startC.toString(36)}:${encodedDirs}`;
+};
+
+const decodePathCompact = (value) => {
+  if (typeof value !== 'string') return null;
+  if (value.length === 0) return [];
+
+  const colonIndex = value.indexOf(':');
+  if (colonIndex <= 0) return null;
+  const head = value.slice(0, colonIndex);
+  const dirs = value.slice(colonIndex + 1);
+
+  const dotIndex = head.indexOf('.');
+  if (dotIndex <= 0 || dotIndex >= head.length - 1) return null;
+  const rRaw = head.slice(0, dotIndex);
+  const cRaw = head.slice(dotIndex + 1);
+  const startR = Number.parseInt(rRaw, 36);
+  const startC = Number.parseInt(cRaw, 36);
+  if (!Number.isInteger(startR) || !Number.isInteger(startC)) return null;
+
+  const points = [[startR, startC]];
+  let r = startR;
+  let c = startC;
+
+  for (let i = 0; i < dirs.length; i++) {
+    const delta = PATH_DELTA_FROM_DIR[dirs[i]];
+    if (!delta) return null;
+    r += delta[0];
+    c += delta[1];
+    points.push([r, c]);
+  }
+
+  return points;
+};
+
+const normalizeSavedMutableState = (value) => {
+  if (!value || typeof value !== 'object') return null;
+  const rawPath = typeof value.path === 'string'
+    ? decodePathCompact(value.path)
+    : (Array.isArray(value.path) ? value.path : []);
+  if (!Array.isArray(rawPath)) return null;
+  const path = [];
+  for (let i = 0; i < rawPath.length; i++) {
+    const normalized = normalizeSavedPathEntry(rawPath[i]);
+    if (!normalized) return null;
+    path.push(normalized);
+  }
+
+  let movableWalls = null;
+  if (value.movableWalls !== undefined) {
+    if (!Array.isArray(value.movableWalls)) return null;
+    movableWalls = [];
+    for (let i = 0; i < value.movableWalls.length; i++) {
+      const normalized = normalizeSavedPathEntry(value.movableWalls[i]);
+      if (!normalized) return null;
+      movableWalls.push(normalized);
+    }
+  }
+
+  return {
+    path,
+    movableWalls,
+  };
+};
+
+const normalizeSavedSingleBoard = (value) => {
+  if (!value || typeof value !== 'object') return null;
+  const levelIndex = clampSavedLevelIndex(value.levelIndex);
+  if (!Number.isInteger(levelIndex)) return null;
+  const mutable = normalizeSavedMutableState(value);
+  if (!mutable) return null;
+  return {
+    levelIndex,
+    path: mutable.path,
+    movableWalls: mutable.movableWalls,
+  };
+};
+
+const buildBoardSignaturePayload = (board) => {
+  if (!board || typeof board !== 'object') return '';
+  const levelIndex = Number.isInteger(board.levelIndex) ? board.levelIndex : -1;
+  const path = Array.isArray(board.path)
+    ? board.path
+      .map((entry) => normalizeSavedPathEntry(entry))
+      .filter(Boolean)
+      .map(([r, c]) => `${r},${c}`)
+      .join(';')
+    : '';
+  const movableWalls = Array.isArray(board.movableWalls)
+    ? board.movableWalls
+      .map((entry) => normalizeSavedPathEntry(entry))
+      .filter(Boolean)
+      .map(([r, c]) => `${r},${c}`)
+      .sort()
+      .join(';')
+    : '';
+  return `v=${SESSION_SAVE_VERSION}|l=${levelIndex}|p=${path}|m=${movableWalls}`;
+};
+
+const computeBoardSignature = (board, seal) => {
+  if (!seal) return '';
+  const payload = buildBoardSignaturePayload(board);
+  const laneA = mix32(hashString32(`${seal}|${payload}|a`));
+  const laneB = mix32(hashString32(`${payload}|${seal}|b`));
+  const laneC = mix32(hashString32(`${seal.length}:${payload}|c`));
+  return `${toHex32(laneA)}${toHex32(laneB)}${toHex32(laneC)}`;
+};
+
+const signBoard = (board) => computeBoardSignature(board, getSessionSeal());
+
+const verifyBoardSignature = (board, signature) => {
+  if (typeof signature !== 'string') return false;
+  const normalizedSig = signature.trim().toLowerCase();
+  if (!/^[0-9a-f]+$/i.test(normalizedSig)) return false;
+  if (normalizedSig.length !== SESSION_SIG_HEX_LEN) return false;
+  const expected = signBoard(board);
+  return secureEqual(expected, normalizedSig);
+};
+
+const toPersistedBoardState = (board) => ({
+  levelIndex: board.levelIndex,
+  path: encodePathCompact(board.path),
+  movableWalls: Array.isArray(board.movableWalls)
+    ? board.movableWalls.map(([r, c]) => [r, c])
+    : null,
+});
+
+const readSessionSave = () => {
+  const emptyResult = {
+    hasData: false,
+    board: null,
+  };
+
+  try {
+    const reject = (clear = false) => {
+      if (clear) {
+        try {
+          window.localStorage.removeItem(SESSION_SAVE_KEY);
+        } catch {
+          // localStorage might be unavailable in restricted environments.
+        }
+      }
+      return emptyResult;
+    };
+
+    const raw = window.localStorage.getItem(SESSION_SAVE_KEY);
+    if (!raw) return emptyResult;
+
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return emptyResult;
+    const parsedVersion = Number.isInteger(parsed.version) ? parsed.version : null;
+    if (parsedVersion !== SESSION_SAVE_VERSION) return reject(true);
+
+    const board = normalizeSavedSingleBoard(parsed.board);
+    if (!board) return reject(true);
+    if (!verifyBoardSignature(board, parsed.sig)) return reject(true);
+    if (!isSavedLevelAllowed(board.levelIndex)) return reject(true);
+
+    return {
+      hasData: true,
+      board,
+    };
+  } catch {
+    try {
+      window.localStorage.removeItem(SESSION_SAVE_KEY);
+    } catch {
+      // localStorage might be unavailable in restricted environments.
+    }
+    return emptyResult;
   }
 };
 
@@ -417,6 +734,7 @@ export function initTetherApp() {
   };
 
   let currentLevelCleared = false;
+  let currentBoardSolved = false;
 
   const syncInfiniteNavigation = (levelIndex, isCleared = false) => {
     if (!isInfiniteAbsIndex(levelIndex)) {
@@ -455,13 +773,122 @@ export function initTetherApp() {
   const onLevelCleared = (levelIndex) => {
     if (isInfiniteAbsIndex(levelIndex)) {
       markInfiniteLevelCleared(toInfiniteIndex(levelIndex));
-      return;
+    } else {
+      markCampaignLevelCleared(levelIndex);
     }
-    markCampaignLevelCleared(levelIndex);
+    currentBoardSolved = true;
+    mutableBoardState = null;
+    queueSessionSave();
   };
 
+  const sessionSaveData = readSessionSave();
+  let mutableBoardState = sessionSaveData.board
+    ? {
+      levelIndex: sessionSaveData.board.levelIndex,
+      path: sessionSaveData.board.path.map(([r, c]) => [r, c]),
+      movableWalls: Array.isArray(sessionSaveData.board.movableWalls)
+        ? sessionSaveData.board.movableWalls.map(([r, c]) => [r, c])
+        : null,
+    }
+    : null;
   const state = createGameState(getLevelAtIndex);
   setLegendIcons(ICONS, refs, ICON_X);
+  let hasLoadedLevel = false;
+  let sessionSaveQueued = false;
+
+  const resolveLoadableLevelIndex = (index) => {
+    const normalized = clampSavedLevelIndex(index);
+    if (!Number.isInteger(normalized)) return null;
+    if (isInfiniteAbsIndex(normalized)) {
+      return ensureInfiniteLevel(clampInfiniteIndex(toInfiniteIndex(normalized)));
+    }
+    return Math.min(normalized, CAMPAIGN_LEVEL_COUNT - 1);
+  };
+
+  const cloneBoardState = (stateValue) => ({
+    levelIndex: stateValue.levelIndex,
+    path: stateValue.path.map(([r, c]) => [r, c]),
+    movableWalls: Array.isArray(stateValue.movableWalls)
+      ? stateValue.movableWalls.map(([r, c]) => [r, c])
+      : null,
+  });
+
+  const serializeMutableBoardState = (snapshot) => {
+    if (!snapshot || !Number.isInteger(snapshot.levelIndex)) return null;
+
+    const level = getLevelAtIndex(snapshot.levelIndex);
+    if (!level || !Array.isArray(level.grid)) return null;
+
+    const path = snapshot.path.map((point) => [point.r, point.c]);
+    if (path.length === 0) return null;
+
+    const collectMovableWalls = (gridRows) => {
+      const walls = [];
+      for (let r = 0; r < gridRows.length; r++) {
+        const row = gridRows[r];
+        for (let c = 0; c < row.length; c++) {
+          if (row[c] === 'm') walls.push([r, c]);
+        }
+      }
+      return walls;
+    };
+
+    const currentMovableWalls = collectMovableWalls(snapshot.gridData);
+
+    return {
+      levelIndex: snapshot.levelIndex,
+      path,
+      movableWalls: currentMovableWalls,
+    };
+  };
+
+  const syncMutableBoardStateFromSnapshot = (snapshot) => {
+    const serialized = serializeMutableBoardState(snapshot);
+    if (!serialized) return false;
+    mutableBoardState = serialized;
+    return true;
+  };
+
+  const persistSessionSave = () => {
+    const snapshot = state.getSnapshot();
+    const didSync = syncMutableBoardStateFromSnapshot(snapshot);
+    if (
+      !didSync
+      && mutableBoardState
+      && mutableBoardState.levelIndex === snapshot.levelIndex
+    ) {
+      mutableBoardState = null;
+    }
+
+    try {
+      if (!mutableBoardState) {
+        window.localStorage.removeItem(SESSION_SAVE_KEY);
+        return;
+      }
+      const board = cloneBoardState(mutableBoardState);
+      const persistedBoard = toPersistedBoardState(board);
+      window.localStorage.setItem(
+        SESSION_SAVE_KEY,
+        JSON.stringify({
+          version: SESSION_SAVE_VERSION,
+          board: persistedBoard,
+          sig: signBoard(board),
+        }),
+      );
+    } catch {
+      // localStorage might be unavailable in restricted environments.
+    }
+  };
+
+  const queueSessionSave = () => {
+    if (sessionSaveQueued) return;
+    sessionSaveQueued = true;
+
+    window.setTimeout(() => {
+      sessionSaveQueued = false;
+      persistSessionSave();
+    }, 150);
+  };
 
   const refreshLevelOptions = () => {
     const currentIndex = state.getSnapshot().levelIndex;
@@ -536,6 +963,7 @@ export function initTetherApp() {
 
   const showLevelGoal = (levelIndex) => {
     currentLevelCleared = isLevelPreviouslyCleared(levelIndex);
+    currentBoardSolved = false;
     setMessage(refs.msgEl, null, baseGoalText(getLevelAtIndex(levelIndex), translate));
     if (refs.nextLevelBtn) {
       refs.nextLevelBtn.textContent = resolveNextButtonLabel(levelIndex);
@@ -689,7 +1117,8 @@ export function initTetherApp() {
       onLevelCleared,
     });
     if (completion) {
-      currentLevelCleared = completion.kind === 'good' || isLevelPreviouslyCleared(snapshot.levelIndex);
+      currentBoardSolved = completion.kind === 'good';
+      currentLevelCleared = currentBoardSolved || isLevelPreviouslyCleared(snapshot.levelIndex);
     }
     syncInfiniteNavigation(snapshot.levelIndex, currentLevelCleared);
     if (completion?.kind === 'good') {
@@ -742,7 +1171,20 @@ export function initTetherApp() {
       targetIndex = Math.min(targetIndex, CAMPAIGN_LEVEL_COUNT - 1);
     }
 
+    if (hasLoadedLevel) {
+      syncMutableBoardStateFromSnapshot(state.getSnapshot());
+    }
+
     state.loadLevel(targetIndex);
+    const savedBoardState = mutableBoardState && mutableBoardState.levelIndex === targetIndex
+      ? mutableBoardState
+      : null;
+    if (savedBoardState) {
+      const restored = state.restoreMutableState(savedBoardState);
+      if (!restored) {
+        mutableBoardState = null;
+      }
+    }
     const snapshot = state.getSnapshot();
 
     if (refs.boardWrap) {
@@ -758,8 +1200,11 @@ export function initTetherApp() {
 
     buildGrid(snapshot, refs, ICONS, ICON_X);
     showLevelGoal(targetIndex);
+    syncMutableBoardStateFromSnapshot(snapshot);
     refreshLevelOptions();
     queueBoardLayout(false);
+    queueSessionSave();
+    hasLoadedLevel = true;
   };
 
   bindInputHandlers(refs, state, (shouldValidate, options = {}) => {
@@ -773,10 +1218,12 @@ export function initTetherApp() {
       const snapshotForGrid = state.getSnapshot();
       buildGrid(snapshotForGrid, refs, ICONS, ICON_X);
       queueBoardLayout(Boolean(shouldValidate), dragEvaluateOptions);
+      queueSessionSave();
       return;
     }
 
     queueBoardLayout(Boolean(shouldValidate), dragEvaluateOptions);
+    queueSessionSave();
   });
 
   refs.levelSel.addEventListener('change', (e) => {
@@ -874,12 +1321,15 @@ export function initTetherApp() {
     const snapshot = state.getSnapshot();
     refresh(snapshot, false);
     showLevelGoal(snapshot.levelIndex);
+    mutableBoardState = null;
+    queueSessionSave();
   });
 
   refs.reverseBtn.addEventListener('click', () => {
     state.reversePath();
     const snapshot = state.getSnapshot();
     refresh(snapshot, true);
+    queueSessionSave();
   });
 
   refs.nextLevelBtn?.addEventListener('click', () => {
@@ -927,15 +1377,21 @@ export function initTetherApp() {
     }, { once: true });
   }
 
+  window.addEventListener('beforeunload', () => {
+    persistSessionSave();
+  });
+
   window.addEventListener('resize', () => {
     queueBoardLayout(false);
   });
 
   refreshStaticUiText({ locale: getLocale() });
   refreshLevelOptions();
-  const initialLevelIndex = isCampaignCompleted()
+  const fallbackInitialLevelIndex = isCampaignCompleted()
     ? ensureInfiniteLevel(clampInfiniteIndex(readInfiniteProgress()))
     : getLatestCampaignLevelIndex();
+  const savedInitialLevelIndex = resolveLoadableLevelIndex(sessionSaveData.board?.levelIndex);
+  const initialLevelIndex = savedInitialLevelIndex ?? fallbackInitialLevelIndex;
   loadLevel(initialLevelIndex);
 }
 
