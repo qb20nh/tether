@@ -9,6 +9,14 @@ import {
   generateInfiniteLevel,
 } from '../src/infinite.js';
 import { canonicalConstraintSignature } from '../src/infinite_canonical.js';
+import {
+  checkCompletion,
+  evaluateBlockedCells,
+  evaluateHints,
+  evaluateRPS,
+  evaluateStitches,
+} from '../src/rules.js';
+import { keyV } from '../src/utils.js';
 import { solveLevel } from './verify_level_properties.js';
 
 const HINT_CODES = new Set(['t', 'r', 'l', 's', 'h', 'v']);
@@ -277,6 +285,178 @@ const hasUnsatisfiableCorner = (level) => {
   return null;
 };
 
+const inBounds = (rows, cols, r, c) => r >= 0 && r < rows && c >= 0 && c < cols;
+const keyOf = (r, c) => `${r},${c}`;
+const isObstacle = (ch) => ch === '#' || ch === 'm';
+
+const buildStitchReq = (stitches) => {
+  const req = new Map();
+  for (const [vr, vc] of stitches) {
+    req.set(keyV(vr, vc), {
+      nw: { r: vr - 1, c: vc - 1 },
+      ne: { r: vr - 1, c: vc },
+      sw: { r: vr, c: vc - 1 },
+      se: { r: vr, c: vc },
+    });
+  }
+  return req;
+};
+
+const verifyWitnessReplay = (level) => {
+  const rows = level.grid?.length || 0;
+  const cols = rows > 0 ? level.grid[0].length : 0;
+  if (!(rows > 0 && cols > 0)) return { ok: false, reason: 'empty_grid' };
+
+  const meta = level?.infiniteMeta || {};
+  if (!Array.isArray(meta.witnessPath) || meta.witnessPath.length === 0) {
+    return { ok: false, reason: 'missing_witness_path' };
+  }
+  if (!Array.isArray(meta.witnessMovableWalls)) {
+    return { ok: false, reason: 'missing_witness_movable_walls' };
+  }
+
+  const path = [];
+  for (let i = 0; i < meta.witnessPath.length; i++) {
+    const entry = meta.witnessPath[i];
+    if (!Array.isArray(entry) || entry.length < 2) {
+      return { ok: false, reason: 'invalid_witness_path_entry', at: i };
+    }
+    const r = entry[0];
+    const c = entry[1];
+    if (!Number.isInteger(r) || !Number.isInteger(c) || !inBounds(rows, cols, r, c)) {
+      return { ok: false, reason: 'witness_path_out_of_bounds', at: i };
+    }
+    path.push({ r, c });
+  }
+
+  const witnessMovableWalls = [];
+  for (let i = 0; i < meta.witnessMovableWalls.length; i++) {
+    const entry = meta.witnessMovableWalls[i];
+    if (!Array.isArray(entry) || entry.length < 2) {
+      return { ok: false, reason: 'invalid_witness_movable_entry', at: i };
+    }
+    const r = entry[0];
+    const c = entry[1];
+    if (!Number.isInteger(r) || !Number.isInteger(c) || !inBounds(rows, cols, r, c)) {
+      return { ok: false, reason: 'witness_movable_out_of_bounds', at: i };
+    }
+    witnessMovableWalls.push([r, c]);
+  }
+
+  const gridData = level.grid.map((row) => row.split(''));
+
+  const currentMovable = [];
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      if (gridData[r][c] === 'm') currentMovable.push([r, c]);
+    }
+  }
+
+  if (currentMovable.length !== witnessMovableWalls.length) {
+    return {
+      ok: false,
+      reason: 'witness_movable_count_mismatch',
+      currentCount: currentMovable.length,
+      witnessCount: witnessMovableWalls.length,
+    };
+  }
+
+  for (const [r, c] of currentMovable) {
+    gridData[r][c] = '.';
+  }
+
+  for (const [r, c] of witnessMovableWalls) {
+    const ch = gridData[r][c];
+    if (ch !== '#' && ch !== '.') {
+      return { ok: false, reason: 'witness_movable_target_invalid', r, c, ch };
+    }
+    gridData[r][c] = 'm';
+  }
+
+  let totalUsable = 0;
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      if (!isObstacle(gridData[r][c])) totalUsable += 1;
+    }
+  }
+  if (path.length !== totalUsable) {
+    return {
+      ok: false,
+      reason: 'witness_path_length_mismatch',
+      pathLength: path.length,
+      totalUsable,
+    };
+  }
+
+  const stitches = (level.stitches || []).map(([vr, vc]) => [vr, vc]);
+  const stitchSet = new Set(stitches.map(([vr, vc]) => keyV(vr, vc)));
+
+  const visited = new Set();
+  for (let i = 0; i < path.length; i++) {
+    const cur = path[i];
+    const curKey = keyOf(cur.r, cur.c);
+
+    if (isObstacle(gridData[cur.r][cur.c])) {
+      return { ok: false, reason: 'witness_path_hits_obstacle', at: i, r: cur.r, c: cur.c };
+    }
+    if (visited.has(curKey)) {
+      return { ok: false, reason: 'witness_path_revisits_cell', at: i, r: cur.r, c: cur.c };
+    }
+    if (i > 0) {
+      const prev = path[i - 1];
+      const dr = Math.abs(prev.r - cur.r);
+      const dc = Math.abs(prev.c - cur.c);
+      const orth = dr + dc === 1;
+      const diagonalWithStitch = dr === 1 && dc === 1 && stitchSet.has(keyV(Math.max(prev.r, cur.r), Math.max(prev.c, cur.c)));
+      if (!orth && !diagonalWithStitch) {
+        return { ok: false, reason: 'witness_path_non_adjacent_step', at: i };
+      }
+    }
+    visited.add(curKey);
+  }
+
+  const idxByKey = new Map(path.map((p, i) => [keyOf(p.r, p.c), i]));
+  const snapshot = {
+    rows,
+    cols,
+    totalUsable,
+    gridData,
+    path,
+    visited,
+    stitches,
+    stitchSet,
+    stitchReq: buildStitchReq(stitches),
+    cornerCounts: level.cornerCounts || [],
+    idxByKey,
+  };
+
+  const hintStatus = evaluateHints(snapshot);
+  const stitchStatus = evaluateStitches(snapshot);
+  const rpsStatus = evaluateRPS(snapshot);
+  const blockedStatus = evaluateBlockedCells(snapshot);
+  const completion = checkCompletion(snapshot, {
+    hintStatus,
+    stitchStatus,
+    rpsStatus,
+  }, (k) => k);
+
+  if (blockedStatus.bad > 0) {
+    return { ok: false, reason: 'witness_blocked_cells', blocked: blockedStatus.bad };
+  }
+  if (completion.kind !== 'good') {
+    return {
+      ok: false,
+      reason: 'witness_completion_failed',
+      allVisited: completion.allVisited,
+      hintsOk: completion.hintsOk,
+      stitchesOk: completion.stitchesOk,
+      rpsOk: completion.rpsOk,
+    };
+  }
+
+  return { ok: true };
+};
+
 const percentile = (values, q) => {
   if (!values.length) return 0;
   const sorted = [...values].sort((a, b) => a - b);
@@ -301,6 +481,7 @@ function main() {
   const densityMismatches = [];
   const wallDensityMismatches = [];
   const cornerUnsatMismatches = [];
+  const witnessProofFailures = [];
   const singletonRpsMismatches = [];
   const canonicalCollisions = [];
   const solvabilityFailures = [];
@@ -479,6 +660,13 @@ function main() {
         ...unsatCorner,
       });
     }
+    const witnessProof = verifyWitnessReplay(level);
+    if (!witnessProof.ok) {
+      witnessProofFailures.push({
+        index: i,
+        ...witnessProof,
+      });
+    }
     const canonicalSignature = canonicalConstraintSignature(level);
     if (!canonicalSeen.has(canonicalSignature)) {
       canonicalSeen.set(canonicalSignature, i);
@@ -491,6 +679,9 @@ function main() {
   }
   if (canonicalCollisions.length > 0) {
     failures.push(`Canonical collisions: ${canonicalCollisions.length}`);
+  }
+  if (witnessProofFailures.length > 0) {
+    failures.push(`Witness-proof failures: ${witnessProofFailures.length}`);
   }
   const singletonRpsMismatchList = [...new Map(
     singletonRpsMismatches.map((entry) => [entry.index, entry]),
@@ -546,7 +737,8 @@ function main() {
     }
   }
 
-  if (solvabilityFailures.length > 0) {
+  // Solver sampling is advisory; authoritative solvability proof is witness replay.
+  if (solvabilityFailures.length > 0 && witnessProofFailures.length > 0) {
     failures.push(`Solvability failures: ${solvabilityFailures.length}`);
   }
 
@@ -644,6 +836,10 @@ function main() {
       scanned: opts.canonicalScan,
       collisions: canonicalCollisions,
       uniqueSignatures: opts.canonicalScan - canonicalCollisions.length,
+    },
+    witnessProof: {
+      checked: opts.canonicalScan,
+      failures: witnessProofFailures,
     },
     solvability: {
       checked: opts.samples,

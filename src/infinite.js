@@ -83,6 +83,11 @@ const sortCornerCounts = (entries) =>
     .slice()
     .sort((a, b) => (a[0] - b[0]) || (a[1] - b[1]) || (a[2] - b[2]));
 
+const sortCells = (cells) =>
+  cells
+    .slice()
+    .sort((a, b) => (a.r - b.r) || (a.c - b.c));
+
 const assertInfiniteIndex = (infiniteIndex) => {
   if (!Number.isInteger(infiniteIndex) || infiniteIndex < 0) {
     throw new Error(`infiniteIndex must be a non-negative integer, got: ${infiniteIndex}`);
@@ -372,6 +377,40 @@ const pickStitchTransitions = (transitions, wantedCount, rng) => {
 
   selected.sort((a, b) => a.start - b.start);
   return selected;
+};
+
+const collectStitchVerticesFromPath = (path) => {
+  const stitchKeys = new Set();
+  const stitches = [];
+  for (let i = 1; i < path.length; i++) {
+    const a = path[i - 1];
+    const b = path[i];
+    const dr = Math.abs(a.r - b.r);
+    const dc = Math.abs(a.c - b.c);
+    if (dr + dc === 1) continue;
+    if (dr === 1 && dc === 1) {
+      const vr = Math.max(a.r, b.r);
+      const vc = Math.max(a.c, b.c);
+      const k = `${vr},${vc}`;
+      if (!stitchKeys.has(k)) {
+        stitchKeys.add(k);
+        stitches.push([vr, vc]);
+      }
+      continue;
+    }
+    return {
+      stitches: [],
+      invalidStep: {
+        index: i,
+        from: [a.r, a.c],
+        to: [b.r, b.c],
+      },
+    };
+  }
+  return {
+    stitches: sortPairs(stitches),
+    invalidStep: null,
+  };
 };
 
 const applyStitchTransitions = (path, selectedTransitions) => {
@@ -699,7 +738,6 @@ const removeArrayAt = (arr, index) => {
 const enforceConstraintDensityBand = (grid, path, stitches, cornerCounts, requiredFeature, rng) => {
   const minHints = requiredFeature === 'hint' ? 3 : (requiredFeature === 'rps' ? 2 : 1);
   const minRps = requiredFeature === 'rps' ? 2 : 0;
-  const minStitches = requiredFeature === 'stitch' ? 1 : 0;
   const minCorners = 1;
 
   const snapshot = () => {
@@ -746,18 +784,28 @@ const enforceConstraintDensityBand = (grid, path, stitches, cornerCounts, requir
         changed = true;
       } else if (cornerCounts.length > minCorners) {
         changed = removeArrayAt(cornerCounts, intFromRng(rng, cornerCounts.length));
-      } else if (stitches.length > minStitches) {
-        changed = removeArrayAt(stitches, intFromRng(rng, stitches.length));
       } else {
-        const removableRps = [];
+        const rpsPathIndices = [];
         for (let i = 1; i < path.length - 1; i++) {
           const p = path[i];
-          if (RPS_CODES.includes(grid[p.r][p.c])) removableRps.push(p);
+          if (RPS_CODES.includes(grid[p.r][p.c])) rpsPathIndices.push(i);
         }
-        if (removableRps.length > minRps) {
-          const pick = removableRps[intFromRng(rng, removableRps.length)];
-          grid[pick.r][pick.c] = '.';
-          changed = true;
+
+        const rpsCount = rpsPathIndices.length;
+        if (rpsCount > minRps) {
+          if (rpsCount === 2 && minRps === 0) {
+            const a = path[rpsPathIndices[0]];
+            const b = path[rpsPathIndices[1]];
+            grid[a.r][a.c] = '.';
+            grid[b.r][b.c] = '.';
+            changed = true;
+          } else if (rpsCount - 1 >= minRps && rpsCount - 1 !== 1) {
+            const removeFromStart = rng() < 0.5;
+            const removeIndex = removeFromStart ? rpsPathIndices[0] : rpsPathIndices[rpsCount - 1];
+            const p = path[removeIndex];
+            grid[p.r][p.c] = '.';
+            changed = true;
+          }
         }
       }
 
@@ -932,9 +980,15 @@ const createCoreLevel = (infiniteIndex, variantId) => {
   }
 
   applyStitchTransitions(path, stitchTransitions);
-  let stitches = sortPairs(
-    stitchTransitions.map((entry) => [entry.stitchVertex[0], entry.stitchVertex[1]]),
-  );
+  const stitchCollect = collectStitchVerticesFromPath(path);
+  if (stitchCollect.invalidStep) {
+    throw new Error(
+      `Invalid witness step after stitch transform at infinite index ${infiniteIndex} variant ${variantId}`
+      + ` step ${stitchCollect.invalidStep.index} from ${stitchCollect.invalidStep.from.join(',')}`
+      + ` to ${stitchCollect.invalidStep.to.join(',')}`,
+    );
+  }
+  let stitches = stitchCollect.stitches;
   const stitchVertexSet = new Set(stitches.map(([vr, vc]) => `${vr},${vc}`));
 
   const occupied = new Set();
@@ -947,7 +1001,7 @@ const createCoreLevel = (infiniteIndex, variantId) => {
     minHints:
       requiredFeature === 'hint'
         ? 3
-        : (requiredFeature === 'rps' ? 2 : 2),
+        : (requiredFeature === 'rps' ? 2 : 1),
     requireRps: plan.rps,
     rpsCount: requestedRps,
     occupied,
@@ -1021,7 +1075,10 @@ const createCoreLevel = (infiniteIndex, variantId) => {
     );
   }
 
-  const profileId = (rows * 10000) + (cols * 1000) + (path.length * 10) + Math.min(9, stitchTransitions.length);
+  const profileId = (rows * 10000) + (cols * 1000) + (path.length * 10) + Math.min(9, stitches.length);
+
+  const witnessPath = path.map((p) => [p.r, p.c]);
+  const witnessMovableWalls = sortCells(solvedMovableCells).map((cell) => [cell.r, cell.c]);
 
   return {
     level,
@@ -1030,6 +1087,8 @@ const createCoreLevel = (infiniteIndex, variantId) => {
       seed,
       profileId,
       variantId,
+      witnessPath,
+      witnessMovableWalls,
     },
   };
 };
@@ -1052,6 +1111,8 @@ const decorateInfiniteLevel = (infiniteIndex, core) => {
       variantId: core.meta.variantId,
       requiredFeature,
       baseLevelIndex: core.meta.profileId,
+      witnessPath: core.meta.witnessPath,
+      witnessMovableWalls: core.meta.witnessMovableWalls,
     },
   };
 };
