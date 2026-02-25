@@ -1214,16 +1214,17 @@ export function initTetherApp() {
       pathDragSide: options.pathDragSide ?? null,
       pathDragCursor: options.pathDragCursor ?? null,
     };
+    const shouldPersistInputState = Boolean(shouldValidate) && !isPathDragging;
     if (options.rebuildGrid) {
       const snapshotForGrid = state.getSnapshot();
       buildGrid(snapshotForGrid, refs, ICONS, ICON_X);
       queueBoardLayout(Boolean(shouldValidate), dragEvaluateOptions);
-      queueSessionSave();
+      if (shouldPersistInputState) queueSessionSave();
       return;
     }
 
     queueBoardLayout(Boolean(shouldValidate), dragEvaluateOptions);
-    queueSessionSave();
+    if (shouldPersistInputState) queueSessionSave();
   });
 
   refs.levelSel.addEventListener('change', (e) => {

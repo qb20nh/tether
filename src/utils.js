@@ -19,6 +19,9 @@ export const parseLevel = (level) => {
     }
   }
 
+  const stitches = (level.stitches || []).map((p) => [p[0], p[1]]);
+  const stitchVertices = new Set(stitches.map(([vr, vc]) => keyV(vr, vc)));
+
   const cornerCountsRaw = level.cornerCounts || [];
   const seenCornerVertices = new Set();
   const cornerCounts = cornerCountsRaw.map((entry, idx) => {
@@ -44,6 +47,9 @@ export const parseLevel = (level) => {
     if (seenCornerVertices.has(vk)) {
       throw new Error(`Duplicate cornerCounts vertex at ${vk}`);
     }
+    if (stitchVertices.has(vk)) {
+      throw new Error(`cornerCounts[${idx}] overlaps stitch at ${vk}`);
+    }
     seenCornerVertices.add(vk);
 
     return [vr, vc, count];
@@ -54,7 +60,7 @@ export const parseLevel = (level) => {
     rows,
     cols,
     usable,
-    stitches: (level.stitches || []).map((p) => [p[0], p[1]]),
+    stitches,
     cornerCounts,
   };
 };

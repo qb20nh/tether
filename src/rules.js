@@ -108,6 +108,27 @@ const countCornerOrthConnections = (vr, vc, orthEdges) => {
   return count;
 };
 
+const cornerWallStats = (snapshot, vr, vc) => {
+  const nwWall = isWall(snapshot.gridData[vr - 1][vc - 1]);
+  const neWall = isWall(snapshot.gridData[vr - 1][vc]);
+  const swWall = isWall(snapshot.gridData[vr][vc - 1]);
+  const seWall = isWall(snapshot.gridData[vr][vc]);
+
+  let maxPossible = 0;
+  if (!nwWall && !neWall) maxPossible += 1;
+  if (!nwWall && !swWall) maxPossible += 1;
+  if (!neWall && !seWall) maxPossible += 1;
+  if (!swWall && !seWall) maxPossible += 1;
+
+  return {
+    nwWall,
+    neWall,
+    swWall,
+    seWall,
+    maxPossible,
+  };
+};
+
 export function evaluateHints(snapshot, options = {}) {
   const suppressEndpointRequirement = Boolean(options.suppressEndpointRequirement);
   const suppressEndpointKey = typeof options.suppressEndpointKey === 'string'
@@ -162,11 +183,12 @@ export function evaluateHints(snapshot, options = {}) {
     total++;
     const vk = keyOf(vr, vc);
     const actual = countCornerOrthConnections(vr, vc, orthEdges);
-    const allAdjacentVisited = (
-      snapshot.visited.has(keyOf(vr - 1, vc - 1))
-      && snapshot.visited.has(keyOf(vr - 1, vc))
-      && snapshot.visited.has(keyOf(vr, vc - 1))
-      && snapshot.visited.has(keyOf(vr, vc))
+    const wallStats = cornerWallStats(snapshot, vr, vc);
+    const allAdjacentClosed = (
+      (snapshot.visited.has(keyOf(vr - 1, vc - 1)) || wallStats.nwWall)
+      && (snapshot.visited.has(keyOf(vr - 1, vc)) || wallStats.neWall)
+      && (snapshot.visited.has(keyOf(vr, vc - 1)) || wallStats.swWall)
+      && (snapshot.visited.has(keyOf(vr, vc)) || wallStats.seWall)
     );
 
     let state = 'pending';
@@ -174,7 +196,10 @@ export function evaluateHints(snapshot, options = {}) {
       state = actual === target ? 'good' : 'bad';
     } else if (actual > target) {
       state = 'bad';
-    } else if (allAdjacentVisited && actual !== target) {
+    } else if (target > wallStats.maxPossible) {
+      // Current wall placement makes this corner target impossible.
+      state = 'bad';
+    } else if (allAdjacentClosed && actual !== target) {
       state = 'bad';
     } else if (actual === target) {
       state = 'good';

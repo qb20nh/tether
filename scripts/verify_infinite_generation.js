@@ -3,6 +3,8 @@ import { performance } from 'node:perf_hooks';
 import {
   INFINITE_FEATURE_CYCLE,
   INFINITE_MAX_LEVELS,
+  MAX_CONSTRAINT_DENSITY,
+  MAX_WALL_DENSITY,
   MIN_CONSTRAINT_DENSITY,
   generateInfiniteLevel,
 } from '../src/infinite.js';
@@ -163,26 +165,36 @@ const analyzeFeatures = (level) => {
   let hasMovable = false;
   let hintCount = 0;
   let rpsCount = 0;
-  let constraintCellCount = 0;
+  let wallCount = 0;
+  let cellConstraintCount = 0;
 
   for (const row of level.grid || []) {
     for (let i = 0; i < row.length; i++) {
       const ch = row[i];
-      if (ch !== '.') constraintCellCount += 1;
+      if (ch === '#' || ch === 'm') wallCount += 1;
       if (HINT_CODES.has(ch)) {
         hasHint = true;
         hintCount += 1;
+        cellConstraintCount += 1;
       }
       if (RPS_CODES.has(ch)) {
         hasRps = true;
         rpsCount += 1;
+        cellConstraintCount += 1;
       }
       if (ch === 'm') hasMovable = true;
     }
   }
 
+  const rows = level.grid?.length || 0;
+  const cols = rows > 0 ? level.grid[0].length : 0;
+  const totalCells = rows * cols;
+  const nonWallCellCount = Math.max(0, totalCells - wallCount);
   const hasStitch = (level.stitches || []).length > 0;
   const hasCorner = (level.cornerCounts || []).length > 0;
+  const stitchCount = (level.stitches || []).length;
+  const cornerCount = (level.cornerCounts || []).length;
+  const constraintTokenCount = cellConstraintCount + stitchCount + cornerCount;
   const featureCount = [hasStitch, hasMovable, hasCorner, hasRps, hasHint].filter(Boolean).length;
 
   return {
@@ -193,19 +205,76 @@ const analyzeFeatures = (level) => {
     hint: hasHint,
     hintCount,
     rpsCount,
-    constraintCellCount,
+    wallCount,
+    nonWallCellCount,
+    cellConstraintCount,
+    constraintTokenCount,
     mixed: featureCount >= 2,
     featureCount,
   };
 };
 
 const constraintDensity = (level, features) => {
+  if (!(features.nonWallCellCount > 0)) return 0;
+  return features.constraintTokenCount / features.nonWallCellCount;
+};
+
+const wallDensity = (level, features) => {
   const rows = level.grid?.length || 0;
   const cols = rows > 0 ? level.grid[0].length : 0;
-  if (rows === 0 || cols === 0) return 0;
-  const stitches = (level.stitches || []).length;
-  const corners = (level.cornerCounts || []).length;
-  return (features.constraintCellCount + stitches + corners) / (rows * cols);
+  const totalCells = rows * cols;
+  if (!(totalCells > 0)) return 0;
+  return features.wallCount / totalCells;
+};
+
+const isWallCell = (level, r, c) => {
+  const row = level.grid?.[r];
+  if (!row) return false;
+  const ch = row[c];
+  return ch === '#' || ch === 'm';
+};
+
+const hasUnsatisfiableCorner = (level) => {
+  for (const [vr, vc, count] of level.cornerCounts || []) {
+    const nw = isWallCell(level, vr - 1, vc - 1);
+    const ne = isWallCell(level, vr - 1, vc);
+    const sw = isWallCell(level, vr, vc - 1);
+    const se = isWallCell(level, vr, vc);
+    const wallCount = (nw ? 1 : 0) + (ne ? 1 : 0) + (sw ? 1 : 0) + (se ? 1 : 0);
+    const diagonalWalls = (nw && se) || (ne && sw);
+
+    let maxPossible = 0;
+    if (!nw && !ne) maxPossible += 1;
+    if (!nw && !sw) maxPossible += 1;
+    if (!ne && !se) maxPossible += 1;
+    if (!sw && !se) maxPossible += 1;
+
+    if (wallCount > 3) {
+      return {
+        vr,
+        vc,
+        count,
+        reason: 'more_than_3_walls',
+      };
+    }
+    if (count === 0 && diagonalWalls) {
+      return {
+        vr,
+        vc,
+        count,
+        reason: 'zero_with_diagonal_walls',
+      };
+    }
+    if (count > maxPossible) {
+      return {
+        vr,
+        vc,
+        count,
+        reason: 'count_exceeds_local_max',
+      };
+    }
+  }
+  return null;
 };
 
 const percentile = (values, q) => {
@@ -230,6 +299,8 @@ function main() {
   const minimumFeatureMismatches = [];
   const rpsHintMinimumMismatches = [];
   const densityMismatches = [];
+  const wallDensityMismatches = [];
+  const cornerUnsatMismatches = [];
   const singletonRpsMismatches = [];
   const canonicalCollisions = [];
   const solvabilityFailures = [];
@@ -318,6 +389,7 @@ function main() {
     const level = generateInfiniteLevel(i);
     const features = analyzeFeatures(level);
     const density = constraintDensity(level, features);
+    const wallRatio = wallDensity(level, features);
     if (!features[expectedFeature]) {
       coverageMismatches.push({
         index: i,
@@ -325,12 +397,28 @@ function main() {
         detected: features,
       });
     }
-    if (density < MIN_CONSTRAINT_DENSITY) {
+    if (density < MIN_CONSTRAINT_DENSITY || density > MAX_CONSTRAINT_DENSITY) {
       densityMismatches.push({
         index: i,
         density,
-        requiredDensity: MIN_CONSTRAINT_DENSITY,
+        requiredMinDensity: MIN_CONSTRAINT_DENSITY,
+        requiredMaxDensity: MAX_CONSTRAINT_DENSITY,
         detected: features,
+      });
+    }
+    if (wallRatio > MAX_WALL_DENSITY) {
+      wallDensityMismatches.push({
+        index: i,
+        wallDensity: wallRatio,
+        requiredMaxWallDensity: MAX_WALL_DENSITY,
+        detected: features,
+      });
+    }
+    const unsatCorner = hasUnsatisfiableCorner(level);
+    if (unsatCorner) {
+      cornerUnsatMismatches.push({
+        index: i,
+        ...unsatCorner,
       });
     }
     if (features.featureCount < 2) {
@@ -367,6 +455,12 @@ function main() {
   if (densityMismatches.length > 0) {
     failures.push(`Constraint-density mismatches: ${densityMismatches.length}`);
   }
+  if (wallDensityMismatches.length > 0) {
+    failures.push(`Wall-density mismatches: ${wallDensityMismatches.length}`);
+  }
+  if (cornerUnsatMismatches.length > 0) {
+    failures.push(`Corner-unsatisfiable mismatches: ${cornerUnsatMismatches.length}`);
+  }
 
   const canonicalSeen = new Map();
   for (let i = 0; i < opts.canonicalScan; i++) {
@@ -376,6 +470,13 @@ function main() {
       singletonRpsMismatches.push({
         index: i,
         detected: features,
+      });
+    }
+    const unsatCorner = hasUnsatisfiableCorner(level);
+    if (unsatCorner) {
+      cornerUnsatMismatches.push({
+        index: i,
+        ...unsatCorner,
       });
     }
     const canonicalSignature = canonicalConstraintSignature(level);
@@ -518,8 +619,21 @@ function main() {
     },
     constraintDensity: {
       checked: opts.coverage,
-      requiredDensity: MIN_CONSTRAINT_DENSITY,
+      requiredMinDensity: MIN_CONSTRAINT_DENSITY,
+      requiredMaxDensity: MAX_CONSTRAINT_DENSITY,
       mismatches: densityMismatches,
+    },
+    wallDensity: {
+      checked: opts.coverage,
+      requiredMaxDensity: MAX_WALL_DENSITY,
+      mismatches: wallDensityMismatches,
+    },
+    cornerUnsatisfiable: {
+      checkedCoverage: opts.coverage,
+      checkedCanonicalScan: opts.canonicalScan,
+      mismatches: [...new Map(
+        cornerUnsatMismatches.map((entry) => [entry.index, entry]),
+      ).values()].sort((a, b) => a.index - b.index),
     },
     singletonRps: {
       checkedCoverage: opts.coverage,

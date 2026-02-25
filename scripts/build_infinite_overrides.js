@@ -15,44 +15,10 @@ const FORMAT_VERSION = 1;
 
 const DEFAULTS = {
   maxLevels: INFINITE_MAX_LEVELS,
-  maxVariantProbe: 2048,
+  maxVariantProbe: 255,
   outBinFile: path.resolve(process.cwd(), 'src/infinite_overrides.bin.gz'),
   json: false,
 };
-
-// Pin solver-stable variants for early indices used in smoke checks.
-const PINNED_VARIANTS = Object.freeze({
-  0: 0,
-  1: 0,
-  2: 1,
-  3: 0,
-  4: 1,
-  5: 2,
-  6: 1,
-  7: 1,
-  8: 0,
-  9: 5,
-  10: 0,
-  11: 1,
-  12: 0,
-  13: 0,
-  14: 0,
-  15: 3,
-  16: 1,
-  17: 0,
-  18: 3,
-  19: 0,
-  20: 0,
-  21: 0,
-  22: 1,
-  23: 0,
-  24: 0,
-  25: 0,
-  26: 0,
-  27: 1,
-  28: 0,
-  29: 0,
-});
 
 const toInt = (name, value) => {
   const parsed = Number.parseInt(value, 10);
@@ -160,19 +126,7 @@ function main() {
   let maxVariantUsed = INFINITE_CANDIDATE_VARIANTS - 1;
 
   for (let i = 0; i < opts.maxLevels; i++) {
-    let selected = null;
-    const pinnedVariantId = PINNED_VARIANTS[i];
-    const hasPinnedVariant = Number.isInteger(pinnedVariantId) && pinnedVariantId >= 0;
-    if (hasPinnedVariant) {
-      const pinnedLevel = generateInfiniteLevelFromVariant(i, pinnedVariantId);
-      selected = {
-        variantId: pinnedVariantId,
-        level: pinnedLevel,
-        canonicalSignature: canonicalConstraintSignature(pinnedLevel),
-      };
-    } else {
-      selected = selectDefaultInfiniteCandidate(i);
-    }
+    const selected = selectDefaultInfiniteCandidate(i);
 
     let acceptedVariantId = selected.variantId;
     let acceptedSignature = selected.canonicalSignature;
@@ -204,11 +158,6 @@ function main() {
           `Unable to resolve canonical collision at index ${i}. First seen at ${firstIndex}. Increase --max-variant-probe.`,
         );
       }
-    }
-
-    if (hasPinnedVariant) {
-      overrides.set(i, acceptedVariantId);
-      if (acceptedVariantId > maxVariantUsed) maxVariantUsed = acceptedVariantId;
     }
 
     acceptedBySignature.set(acceptedSignature, i);
