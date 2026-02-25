@@ -7,7 +7,12 @@ import {
   hideWallDragGhost,
 } from './renderer.js';
 import { isAdjacentMove } from './utils.js';
-import { cellCenter, getCellSize } from './geometry.js';
+import {
+  cellCenter,
+  getCellSize,
+  getGridGap,
+  getGridPadding,
+} from './geometry.js';
 
 export function bindInputHandlers(refs, state, onStateChange = () => { }) {
   let dragMode = null;
@@ -34,6 +39,42 @@ export function bindInputHandlers(refs, state, onStateChange = () => { }) {
       r: parseInt(cell.dataset.r, 10),
       c: parseInt(cell.dataset.c, 10),
     };
+  };
+
+  const snapWallCellFromPoint = (x, y, snapshot) => {
+    if (!refs.gridEl || !snapshot) return null;
+
+    const rows = Number.isInteger(snapshot.rows) ? snapshot.rows : 0;
+    const cols = Number.isInteger(snapshot.cols) ? snapshot.cols : 0;
+    if (rows <= 0 || cols <= 0) return null;
+
+    const rect = refs.gridEl.getBoundingClientRect();
+    const size = getCellSize(refs.gridEl);
+    const gap = getGridGap(refs.gridEl);
+    const pad = getGridPadding(refs.gridEl);
+    const step = size + gap;
+    if (!(step > 0)) return null;
+
+    // Keep snapping active around cell gaps and rounded border cutouts,
+    // while still ignoring pointer positions far away from the board.
+    const margin = Math.max(6, step * 0.5);
+    if (x < rect.left - margin || x > rect.right + margin || y < rect.top - margin || y > rect.bottom + margin) {
+      return null;
+    }
+
+    const localX = x - rect.left - pad - (size * 0.5);
+    const localY = y - rect.top - pad - (size * 0.5);
+
+    const clamp = (value, lo, hi) => Math.max(lo, Math.min(hi, value));
+    const c = clamp(Math.round(localX / step), 0, cols - 1);
+    const r = clamp(Math.round(localY / step), 0, rows - 1);
+    return { r, c };
+  };
+
+  const wallCellFromPoint = (x, y, snapshot) => {
+    const direct = cellFromPoint(x, y);
+    if (direct) return direct;
+    return snapWallCellFromPoint(x, y, snapshot);
   };
 
   const isUsableCell = (snapshot, r, c) => {
@@ -229,7 +270,8 @@ export function bindInputHandlers(refs, state, onStateChange = () => { }) {
     if (dragMode === 'wall') {
       if (e.cancelable) e.preventDefault();
       moveWallDragGhost(e.clientX, e.clientY);
-      const cell = cellFromPoint(e.clientX, e.clientY);
+      const snapshot = state.getSnapshot();
+      const cell = wallCellFromPoint(e.clientX, e.clientY, snapshot);
       if (!cell) {
         wallDrag.hover = null;
         clearDropTarget();
