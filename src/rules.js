@@ -331,19 +331,17 @@ export function evaluateStitches(snapshot) {
       continue;
     }
 
-    const cells = [req.nw, req.ne, req.sw, req.se];
-    const allIn = cells.every((p) => inBounds(snapshot.rows, snapshot.cols, p.r, p.c));
-    const allUsable = cells.every((p) => {
+    const isUsableCell = (p) => {
       if (!inBounds(snapshot.rows, snapshot.cols, p.r, p.c)) return false;
       const code = snapshot.gridData[p.r][p.c];
       return code !== CELL_TYPES.WALL && code !== CELL_TYPES.MOVABLE_WALL;
-    });
-
-    if (!allIn || !allUsable) {
-      vertexStatus.set(vk, { diagA: 'bad', diagB: 'bad' });
-      badPairs += 2;
-      continue;
-    }
+    };
+    const nwUsable = isUsableCell(req.nw);
+    const neUsable = isUsableCell(req.ne);
+    const swUsable = isUsableCell(req.sw);
+    const seUsable = isUsableCell(req.se);
+    const diagABlocked = !nwUsable || !seUsable;
+    const diagBBlocked = !neUsable || !swUsable;
 
     const k1a = keyOf(req.nw.r, req.nw.c);
     const k1b = keyOf(req.se.r, req.se.c);
@@ -354,22 +352,28 @@ export function evaluateStitches(snapshot) {
 
     const has1a = idxByKey.has(k1a);
     const has1b = idxByKey.has(k1b);
-    let ok1 = false, bad1 = false;
-    if (has1a && has1b) {
-      if (Math.abs(idxByKey.get(k1a) - idxByKey.get(k1b)) === 1) ok1 = true;
-      else bad1 = true;
-    } else {
-      if (isInternal(k1a) || isInternal(k1b)) bad1 = true;
+    let ok1 = false;
+    let bad1 = diagABlocked;
+    if (!diagABlocked) {
+      if (has1a && has1b) {
+        if (Math.abs(idxByKey.get(k1a) - idxByKey.get(k1b)) === 1) ok1 = true;
+        else bad1 = true;
+      } else if (isInternal(k1a) || isInternal(k1b)) {
+        bad1 = true;
+      }
     }
 
     const has2a = idxByKey.has(k2a);
     const has2b = idxByKey.has(k2b);
-    let ok2 = false, bad2 = false;
-    if (has2a && has2b) {
-      if (Math.abs(idxByKey.get(k2a) - idxByKey.get(k2b)) === 1) ok2 = true;
-      else bad2 = true;
-    } else {
-      if (isInternal(k2a) || isInternal(k2b)) bad2 = true;
+    let ok2 = false;
+    let bad2 = diagBBlocked;
+    if (!diagBBlocked) {
+      if (has2a && has2b) {
+        if (Math.abs(idxByKey.get(k2a) - idxByKey.get(k2b)) === 1) ok2 = true;
+        else bad2 = true;
+      } else if (isInternal(k2a) || isInternal(k2b)) {
+        bad2 = true;
+      }
     }
 
     const complete = snapshot.path.length === snapshot.totalUsable;
@@ -384,8 +388,12 @@ export function evaluateStitches(snapshot) {
     if (bad1) badPairs++;
     if (bad2) badPairs++;
 
-    const diagAStatus = has1a && has1b ? (ok1 ? 'good' : 'bad') : (bad1 ? 'bad' : 'pending');
-    const diagBStatus = has2a && has2b ? (ok2 ? 'good' : 'bad') : (bad2 ? 'bad' : 'pending');
+    const diagAStatus = diagABlocked
+      ? 'bad'
+      : (has1a && has1b ? (ok1 ? 'good' : 'bad') : (bad1 ? 'bad' : 'pending'));
+    const diagBStatus = diagBBlocked
+      ? 'bad'
+      : (has2a && has2b ? (ok2 ? 'good' : 'bad') : (bad2 ? 'bad' : 'pending'));
     vertexStatus.set(vk, { diagA: diagAStatus, diagB: diagBStatus });
   }
 

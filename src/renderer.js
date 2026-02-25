@@ -15,6 +15,7 @@ let latestPathSnapshot = null;
 let latestPathRefs = null;
 let latestPathStatuses = null;
 let latestPathMainFlowTravel = 0;
+let colorParserCtx = null;
 
 const PATH_FLOW_SPEED = -32;
 const PATH_FLOW_CYCLE = 128;
@@ -159,8 +160,8 @@ const buildFlowGradientStops = (
   const length = travelEnd - travelStart;
   if (!Number.isFinite(length) || length <= 0) {
     return [
-      { position: 0, color: PATH_FLOW_GLOW_SOFT },
-      { position: 1, color: PATH_FLOW_GLOW_SOFT },
+      { position: 0, alpha: 0, color: PATH_FLOW_GLOW_SOFT },
+      { position: 1, alpha: 0, color: PATH_FLOW_GLOW_SOFT },
     ];
   }
 
@@ -207,8 +208,8 @@ const buildFlowGradientStops = (
 
   if (merged.length === 0) {
     return [
-      { position: 0, color: PATH_FLOW_GLOW_SOFT },
-      { position: 1, color: PATH_FLOW_GLOW_SOFT },
+      { position: 0, alpha: 0, color: PATH_FLOW_GLOW_SOFT },
+      { position: 1, alpha: 0, color: PATH_FLOW_GLOW_SOFT },
     ];
   }
 
@@ -223,12 +224,13 @@ const buildFlowGradientStops = (
 
   return merged.map((stop) => ({
     position: stop.position,
+    alpha: stop.alpha,
     color: flowColorFromAlpha(stop.alpha),
   }));
 };
 
 const getHeadLeadTravel = (path, refs = {}, offset = { x: 0, y: 0 }) => {
-  const { gridEl, ctx } = refs;
+  const { gridEl } = refs;
   if (!path || path.length < 2) return 0;
 
   const first = getCellPoint(path[0].r, path[0].c, { gridEl }, offset);
@@ -236,8 +238,7 @@ const getHeadLeadTravel = (path, refs = {}, offset = { x: 0, y: 0 }) => {
   const firstSegmentLength = Math.hypot(second.x - first.x, second.y - first.y);
   if (!(firstSegmentLength > 0)) return 0;
 
-  const canUseConic = typeof ctx?.createConicGradient === 'function';
-  if (!canUseConic || path.length < 3) return firstSegmentLength;
+  if (path.length < 3) return firstSegmentLength;
 
   const third = getCellPoint(path[2].r, path[2].c, { gridEl }, offset);
   const inDx = second.x - first.x;
@@ -414,6 +415,59 @@ const forceOpaqueColor = (color) => {
   }
 
   return trimmed;
+};
+
+const parseColorToRgb = (color) => {
+  if (typeof color !== 'string' || typeof document === 'undefined') return null;
+  if (!colorParserCtx) {
+    const canvas = document.createElement('canvas');
+    canvas.width = 1;
+    canvas.height = 1;
+    colorParserCtx = canvas.getContext('2d');
+  }
+  if (!colorParserCtx) return null;
+
+  try {
+    colorParserCtx.fillStyle = '#000000';
+    colorParserCtx.fillStyle = color;
+  } catch {
+    return null;
+  }
+
+  const resolved = String(colorParserCtx.fillStyle || '').trim();
+  if (!resolved) return null;
+
+  const hex = resolved.match(/^#([0-9a-f]{6})$/i);
+  if (hex) {
+    const value = parseInt(hex[1], 16);
+    return {
+      r: (value >> 16) & 0xff,
+      g: (value >> 8) & 0xff,
+      b: value & 0xff,
+    };
+  }
+
+  const rgb = resolved.match(
+    /^rgba?\(\s*([+\-]?\d*\.?\d+)\s*,\s*([+\-]?\d*\.?\d+)\s*,\s*([+\-]?\d*\.?\d+)/i,
+  );
+  if (rgb) {
+    return {
+      r: Math.max(0, Math.min(255, Math.round(Number(rgb[1])))),
+      g: Math.max(0, Math.min(255, Math.round(Number(rgb[2])))),
+      b: Math.max(0, Math.min(255, Math.round(Number(rgb[3])))),
+    };
+  }
+
+  return null;
+};
+
+const blendRgbTowardsWhite = (rgb, alpha) => {
+  if (!rgb) return flowColorFromAlpha(alpha);
+  const t = Math.max(0, Math.min(1, alpha));
+  const r = Math.round(rgb.r + (255 - rgb.r) * t);
+  const g = Math.round(rgb.g + (255 - rgb.g) * t);
+  const b = Math.round(rgb.b + (255 - rgb.b) * t);
+  return `rgb(${r}, ${g}, ${b})`;
 };
 
 const syncBoardCellSize = (refs, rows = activeBoardSize.rows, cols = activeBoardSize.cols) => {
@@ -1009,6 +1063,8 @@ function drawPathLine(snapshot, refs, ctx, flowOffset = 0) {
   const colorMain = forceOpaqueColor(
     getComputedStyle(document.documentElement).getPropertyValue('--line').trim(),
   );
+  const colorMainRgb = parseColorToRgb(colorMain);
+  const flowColorAtAlpha = (alpha) => blendRgbTowardsWhite(colorMainRgb, alpha);
   const flowMetrics = getPathFlowMetrics(refs);
 
   ctx.lineCap = 'round';
@@ -1039,6 +1095,7 @@ function drawPathLine(snapshot, refs, ctx, flowOffset = 0) {
         endHalfWidth: halfHeadWidth,
         drawMain: true,
         drawTips: false,
+        flowColorAtAlpha,
       }, flowMetrics);
     } else {
       latestPathMainFlowTravel = 0;
@@ -1084,6 +1141,7 @@ function drawPathLine(snapshot, refs, ctx, flowOffset = 0) {
       endHalfWidth: halfHeadWidth,
       drawMain: false,
       drawTips: true,
+      flowColorAtAlpha,
     }, flowMetrics);
   }
 
@@ -1104,6 +1162,9 @@ function drawFlowRibbon(points, ctx, width, flowOffset, tipOptions = {}, flowMet
   const endTipHalfWidth = Number.isFinite(tipOptions.endHalfWidth)
     ? Math.max(0, tipOptions.endHalfWidth)
     : Math.max(6, Math.floor(flowWidth * 0.95));
+  const flowColorAtAlpha = typeof tipOptions.flowColorAtAlpha === 'function'
+    ? tipOptions.flowColorAtAlpha
+    : null;
   const canUseConic = typeof ctx.createConicGradient === 'function';
   const segmentCount = points.length - 1;
   const segmentLengths = new Array(Math.max(0, segmentCount)).fill(0);
@@ -1201,8 +1262,8 @@ function drawFlowRibbon(points, ctx, width, flowOffset, tipOptions = {}, flowMet
   let flowTravel = 0;
   for (let i = 0; i < segmentCount; i++) {
     const len = segmentLengths[i];
-    const startCorner = canUseConic ? cornerTurns[i] : null;
-    const endCorner = canUseConic ? cornerTurns[i + 1] : null;
+    const startCorner = cornerTurns[i];
+    const endCorner = cornerTurns[i + 1];
     const hasStartCorner = Boolean(startCorner);
     const hasEndCorner = Boolean(endCorner);
     const trimStart = hasStartCorner ? startCorner.tangentOffset : 0;
@@ -1240,19 +1301,28 @@ function drawFlowRibbon(points, ctx, width, flowOffset, tipOptions = {}, flowMet
   ctx.lineJoin = 'round';
   ctx.globalAlpha = 1;
 
-  const fillGradientWithClip = (clipPath, bounds, x1, y1, x2, y2, travelStart, travelEnd) => {
-    if (!clipPath || !bounds) return;
-    const travelSpan = travelEnd - travelStart;
-    if (!Number.isFinite(travelSpan) || travelSpan <= 0) return;
-
-    const gradient = ctx.createLinearGradient(x1, y1, x2, y2);
-    const flowStops = buildFlowGradientStops(
+  const resolveFlowStops = (travelStart, travelEnd) => {
+    const stops = buildFlowGradientStops(
       travelStart,
       travelEnd,
       flowOffset,
       cycle,
       pulse,
     );
+    if (!flowColorAtAlpha) return stops;
+    return stops.map((stop) => ({
+      position: stop.position,
+      color: flowColorAtAlpha(stop.alpha),
+    }));
+  };
+
+  const fillGradientWithClip = (clipPath, bounds, x1, y1, x2, y2, travelStart, travelEnd) => {
+    if (!clipPath || !bounds) return;
+    const travelSpan = travelEnd - travelStart;
+    if (!Number.isFinite(travelSpan) || travelSpan <= 0) return;
+
+    const gradient = ctx.createLinearGradient(x1, y1, x2, y2);
+    const flowStops = resolveFlowStops(travelStart, travelEnd);
     addOrderedGradientStops(gradient, flowStops);
 
     ctx.save();
@@ -1297,12 +1367,9 @@ function drawFlowRibbon(points, ctx, width, flowOffset, tipOptions = {}, flowMet
       const x2 = start.x + ux * primitive.localEnd;
       const y2 = start.y + uy * primitive.localEnd;
       const flow = ctx.createLinearGradient(x1, y1, x2, y2);
-      const flowStops = buildFlowGradientStops(
+      const flowStops = resolveFlowStops(
         primitive.travelStart,
         primitive.travelEnd,
-        flowOffset,
-        cycle,
-        pulse,
       );
       addOrderedGradientStops(flow, flowStops);
 
@@ -1355,12 +1422,6 @@ function drawFlowRibbon(points, ctx, width, flowOffset, tipOptions = {}, flowMet
     );
   }
 
-  if (!canUseConic) {
-    if (drawTips) drawStartTipGradient();
-    ctx.restore();
-    return flowTravel;
-  }
-
   if (drawMain) {
     for (const primitive of cornerPrimitives) {
       const i = primitive.cornerIndex;
@@ -1369,7 +1430,7 @@ function drawFlowRibbon(points, ctx, width, flowOffset, tipOptions = {}, flowMet
 
       const turnSigned = corner.turnSigned;
       const turnAbs = corner.absTurn;
-      const cornerArcLength = Math.max(0, turnAbs * cornerRadius);
+      const cornerArcLength = corner.arcLength;
       if (cornerArcLength <= 0) continue;
 
       const baseCx = points[i].x;
@@ -1380,21 +1441,36 @@ function drawFlowRibbon(points, ctx, width, flowOffset, tipOptions = {}, flowMet
       const tangentInY = corner.tangentInY;
       const tangentOutX = corner.tangentOutX;
       const tangentOutY = corner.tangentOutY;
-      const spanNorm = turnAbs / TAU;
-      const conicStartAngle = turnSigned > 0 ? corner.centerAngleIn : corner.centerAngleOut;
-      const cornerGradient = ctx.createConicGradient(conicStartAngle, cx, cy);
-      const flowStops = buildFlowGradientStops(
+
+      const flowStops = resolveFlowStops(
         primitive.travelStart,
         primitive.travelEnd,
-        flowOffset,
-        cycle,
-        pulse,
       );
-      const conicStops = flowStops.map((stop) => ({
-        position: turnSigned > 0 ? stop.position * spanNorm : (1 - stop.position) * spanNorm,
-        color: stop.color,
-      }));
-      addOrderedGradientStops(cornerGradient, conicStops);
+      let cornerGradient = null;
+      if (canUseConic) {
+        const spanNorm = turnAbs / TAU;
+        const stopOffsetNorm = Math.max(0, Math.min(0.5, (1 - spanNorm) * 0.5));
+        const anchorAngle = turnSigned > 0 ? corner.centerAngleIn : corner.centerAngleOut;
+        const conicStartAngle = normalizeAngle(anchorAngle - (stopOffsetNorm * TAU));
+        cornerGradient = ctx.createConicGradient(conicStartAngle, cx, cy);
+        const conicStops = flowStops.map((stop) => ({
+          position: stopOffsetNorm + (
+            turnSigned > 0
+              ? stop.position * spanNorm
+              : (1 - stop.position) * spanNorm
+          ),
+          color: stop.color,
+        }));
+        addOrderedGradientStops(cornerGradient, conicStops);
+      } else {
+        cornerGradient = ctx.createLinearGradient(
+          tangentInX,
+          tangentInY,
+          tangentOutX,
+          tangentOutY,
+        );
+        addOrderedGradientStops(cornerGradient, flowStops);
+      }
 
       const cornerConnector = new Path2D();
       cornerConnector.moveTo(tangentInX, tangentInY);
