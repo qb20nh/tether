@@ -533,6 +533,10 @@ button:disabled:active {
   gap: 8px;
 }
 
+.panel > .progressNav {
+  margin-top: 8px;
+}
+
 .msg.good {
   border-color: rgba(46, 204, 113, 0.35);
   color: var(--good);

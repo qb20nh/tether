@@ -917,25 +917,6 @@ const buildPathForLevel = (rows, cols, requiredFeature, plan, rng) => {
   };
 };
 
-const featureLabel = (feature) => {
-  switch (feature) {
-    case 'stitch':
-      return 'stitch weaving';
-    case 'movable':
-      return 'movable walls';
-    case 'corner':
-      return 'corner counting';
-    case 'rps':
-      return 'RPS ordering';
-    case 'hint':
-      return 'route hints';
-    case 'mixed':
-      return 'mixed constraints';
-    default:
-      return 'constraints';
-  }
-};
-
 const createCoreLevel = (infiniteIndex, variantId) => {
   assertInfiniteIndex(infiniteIndex);
   assertVariantId(variantId);
@@ -1100,8 +1081,6 @@ const decorateInfiniteLevel = (infiniteIndex, core) => {
   return {
     name: `Infinite ${displayIndex}`,
     nameKey: `level.infinite.${displayIndex}.name`,
-    desc: `Procedural challenge focused on ${featureLabel(requiredFeature)}.`,
-    descKey: '',
     grid: core.level.grid,
     stitches: core.level.stitches,
     cornerCounts: core.level.cornerCounts,
