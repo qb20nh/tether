@@ -59,6 +59,7 @@ test('publish_daily_level emits today payload and appends history', () => {
   const history = JSON.parse(fs.readFileSync(fx.historyFile, 'utf8'));
 
   assert.equal(summary.ok, true);
+  assert.equal(summary.preservedExistingDaily, false);
   assert.equal(today.dailyId, '2026-01-01');
   assert.equal(Number.isInteger(today.dailySlot), true);
   assert.equal(Array.isArray(today.level.grid), true);
@@ -115,4 +116,44 @@ test('publish_daily_level is idempotent within the same UTC day', () => {
   assert.equal(secondToday.generatedAtUtcMs, firstToday.generatedAtUtcMs);
   assert.equal(secondTodayRaw, firstTodayRaw);
   assert.equal(history.entries.length, 1);
+});
+
+test('publish_daily_level preserves existing daily when artifacts drift mid-day', () => {
+  const fx = createFixture();
+  const firstNowMs = Date.UTC(2026, 0, 1, 0, 0, 5);
+  const secondNowMs = Date.UTC(2026, 0, 1, 12, 34, 56);
+
+  publishDailyLevel({
+    manifestFile: fx.manifestFile,
+    overridesFile: fx.overridesFile,
+    historyFile: fx.historyFile,
+    todayFile: fx.todayFile,
+    nowMs: firstNowMs,
+    dailySecret: 'test-secret',
+  });
+
+  const firstTodayRaw = fs.readFileSync(fx.todayFile, 'utf8');
+  const firstHistoryRaw = fs.readFileSync(fx.historyFile, 'utf8');
+
+  fs.writeFileSync(fx.overridesFile, Buffer.from('corrupt'));
+  const manifest = JSON.parse(fs.readFileSync(fx.manifestFile, 'utf8'));
+  manifest.poolVersion = 'test-v2';
+  writeJson(fx.manifestFile, manifest);
+
+  const summary = publishDailyLevel({
+    manifestFile: fx.manifestFile,
+    overridesFile: fx.overridesFile,
+    historyFile: fx.historyFile,
+    todayFile: fx.todayFile,
+    nowMs: secondNowMs,
+    dailySecret: 'test-secret',
+  });
+
+  const secondTodayRaw = fs.readFileSync(fx.todayFile, 'utf8');
+  const secondHistoryRaw = fs.readFileSync(fx.historyFile, 'utf8');
+
+  assert.equal(summary.ok, true);
+  assert.equal(summary.preservedExistingDaily, true);
+  assert.equal(secondTodayRaw, firstTodayRaw);
+  assert.equal(secondHistoryRaw, firstHistoryRaw);
 });

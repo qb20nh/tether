@@ -129,6 +129,35 @@ const normalizeTodayPayload = (raw) => {
 export const publishDailyLevel = (rawOptions = {}) => {
   const opts = { ...DEFAULTS, ...rawOptions };
 
+  const nowMs = Number.isInteger(opts.nowMs) ? opts.nowMs : Date.now();
+  const dailyId = utcDateIdFromMs(nowMs);
+  const history = normalizeHistory(readJson(opts.historyFile, { schemaVersion: HISTORY_SCHEMA_VERSION, entries: [] }));
+  const todayEntry = history.entries.find((entry) => entry.dailyId === dailyId);
+
+  if (todayEntry) {
+    const existingTodayPayload = normalizeTodayPayload(readJson(opts.todayFile, null));
+    const payloadMatchesHistory = Boolean(
+      existingTodayPayload
+      && existingTodayPayload.dailyId === dailyId
+      && existingTodayPayload.dailySlot === todayEntry.dailySlot
+      && existingTodayPayload.canonicalKey === todayEntry.canonicalKey
+    );
+    if (!payloadMatchesHistory) {
+      throw new Error(`History conflict for ${dailyId}: existing daily payload does not match history entry`);
+    }
+    return {
+      ok: true,
+      preservedExistingDaily: true,
+      dailyId,
+      dailySlot: todayEntry.dailySlot,
+      canonicalKey: todayEntry.canonicalKey,
+      ordinal: null,
+      wroteTodayFile: null,
+      wroteHistoryFile: null,
+      historyLength: history.entries.length,
+    };
+  }
+
   const dailySecret = typeof opts.dailySecret === 'string' && opts.dailySecret.length > 0
     ? opts.dailySecret
     : process.env.DAILY_SECRET;
@@ -142,8 +171,6 @@ export const publishDailyLevel = (rawOptions = {}) => {
     ? manifest.baseVariantId
     : DAILY_POOL_BASE_VARIANT_ID;
 
-  const nowMs = Number.isInteger(opts.nowMs) ? opts.nowMs : Date.now();
-  const dailyId = utcDateIdFromMs(nowMs);
   const ordinal = computeDayOrdinal(dailyId, manifest.epochUtcDate);
 
   if (ordinal < 0) {
@@ -167,18 +194,6 @@ export const publishDailyLevel = (rawOptions = {}) => {
     throw new Error(`Daily slot ${dailySlot} failed witness solvability check`);
   }
 
-  const history = normalizeHistory(readJson(opts.historyFile, { schemaVersion: HISTORY_SCHEMA_VERSION, entries: [] }));
-  const todayEntry = history.entries.find((entry) => entry.dailyId === dailyId);
-  if (todayEntry) {
-    if (
-      todayEntry.dailySlot !== dailySlot
-      || todayEntry.canonicalKey !== materialized.canonicalKey
-      || todayEntry.poolVersion !== manifest.poolVersion
-    ) {
-      throw new Error(`History conflict for ${dailyId}: existing entry differs from computed payload`);
-    }
-  }
-
   const canonicalCollision = history.entries.find(
     (entry) => entry.canonicalKey === materialized.canonicalKey && entry.dailyId !== dailyId,
   );
@@ -195,17 +210,13 @@ export const publishDailyLevel = (rawOptions = {}) => {
 
   const existingTodayPayload = normalizeTodayPayload(readJson(opts.todayFile, null));
   const stableGeneratedAtUtcMs = (
-    Number.isInteger(todayEntry?.publishedAtUtcMs) && todayEntry.publishedAtUtcMs > 0
-      ? todayEntry.publishedAtUtcMs
-      : (
-        existingTodayPayload
-        && existingTodayPayload.dailyId === dailyId
-        && existingTodayPayload.dailySlot === dailySlot
-        && existingTodayPayload.canonicalKey === materialized.canonicalKey
-        && existingTodayPayload.generatedAtUtcMs > 0
-          ? existingTodayPayload.generatedAtUtcMs
-          : nowMs
-      )
+    existingTodayPayload
+    && existingTodayPayload.dailyId === dailyId
+    && existingTodayPayload.dailySlot === dailySlot
+    && existingTodayPayload.canonicalKey === materialized.canonicalKey
+    && existingTodayPayload.generatedAtUtcMs > 0
+      ? existingTodayPayload.generatedAtUtcMs
+      : nowMs
   );
 
   const tomorrowId = addUtcDaysToDateId(dailyId, 1);
@@ -220,22 +231,21 @@ export const publishDailyLevel = (rawOptions = {}) => {
     level: toDailyPayloadLevel(materialized.level, dailyId),
   };
 
-  if (!todayEntry) {
-    history.entries.push({
-      dailyId,
-      dailySlot,
-      canonicalKey: materialized.canonicalKey,
-      poolVersion: String(manifest.poolVersion || ''),
-      publishedAtUtcMs: stableGeneratedAtUtcMs,
-    });
-    history.entries.sort((a, b) => (a.dailyId < b.dailyId ? -1 : (a.dailyId > b.dailyId ? 1 : 0)));
-  }
+  history.entries.push({
+    dailyId,
+    dailySlot,
+    canonicalKey: materialized.canonicalKey,
+    poolVersion: String(manifest.poolVersion || ''),
+    publishedAtUtcMs: stableGeneratedAtUtcMs,
+  });
+  history.entries.sort((a, b) => (a.dailyId < b.dailyId ? -1 : (a.dailyId > b.dailyId ? 1 : 0)));
 
   writeJson(opts.todayFile, payload);
   writeJson(opts.historyFile, history);
 
   return {
     ok: true,
+    preservedExistingDaily: false,
     dailyId,
     dailySlot,
     canonicalKey: materialized.canonicalKey,
