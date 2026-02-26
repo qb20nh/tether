@@ -1,4 +1,12 @@
 {
   "schemaVersion": 1,
-  "entries": []
+  "entries": [
+    {
+      "dailyId": "2026-02-26",
+      "dailySlot": 25709,
+      "canonicalKey": "8efd2263482c67e3ae0f994236586ca1",
+      "poolVersion": "v1",
+      "publishedAtUtcMs": 1772137183798
+    }
+  ]
 }
