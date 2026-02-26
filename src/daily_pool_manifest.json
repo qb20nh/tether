@@ -6,20 +6,20 @@
   "baseVariantId": 0,
   "slotMapping": "identity",
   "maxVariantProbe": 255,
-  "maxVariantUsed": 0,
-  "poolDigest": "",
+  "maxVariantUsed": 4,
+  "poolDigest": "2471ba6a92d6e01c27f806e17c89a2daa51efac0cd09a0b2b29bf689eda004ed",
   "generatedAtUtcMs": 0,
   "checks": {
-    "infiniteDisjointCount": 0,
-    "dailyUniqueCount": 0,
-    "witnessValidatedCount": 0
+    "infiniteDisjointCount": 30000,
+    "dailyUniqueCount": 30000,
+    "witnessValidatedCount": 30000
   },
   "artifacts": {
     "dailyOverridesFile": "src/daily_overrides.bin.gz",
     "infiniteCanonicalKeysFile": "src/infinite_canonical_keys.json",
-    "overrideCount": 0,
-    "variantBits": 1,
-    "packedBytes": 3,
-    "gzipBytes": 0
+    "overrideCount": 7756,
+    "variantBits": 3,
+    "packedBytes": 7859,
+    "gzipBytes": 3956
   }
 }
