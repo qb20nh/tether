@@ -22,7 +22,6 @@ const PAYLOAD_SCHEMA_VERSION = 1;
 const DEFAULTS = {
   manifestFile: path.resolve(process.cwd(), 'src/daily_pool_manifest.json'),
   overridesFile: path.resolve(process.cwd(), 'src/daily_overrides.bin.gz'),
-  infiniteKeysFile: path.resolve(process.cwd(), 'src/infinite_canonical_keys.json'),
   historyFile: path.resolve(process.cwd(), 'daily/history.json'),
   todayFile: path.resolve(process.cwd(), 'daily/today.json'),
   nowMs: null,
@@ -43,7 +42,6 @@ const parseArgs = (argv) => {
 
     if (arg === '--manifest') opts.manifestFile = path.resolve(process.cwd(), nextValue());
     else if (arg === '--overrides') opts.overridesFile = path.resolve(process.cwd(), nextValue());
-    else if (arg === '--infinite-keys') opts.infiniteKeysFile = path.resolve(process.cwd(), nextValue());
     else if (arg === '--history') opts.historyFile = path.resolve(process.cwd(), nextValue());
     else if (arg === '--today') opts.todayFile = path.resolve(process.cwd(), nextValue());
     else if (arg === '--now-ms') {
@@ -63,7 +61,6 @@ const parseArgs = (argv) => {
           'Options:',
           `  --manifest <path>       Daily pool manifest path (default: ${DEFAULTS.manifestFile})`,
           `  --overrides <path>      Daily override payload path (default: ${DEFAULTS.overridesFile})`,
-          `  --infinite-keys <path>  Infinite canonical key file (default: ${DEFAULTS.infiniteKeysFile})`,
           `  --history <path>        Daily history ledger path (default: ${DEFAULTS.historyFile})`,
           `  --today <path>          Today's payload output path (default: ${DEFAULTS.todayFile})`,
           '  --now-ms <epochMs>      Override current time for testing',
@@ -153,16 +150,6 @@ export const publishDailyLevel = (rawOptions = {}) => {
 
   if (!replayWitnessAndValidate(materialized.level)) {
     throw new Error(`Daily slot ${dailySlot} failed witness solvability check`);
-  }
-
-  const infiniteKeyFile = readJson(opts.infiniteKeysFile, { keys: [] });
-  const infiniteKeyList = Array.isArray(infiniteKeyFile?.keys) ? infiniteKeyFile.keys : [];
-  if (infiniteKeyList.length < maxSlots) {
-    throw new Error(`Infinite canonical key file is incomplete: ${infiniteKeyList.length} keys`);
-  }
-  const infiniteCanonicalSet = new Set(infiniteKeyList);
-  if (infiniteCanonicalSet.has(materialized.canonicalKey)) {
-    throw new Error(`Daily slot ${dailySlot} collides with infinite canonical key set`);
   }
 
   const history = normalizeHistory(readJson(opts.historyFile, { schemaVersion: HISTORY_SCHEMA_VERSION, entries: [] }));

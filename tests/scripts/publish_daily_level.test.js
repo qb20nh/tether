@@ -16,7 +16,6 @@ const createFixture = () => {
 
   const manifestFile = path.join(tmpDir, 'daily_pool_manifest.json');
   const overridesFile = path.join(tmpDir, 'daily_overrides.bin.gz');
-  const infiniteKeysFile = path.join(tmpDir, 'infinite_canonical_keys.json');
   const historyFile = path.join(tmpDir, 'daily', 'history.json');
   const todayFile = path.join(tmpDir, 'daily', 'today.json');
 
@@ -26,19 +25,9 @@ const createFixture = () => {
     epochUtcDate: '2026-01-01',
     maxSlots: 2,
     baseVariantId: 0,
-    artifacts: {
-      infiniteCanonicalKeysFile: path.relative(process.cwd(), infiniteKeysFile),
-    },
   });
 
   fs.writeFileSync(overridesFile, gzipSync(Buffer.from([0x44, 0x01, 0x01]), { level: 9 }));
-
-  writeJson(infiniteKeysFile, {
-    schemaVersion: 1,
-    maxLevels: 30000,
-    canonicalKeyCount: 2,
-    keys: ['dummy-a', 'dummy-b'],
-  });
 
   writeJson(historyFile, {
     schemaVersion: 1,
@@ -49,7 +38,6 @@ const createFixture = () => {
     tmpDir,
     manifestFile,
     overridesFile,
-    infiniteKeysFile,
     historyFile,
     todayFile,
   };
@@ -61,7 +49,6 @@ test('publish_daily_level emits today payload and appends history', () => {
   const summary = publishDailyLevel({
     manifestFile: fx.manifestFile,
     overridesFile: fx.overridesFile,
-    infiniteKeysFile: fx.infiniteKeysFile,
     historyFile: fx.historyFile,
     todayFile: fx.todayFile,
     nowMs,
@@ -87,7 +74,6 @@ test('publish_daily_level fails when pool ordinal is exhausted', () => {
     publishDailyLevel({
       manifestFile: fx.manifestFile,
       overridesFile: fx.overridesFile,
-      infiniteKeysFile: fx.infiniteKeysFile,
       historyFile: fx.historyFile,
       todayFile: fx.todayFile,
       nowMs,

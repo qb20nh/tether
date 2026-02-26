@@ -16,10 +16,9 @@
   },
   "artifacts": {
     "dailyOverridesFile": "src/daily_overrides.bin.gz",
-    "infiniteCanonicalKeysFile": "src/infinite_canonical_keys.json",
     "overrideCount": 7756,
     "variantBits": 3,
     "packedBytes": 7859,
-    "gzipBytes": 3956
+    "gzipBytes": 4150
   }
 }

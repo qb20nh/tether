@@ -15,9 +15,7 @@ import {
 const DEFAULTS = {
   manifestFile: path.resolve(process.cwd(), 'src/daily_pool_manifest.json'),
   overridesFile: path.resolve(process.cwd(), 'src/daily_overrides.bin.gz'),
-  infiniteKeysFile: path.resolve(process.cwd(), 'src/infinite_canonical_keys.json'),
   maxSlots: null,
-  rebuildInfiniteSet: false,
   json: false,
 };
 
@@ -42,9 +40,7 @@ const parseArgs = (argv) => {
 
     if (arg === '--manifest') opts.manifestFile = path.resolve(process.cwd(), nextValue());
     else if (arg === '--overrides') opts.overridesFile = path.resolve(process.cwd(), nextValue());
-    else if (arg === '--infinite-keys') opts.infiniteKeysFile = path.resolve(process.cwd(), nextValue());
     else if (arg === '--max-slots') opts.maxSlots = toInt('--max-slots', nextValue());
-    else if (arg === '--rebuild-infinite-set') opts.rebuildInfiniteSet = true;
     else if (arg === '--json') opts.json = true;
     else if (arg === '--help' || arg === '-h') {
       console.log(
@@ -55,9 +51,7 @@ const parseArgs = (argv) => {
           'Options:',
           `  --manifest <path>        Pool manifest path (default: ${DEFAULTS.manifestFile})`,
           `  --overrides <path>       Daily overrides .bin.gz path (default: ${DEFAULTS.overridesFile})`,
-          `  --infinite-keys <path>   Infinite key set JSON path (default: ${DEFAULTS.infiniteKeysFile})`,
           '  --max-slots <n>          Verify prefix slot count (default: manifest.maxSlots)',
-          '  --rebuild-infinite-set   Regenerate infinite key set instead of reading key file',
           '  --json                   Emit JSON summary',
           '  --help                   Show this help',
         ].join('\n'),
@@ -73,23 +67,6 @@ const parseArgs = (argv) => {
 
 const readJson = (filePath) => JSON.parse(fs.readFileSync(filePath, 'utf8'));
 
-const loadInfiniteCanonicalSet = (opts, manifest) => {
-  if (opts.rebuildInfiniteSet) {
-    return buildInfiniteCanonicalKeySet(INFINITE_MAX_LEVELS);
-  }
-
-  const fromManifest = manifest?.artifacts?.infiniteCanonicalKeysFile;
-  const keyFilePath = fromManifest
-    ? path.resolve(process.cwd(), fromManifest)
-    : opts.infiniteKeysFile;
-  const keyFile = readJson(keyFilePath);
-  const keys = Array.isArray(keyFile?.keys) ? keyFile.keys : [];
-  if (keys.length < INFINITE_MAX_LEVELS) {
-    throw new Error(`Infinite canonical key file is incomplete: ${keys.length}/${INFINITE_MAX_LEVELS}`);
-  }
-  return new Set(keys);
-};
-
 function main() {
   const opts = parseArgs(process.argv.slice(2));
 
@@ -104,7 +81,7 @@ function main() {
     : DAILY_POOL_BASE_VARIANT_ID;
 
   const overrides = readDailyOverridesGzipFile(opts.overridesFile);
-  const infiniteCanonicalSet = loadInfiniteCanonicalSet(opts, manifest);
+  const infiniteCanonicalSet = buildInfiniteCanonicalKeySet(INFINITE_MAX_LEVELS);
 
   const dailyCanonicalSet = new Set();
   const digestRecords = [];

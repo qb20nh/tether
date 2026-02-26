@@ -20,7 +20,6 @@ const DEFAULTS = {
   maxVariantProbe: DAILY_POOL_MAX_VARIANT_PROBE,
   outBinFile: path.resolve(process.cwd(), 'src/daily_overrides.bin.gz'),
   outManifestFile: path.resolve(process.cwd(), 'src/daily_pool_manifest.json'),
-  outInfiniteKeysFile: path.resolve(process.cwd(), 'src/infinite_canonical_keys.json'),
   generatedAtUtcMs: 0,
   poolVersion: DAILY_POOL_VERSION,
   epochUtcDate: DAILY_POOL_EPOCH_UTC_DATE,
@@ -58,7 +57,6 @@ const parseArgs = (argv) => {
     else if (arg === '--max-variant-probe') opts.maxVariantProbe = toInt('--max-variant-probe', nextValue());
     else if (arg === '--out' || arg === '--out-bin') opts.outBinFile = path.resolve(process.cwd(), nextValue());
     else if (arg === '--out-manifest') opts.outManifestFile = path.resolve(process.cwd(), nextValue());
-    else if (arg === '--out-infinite-keys') opts.outInfiniteKeysFile = path.resolve(process.cwd(), nextValue());
     else if (arg === '--generated-at-utc-ms') opts.generatedAtUtcMs = toNonNegativeInt('--generated-at-utc-ms', nextValue());
     else if (arg === '--pool-version') opts.poolVersion = String(nextValue()).trim();
     else if (arg === '--epoch-utc-date') opts.epochUtcDate = String(nextValue()).trim();
@@ -74,7 +72,6 @@ const parseArgs = (argv) => {
           `  --max-variant-probe <n>   Variant probe cap per slot (default: ${DEFAULTS.maxVariantProbe})`,
           `  --out-bin <path>          Daily override payload path (default: ${DEFAULTS.outBinFile})`,
           `  --out-manifest <path>     Manifest output path (default: ${DEFAULTS.outManifestFile})`,
-          `  --out-infinite-keys <path> Infinite canonical key file (default: ${DEFAULTS.outInfiniteKeysFile})`,
           `  --generated-at-utc-ms <ms> Metadata timestamp (default: ${DEFAULTS.generatedAtUtcMs}, deterministic)`,
           `  --pool-version <id>       Pool version label (default: ${DEFAULTS.poolVersion})`,
           `  --epoch-utc-date <date>   Epoch date YYYY-MM-DD (default: ${DEFAULTS.epochUtcDate})`,
@@ -115,14 +112,6 @@ function main() {
       `Infinite canonical set is not unique: ${infiniteCanonicalSet.size}/${INFINITE_MAX_LEVELS}`,
     );
   }
-  const infiniteCanonicalKeys = [...infiniteCanonicalSet].sort();
-  writeJson(opts.outInfiniteKeysFile, {
-    schemaVersion: DAILY_POOL_SCHEMA_VERSION,
-    generatedAtUtcMs: opts.generatedAtUtcMs,
-    maxLevels: INFINITE_MAX_LEVELS,
-    canonicalKeyCount: infiniteCanonicalSet.size,
-    keys: infiniteCanonicalKeys,
-  });
 
   const dailyCanonicalKeys = new Set();
   const overrides = new Map();
@@ -171,7 +160,6 @@ function main() {
     },
     artifacts: {
       dailyOverridesFile: path.relative(process.cwd(), opts.outBinFile),
-      infiniteCanonicalKeysFile: path.relative(process.cwd(), opts.outInfiniteKeysFile),
       overrideCount: overrides.size,
       variantBits: encoded.variantBits,
       packedBytes: encoded.packedBytes,
@@ -193,7 +181,6 @@ function main() {
     poolDigest,
     outBinFile: opts.outBinFile,
     outManifestFile: opts.outManifestFile,
-    outInfiniteKeysFile: opts.outInfiniteKeysFile,
   };
 
   if (opts.json) {
@@ -202,7 +189,6 @@ function main() {
     console.log(`Generated daily pool artifacts:`);
     console.log(`  overrides: ${opts.outBinFile}`);
     console.log(`  manifest: ${opts.outManifestFile}`);
-    console.log(`  infinite keys: ${opts.outInfiniteKeysFile}`);
     console.log(
       `  unique: ${summary.dailyUniqueCount}/${opts.maxSlots}, overrides: ${summary.overrideCount}, variantBits: ${summary.variantBits}`,
     );

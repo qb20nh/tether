@@ -46,22 +46,22 @@ jobs:
       - name: Ensure committed artifacts are up to date (PR gate)
         if: github.event_name == 'pull_request'
         run: |
-          if ! git diff --quiet -- src/daily_overrides.bin.gz src/daily_pool_manifest.json src/infinite_canonical_keys.json; then
+          if ! git diff --quiet -- src/daily_overrides.bin.gz src/daily_pool_manifest.json; then
             echo "Daily pool artifacts are stale. Regenerate and commit these files:"
-            git status --short -- src/daily_overrides.bin.gz src/daily_pool_manifest.json src/infinite_canonical_keys.json
+            git status --short -- src/daily_overrides.bin.gz src/daily_pool_manifest.json
             exit 1
           fi
 
       - name: Auto-commit refreshed artifacts
         if: github.event_name != 'pull_request'
         run: |
-          if git diff --quiet -- src/daily_overrides.bin.gz src/daily_pool_manifest.json src/infinite_canonical_keys.json; then
+          if git diff --quiet -- src/daily_overrides.bin.gz src/daily_pool_manifest.json; then
             echo "Artifacts already up to date."
             exit 0
           fi
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add src/daily_overrides.bin.gz src/daily_pool_manifest.json src/infinite_canonical_keys.json
+          git add src/daily_overrides.bin.gz src/daily_pool_manifest.json
           git commit -m "chore(daily): refresh pool artifacts"
           git push
