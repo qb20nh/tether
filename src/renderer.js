@@ -15,6 +15,7 @@ let pathAnimationLastTs = 0;
 let latestPathSnapshot = null;
 let latestPathRefs = null;
 let latestPathStatuses = null;
+let latestCompletionModel = null;
 let latestPathMainFlowTravel = 0;
 let colorParserCtx = null;
 
@@ -22,6 +23,7 @@ const PATH_FLOW_SPEED = -32;
 const PATH_FLOW_CYCLE = 128;
 const PATH_FLOW_PULSE = 64;
 const PATH_FLOW_BASE_CELL = 56;
+const COMPLETE_PATH_THRESHOLD = 0.999;
 const PATH_FLOW_GLOW_ALPHA = 1;
 const PATH_FLOW_GLOW = `rgba(255, 255, 255, ${PATH_FLOW_GLOW_ALPHA})`;
 const PATH_FLOW_GLOW_SOFT = 'rgba(255, 255, 255, 0)';
@@ -29,6 +31,7 @@ const PATH_FLOW_RISE = 0.82;
 const PATH_FLOW_DROP = 0.83;
 const FLOW_STOP_EPSILON = 1e-4;
 const TAU = Math.PI * 2;
+const CANVAS_ALIGN_OFFSET_CSS_PX = 0.5;
 
 const pointsMatch = (a, b) => a && b && a.r === b.r && a.c === b.c;
 const cellDistance = (a, b) => {
@@ -51,6 +54,28 @@ const normalizeFlowOffset = (value, cycle = PATH_FLOW_CYCLE) => {
   if (!Number.isFinite(cycle) || cycle <= 0) return 0;
   const mod = value % cycle;
   return mod >= 0 ? mod : mod + cycle;
+};
+
+const clampUnit = (value) => Math.max(0, Math.min(1, value));
+
+const getNowMs = () => {
+  if (typeof performance !== 'undefined' && typeof performance.now === 'function') {
+    return performance.now();
+  }
+  return Date.now();
+};
+
+const getCompletionProgress = (completionModel = latestCompletionModel) => {
+  if (!completionModel || !completionModel.isSolved) return 0;
+  if (!completionModel.isCompleting) return 1;
+
+  const durationMs = Number(completionModel.durationMs);
+  if (!Number.isFinite(durationMs) || durationMs <= 0) return 1;
+  const startTimeMs = Number(completionModel.startTimeMs);
+  if (!Number.isFinite(startTimeMs)) return 0;
+
+  const elapsedMs = getNowMs() - startTimeMs;
+  return clampUnit(elapsedMs / durationMs);
 };
 
 const getPathFlowMetrics = (refs = latestPathRefs) => {
@@ -305,7 +330,7 @@ const getHeadShiftDelta = (nextPath, previousPath, refs = {}, offset = { x: 0, y
   return 0;
 };
 
-const shouldAnimatePathFlow = (snapshot) => {
+const shouldAnimatePathFlow = (snapshot, completionModel = latestCompletionModel) => {
   if (!snapshot || snapshot.path.length <= 1) return false;
   if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return true;
   return !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -326,9 +351,9 @@ const animatePathFlow = (timestamp) => {
     return;
   }
 
-  if (!shouldAnimatePathFlow(latestPathSnapshot)) {
+  if (!shouldAnimatePathFlow(latestPathSnapshot, latestCompletionModel)) {
     stopPathAnimation();
-    drawAllInternal(latestPathSnapshot, latestPathRefs, latestPathStatuses, 0);
+    drawAllInternal(latestPathSnapshot, latestPathRefs, latestPathStatuses, 0, latestCompletionModel);
     return;
   }
 
@@ -345,7 +370,13 @@ const animatePathFlow = (timestamp) => {
 
   pathAnimationLastTs = timestamp;
   if (latestPathSnapshot && latestPathRefs) {
-    drawAnimatedPath(latestPathSnapshot, latestPathRefs, latestPathStatuses, pathAnimationOffset);
+    drawAnimatedPath(
+      latestPathSnapshot,
+      latestPathRefs,
+      latestPathStatuses,
+      pathAnimationOffset,
+      latestCompletionModel,
+    );
   }
 
   pathAnimationFrame = requestAnimationFrame(animatePathFlow);
@@ -393,8 +424,23 @@ const configureHiDPICanvas = (canvas, ctx, cssWidth, cssHeight) => {
   if (canvas.style.width !== cssWidthPx) canvas.style.width = cssWidthPx;
   if (canvas.style.height !== cssHeightPx) canvas.style.height = cssHeightPx;
 
-  ctx.setTransform(scaleX, 0, 0, scaleY, 0, 0);
+  ctx.setTransform(
+    scaleX,
+    0,
+    0,
+    scaleY,
+    CANVAS_ALIGN_OFFSET_CSS_PX * scaleX,
+    CANVAS_ALIGN_OFFSET_CSS_PX * scaleY,
+  );
   ctx.imageSmoothingEnabled = false;
+};
+
+const clearCanvas = (ctx, canvas) => {
+  if (!ctx || !canvas) return;
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.restore();
 };
 
 const forceOpaqueColor = (color) => {
@@ -792,7 +838,7 @@ export function setDropTarget(r, c) {
   }
 }
 
-export function updateCells(snapshot, results, refs) {
+export function updateCells(snapshot, results, refs, completionModel = null) {
   const { hintStatus, stitchStatus, rpsStatus, blockedStatus } = results;
   const desired = buildBoardCellViewModel(
     snapshot,
@@ -819,13 +865,29 @@ export function updateCells(snapshot, results, refs) {
       if (markEl && markEl.innerHTML !== state.markHtml) {
         markEl.innerHTML = state.markHtml;
       }
+
+      const diagOrderValue = String(r + c);
+      const currentDiagOrder = cell.style.getPropertyValue('--diag-order');
+      if (currentDiagOrder !== diagOrderValue) {
+        cell.style.setProperty('--diag-order', diagOrderValue);
+      }
+
+      const pathOrderValue = state.idx ? String(Math.max(0, Number(state.idx) - 1)) : '';
+      const currentPathOrder = cell.style.getPropertyValue('--path-order');
+      if (pathOrderValue) {
+        if (currentPathOrder !== pathOrderValue) {
+          cell.style.setProperty('--path-order', pathOrderValue);
+        }
+      } else if (currentPathOrder) {
+        cell.style.removeProperty('--path-order');
+      }
     }
   }
 
-  drawAll(snapshot, refs, { hintStatus, stitchStatus, rpsStatus });
+  drawAll(snapshot, refs, { hintStatus, stitchStatus, rpsStatus }, completionModel);
 }
 
-export function drawAll(snapshot, refs, statuses) {
+export function drawAll(snapshot, refs, statuses, completionModel = null) {
   const previousPath = latestPathSnapshot?.path || null;
   const flow = getPathFlowMetrics(refs);
 
@@ -855,11 +917,12 @@ export function drawAll(snapshot, refs, statuses) {
   latestPathSnapshot = snapshot;
   latestPathRefs = refs;
   latestPathStatuses = statuses;
+  latestCompletionModel = completionModel;
 
-  const offset = shouldAnimatePathFlow(snapshot) ? pathAnimationOffset : 0;
-  drawAllInternal(snapshot, refs, statuses, offset);
+  const offset = shouldAnimatePathFlow(snapshot, completionModel) ? pathAnimationOffset : 0;
+  drawAllInternal(snapshot, refs, statuses, offset, completionModel);
 
-  if (shouldAnimatePathFlow(snapshot)) {
+  if (shouldAnimatePathFlow(snapshot, completionModel)) {
     schedulePathAnimation();
   } else {
     stopPathAnimation();
@@ -870,26 +933,24 @@ export function drawStaticSymbols(snapshot, refs, statuses) {
   const { symbolCtx, symbolCanvas } = refs;
   if (!symbolCtx || !symbolCanvas) return;
 
-  const symbolScale = getCanvasScale(symbolCtx);
-  symbolCtx.clearRect(0, 0, symbolCanvas.width / symbolScale.x, symbolCanvas.height / symbolScale.y);
+  clearCanvas(symbolCtx, symbolCanvas);
 
   drawCornerCounts(snapshot, refs, symbolCtx, statuses?.hintStatus?.cornerVertexStatus);
   drawCrossStitches(snapshot, refs, symbolCtx, statuses?.stitchStatus?.vertexStatus);
 }
 
-export function drawAnimatedPath(snapshot, refs, statuses, flowOffset = 0) {
+export function drawAnimatedPath(snapshot, refs, statuses, flowOffset = 0, completionModel = null) {
   const { ctx, canvas } = refs;
   if (!ctx || !canvas) return;
 
-  const pathScale = getCanvasScale(ctx);
-  ctx.clearRect(0, 0, canvas.width / pathScale.x, canvas.height / pathScale.y);
+  clearCanvas(ctx, canvas);
 
-  drawPathLine(snapshot, refs, ctx, flowOffset);
+  drawPathLine(snapshot, refs, ctx, flowOffset, completionModel);
 }
 
-function drawAllInternal(snapshot, refs, statuses, flowOffset = 0) {
+function drawAllInternal(snapshot, refs, statuses, flowOffset = 0, completionModel = null) {
   drawStaticSymbols(snapshot, refs, statuses);
-  drawAnimatedPath(snapshot, refs, statuses, flowOffset);
+  drawAnimatedPath(snapshot, refs, statuses, flowOffset, completionModel);
 }
 
 function drawCrossStitches(snapshot, refs, ctx, vertexStatus = new Map()) {
@@ -986,7 +1047,107 @@ function drawCrossStitches(snapshot, refs, ctx, vertexStatus = new Map()) {
   ctx.restore();
 }
 
-function drawPathLine(snapshot, refs, ctx, flowOffset = 0) {
+const drawPathStrokeByProgress = (points, ctx, width, color, progress) => {
+  if (!Array.isArray(points) || points.length < 2) return;
+  const clampedProgress = clampUnit(progress);
+  if (clampedProgress <= 0) return;
+
+  let totalLength = 0;
+  for (let i = 0; i < points.length - 1; i++) {
+    const a = points[i];
+    const b = points[i + 1];
+    totalLength += Math.hypot(b.x - a.x, b.y - a.y);
+  }
+  if (!(totalLength > 0)) return;
+
+  const completeRgb = parseColorToRgb(color) || { r: 34, g: 197, b: 94 };
+  const colorAtAlpha = (alpha) => {
+    const clampedAlpha = clampUnit(alpha);
+    if (clampedAlpha <= 0) return `rgba(${completeRgb.r}, ${completeRgb.g}, ${completeRgb.b}, 0)`;
+    if (clampedAlpha >= 1) return `rgb(${completeRgb.r}, ${completeRgb.g}, ${completeRgb.b})`;
+    return `rgba(${completeRgb.r}, ${completeRgb.g}, ${completeRgb.b}, ${clampedAlpha.toFixed(4)})`;
+  };
+
+  ctx.lineWidth = width;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+
+  if (clampedProgress >= COMPLETE_PATH_THRESHOLD) {
+    ctx.strokeStyle = colorAtAlpha(1);
+    ctx.beginPath();
+    ctx.moveTo(points[0].x, points[0].y);
+    for (let i = 1; i < points.length; i++) {
+      ctx.lineTo(points[i].x, points[i].y);
+    }
+    ctx.stroke();
+    return;
+  }
+
+  const boundary = totalLength * clampedProgress;
+  const feather = Math.max(width * 2.2, 14);
+  const fadeStart = boundary - (feather * 0.5);
+  const fadeEnd = boundary + (feather * 0.5);
+
+  const alphaAtTravel = (travel) => {
+    if (travel <= fadeStart) return 1;
+    if (travel >= fadeEnd) return 0;
+    if (fadeEnd <= fadeStart) return travel < boundary ? 1 : 0;
+    return 1 - ((travel - fadeStart) / (fadeEnd - fadeStart));
+  };
+
+  let travelCursor = 0;
+  for (let i = 0; i < points.length - 1; i++) {
+    const start = points[i];
+    const end = points[i + 1];
+    const dx = end.x - start.x;
+    const dy = end.y - start.y;
+    const segLength = Math.hypot(dx, dy);
+    if (!(segLength > 0)) {
+      travelCursor += segLength;
+      continue;
+    }
+
+    const segStart = travelCursor;
+    const segEnd = segStart + segLength;
+    travelCursor = segEnd;
+
+    if (segStart >= fadeEnd) break;
+
+    let strokeStyle = colorAtAlpha(1);
+    if (!(segEnd <= fadeStart)) {
+      const gradient = ctx.createLinearGradient(start.x, start.y, end.x, end.y);
+      const stops = [
+        { position: 0, color: colorAtAlpha(alphaAtTravel(segStart)) },
+        { position: 1, color: colorAtAlpha(alphaAtTravel(segEnd)) },
+      ];
+
+      if (fadeStart > segStart && fadeStart < segEnd) {
+        stops.push({
+          position: (fadeStart - segStart) / segLength,
+          color: colorAtAlpha(1),
+        });
+      }
+
+      if (fadeEnd > segStart && fadeEnd < segEnd) {
+        stops.push({
+          position: (fadeEnd - segStart) / segLength,
+          color: colorAtAlpha(0),
+        });
+      }
+
+      addOrderedGradientStops(gradient, stops);
+      strokeStyle = gradient;
+    }
+
+    ctx.strokeStyle = strokeStyle;
+    ctx.beginPath();
+    ctx.moveTo(start.x, start.y);
+    ctx.lineTo(end.x, end.y);
+    ctx.stroke();
+  }
+};
+
+function drawPathLine(snapshot, refs, ctx, flowOffset = 0, completionModel = null) {
   if (snapshot.path.length === 0) {
     latestPathMainFlowTravel = 0;
     return;
@@ -1001,11 +1162,21 @@ function drawPathLine(snapshot, refs, ctx, flowOffset = 0) {
   const startRadius = Math.max(Math.floor(width * 0.9), 6);
   const halfHeadWidth = Math.max(6, Math.floor(width * 0.95));
 
-  const colorMain = forceOpaqueColor(
-    getComputedStyle(document.documentElement).getPropertyValue('--line').trim(),
-  );
+  const themeStyles = getComputedStyle(refs.boardWrap || document.documentElement);
+  const colorMain = forceOpaqueColor(themeStyles.getPropertyValue('--line').trim());
   const colorMainRgb = parseColorToRgb(colorMain);
-  const flowColorAtAlpha = (alpha) => blendRgbTowardsWhite(colorMainRgb, alpha);
+  const colorComplete = forceOpaqueColor(
+    themeStyles.getPropertyValue('--good').trim() || '#22c55e',
+  );
+  const completionProgress = getCompletionProgress(completionModel);
+  const isCompletionSolved = Boolean(completionModel?.isSolved);
+  const flowColorAtAlpha = (alpha) => {
+    if (isCompletionSolved && completionProgress > 0) {
+      return flowColorFromAlpha(alpha);
+    }
+    return blendRgbTowardsWhite(colorMainRgb, alpha);
+  };
+  const showFlowRibbon = shouldAnimatePathFlow(snapshot, completionModel);
   const flowMetrics = getPathFlowMetrics(refs);
 
   ctx.lineCap = 'round';
@@ -1029,7 +1200,11 @@ function drawPathLine(snapshot, refs, ctx, flowOffset = 0) {
     }
     ctx.stroke();
 
-    if (shouldAnimatePathFlow(snapshot)) {
+    if (isCompletionSolved && completionProgress > 0) {
+      drawPathStrokeByProgress(adjustedPoints, ctx, width, colorComplete, completionProgress);
+    }
+
+    if (showFlowRibbon) {
       latestPathMainFlowTravel = drawFlowRibbon(adjustedPoints, ctx, width, flowOffset, {
         startRadius,
         arrowLength,
@@ -1049,6 +1224,13 @@ function drawPathLine(snapshot, refs, ctx, flowOffset = 0) {
   ctx.beginPath();
   ctx.arc(hx, hy, startRadius, 0, Math.PI * 2);
   ctx.fill();
+
+  if (isCompletionSolved && completionProgress > 0) {
+    ctx.fillStyle = colorComplete;
+    ctx.beginPath();
+    ctx.arc(hx, hy, startRadius, 0, Math.PI * 2);
+    ctx.fill();
+  }
 
   if (snapshot.path.length > 1) {
     const tail = snapshot.path[snapshot.path.length - 1];
@@ -1073,9 +1255,23 @@ function drawPathLine(snapshot, refs, ctx, flowOffset = 0) {
     ctx.closePath();
     ctx.restore();
     ctx.fill();
+
+    if (isCompletionSolved && completionProgress >= COMPLETE_PATH_THRESHOLD) {
+      ctx.fillStyle = colorComplete;
+      ctx.beginPath();
+      ctx.save();
+      ctx.translate(tx, ty);
+      ctx.rotate(angle);
+      ctx.moveTo(arrowLength, 0);
+      ctx.lineTo(0, -halfHeadWidth);
+      ctx.lineTo(0, halfHeadWidth);
+      ctx.closePath();
+      ctx.restore();
+      ctx.fill();
+    }
   }
 
-  if (snapshot.path.length > 1 && shouldAnimatePathFlow(snapshot)) {
+  if (snapshot.path.length > 1 && showFlowRibbon) {
     drawFlowRibbon(adjustedPoints, ctx, width, flowOffset, {
       startRadius,
       arrowLength,

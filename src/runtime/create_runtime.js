@@ -1,4 +1,4 @@
-import { INTENT_TYPES, UI_ACTIONS, INTERACTION_UPDATES } from './intents.js';
+import { INTENT_TYPES, UI_ACTIONS, INTERACTION_UPDATES, GAME_COMMANDS } from './intents.js';
 
 const PATH_BRACKET_TUTORIAL_LEVEL_INDEX = 0;
 const MOVABLE_BRACKET_TUTORIAL_LEVEL_INDEX = 7;
@@ -89,6 +89,7 @@ export function createRuntime(options) {
   let layoutQueued = false;
   let queuedLayoutOptions = {};
   let pendingValidate = false;
+  let pendingValidateSource = null;
   let settingsMenuOpen = false;
 
   const sessionSaveData = {
@@ -486,7 +487,8 @@ export function createRuntime(options) {
     return `${cursor.r},${cursor.c}`;
   };
 
-  const renderSnapshot = (snapshot, evaluation, completion = null) => {
+  const renderSnapshot = (snapshot, evaluation, completion = null, options = {}) => {
+    const completionAnimationTrigger = Boolean(options.completionAnimationTrigger);
     renderer.renderFrame({
       snapshot,
       evaluation,
@@ -494,6 +496,8 @@ export function createRuntime(options) {
       uiModel: {
         messageKind: currentMessageKind,
         messageHtml: currentMessageHtml,
+        isBoardSolved: currentBoardSolved,
+        completionAnimationTrigger,
         tutorialFlags: {
           path: snapshot.levelIndex === PATH_BRACKET_TUTORIAL_LEVEL_INDEX,
           movable: snapshot.levelIndex === MOVABLE_BRACKET_TUTORIAL_LEVEL_INDEX,
@@ -510,7 +514,7 @@ export function createRuntime(options) {
     });
   };
 
-  const refresh = (snapshot, validate = false) => {
+  const refresh = (snapshot, validate = false, options = {}) => {
     const draggedHintSuppressionKey = resolveDraggedHintSuppressionKey(snapshot);
     const evaluateResult = core.evaluate(snapshot, {
       suppressEndpointRequirement: Boolean(draggedHintSuppressionKey),
@@ -535,13 +539,19 @@ export function createRuntime(options) {
       }
     }
 
-    renderSnapshot(snapshot, evaluateResult, completion);
+    const completionAnimationTrigger = Boolean(
+      completion?.kind === 'good'
+      && options.validationSource === GAME_COMMANDS.FINALIZE_PATH,
+    );
+    renderSnapshot(snapshot, evaluateResult, completion, {
+      completionAnimationTrigger,
+    });
   };
 
-  const runBoardLayout = (validate = false) => {
+  const runBoardLayout = (validate = false, options = {}) => {
     const snapshot = state.getSnapshot();
     renderer.resize();
-    refresh(snapshot, validate);
+    refresh(snapshot, validate, options);
   };
 
   const queueBoardLayout = (validate = false, optionsForInteraction = {}) => {
@@ -560,6 +570,9 @@ export function createRuntime(options) {
       interactionState.pathDragCursor = queuedLayoutOptions.pathDragCursor;
     }
 
+    if (Boolean(validate)) {
+      pendingValidateSource = optionsForInteraction.validationSource || null;
+    }
     pendingValidate = pendingValidate || Boolean(validate);
     if (layoutQueued) return;
     layoutQueued = true;
@@ -567,9 +580,11 @@ export function createRuntime(options) {
     requestAnimationFrame(() => {
       layoutQueued = false;
       const shouldValidate = pendingValidate;
+      const validationSource = pendingValidateSource;
       pendingValidate = false;
+      pendingValidateSource = null;
       queuedLayoutOptions = {};
-      runBoardLayout(shouldValidate);
+      runBoardLayout(shouldValidate, { validationSource });
     });
   };
 
@@ -872,6 +887,7 @@ export function createRuntime(options) {
       isPathDragging: interactionState.isPathDragging,
       pathDragSide: interactionState.pathDragSide,
       pathDragCursor: interactionState.pathDragCursor,
+      validationSource: transition.validate ? payload.commandType : null,
     });
 
     const shouldPersistInputState = Boolean(transition.validate) && !interactionState.isPathDragging;

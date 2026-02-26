@@ -17,6 +17,7 @@
   --accent: #6aa6ff;
   --line: rgb(120, 190, 255);
   --lineShadow: rgba(120, 190, 255, 0.25);
+  --path-canvas-blend: overlay;
   --stitchIdle: #8f9cac;
   --stitchShadow: #080f1a;
   --app-pad-inline: 6px;
@@ -85,8 +86,9 @@ body.isPathDragging * {
   --bad: #ff5c5c;
   --warn: #ffb14a;
   --accent: #2563eb;
-  --line: rgb(120, 190, 255);
-  --lineShadow: rgba(120, 190, 255, 0.25);
+  --line: rgb(37, 99, 235);
+  --lineShadow: rgba(37, 99, 235, 0.32);
+  --path-canvas-blend: overlay;
   --stitchIdle: #8f9cac;
   --stitchShadow: #080f1a;
   --color-scheme: light;
@@ -533,7 +535,7 @@ button:disabled:active {
   gap: 8px;
 }
 
-.panel > .progressNav {
+.panel>.progressNav {
   margin-top: 8px;
 }
 
@@ -563,6 +565,12 @@ button:disabled:active {
   max-width: 100%;
   user-select: none;
   touch-action: none;
+  --complete-cascade-total-ms: 1000ms;
+  --complete-cascade-cell-ms: 100ms;
+  --complete-step-ms: 100ms;
+  --complete-cell-duration-ms: var(--complete-cascade-cell-ms);
+  --complete-done-pulse-ms: 400ms;
+  --complete-done-pulse-step-ms: 50ms;
   --grid-cols: 7;
   --grid-rows: 7;
   --cell: 56px;
@@ -591,7 +599,14 @@ button:disabled:active {
   initial-value: 0;
 }
 
+@property --interactive-corner-color {
+  syntax: '<color>';
+  inherits: true;
+  initial-value: rgba(120, 190, 255, 0.84);
+}
+
 @keyframes interactivePulseClock {
+
   0%,
   100% {
     --interactive-pulse: 0;
@@ -619,7 +634,19 @@ button:disabled:active {
     border-color 120ms ease,
     transform 80ms ease,
     box-shadow 120ms ease,
-    filter 120ms ease;
+    filter 120ms ease,
+    --interactive-corner-color var(--complete-cell-duration-ms) ease-out;
+}
+
+.cell::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: linear-gradient(180deg, rgba(34, 197, 94, 0.24) 0%, rgba(21, 128, 61, 0.34) 100%);
+  opacity: 0;
+  transition: opacity var(--complete-cell-duration-ms) ease-out;
 }
 
 .cell:hover {
@@ -672,6 +699,16 @@ button:disabled:active {
     0 0 0 3px rgba(120, 190, 255, 0.24) inset,
     0 0 0 2px rgba(120, 190, 255, 0.30);
   filter: brightness(1.16);
+}
+
+.theme-light .cell.wall.movable {
+  background: linear-gradient(180deg, #23354f 0%, #172337 100%);
+  border-color: rgba(147, 197, 253, 0.62);
+}
+
+.theme-light .cell.wall.movable .mark,
+.theme-light .wallDragGhostMark {
+  color: #eef6ff;
 }
 
 .cell .mark {
@@ -841,7 +878,179 @@ button:disabled:active {
   --interactive-corner-color: rgba(120, 190, 255, 1);
 }
 
+.theme-light .cell.visited {
+  background: linear-gradient(180deg, rgba(37, 99, 235, 0.14) 0%, rgba(30, 64, 175, 0.24) 100%);
+  border-color: rgba(37, 99, 235, 0.34);
+}
+
+.theme-light .cell.visited:not(.pathStart):not(.pathEnd) {
+  border-color: rgba(37, 99, 235, 0.42);
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.11) inset;
+}
+
+.theme-light .cell.visited:not(.pathStart):not(.pathEnd):hover {
+  border-color: rgba(37, 99, 235, 0.78);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.18) inset, 0 0 0 2px rgba(37, 99, 235, 0.24);
+}
+
+.theme-light .cell.pathStart,
+.theme-light .cell.pathEnd {
+  border-color: rgba(37, 99, 235, 0.92);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.32) inset, 0 0 0 2px rgba(37, 99, 235, 0.38);
+  --interactive-corner-color: rgba(37, 99, 235, 0.95);
+}
+
+.theme-light .cell.pathStart:hover,
+.theme-light .cell.pathEnd:hover {
+  border-color: rgba(29, 78, 216, 1);
+  box-shadow: 0 0 0 3px rgba(29, 78, 216, 0.36) inset, 0 0 0 2px rgba(29, 78, 216, 0.34);
+  --interactive-corner-color: rgba(29, 78, 216, 1);
+}
+
+.theme-light .cell.pathStart:active,
+.theme-light .cell.pathEnd:active {
+  box-shadow: 0 0 0 3px rgba(29, 78, 216, 0.4) inset, 0 0 0 2px rgba(29, 78, 216, 0.38);
+  --interactive-corner-color: rgba(29, 78, 216, 1);
+}
+
+.theme-light .boardWrap.isComplete .cell::before {
+  background: linear-gradient(180deg, rgba(134, 239, 172, 0.48) 0%, rgba(34, 197, 94, 0.64) 100%);
+}
+
+.theme-light .boardWrap.isComplete {
+  --good: #14532d;
+}
+
+.boardWrap.isComplete:not(.isCompleting) .cell:not(.wall) {
+  border-color: rgba(34, 197, 94, 0.44);
+}
+
+.boardWrap.isComplete:not(.isCompleting) .cell.visited:not(.pathStart):not(.pathEnd) {
+  border-color: rgba(34, 197, 94, 0.62);
+  box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.2) inset, 0 0 0 2px rgba(34, 197, 94, 0.16);
+}
+
+.boardWrap.isComplete:not(.isCompleting) .cell.pathStart,
+.boardWrap.isComplete:not(.isCompleting) .cell.pathEnd {
+  border-color: rgba(34, 197, 94, 0.95);
+  box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.34) inset, 0 0 0 2px rgba(34, 197, 94, 0.32);
+  --interactive-corner-color: rgba(34, 197, 94, 1);
+}
+
+.boardWrap.isComplete:not(.isCompleting) .cell.wall.movable {
+  --interactive-corner-color: rgba(34, 197, 94, 1);
+}
+
+@keyframes completeCellCascade {
+  to {
+    border-color: rgba(34, 197, 94, 0.62);
+    box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.2) inset, 0 0 0 2px rgba(34, 197, 94, 0.16);
+  }
+}
+
+@keyframes completeCellCascadeEndpoint {
+  to {
+    border-color: rgba(34, 197, 94, 0.95);
+    box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.34) inset, 0 0 0 2px rgba(34, 197, 94, 0.32);
+    --interactive-corner-color: rgba(34, 197, 94, 1);
+  }
+}
+
+@keyframes completeDoneFlashCell {
+
+  0%,
+  100% {
+    filter: brightness(1) saturate(1);
+  }
+
+  45% {
+    filter: brightness(1.14) saturate(1.24);
+  }
+}
+
+@keyframes completeDoneFlashCorner {
+
+  0%,
+  100% {
+    --interactive-corner-color: rgba(34, 197, 94, 1);
+  }
+
+  45% {
+    --interactive-corner-color: rgba(134, 239, 172, 1);
+  }
+}
+
+.boardWrap.isComplete:not(.isCompleting) .cell.visited::before {
+  opacity: 1;
+  transition-delay: 0ms;
+}
+
+.boardWrap.isComplete.isCompleting .cell.visited {
+  animation-name: completeCellCascade;
+  animation-duration: var(--complete-cell-duration-ms);
+  animation-timing-function: ease-out;
+  animation-fill-mode: both;
+  animation-delay: calc(var(--path-order, 0) * var(--complete-step-ms));
+}
+
+.boardWrap.isComplete.isCompleting .cell.pathStart,
+.boardWrap.isComplete.isCompleting .cell.pathEnd {
+  animation-name: completeCellCascadeEndpoint;
+  animation-duration: var(--complete-cell-duration-ms);
+  animation-timing-function: ease-out;
+  animation-fill-mode: both;
+  animation-delay: calc(var(--path-order, 0) * var(--complete-step-ms));
+}
+
+.boardWrap.isComplete.isCompleting .cell.visited::before {
+  opacity: 1;
+  transition-duration: var(--complete-cell-duration-ms);
+  transition-timing-function: ease-out;
+  transition-delay: calc(var(--path-order, 0) * var(--complete-step-ms));
+}
+
+.boardWrap.isCompletePulse .cell.visited {
+  animation: completeDoneFlashCell var(--complete-done-pulse-ms) ease-out 1 both;
+  animation-delay: calc(var(--diag-order, 0) * var(--complete-done-pulse-step-ms));
+}
+
+.boardWrap.isCompletePulse .cell.pathStart,
+.boardWrap.isCompletePulse .cell.pathEnd {
+  animation:
+    completeDoneFlashCell var(--complete-done-pulse-ms) ease-out 1 both,
+    completeDoneFlashCorner var(--complete-done-pulse-ms) ease-out 1 both;
+  animation-delay:
+    calc(var(--diag-order, 0) * var(--complete-done-pulse-step-ms)),
+    calc(var(--diag-order, 0) * var(--complete-done-pulse-step-ms));
+}
+
+.boardWrap.isCompletePulse .cell.wall.movable {
+  animation: completeDoneFlashCorner var(--complete-done-pulse-ms) ease-out 1 both;
+  animation-delay: calc(var(--diag-order, 0) * var(--complete-done-pulse-step-ms));
+}
+
+.boardWrap.isCompleteReset .cell,
+.boardWrap.isCompleteReset .cell::before {
+  animation: none !important;
+  transition-duration: 0ms !important;
+  transition-delay: 0ms !important;
+}
+
+.boardWrap.isCompleteReset .cell.visited,
+.boardWrap.isCompleteReset .cell.visited::before {
+  animation: none !important;
+}
+
 @media (prefers-reduced-motion: reduce) {
+  .boardWrap {
+    --complete-cascade-total-ms: 0ms;
+    --complete-cascade-cell-ms: 0ms;
+    --complete-step-ms: 0ms;
+    --complete-cell-duration-ms: 0ms;
+    --complete-done-pulse-ms: 0ms;
+    --complete-done-pulse-step-ms: 0ms;
+  }
+
   #grid {
     animation: none;
     --interactive-pulse: 1;
@@ -913,8 +1122,8 @@ button:disabled:active {
 .cell.badBlocked,
 .cell.badRps {
   border-color: rgba(255, 92, 92, 0.95) !important;
-  background: linear-gradient(180deg, rgba(255, 92, 92, 0.18) 0%, rgba(138, 35, 45, 0.30) 100%);
-  box-shadow: 0 0 0 3px rgba(255, 92, 92, 0.28) inset, 0 0 0 2px rgba(255, 92, 92, 0.16);
+  background: linear-gradient(180deg, rgba(255, 92, 92, 0.18) 0%, rgba(138, 35, 45, 0.30) 100%) !important;
+  box-shadow: 0 0 0 3px rgba(255, 92, 92, 0.28) inset, 0 0 0 2px rgba(255, 92, 92, 0.16) !important;
 }
 
 .cell.badHint:hover,
@@ -924,7 +1133,7 @@ button:disabled:active {
   box-shadow:
     0 0 0 3px rgba(255, 92, 92, 0.34) inset,
     0 0 0 2px rgba(255, 92, 92, 0.25),
-    0 0 0 1px rgba(255, 92, 92, 0.38);
+    0 0 0 1px rgba(255, 92, 92, 0.38) !important;
   filter: brightness(1.1) saturate(1.08);
 }
 
@@ -936,14 +1145,14 @@ button:disabled:active {
 
 .cell.goodHint {
   border-color: rgba(46, 204, 113, 0.95) !important;
-  background: linear-gradient(180deg, rgba(46, 204, 113, 0.16) 0%, rgba(22, 106, 65, 0.26) 100%);
-  box-shadow: 0 0 0 3px rgba(46, 204, 113, 0.28) inset, 0 0 0 2px rgba(46, 204, 113, 0.16);
+  background: linear-gradient(180deg, rgba(46, 204, 113, 0.16) 0%, rgba(22, 106, 65, 0.26) 100%) !important;
+  box-shadow: 0 0 0 3px rgba(46, 204, 113, 0.28) inset, 0 0 0 2px rgba(46, 204, 113, 0.16) !important;
 }
 
 .cell.goodRps {
   border-color: rgba(46, 204, 113, 0.95) !important;
-  background: linear-gradient(180deg, rgba(46, 204, 113, 0.16) 0%, rgba(22, 106, 65, 0.26) 100%);
-  box-shadow: 0 0 0 3px rgba(46, 204, 113, 0.28) inset, 0 0 0 2px rgba(46, 204, 113, 0.16);
+  background: linear-gradient(180deg, rgba(46, 204, 113, 0.16) 0%, rgba(22, 106, 65, 0.26) 100%) !important;
+  box-shadow: 0 0 0 3px rgba(46, 204, 113, 0.28) inset, 0 0 0 2px rgba(46, 204, 113, 0.16) !important;
 }
 
 .cell.goodHint:hover,
@@ -952,7 +1161,7 @@ button:disabled:active {
   box-shadow:
     0 0 0 3px rgba(46, 204, 113, 0.34) inset,
     0 0 0 2px rgba(46, 204, 113, 0.24),
-    0 0 0 1px rgba(46, 204, 113, 0.35);
+    0 0 0 1px rgba(46, 204, 113, 0.35) !important;
   filter: brightness(1.1) saturate(1.08);
 }
 
@@ -1013,7 +1222,7 @@ button:disabled:active {
   inset: 0;
   z-index: 3;
   pointer-events: none;
-  mix-blend-mode: overlay;
+  mix-blend-mode: var(--path-canvas-blend);
 }
 
 #symbolCanvas {
@@ -1314,7 +1523,7 @@ button:disabled:active {
     --ui-reserve: clamp(310px, 52dvh, 390px);
   }
 
-  .controls .left > * {
+  .controls .left>* {
     max-width: 100%;
   }
 }
