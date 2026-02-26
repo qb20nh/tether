@@ -1,0 +1,46 @@
+name: daily-pool-validate
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'scripts/build_daily_overrides.js'
+      - 'scripts/verify_daily_pool.js'
+      - 'scripts/daily_pool_tools.js'
+      - 'src/daily_pool_codec.js'
+      - 'src/infinite.js'
+      - 'src/infinite_canonical.js'
+      - 'src/infinite_overrides.bin.gz'
+  pull_request:
+    paths:
+      - 'scripts/build_daily_overrides.js'
+      - 'scripts/verify_daily_pool.js'
+      - 'scripts/daily_pool_tools.js'
+      - 'src/daily_pool_codec.js'
+      - 'src/infinite.js'
+      - 'src/infinite_canonical.js'
+      - 'src/infinite_overrides.bin.gz'
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Build daily pool artifacts
+        run: node scripts/build_daily_overrides.js --max-slots 30000 --max-variant-probe 255
+
+      - name: Verify daily pool
+        run: node scripts/verify_daily_pool.js --max-slots 30000 --json
+
+      - name: Ensure committed artifacts are up to date
+        run: |
+          git diff --exit-code -- src/daily_overrides.bin.gz src/daily_pool_manifest.json src/infinite_canonical_keys.json

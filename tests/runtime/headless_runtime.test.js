@@ -38,3 +38,47 @@ test('headless runtime executes commands and updates progress', () => {
   assert.equal(out.completion.kind, 'good');
   assert.equal(runtime.getProgress().campaignProgress, 1);
 });
+
+test('headless runtime clears daily level without touching campaign or infinite progress', () => {
+  const dailyLevel = {
+    name: 'Daily',
+    grid: [
+      '..',
+      '..',
+    ],
+    stitches: [],
+    cornerCounts: [],
+  };
+
+  const levelProvider = createLevelProvider({
+    levels: [LEVEL],
+    infiniteMaxLevels: 8,
+    generateInfiniteLevel: () => LEVEL,
+    dailyLevel,
+    dailyId: '2026-02-27',
+  });
+  const core = createDefaultCore(levelProvider);
+  const state = createGameStateStore((i) => core.getLevel(i));
+  const persistence = createMemoryPersistence({}, {
+    dailyAbsIndex: core.getDailyAbsIndex(),
+    activeDailyId: core.getDailyId(),
+  });
+
+  const runtime = createHeadlessRuntime({ core, state, persistence });
+  const dailyIndex = core.getDailyAbsIndex();
+  runtime.start(dailyIndex);
+
+  runtime.dispatch('path/start-or-step', { r: 0, c: 0 });
+  runtime.dispatch('path/start-or-step', { r: 0, c: 1 });
+  runtime.dispatch('path/start-or-step', { r: 1, c: 1 });
+  const out = runtime.dispatch('path/start-or-step', { r: 1, c: 0 });
+
+  assert.equal(out.completion, null);
+  const final = runtime.dispatch('path/finalize-after-pointer', {});
+  assert.equal(final.completion.kind, 'good');
+  assert.deepEqual(runtime.getProgress(), {
+    campaignProgress: 0,
+    infiniteProgress: 0,
+    dailySolvedDate: '2026-02-27',
+  });
+});

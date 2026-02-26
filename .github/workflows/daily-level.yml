@@ -1,0 +1,39 @@
+name: daily-level
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: daily-level
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Publish daily payload
+        env:
+          DAILY_SECRET: ${{ secrets.DAILY_SECRET }}
+        run: node scripts/publish_daily_level.js --json
+
+      - name: Commit and push daily files
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add daily/today.json daily/history.json
+          git commit -m "daily: publish $(date -u +%F)" || exit 0
+          git push

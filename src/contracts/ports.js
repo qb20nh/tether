@@ -70,6 +70,10 @@
  *   toAbsInfiniteIndex:(infiniteIndex:number)=>number,
  *   clampInfiniteIndex:(infiniteIndex:number)=>number,
  *   ensureInfiniteAbsIndex:(infiniteIndex:number)=>number,
+ *   getDailyAbsIndex:()=>number,
+ *   isDailyAbsIndex:(index:number)=>boolean,
+ *   hasDailyLevel:()=>boolean,
+ *   getDailyId:()=>string|null,
  * }} CorePort
  */
 
@@ -88,7 +92,8 @@
  *   hiddenPanels:{guide:boolean,legend:boolean},
  *   campaignProgress:number,
  *   infiniteProgress:number,
- *   sessionBoard:null|{levelIndex:number,path:Array<[number,number]>,movableWalls:null|Array<[number,number]>},
+ *   dailySolvedDate:string|null,
+ *   sessionBoard:null|{levelIndex:number,path:Array<[number,number]>,movableWalls:null|Array<[number,number]>,dailyId?:string|null},
  * }} BootState
  */
 
@@ -99,7 +104,8 @@
  *   writeHiddenPanel:(panel:'guide'|'legend', hidden:boolean)=>void,
  *   writeCampaignProgress:(value:number)=>void,
  *   writeInfiniteProgress:(value:number)=>void,
- *   writeSessionBoard:(board:{levelIndex:number,path:Array<[number,number]>,movableWalls:null|Array<[number,number]>})=>void,
+ *   writeDailySolvedDate:(dailyId:string)=>void,
+ *   writeSessionBoard:(board:{levelIndex:number,path:Array<[number,number]>,movableWalls:null|Array<[number,number]>,dailyId?:string|null})=>void,
  *   clearSessionBoard:()=>void,
  * }} PersistencePort
  */

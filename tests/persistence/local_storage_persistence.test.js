@@ -45,12 +45,14 @@ test('localStorage persistence round-trips and validates session signature', () 
   assert.equal(boot.theme, 'dark');
   assert.equal(boot.hiddenPanels.guide, false);
   assert.equal(boot.hiddenPanels.legend, true);
+  assert.equal(boot.dailySolvedDate, null);
   assert.equal(boot.sessionBoard, null);
 
   persistence.writeTheme('light');
   persistence.writeHiddenPanel('guide', true);
   persistence.writeCampaignProgress(5);
   persistence.writeInfiniteProgress(3);
+  persistence.writeDailySolvedDate('2026-02-27');
   persistence.writeSessionBoard({
     levelIndex: 4,
     path: [[0, 0], [0, 1], [1, 1]],
@@ -62,6 +64,7 @@ test('localStorage persistence round-trips and validates session signature', () 
   assert.equal(boot.hiddenPanels.guide, true);
   assert.equal(boot.campaignProgress, 5);
   assert.equal(boot.infiniteProgress, 3);
+  assert.equal(boot.dailySolvedDate, '2026-02-27');
   assert.deepEqual(boot.sessionBoard.path, [[0, 0], [0, 1], [1, 1]]);
 
   const raw = storage.getItem(STORAGE_KEYS.SESSION_SAVE_KEY);
@@ -70,6 +73,47 @@ test('localStorage persistence round-trips and validates session signature', () 
   storage.setItem(STORAGE_KEYS.SESSION_SAVE_KEY, JSON.stringify(parsed));
 
   boot = persistence.readBootState();
+  assert.equal(boot.sessionBoard, null);
+  assert.equal(storage.getItem(STORAGE_KEYS.SESSION_SAVE_KEY), null);
+});
+
+test('daily session save is rejected when saved dailyId does not match active daily', () => {
+  const storage = createFakeStorage();
+  const fakeWindow = {
+    localStorage: storage,
+    matchMedia: () => ({ matches: false }),
+    crypto: {
+      getRandomValues(bytes) {
+        for (let i = 0; i < bytes.length; i++) bytes[i] = i + 1;
+      },
+    },
+  };
+
+  const dailyAbsIndex = 30;
+
+  const firstPersistence = createLocalStoragePersistence({
+    windowObj: fakeWindow,
+    campaignLevelCount: 10,
+    maxInfiniteIndex: 20,
+    dailyAbsIndex,
+    activeDailyId: '2026-02-27',
+  });
+
+  firstPersistence.writeSessionBoard({
+    levelIndex: dailyAbsIndex,
+    path: [[0, 0], [0, 1]],
+    movableWalls: null,
+  });
+
+  const secondPersistence = createLocalStoragePersistence({
+    windowObj: fakeWindow,
+    campaignLevelCount: 10,
+    maxInfiniteIndex: 20,
+    dailyAbsIndex,
+    activeDailyId: '2026-02-28',
+  });
+
+  const boot = secondPersistence.readBootState();
   assert.equal(boot.sessionBoard, null);
   assert.equal(storage.getItem(STORAGE_KEYS.SESSION_SAVE_KEY), null);
 });

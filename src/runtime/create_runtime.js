@@ -54,11 +54,21 @@ export function createRuntime(options) {
 
   const campaignCount = core.getCampaignLevelCount();
   const maxInfiniteIndex = core.getInfiniteMaxIndex();
+  const dailyAbsIndex = typeof core.getDailyAbsIndex === 'function'
+    ? core.getDailyAbsIndex()
+    : (campaignCount + maxInfiniteIndex + 1);
+  const hasDailyLevel = typeof core.hasDailyLevel === 'function'
+    ? core.hasDailyLevel()
+    : false;
+  const activeDailyId = typeof core.getDailyId === 'function'
+    ? core.getDailyId()
+    : null;
 
   const bootState = persistence.readBootState();
 
   let campaignProgress = Number.isInteger(bootState.campaignProgress) ? bootState.campaignProgress : 0;
   let infiniteProgress = Number.isInteger(bootState.infiniteProgress) ? bootState.infiniteProgress : 0;
+  let dailySolvedDate = typeof bootState.dailySolvedDate === 'string' ? bootState.dailySolvedDate : null;
   let activeTheme = normalizeTheme(bootState.theme);
 
   const initialLocale = i18n.resolveLocale();
@@ -100,6 +110,9 @@ export function createRuntime(options) {
         movableWalls: Array.isArray(bootState.sessionBoard.movableWalls)
           ? bootState.sessionBoard.movableWalls.map(([r, c]) => [r, c])
           : null,
+        dailyId: typeof bootState.sessionBoard.dailyId === 'string'
+          ? bootState.sessionBoard.dailyId
+          : null,
       }
       : null,
   };
@@ -110,6 +123,9 @@ export function createRuntime(options) {
       path: sessionSaveData.board.path.map(([r, c]) => [r, c]),
       movableWalls: Array.isArray(sessionSaveData.board.movableWalls)
         ? sessionSaveData.board.movableWalls.map(([r, c]) => [r, c])
+        : null,
+      dailyId: typeof sessionSaveData.board.dailyId === 'string'
+        ? sessionSaveData.board.dailyId
         : null,
     }
     : null;
@@ -221,7 +237,13 @@ export function createRuntime(options) {
     return true;
   };
 
+  const isDailyLevelIndex = (levelIndex) =>
+    typeof core.isDailyAbsIndex === 'function' && core.isDailyAbsIndex(levelIndex);
+
   const resolveNextButtonLabel = (levelIndex) => {
+    if (isDailyLevelIndex(levelIndex)) {
+      return translate('ui.dailyComplete');
+    }
     if (core.isInfiniteAbsIndex(levelIndex)) {
       if (core.toInfiniteIndex(levelIndex) >= maxInfiniteIndex) return translate('ui.infiniteComplete');
       return translate('ui.nextInfinite');
@@ -245,6 +267,8 @@ export function createRuntime(options) {
   };
 
   const isNextLevelAvailable = (levelIndex) => {
+    if (isDailyLevelIndex(levelIndex)) return false;
+
     if (core.isInfiniteAbsIndex(levelIndex)) {
       const infiniteIndex = core.clampInfiniteIndex(core.toInfiniteIndex(levelIndex));
       if (infiniteIndex >= maxInfiniteIndex) return false;
@@ -258,6 +282,10 @@ export function createRuntime(options) {
   };
 
   const isLevelPreviouslyCleared = (levelIndex) => {
+    if (isDailyLevelIndex(levelIndex)) {
+      return Boolean(activeDailyId) && activeDailyId === dailySolvedDate;
+    }
+
     if (core.isInfiniteAbsIndex(levelIndex)) {
       const infiniteIndex = core.clampInfiniteIndex(core.toInfiniteIndex(levelIndex));
       return infiniteIndex < core.clampInfiniteIndex(readInfiniteProgress());
@@ -271,6 +299,7 @@ export function createRuntime(options) {
     movableWalls: Array.isArray(stateValue.movableWalls)
       ? stateValue.movableWalls.map(([r, c]) => [r, c])
       : null,
+    dailyId: typeof stateValue.dailyId === 'string' ? stateValue.dailyId : null,
   });
 
   const serializeMutableBoardState = (snapshot) => {
@@ -299,6 +328,7 @@ export function createRuntime(options) {
       levelIndex: snapshot.levelIndex,
       path,
       movableWalls: currentMovableWalls,
+      dailyId: isDailyLevelIndex(snapshot.levelIndex) ? activeDailyId : null,
     };
   };
 
@@ -342,7 +372,7 @@ export function createRuntime(options) {
   const syncInfiniteNavigation = (levelIndex, isCleared = false) => {
     const refs = renderer.getRefs();
 
-    if (!core.isInfiniteAbsIndex(levelIndex)) {
+    if (isDailyLevelIndex(levelIndex) || !core.isInfiniteAbsIndex(levelIndex)) {
       if (refs?.prevInfiniteBtn) {
         refs.prevInfiniteBtn.hidden = true;
         refs.prevInfiniteBtn.disabled = false;
@@ -361,6 +391,13 @@ export function createRuntime(options) {
     }
 
     if (refs?.nextLevelBtn) {
+      if (isDailyLevelIndex(levelIndex)) {
+        refs.nextLevelBtn.hidden = true;
+        refs.nextLevelBtn.disabled = true;
+        setDisabledReasonTitle(refs.nextLevelBtn, null);
+        return;
+      }
+
       const nextAvailable = isNextLevelAvailable(levelIndex);
       const atInfiniteEnd = core.isInfiniteAbsIndex(levelIndex)
         && core.clampInfiniteIndex(core.toInfiniteIndex(levelIndex)) >= maxInfiniteIndex;
@@ -376,7 +413,12 @@ export function createRuntime(options) {
   };
 
   const onLevelCleared = (levelIndex) => {
-    if (core.isInfiniteAbsIndex(levelIndex)) {
+    if (isDailyLevelIndex(levelIndex)) {
+      if (activeDailyId) {
+        dailySolvedDate = activeDailyId;
+        persistence.writeDailySolvedDate(activeDailyId);
+      }
+    } else if (core.isInfiniteAbsIndex(levelIndex)) {
       markInfiniteLevelCleared(core.toInfiniteIndex(levelIndex));
     } else {
       markCampaignLevelCleared(levelIndex);
@@ -407,6 +449,12 @@ export function createRuntime(options) {
       const infiniteLabel = translated === 'ui.infiniteLevelOption' ? fallback : translated;
       optionHtml += `<option value="${infiniteAbsIndex}" ${infiniteAbsIndex === currentIndex ? 'selected' : ''}>${infiniteLabel}</option>`;
     }
+
+    const dailyLabel = hasDailyLevel
+      ? translate('ui.dailyLevelOption')
+      : translate('ui.dailyUnavailable');
+    const dailyDisabled = hasDailyLevel ? '' : 'disabled';
+    optionHtml += `<option value="${dailyAbsIndex}" ${dailyDisabled} ${dailyAbsIndex === currentIndex ? 'selected' : ''}>${dailyLabel}</option>`;
 
     refs.levelSel.innerHTML = optionHtml;
     refs.levelSel.value = String(currentIndex);
@@ -592,7 +640,13 @@ export function createRuntime(options) {
     let targetIndex = Number.isInteger(idx) ? idx : 0;
     if (targetIndex < 0) targetIndex = 0;
 
-    if (core.isInfiniteAbsIndex(targetIndex)) {
+    if (isDailyLevelIndex(targetIndex)) {
+      if (!hasDailyLevel) {
+        refreshLevelOptions();
+        return;
+      }
+      targetIndex = dailyAbsIndex;
+    } else if (core.isInfiniteAbsIndex(targetIndex)) {
       targetIndex = core.ensureInfiniteAbsIndex(core.clampInfiniteIndex(core.toInfiniteIndex(targetIndex)));
     } else {
       targetIndex = Math.min(targetIndex, campaignCount - 1);
@@ -806,6 +860,8 @@ export function createRuntime(options) {
 
     if (actionType === UI_ACTIONS.NEXT_LEVEL_CLICK) {
       const snapshot = state.getSnapshot();
+      if (isDailyLevelIndex(snapshot.levelIndex)) return;
+
       if (core.isInfiniteAbsIndex(snapshot.levelIndex)) {
         const currentInfiniteIndex = core.clampInfiniteIndex(core.toInfiniteIndex(snapshot.levelIndex));
         if (currentInfiniteIndex >= maxInfiniteIndex) return;
@@ -1002,8 +1058,18 @@ export function createHeadlessRuntime(options) {
   const bootState = persistence.readBootState();
   let campaignProgress = Number.isInteger(bootState.campaignProgress) ? bootState.campaignProgress : 0;
   let infiniteProgress = Number.isInteger(bootState.infiniteProgress) ? bootState.infiniteProgress : 0;
+  let dailySolvedDate = typeof bootState.dailySolvedDate === 'string' ? bootState.dailySolvedDate : null;
 
   const markCleared = (levelIndex) => {
+    if (typeof core.isDailyAbsIndex === 'function' && core.isDailyAbsIndex(levelIndex)) {
+      const dailyId = typeof core.getDailyId === 'function' ? core.getDailyId() : null;
+      if (dailyId) {
+        dailySolvedDate = dailyId;
+        persistence.writeDailySolvedDate(dailyId);
+      }
+      return;
+    }
+
     if (core.isInfiniteAbsIndex(levelIndex)) {
       const next = Math.max(infiniteProgress, core.toInfiniteIndex(levelIndex) + 1);
       infiniteProgress = Math.min(core.getInfiniteMaxIndex(), next);
@@ -1052,7 +1118,7 @@ export function createHeadlessRuntime(options) {
     },
 
     getProgress() {
-      return { campaignProgress, infiniteProgress };
+      return { campaignProgress, infiniteProgress, dailySolvedDate };
     },
 
     getSnapshot() {

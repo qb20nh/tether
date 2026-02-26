@@ -7,8 +7,17 @@ import { createDomRenderer } from '../renderer/dom_renderer.js';
 import { createDomInputAdapter } from '../input/dom_input_adapter.js';
 
 export function createDefaultAdapters(options = {}) {
+  const dailyLevel = options.dailyLevel && Array.isArray(options.dailyLevel.grid)
+    ? options.dailyLevel
+    : null;
+  const dailyId = typeof options.dailyId === 'string' && options.dailyId.length > 0
+    ? options.dailyId
+    : null;
+
   const levelProvider = createLevelProvider({
     cacheLimit: options.infiniteCacheLimit || 48,
+    dailyLevel,
+    dailyId,
   });
 
   const core = createDefaultCore(levelProvider);
@@ -16,6 +25,8 @@ export function createDefaultAdapters(options = {}) {
   const persistence = createLocalStoragePersistence({
     campaignLevelCount: core.getCampaignLevelCount(),
     maxInfiniteIndex: core.getInfiniteMaxIndex(),
+    dailyAbsIndex: core.getDailyAbsIndex(),
+    activeDailyId: core.getDailyId(),
     windowObj: options.windowObj,
   });
 

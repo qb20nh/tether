@@ -37,5 +37,9 @@ export function createDefaultCore(levelProvider) {
     toAbsInfiniteIndex: levelProvider.toAbsInfiniteIndex,
     clampInfiniteIndex: levelProvider.clampInfiniteIndex,
     ensureInfiniteAbsIndex: levelProvider.ensureInfiniteAbsIndex,
+    getDailyAbsIndex: levelProvider.getDailyAbsIndex,
+    isDailyAbsIndex: levelProvider.isDailyAbsIndex,
+    hasDailyLevel: levelProvider.hasDailyLevel,
+    getDailyId: levelProvider.getDailyId,
   };
 }

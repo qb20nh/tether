@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "poolVersion": "v1",
+  "epochUtcDate": "2026-01-01",
+  "maxSlots": 30000,
+  "baseVariantId": 0,
+  "slotMapping": "identity",
+  "maxVariantProbe": 255,
+  "maxVariantUsed": 0,
+  "poolDigest": "",
+  "generatedAtUtcMs": 0,
+  "checks": {
+    "infiniteDisjointCount": 0,
+    "dailyUniqueCount": 0,
+    "witnessValidatedCount": 0
+  },
+  "artifacts": {
+    "dailyOverridesFile": "src/daily_overrides.bin.gz",
+    "infiniteCanonicalKeysFile": "src/infinite_canonical_keys.json",
+    "overrideCount": 0,
+    "variantBits": 1,
+    "packedBytes": 3,
+    "gzipBytes": 0
+  }
+}

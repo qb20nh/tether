@@ -35,4 +35,6 @@ test('default core evaluates snapshot and completion', () => {
   assert.ok(result.blockedStatus);
   assert.equal(completion.kind, null);
   assert.equal(typeof core.goalText(0, (k) => k), 'string');
+  assert.equal(typeof core.getDailyAbsIndex(), 'number');
+  assert.equal(core.hasDailyLevel(), false);
 });

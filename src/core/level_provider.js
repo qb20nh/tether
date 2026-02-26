@@ -13,11 +13,20 @@ export function createLevelProvider(options = {}) {
     ? options.cacheLimit
     : 48;
 
+  const dailyLevel = options.dailyLevel && Array.isArray(options.dailyLevel.grid)
+    ? options.dailyLevel
+    : null;
+  const dailyId = typeof options.dailyId === 'string' && options.dailyId.trim().length > 0
+    ? options.dailyId.trim()
+    : null;
+
   const campaignCount = campaignLevels.length;
   const maxInfiniteIndex = infiniteMaxLevels - 1;
+  const dailyAbsIndex = campaignCount + infiniteMaxLevels;
   const infiniteLevelCache = new Map();
 
-  const isInfiniteAbsIndex = (index) => Number.isInteger(index) && index >= campaignCount;
+  const isDailyAbsIndex = (index) => Number.isInteger(index) && index === dailyAbsIndex;
+  const isInfiniteAbsIndex = (index) => Number.isInteger(index) && index >= campaignCount && index < dailyAbsIndex;
   const toInfiniteIndex = (index) => index - campaignCount;
   const toAbsInfiniteIndex = (infiniteIndex) => campaignCount + infiniteIndex;
   const clampInfiniteIndex = (index) => Math.min(Math.max(index, 0), maxInfiniteIndex);
@@ -51,9 +60,15 @@ export function createLevelProvider(options = {}) {
   };
 
   const getLevel = (index) => {
+    if (isDailyAbsIndex(index)) {
+      return dailyLevel;
+    }
+
     if (!isInfiniteAbsIndex(index)) {
+      if (!Number.isInteger(index) || index < 0 || index >= campaignCount) return null;
       return campaignLevels[index] || null;
     }
+
     const infiniteIndex = clampInfiniteIndex(toInfiniteIndex(index));
     const cached = getCachedInfiniteLevel(infiniteIndex);
     if (cached) return cached;
@@ -71,5 +86,9 @@ export function createLevelProvider(options = {}) {
     toAbsInfiniteIndex,
     clampInfiniteIndex,
     ensureInfiniteAbsIndex,
+    getDailyAbsIndex: () => dailyAbsIndex,
+    isDailyAbsIndex,
+    hasDailyLevel: () => Boolean(dailyLevel),
+    getDailyId: () => dailyId,
   };
 }

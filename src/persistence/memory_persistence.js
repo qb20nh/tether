@@ -1,4 +1,9 @@
-export function createMemoryPersistence(initialState = {}) {
+export function createMemoryPersistence(initialState = {}, options = {}) {
+  const dailyAbsIndex = Number.isInteger(options.dailyAbsIndex) ? options.dailyAbsIndex : null;
+  const activeDailyId = typeof options.activeDailyId === 'string' && options.activeDailyId.length > 0
+    ? options.activeDailyId
+    : null;
+
   const state = {
     theme: initialState.theme || 'dark',
     hiddenPanels: {
@@ -7,6 +12,7 @@ export function createMemoryPersistence(initialState = {}) {
     },
     campaignProgress: Number.isInteger(initialState.campaignProgress) ? initialState.campaignProgress : 0,
     infiniteProgress: Number.isInteger(initialState.infiniteProgress) ? initialState.infiniteProgress : 0,
+    dailySolvedDate: typeof initialState.dailySolvedDate === 'string' ? initialState.dailySolvedDate : null,
     sessionBoard: initialState.sessionBoard || null,
   };
 
@@ -20,6 +26,7 @@ export function createMemoryPersistence(initialState = {}) {
         },
         campaignProgress: state.campaignProgress,
         infiniteProgress: state.infiniteProgress,
+        dailySolvedDate: state.dailySolvedDate,
         sessionBoard: state.sessionBoard
           ? {
             levelIndex: state.sessionBoard.levelIndex,
@@ -27,6 +34,7 @@ export function createMemoryPersistence(initialState = {}) {
             movableWalls: Array.isArray(state.sessionBoard.movableWalls)
               ? state.sessionBoard.movableWalls.map(([r, c]) => [r, c])
               : null,
+            dailyId: typeof state.sessionBoard.dailyId === 'string' ? state.sessionBoard.dailyId : null,
           }
           : null,
       };
@@ -49,6 +57,10 @@ export function createMemoryPersistence(initialState = {}) {
       state.infiniteProgress = Number.isInteger(value) ? value : state.infiniteProgress;
     },
 
+    writeDailySolvedDate(dailyId) {
+      state.dailySolvedDate = typeof dailyId === 'string' ? dailyId : state.dailySolvedDate;
+    },
+
     writeSessionBoard(board) {
       if (!board) {
         state.sessionBoard = null;
@@ -59,6 +71,13 @@ export function createMemoryPersistence(initialState = {}) {
         path: Array.isArray(board.path) ? board.path.map(([r, c]) => [r, c]) : [],
         movableWalls: Array.isArray(board.movableWalls)
           ? board.movableWalls.map(([r, c]) => [r, c])
+          : null,
+        dailyId: (
+          Number.isInteger(dailyAbsIndex)
+          && board.levelIndex === dailyAbsIndex
+          && activeDailyId
+        )
+          ? activeDailyId
           : null,
       };
     },

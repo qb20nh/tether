@@ -4,10 +4,12 @@ const LEVEL_PROGRESS_KEY = 'tetherLevelProgress';
 const LEVEL_PROGRESS_VERSION = 1;
 const INFINITE_PROGRESS_KEY = 'tetherInfiniteProgress';
 const INFINITE_PROGRESS_VERSION = 1;
+const DAILY_SOLVED_KEY = 'tetherDailySolved';
+const DAILY_SOLVED_VERSION = 1;
 const THEME_KEY = 'tetherTheme';
 const SESSION_SAVE_KEY = 'tetherSessionSave';
 const SESSION_SEAL_KEY = 'tetherSessionSeal';
-const SESSION_SAVE_VERSION = 2;
+const SESSION_SAVE_VERSION = 3;
 const SESSION_SIG_HEX_LEN = 24;
 const DEFAULT_THEME = 'dark';
 
@@ -176,9 +178,16 @@ export function createLocalStoragePersistence(options = {}) {
   const maxInfiniteIndex = Number.isInteger(options.maxInfiniteIndex)
     ? options.maxInfiniteIndex
     : 0;
+  const dailyAbsIndex = Number.isInteger(options.dailyAbsIndex)
+    ? options.dailyAbsIndex
+    : null;
+  const activeDailyId = typeof options.activeDailyId === 'string' && options.activeDailyId.length > 0
+    ? options.activeDailyId
+    : null;
 
   let campaignProgressCache = null;
   let infiniteProgressCache = null;
+  let dailySolvedDateCache = null;
   let cachedTheme = null;
   let cachedSessionSeal = null;
   let volatileSessionSeal = null;
@@ -222,7 +231,10 @@ export function createLocalStoragePersistence(options = {}) {
 
   const clampSavedLevelIndex = (value) => {
     if (!Number.isInteger(value)) return null;
-    return Math.min(Math.max(value, 0), campaignLevelCount + maxInfiniteIndex);
+    const maxIndex = Number.isInteger(dailyAbsIndex)
+      ? dailyAbsIndex
+      : (campaignLevelCount + maxInfiniteIndex);
+    return Math.min(Math.max(value, 0), maxIndex);
   };
 
   const readCampaignProgress = () => {
@@ -267,6 +279,31 @@ export function createLocalStoragePersistence(options = {}) {
     }
   };
 
+  const readDailySolvedDate = () => {
+    if (dailySolvedDateCache !== null) return dailySolvedDateCache;
+    try {
+      const raw = readStorage(DAILY_SOLVED_KEY);
+      if (!raw) {
+        dailySolvedDateCache = '';
+        return dailySolvedDateCache;
+      }
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== 'object') {
+        dailySolvedDateCache = '';
+        return dailySolvedDateCache;
+      }
+      if (Number.isInteger(parsed.version) && parsed.version !== DAILY_SOLVED_VERSION) {
+        dailySolvedDateCache = '';
+        return dailySolvedDateCache;
+      }
+      dailySolvedDateCache = typeof parsed.dailyId === 'string' ? parsed.dailyId : '';
+      return dailySolvedDateCache;
+    } catch {
+      dailySolvedDateCache = '';
+      return dailySolvedDateCache;
+    }
+  };
+
   const getHiddenPanel = (panel) => {
     const key = PANEL_KEY_BY_NAME[panel];
     if (!key) return false;
@@ -308,6 +345,10 @@ export function createLocalStoragePersistence(options = {}) {
 
   const isSavedLevelAllowed = (levelIndex) => {
     if (!Number.isInteger(levelIndex)) return false;
+
+    if (Number.isInteger(dailyAbsIndex) && levelIndex === dailyAbsIndex) {
+      return Boolean(activeDailyId);
+    }
 
     if (levelIndex < campaignLevelCount) {
       return levelIndex <= readCampaignProgress();
@@ -358,6 +399,7 @@ export function createLocalStoragePersistence(options = {}) {
       levelIndex,
       path: mutable.path,
       movableWalls: mutable.movableWalls,
+      dailyId: typeof value.dailyId === 'string' ? value.dailyId : null,
     };
   };
 
@@ -379,7 +421,8 @@ export function createLocalStoragePersistence(options = {}) {
         .sort()
         .join(';')
       : '';
-    return `v=${SESSION_SAVE_VERSION}|l=${levelIndex}|p=${path}|m=${movableWalls}`;
+    const dailyId = typeof board.dailyId === 'string' ? board.dailyId : '';
+    return `v=${SESSION_SAVE_VERSION}|l=${levelIndex}|p=${path}|m=${movableWalls}|d=${dailyId}`;
   };
 
   const computeBoardSignature = (board, seal) => {
@@ -408,6 +451,7 @@ export function createLocalStoragePersistence(options = {}) {
     movableWalls: Array.isArray(board.movableWalls)
       ? board.movableWalls.map(([r, c]) => [r, c])
       : null,
+    dailyId: typeof board.dailyId === 'string' ? board.dailyId : null,
   });
 
   const readSessionSave = () => {
@@ -431,6 +475,13 @@ export function createLocalStoragePersistence(options = {}) {
       if (!board) return reject(true);
       if (!verifyBoardSignature(board, parsed.sig)) return reject(true);
       if (!isSavedLevelAllowed(board.levelIndex)) return reject(true);
+      if (
+        Number.isInteger(dailyAbsIndex)
+        && board.levelIndex === dailyAbsIndex
+        && board.dailyId !== activeDailyId
+      ) {
+        return reject(true);
+      }
 
       return board;
     } catch {
@@ -457,6 +508,15 @@ export function createLocalStoragePersistence(options = {}) {
     writeStorage(THEME_KEY, normalized);
   };
 
+  const writeDailySolvedDate = (dailyId) => {
+    dailySolvedDateCache = typeof dailyId === 'string' ? dailyId : '';
+    const payload = {
+      version: DAILY_SOLVED_VERSION,
+      dailyId: dailySolvedDateCache,
+    };
+    writeStorage(DAILY_SOLVED_KEY, JSON.stringify(payload));
+  };
+
   const writeHiddenPanel = (panel, hidden) => {
     const key = PANEL_KEY_BY_NAME[panel];
     if (!key) return;
@@ -475,13 +535,24 @@ export function createLocalStoragePersistence(options = {}) {
       return;
     }
 
-    const persistedBoard = toPersistedBoardState(normalized);
+    const persistedState = {
+      ...normalized,
+      dailyId: (
+        Number.isInteger(dailyAbsIndex)
+        && normalized.levelIndex === dailyAbsIndex
+        && activeDailyId
+      )
+        ? activeDailyId
+        : null,
+    };
+
+    const persistedBoard = toPersistedBoardState(persistedState);
     writeStorage(
       SESSION_SAVE_KEY,
       JSON.stringify({
         version: SESSION_SAVE_VERSION,
         board: persistedBoard,
-        sig: signBoard(normalized),
+        sig: signBoard(persistedState),
       }),
     );
   };
@@ -502,6 +573,7 @@ export function createLocalStoragePersistence(options = {}) {
       },
       campaignProgress,
       infiniteProgress,
+      dailySolvedDate: readDailySolvedDate() || null,
       sessionBoard: readSessionSave(),
     };
   };
@@ -512,6 +584,7 @@ export function createLocalStoragePersistence(options = {}) {
     writeHiddenPanel,
     writeCampaignProgress,
     writeInfiniteProgress,
+    writeDailySolvedDate,
     writeSessionBoard,
     clearSessionBoard,
   };
@@ -522,6 +595,7 @@ export const STORAGE_KEYS = Object.freeze({
   LEGEND_KEY,
   LEVEL_PROGRESS_KEY,
   INFINITE_PROGRESS_KEY,
+  DAILY_SOLVED_KEY,
   THEME_KEY,
   SESSION_SAVE_KEY,
   SESSION_SEAL_KEY,
@@ -529,6 +603,7 @@ export const STORAGE_KEYS = Object.freeze({
 
 export const STORAGE_DEFAULTS = Object.freeze({
   DEFAULT_THEME,
+  DAILY_SOLVED_VERSION,
   SESSION_SAVE_VERSION,
   SESSION_SIG_HEX_LEN,
   DEFAULT_HIDDEN_BY_PANEL,
