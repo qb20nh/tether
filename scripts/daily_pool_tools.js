@@ -270,9 +270,18 @@ export const buildSecretPermutation = (secret, maxSlots, context = 'tether|daily
   return permutation;
 };
 
-export const writeDailyOverridesGzipFile = (outFilePath, overrides, maxVariantUsed = 0) => {
+export const writeDailyOverridesGzipFile = (
+  outFilePath,
+  overrides,
+  maxVariantUsed = 0,
+  gzipOptions = {},
+) => {
   const encoded = encodeDailyOverridesPayload(overrides, maxVariantUsed);
-  const compressed = gzipSync(encoded.payload, { level: 9 });
+  const compressed = gzipSync(encoded.payload, {
+    level: 9,
+    mtime: 0,
+    ...gzipOptions,
+  });
   fs.mkdirSync(path.dirname(outFilePath), { recursive: true });
   fs.writeFileSync(outFilePath, compressed);
   return {

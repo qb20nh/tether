@@ -43,4 +43,8 @@ jobs:
 
       - name: Ensure committed artifacts are up to date
         run: |
-          git diff --exit-code -- src/daily_overrides.bin.gz src/daily_pool_manifest.json src/infinite_canonical_keys.json
+          if ! git diff --quiet -- src/daily_overrides.bin.gz src/daily_pool_manifest.json src/infinite_canonical_keys.json; then
+            echo "Daily pool artifacts are stale. Regenerate and commit these files:"
+            git status --short -- src/daily_overrides.bin.gz src/daily_pool_manifest.json src/infinite_canonical_keys.json
+            exit 1
+          fi

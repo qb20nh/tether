@@ -21,6 +21,7 @@ const DEFAULTS = {
   outBinFile: path.resolve(process.cwd(), 'src/daily_overrides.bin.gz'),
   outManifestFile: path.resolve(process.cwd(), 'src/daily_pool_manifest.json'),
   outInfiniteKeysFile: path.resolve(process.cwd(), 'src/infinite_canonical_keys.json'),
+  generatedAtUtcMs: 0,
   poolVersion: DAILY_POOL_VERSION,
   epochUtcDate: DAILY_POOL_EPOCH_UTC_DATE,
   json: false,
@@ -30,6 +31,14 @@ const toInt = (name, value) => {
   const parsed = Number.parseInt(value, 10);
   if (!Number.isInteger(parsed) || parsed <= 0) {
     throw new Error(`${name} must be a positive integer, got ${value}`);
+  }
+  return parsed;
+};
+
+const toNonNegativeInt = (name, value) => {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isInteger(parsed) || parsed < 0) {
+    throw new Error(`${name} must be a non-negative integer, got ${value}`);
   }
   return parsed;
 };
@@ -50,6 +59,7 @@ const parseArgs = (argv) => {
     else if (arg === '--out' || arg === '--out-bin') opts.outBinFile = path.resolve(process.cwd(), nextValue());
     else if (arg === '--out-manifest') opts.outManifestFile = path.resolve(process.cwd(), nextValue());
     else if (arg === '--out-infinite-keys') opts.outInfiniteKeysFile = path.resolve(process.cwd(), nextValue());
+    else if (arg === '--generated-at-utc-ms') opts.generatedAtUtcMs = toNonNegativeInt('--generated-at-utc-ms', nextValue());
     else if (arg === '--pool-version') opts.poolVersion = String(nextValue()).trim();
     else if (arg === '--epoch-utc-date') opts.epochUtcDate = String(nextValue()).trim();
     else if (arg === '--json') opts.json = true;
@@ -65,6 +75,7 @@ const parseArgs = (argv) => {
           `  --out-bin <path>          Daily override payload path (default: ${DEFAULTS.outBinFile})`,
           `  --out-manifest <path>     Manifest output path (default: ${DEFAULTS.outManifestFile})`,
           `  --out-infinite-keys <path> Infinite canonical key file (default: ${DEFAULTS.outInfiniteKeysFile})`,
+          `  --generated-at-utc-ms <ms> Metadata timestamp (default: ${DEFAULTS.generatedAtUtcMs}, deterministic)`,
           `  --pool-version <id>       Pool version label (default: ${DEFAULTS.poolVersion})`,
           `  --epoch-utc-date <date>   Epoch date YYYY-MM-DD (default: ${DEFAULTS.epochUtcDate})`,
           '  --json                    Emit JSON summary',
@@ -107,7 +118,7 @@ function main() {
   const infiniteCanonicalKeys = [...infiniteCanonicalSet].sort();
   writeJson(opts.outInfiniteKeysFile, {
     schemaVersion: DAILY_POOL_SCHEMA_VERSION,
-    generatedAtUtcMs: Date.now(),
+    generatedAtUtcMs: opts.generatedAtUtcMs,
     maxLevels: INFINITE_MAX_LEVELS,
     canonicalKeyCount: infiniteCanonicalSet.size,
     keys: infiniteCanonicalKeys,
@@ -152,7 +163,7 @@ function main() {
     maxVariantProbe: opts.maxVariantProbe,
     maxVariantUsed,
     poolDigest,
-    generatedAtUtcMs: Date.now(),
+    generatedAtUtcMs: opts.generatedAtUtcMs,
     checks: {
       infiniteDisjointCount: opts.maxSlots,
       dailyUniqueCount: dailyCanonicalKeys.size,
