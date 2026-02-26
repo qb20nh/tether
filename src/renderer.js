@@ -2,6 +2,7 @@ import { ELEMENT_IDS } from './config.js';
 import { keyOf } from './utils.js';
 import { cellCenter, getCellSize, vertexPos } from './geometry.js';
 import { ICONS } from './icons.js';
+import { buildBoardCellViewModel } from './renderer/board_view_model.js';
 
 let gridCells = [];
 let lastDropTargetKey = null;
@@ -793,71 +794,11 @@ export function setDropTarget(r, c) {
 
 export function updateCells(snapshot, results, refs) {
   const { hintStatus, stitchStatus, rpsStatus, blockedStatus } = results;
-
-  const desired = Array.from({ length: snapshot.rows }, () =>
-    Array.from({ length: snapshot.cols }, () => ({
-      classes: ['cell'],
-      idx: '',
-    }))
+  const desired = buildBoardCellViewModel(
+    snapshot,
+    { hintStatus, rpsStatus, blockedStatus },
+    resolveCellMarkHtml,
   );
-
-  for (let r = 0; r < snapshot.rows; r++) {
-    for (let c = 0; c < snapshot.cols; c++) {
-      const code = snapshot.gridData[r][c];
-      if (code === 'm') desired[r][c].classes.push('wall', 'movable');
-      else if (code === '#') desired[r][c].classes.push('wall');
-      desired[r][c].markHtml = resolveCellMarkHtml(code);
-    }
-  }
-
-  for (let i = 0; i < snapshot.path.length; i++) {
-    const p = snapshot.path[i];
-    desired[p.r][p.c].classes.push('visited');
-    desired[p.r][p.c].idx = String(i + 1);
-  }
-
-  if (snapshot.path.length > 0) {
-    const head = snapshot.path[0];
-    desired[head.r][head.c].classes.push('pathStart');
-
-    if (snapshot.path.length > 1) {
-      const tail = snapshot.path[snapshot.path.length - 1];
-      desired[tail.r][tail.c].classes.push('pathEnd');
-    }
-  }
-
-  if (hintStatus) {
-    hintStatus.badKeys.forEach((k) => {
-      const [r, c] = k.split(',').map(Number);
-      if (desired[r]?.[c]) desired[r][c].classes.push('badHint');
-    });
-
-    hintStatus.goodKeys.forEach((k) => {
-      const [r, c] = k.split(',').map(Number);
-      if (desired[r]?.[c]) desired[r][c].classes.push('goodHint');
-    });
-  }
-
-  if (rpsStatus) {
-    rpsStatus.badKeys.forEach((k) => {
-      const [r, c] = k.split(',').map(Number);
-      if (desired[r]?.[c]) desired[r][c].classes.push('badRps');
-    });
-
-    rpsStatus.goodKeys.forEach((k) => {
-      const [r, c] = k.split(',').map(Number);
-      if (desired[r]?.[c] && !desired[r][c].classes.includes('badRps')) {
-        desired[r][c].classes.push('goodRps');
-      }
-    });
-  }
-
-  if (blockedStatus) {
-    blockedStatus.badKeys.forEach((k) => {
-      const [r, c] = k.split(',').map(Number);
-      if (desired[r]?.[c]) desired[r][c].classes.push('badBlocked');
-    });
-  }
 
   for (let r = 0; r < snapshot.rows; r++) {
     for (let c = 0; c < snapshot.cols; c++) {
