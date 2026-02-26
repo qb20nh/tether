@@ -245,6 +245,7 @@ export async function initTetherApp() {
       icons: ICONS,
       iconX: ICON_X,
     },
+    dailyHardInvalidateAtUtcMs: bootDaily.hardInvalidateAtUtcMs,
   });
 
   runtimeInstance.start();

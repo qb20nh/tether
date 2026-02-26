@@ -405,6 +405,41 @@ header h1.brandTitle {
   min-width: 0;
 }
 
+.dailyMeta {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--control-border);
+  background: var(--control-bg);
+  min-width: 0;
+}
+
+.dailyMeta[hidden] {
+  display: none;
+}
+
+.dailyMetaItem {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.dailyMetaLabel {
+  color: var(--muted);
+}
+
+.dailyMetaValue {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.2px;
+}
+
 select,
 button {
   appearance: none;
@@ -1448,6 +1483,18 @@ button:disabled:active {
   .levelSelectGroup.isInfiniteActive {
     flex: 1 1 100%;
     width: 100%;
+  }
+
+  .dailyMeta {
+    flex: 1 1 100%;
+    width: 100%;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 6px 8px;
+  }
+
+  .dailyMetaItem {
+    gap: 4px;
   }
 
   #resetBtn,

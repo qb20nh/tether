@@ -81,3 +81,38 @@ test('publish_daily_level fails when pool ordinal is exhausted', () => {
     });
   }, /Daily pool exhausted/);
 });
+
+test('publish_daily_level is idempotent within the same UTC day', () => {
+  const fx = createFixture();
+  const firstNowMs = Date.UTC(2026, 0, 1, 0, 0, 5);
+  const secondNowMs = Date.UTC(2026, 0, 1, 12, 34, 56);
+
+  publishDailyLevel({
+    manifestFile: fx.manifestFile,
+    overridesFile: fx.overridesFile,
+    historyFile: fx.historyFile,
+    todayFile: fx.todayFile,
+    nowMs: firstNowMs,
+    dailySecret: 'test-secret',
+  });
+
+  const firstTodayRaw = fs.readFileSync(fx.todayFile, 'utf8');
+  const firstToday = JSON.parse(firstTodayRaw);
+
+  publishDailyLevel({
+    manifestFile: fx.manifestFile,
+    overridesFile: fx.overridesFile,
+    historyFile: fx.historyFile,
+    todayFile: fx.todayFile,
+    nowMs: secondNowMs,
+    dailySecret: 'test-secret',
+  });
+
+  const secondTodayRaw = fs.readFileSync(fx.todayFile, 'utf8');
+  const secondToday = JSON.parse(secondTodayRaw);
+  const history = JSON.parse(fs.readFileSync(fx.historyFile, 'utf8'));
+
+  assert.equal(secondToday.generatedAtUtcMs, firstToday.generatedAtUtcMs);
+  assert.equal(secondTodayRaw, firstTodayRaw);
+  assert.equal(history.entries.length, 1);
+});

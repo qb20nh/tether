@@ -6,8 +6,9 @@
   "baseVariantId": 0,
   "slotMapping": "identity",
   "maxVariantProbe": 255,
-  "maxVariantUsed": 4,
-  "poolDigest": "2471ba6a92d6e01c27f806e17c89a2daa51efac0cd09a0b2b29bf689eda004ed",
+  "difficultyVariantWindow": 8,
+  "maxVariantUsed": 7,
+  "poolDigest": "da18437862e3e0e7876c2a871c22f4e5f578823831e1e645c95f178fa8f4ef8d",
   "generatedAtUtcMs": 0,
   "checks": {
     "infiniteDisjointCount": 30000,
@@ -16,9 +17,9 @@
   },
   "artifacts": {
     "dailyOverridesFile": "src/daily_overrides.bin.gz",
-    "overrideCount": 7756,
+    "overrideCount": 26902,
     "variantBits": 3,
-    "packedBytes": 7859,
-    "gzipBytes": 3956
+    "packedBytes": 26905,
+    "gzipBytes": 13606
   }
 }

@@ -13,6 +13,7 @@ const INFINITE_SELECTOR_ACTIONS = Object.freeze({
 
 const normalizeTheme = (theme) => (theme === 'light' || theme === 'dark' ? theme : 'dark');
 const isRtlLocale = (locale) => /^ar/i.test(locale || '');
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 const applyTextDirection = (locale) => {
   const direction = isRtlLocale(locale) ? 'rtl' : 'ltr';
@@ -38,6 +39,27 @@ const applyDataAttributes = (appEl, translate) => {
   });
 };
 
+const utcStartMsFromDateId = (dateId) => {
+  if (typeof dateId !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(dateId)) return null;
+  const [y, m, d] = dateId.split('-').map((part) => Number.parseInt(part, 10));
+  if (!Number.isInteger(y) || !Number.isInteger(m) || !Number.isInteger(d)) return null;
+  return Date.UTC(y, m - 1, d, 0, 0, 0, 0);
+};
+
+const formatDailyDateLabel = (dateId) => {
+  if (typeof dateId !== 'string' || dateId.length === 0) return '-';
+  return `${dateId} UTC`;
+};
+
+const formatCountdownHms = (remainingMs) => {
+  const totalSeconds = Math.max(0, Math.floor(remainingMs / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  const pad2 = (value) => String(value).padStart(2, '0');
+  return `${pad2(hours)}:${pad2(minutes)}:${pad2(seconds)}`;
+};
+
 export function createRuntime(options) {
   const {
     appEl,
@@ -48,6 +70,7 @@ export function createRuntime(options) {
     input,
     i18n,
     ui,
+    dailyHardInvalidateAtUtcMs = null,
   } = options;
 
   if (!appEl) throw new Error('createRuntime requires appEl');
@@ -63,6 +86,16 @@ export function createRuntime(options) {
   const activeDailyId = typeof core.getDailyId === 'function'
     ? core.getDailyId()
     : null;
+  const dailyResetUtcMs = Number.isInteger(dailyHardInvalidateAtUtcMs) && dailyHardInvalidateAtUtcMs > 0
+    ? dailyHardInvalidateAtUtcMs
+    : (
+      activeDailyId
+        ? (() => {
+          const startMs = utcStartMsFromDateId(activeDailyId);
+          return Number.isInteger(startMs) ? (startMs + DAY_MS) : null;
+        })()
+        : null
+    );
 
   const bootState = persistence.readBootState();
 
@@ -101,6 +134,7 @@ export function createRuntime(options) {
   let pendingValidate = false;
   let pendingValidateSource = null;
   let settingsMenuOpen = false;
+  let dailyCountdownTimer = 0;
 
   const sessionSaveData = {
     board: bootState.sessionBoard
@@ -216,6 +250,49 @@ export function createRuntime(options) {
     const label = `${translate('ui.language')} / ${translate('ui.theme')}`;
     refs.settingsToggle.setAttribute('aria-label', label);
     refs.settingsToggle.setAttribute('title', label);
+  };
+
+  const clearDailyCountdownTimer = () => {
+    if (!dailyCountdownTimer) return;
+    clearInterval(dailyCountdownTimer);
+    dailyCountdownTimer = 0;
+  };
+
+  const renderDailyMeta = () => {
+    const refs = renderer.getRefs();
+    if (!refs?.dailyMeta || !refs?.dailyDateValue || !refs?.dailyCountdownValue) return;
+
+    if (!hasDailyLevel || !activeDailyId) {
+      refs.dailyMeta.hidden = true;
+      refs.dailyDateValue.textContent = '-';
+      refs.dailyCountdownValue.textContent = '--:--:--';
+      return;
+    }
+
+    refs.dailyMeta.hidden = false;
+    refs.dailyDateValue.textContent = formatDailyDateLabel(activeDailyId);
+
+    if (!Number.isInteger(dailyResetUtcMs)) {
+      refs.dailyCountdownValue.textContent = '--:--:--';
+      return;
+    }
+
+    const remainingMs = dailyResetUtcMs - Date.now();
+    if (remainingMs <= 0) {
+      refs.dailyCountdownValue.textContent = translate('ui.dailyResetNow');
+      return;
+    }
+    refs.dailyCountdownValue.textContent = formatCountdownHms(remainingMs);
+  };
+
+  const startDailyCountdown = () => {
+    clearDailyCountdownTimer();
+    renderDailyMeta();
+    if (!hasDailyLevel || !activeDailyId || !Number.isInteger(dailyResetUtcMs)) return;
+    if (dailyResetUtcMs <= Date.now()) return;
+    dailyCountdownTimer = window.setInterval(() => {
+      renderDailyMeta();
+    }, 1000);
   };
 
   const isCampaignLevelUnlocked = (index) => index <= readCampaignProgress();
@@ -704,6 +781,7 @@ export function createRuntime(options) {
     refreshLevelOptions();
 
     applyDataAttributes(appEl, translate);
+    renderDailyMeta();
     applyPanelVisibility(refs.guidePanel, refs.guideToggleBtn, 'guide', refs.guidePanel.classList.contains('is-hidden'));
     applyPanelVisibility(refs.legendPanel, refs.legendToggleBtn, 'legend', refs.legendPanel.classList.contains('is-hidden'));
 
@@ -1018,6 +1096,7 @@ export function createRuntime(options) {
     });
 
     refreshStaticUiText({ locale: i18n.getLocale() });
+    startDailyCountdown();
     refreshLevelOptions();
 
     const fallbackInitialLevelIndex = isCampaignCompleted()
@@ -1033,6 +1112,7 @@ export function createRuntime(options) {
   };
 
   const destroy = () => {
+    clearDailyCountdownTimer();
     input.unbind();
     renderer.unmount();
   };

@@ -27,6 +27,7 @@ export const DAILY_POOL_EPOCH_UTC_DATE = '2026-01-01';
 export const DAILY_POOL_MAX_SLOTS = 30000;
 export const DAILY_POOL_BASE_VARIANT_ID = 0;
 export const DAILY_POOL_MAX_VARIANT_PROBE = 255;
+export const DAILY_POOL_DIFFICULTY_VARIANT_WINDOW = 8;
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -45,6 +46,84 @@ const countMovableWalls = (level) => {
     }
   }
   return count;
+};
+
+const countCellType = (level, matcher) => {
+  let count = 0;
+  for (const row of level?.grid || []) {
+    for (let i = 0; i < row.length; i++) {
+      if (matcher(row[i])) count += 1;
+    }
+  }
+  return count;
+};
+
+const countWitnessTurns = (witnessPathRaw) => {
+  if (!Array.isArray(witnessPathRaw) || witnessPathRaw.length < 3) return 0;
+  let turns = 0;
+  let prevDr = null;
+  let prevDc = null;
+
+  for (let i = 1; i < witnessPathRaw.length; i++) {
+    const prev = parsePair(witnessPathRaw[i - 1]);
+    const next = parsePair(witnessPathRaw[i]);
+    if (!prev || !next) continue;
+
+    const dr = next.r - prev.r;
+    const dc = next.c - prev.c;
+    if (!Number.isInteger(dr) || !Number.isInteger(dc)) continue;
+    if (prevDr !== null && prevDc !== null && (dr !== prevDr || dc !== prevDc)) turns += 1;
+    prevDr = dr;
+    prevDc = dc;
+  }
+
+  return turns;
+};
+
+export const estimateDailyDifficultyScore = (level) => {
+  if (!level || !Array.isArray(level.grid) || level.grid.length === 0) return -1;
+  const rows = level.grid.length;
+  const cols = level.grid[0]?.length || 0;
+  const totalCells = rows * cols;
+
+  const wallCount = countCellType(level, (ch) => ch === '#');
+  const movableCount = countCellType(level, (ch) => ch === 'm');
+  const hintCount = countCellType(level, (ch) => (
+    ch === 't'
+    || ch === 'r'
+    || ch === 'l'
+    || ch === 's'
+    || ch === 'h'
+    || ch === 'v'
+  ));
+  const rpsCount = countCellType(level, (ch) => ch === 'g' || ch === 'b' || ch === 'p');
+
+  const stitchCount = Array.isArray(level.stitches) ? level.stitches.length : 0;
+  const cornerCount = Array.isArray(level.cornerCounts) ? level.cornerCounts.length : 0;
+  const witnessPathRaw = level?.infiniteMeta?.witnessPath;
+  const witnessLength = Array.isArray(witnessPathRaw)
+    ? witnessPathRaw.length
+    : Math.max(0, totalCells - wallCount - movableCount);
+  const witnessTurns = countWitnessTurns(witnessPathRaw);
+
+  const featureFamilies =
+    (hintCount > 0 ? 1 : 0)
+    + (rpsCount > 0 ? 1 : 0)
+    + (stitchCount > 0 ? 1 : 0)
+    + (cornerCount > 0 ? 1 : 0)
+    + (movableCount > 0 ? 1 : 0);
+
+  return (
+    (totalCells * 8)
+    + (witnessLength * 20)
+    + (witnessTurns * 9)
+    + ((wallCount + movableCount) * 7)
+    + (hintCount * 12)
+    + (rpsCount * 16)
+    + (stitchCount * 22)
+    + (cornerCount * 10)
+    + (featureFamilies * 40)
+  );
 };
 
 const evaluateSnapshotCompletion = (snapshot) => {
@@ -143,11 +222,19 @@ export const selectDailyCandidateForSlot = (
     dailyCanonicalKeys,
     maxVariantProbe = DAILY_POOL_MAX_VARIANT_PROBE,
     baseVariantId = DAILY_POOL_BASE_VARIANT_ID,
+    difficultyVariantWindow = DAILY_POOL_DIFFICULTY_VARIANT_WINDOW,
   },
 ) => {
   if (!Number.isInteger(maxVariantProbe) || maxVariantProbe < baseVariantId) {
     throw new Error(`maxVariantProbe must be >= ${baseVariantId}, got ${maxVariantProbe}`);
   }
+  if (!Number.isInteger(difficultyVariantWindow) || difficultyVariantWindow <= 0) {
+    throw new Error(`difficultyVariantWindow must be a positive integer, got ${difficultyVariantWindow}`);
+  }
+
+  const windowEnd = Math.min(maxVariantProbe, baseVariantId + difficultyVariantWindow - 1);
+  let bestWindowCandidate = null;
+  let firstFallbackCandidate = null;
 
   for (let variantId = baseVariantId; variantId <= maxVariantProbe; variantId++) {
     let level = null;
@@ -162,14 +249,38 @@ export const selectDailyCandidateForSlot = (
     if (dailyCanonicalKeys?.has(canonicalKey)) continue;
     if (!replayWitnessAndValidate(level)) continue;
 
-    return {
+    const candidate = {
       slot,
       infiniteIndex: slot,
       variantId,
       canonicalKey,
       level,
+      difficultyScore: estimateDailyDifficultyScore(level),
     };
+
+    if (variantId <= windowEnd) {
+      if (
+        !bestWindowCandidate
+        || candidate.difficultyScore > bestWindowCandidate.difficultyScore
+        || (
+          candidate.difficultyScore === bestWindowCandidate.difficultyScore
+          && candidate.variantId < bestWindowCandidate.variantId
+        )
+      ) {
+        bestWindowCandidate = candidate;
+      }
+      continue;
+    }
+
+    if (!bestWindowCandidate) {
+      firstFallbackCandidate = candidate;
+      break;
+    }
+    break;
   }
+
+  if (bestWindowCandidate) return bestWindowCandidate;
+  if (firstFallbackCandidate) return firstFallbackCandidate;
 
   throw new Error(`Unable to find unique solvable daily variant for slot ${slot}`);
 };

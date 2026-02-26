@@ -77,11 +77,11 @@ const parseArgs = (argv) => {
   return opts;
 };
 
-const readJson = (filePath, fallback = null) => {
+const readJson = (filePath, fallback = undefined) => {
   try {
     return JSON.parse(fs.readFileSync(filePath, 'utf8'));
   } catch (error) {
-    if (fallback !== null && error && typeof error === 'object' && error.code === 'ENOENT') {
+    if (fallback !== undefined && error && typeof error === 'object' && error.code === 'ENOENT') {
       return fallback;
     }
     throw error;
@@ -108,6 +108,21 @@ const normalizeHistory = (raw) => {
       poolVersion: String(entry.poolVersion || ''),
       publishedAtUtcMs: Number.isInteger(entry.publishedAtUtcMs) ? entry.publishedAtUtcMs : 0,
     })).filter((entry) => entry.dailyId && entry.dailySlot >= 0 && entry.canonicalKey),
+  };
+};
+
+const normalizeTodayPayload = (raw) => {
+  if (!raw || typeof raw !== 'object') return null;
+  const dailyId = typeof raw.dailyId === 'string' ? raw.dailyId : '';
+  const dailySlot = Number.isInteger(raw.dailySlot) ? raw.dailySlot : -1;
+  const canonicalKey = typeof raw.canonicalKey === 'string' ? raw.canonicalKey : '';
+  const generatedAtUtcMs = Number.isInteger(raw.generatedAtUtcMs) ? raw.generatedAtUtcMs : 0;
+  if (!dailyId || dailySlot < 0 || !canonicalKey) return null;
+  return {
+    dailyId,
+    dailySlot,
+    canonicalKey,
+    generatedAtUtcMs,
   };
 };
 
@@ -178,6 +193,21 @@ export const publishDailyLevel = (rawOptions = {}) => {
     throw new Error(`History collision: slot ${dailySlot} already used on ${slotCollision.dailyId}`);
   }
 
+  const existingTodayPayload = normalizeTodayPayload(readJson(opts.todayFile, null));
+  const stableGeneratedAtUtcMs = (
+    Number.isInteger(todayEntry?.publishedAtUtcMs) && todayEntry.publishedAtUtcMs > 0
+      ? todayEntry.publishedAtUtcMs
+      : (
+        existingTodayPayload
+        && existingTodayPayload.dailyId === dailyId
+        && existingTodayPayload.dailySlot === dailySlot
+        && existingTodayPayload.canonicalKey === materialized.canonicalKey
+        && existingTodayPayload.generatedAtUtcMs > 0
+          ? existingTodayPayload.generatedAtUtcMs
+          : nowMs
+      )
+  );
+
   const tomorrowId = addUtcDaysToDateId(dailyId, 1);
   const payload = {
     schemaVersion: PAYLOAD_SCHEMA_VERSION,
@@ -185,7 +215,7 @@ export const publishDailyLevel = (rawOptions = {}) => {
     dailyId,
     dailySlot,
     canonicalKey: materialized.canonicalKey,
-    generatedAtUtcMs: nowMs,
+    generatedAtUtcMs: stableGeneratedAtUtcMs,
     hardInvalidateAtUtcMs: utcStartMsFromDateId(tomorrowId),
     level: toDailyPayloadLevel(materialized.level, dailyId),
   };
@@ -196,7 +226,7 @@ export const publishDailyLevel = (rawOptions = {}) => {
       dailySlot,
       canonicalKey: materialized.canonicalKey,
       poolVersion: String(manifest.poolVersion || ''),
-      publishedAtUtcMs: nowMs,
+      publishedAtUtcMs: stableGeneratedAtUtcMs,
     });
     history.entries.sort((a, b) => (a.dailyId < b.dailyId ? -1 : (a.dailyId > b.dailyId ? 1 : 0)));
   }

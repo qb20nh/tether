@@ -4,6 +4,7 @@ import path from 'node:path';
 import { INFINITE_MAX_LEVELS } from '../src/infinite.js';
 import {
   DAILY_POOL_BASE_VARIANT_ID,
+  DAILY_POOL_DIFFICULTY_VARIANT_WINDOW,
   DAILY_POOL_EPOCH_UTC_DATE,
   DAILY_POOL_MAX_SLOTS,
   DAILY_POOL_MAX_VARIANT_PROBE,
@@ -18,6 +19,7 @@ import {
 const DEFAULTS = {
   maxSlots: DAILY_POOL_MAX_SLOTS,
   maxVariantProbe: DAILY_POOL_MAX_VARIANT_PROBE,
+  difficultyVariantWindow: DAILY_POOL_DIFFICULTY_VARIANT_WINDOW,
   outBinFile: path.resolve(process.cwd(), 'src/daily_overrides.bin.gz'),
   outManifestFile: path.resolve(process.cwd(), 'src/daily_pool_manifest.json'),
   generatedAtUtcMs: 0,
@@ -55,6 +57,9 @@ const parseArgs = (argv) => {
 
     if (arg === '--max-slots') opts.maxSlots = toInt('--max-slots', nextValue());
     else if (arg === '--max-variant-probe') opts.maxVariantProbe = toInt('--max-variant-probe', nextValue());
+    else if (arg === '--difficulty-variant-window') {
+      opts.difficultyVariantWindow = toInt('--difficulty-variant-window', nextValue());
+    }
     else if (arg === '--out' || arg === '--out-bin') opts.outBinFile = path.resolve(process.cwd(), nextValue());
     else if (arg === '--out-manifest') opts.outManifestFile = path.resolve(process.cwd(), nextValue());
     else if (arg === '--generated-at-utc-ms') opts.generatedAtUtcMs = toNonNegativeInt('--generated-at-utc-ms', nextValue());
@@ -70,6 +75,7 @@ const parseArgs = (argv) => {
           'Options:',
           `  --max-slots <n>           Daily pool slots to build (default: ${DEFAULTS.maxSlots})`,
           `  --max-variant-probe <n>   Variant probe cap per slot (default: ${DEFAULTS.maxVariantProbe})`,
+          `  --difficulty-variant-window <n> Difficulty probe width for harder picks (default: ${DEFAULTS.difficultyVariantWindow})`,
           `  --out-bin <path>          Daily override payload path (default: ${DEFAULTS.outBinFile})`,
           `  --out-manifest <path>     Manifest output path (default: ${DEFAULTS.outManifestFile})`,
           `  --generated-at-utc-ms <ms> Metadata timestamp (default: ${DEFAULTS.generatedAtUtcMs}, deterministic)`,
@@ -90,6 +96,9 @@ const parseArgs = (argv) => {
   }
   if (opts.maxVariantProbe < DAILY_POOL_BASE_VARIANT_ID) {
     throw new Error(`--max-variant-probe must be >= ${DAILY_POOL_BASE_VARIANT_ID}`);
+  }
+  if (opts.difficultyVariantWindow <= 0) {
+    throw new Error('--difficulty-variant-window must be a positive integer');
   }
   if (!/^\d{4}-\d{2}-\d{2}$/.test(opts.epochUtcDate)) {
     throw new Error(`--epoch-utc-date must be YYYY-MM-DD, got ${opts.epochUtcDate}`);
@@ -117,6 +126,7 @@ function main() {
   const overrides = new Map();
   const digestRecords = [];
   let maxVariantUsed = DAILY_POOL_BASE_VARIANT_ID;
+  let difficultyScoreTotal = 0;
 
   for (let slot = 0; slot < opts.maxSlots; slot++) {
     const candidate = selectDailyCandidateForSlot(slot, {
@@ -124,6 +134,7 @@ function main() {
       dailyCanonicalKeys,
       maxVariantProbe: opts.maxVariantProbe,
       baseVariantId: DAILY_POOL_BASE_VARIANT_ID,
+      difficultyVariantWindow: opts.difficultyVariantWindow,
     });
 
     dailyCanonicalKeys.add(candidate.canonicalKey);
@@ -131,6 +142,7 @@ function main() {
       overrides.set(slot, candidate.variantId);
     }
     if (candidate.variantId > maxVariantUsed) maxVariantUsed = candidate.variantId;
+    if (Number.isFinite(candidate.difficultyScore)) difficultyScoreTotal += candidate.difficultyScore;
 
     digestRecords.push(`${slot}:${candidate.variantId}:${candidate.canonicalKey}`);
 
@@ -150,6 +162,7 @@ function main() {
     baseVariantId: DAILY_POOL_BASE_VARIANT_ID,
     slotMapping: 'identity',
     maxVariantProbe: opts.maxVariantProbe,
+    difficultyVariantWindow: opts.difficultyVariantWindow,
     maxVariantUsed,
     poolDigest,
     generatedAtUtcMs: opts.generatedAtUtcMs,
@@ -175,6 +188,8 @@ function main() {
     dailyUniqueCount: dailyCanonicalKeys.size,
     overrideCount: overrides.size,
     maxVariantUsed,
+    difficultyVariantWindow: opts.difficultyVariantWindow,
+    averageDifficultyScore: opts.maxSlots > 0 ? (difficultyScoreTotal / opts.maxSlots) : 0,
     variantBits: encoded.variantBits,
     packedBytes: encoded.packedBytes,
     gzipBytes: encoded.compressedBytes,
