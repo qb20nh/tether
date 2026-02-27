@@ -302,8 +302,14 @@ export function createRuntime(options) {
   const renderDailyMeta = () => {
     const refs = renderer.getRefs();
     if (!refs?.dailyMeta || !refs?.dailyDateValue || !refs?.dailyCountdownValue) return;
+    const activeSnapshot = state.getSnapshot();
+    const isDailySnapshot = Boolean(
+      activeSnapshot
+      && Number.isInteger(activeSnapshot.levelIndex)
+      && isDailyLevelIndex(activeSnapshot.levelIndex),
+    );
 
-    if (!hasDailyLevel || !activeDailyId) {
+    if (!hasDailyLevel || !activeDailyId || !isDailySnapshot) {
       refs.dailyMeta.hidden = true;
       refs.dailyDateValue.textContent = '-';
       refs.dailyCountdownValue.textContent = '00:00:00';
@@ -807,6 +813,7 @@ export function createRuntime(options) {
     applyDailyBoardLockState(snapshot);
     syncMutableBoardStateFromSnapshot(snapshot);
     refreshLevelOptions();
+    renderDailyMeta();
     queueBoardLayout(false);
     queueSessionSave();
     hasLoadedLevel = true;
