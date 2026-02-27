@@ -7,7 +7,7 @@ export const utcStartMsFromDateId = (dateId) => {
 
 export const formatDailyDateLabel = (dateId) => {
     if (typeof dateId !== 'string' || dateId.length === 0) return '-';
-    return `${dateId} UTC`;
+    return dateId;
 };
 
 export const formatCountdownHms = (remainingMs) => {

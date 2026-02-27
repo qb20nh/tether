@@ -522,6 +522,10 @@ export function createRuntime(options) {
 
       refs.levelSelectGroup.classList.toggle('isInfiniteActive', infiniteActive);
       refs.levelSelectGroup.classList.toggle('isDailyActive', dailyActive);
+      if (refs.levelSelectGroup.parentElement) {
+        refs.levelSelectGroup.parentElement.classList.toggle('isInfiniteActive', infiniteActive);
+        refs.levelSelectGroup.parentElement.classList.toggle('isDailyActive', dailyActive);
+      }
 
       refs.infiniteSel.hidden = !infiniteActive;
       refs.infiniteSel.disabled = !infiniteActive;
