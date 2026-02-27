@@ -2,7 +2,7 @@ name: daily-level
 
 on:
   schedule:
-    - cron: '*/5 * * * *'
+    - cron: '50 23 * * *'
   workflow_dispatch:
 
 concurrency:
@@ -25,15 +25,58 @@ jobs:
         with:
           node-version: 20
 
+      - name: Wait until 23:59 UTC when applicable
+        run: |
+          set -euo pipefail
+          hour="$(date -u +%H)"
+          minute="$(date -u +%M)"
+          if [ "$hour" = "23" ] && [ "$minute" -lt 59 ]; then
+            now="$(date -u +%s)"
+            target="$(date -u -d "$(date -u +%F) 23:59:00" +%s)"
+            wait_seconds="$((target - now))"
+            if [ "$wait_seconds" -gt 0 ]; then
+              echo "Waiting ${wait_seconds}s for 23:59 UTC publish window..."
+              sleep "$wait_seconds"
+            fi
+          else
+            echo "Already at/after 23:59 UTC (or delayed past midnight); skipping wait."
+          fi
+
+      - name: Resolve publish timestamp
+        id: target
+        run: |
+          set -euo pipefail
+          hour="$(date -u +%H)"
+          if [ "$hour" = "23" ]; then
+            publish_ms="$(date -u -d "tomorrow 00:00:01" +%s000)"
+            publish_date="$(date -u -d "tomorrow" +%F)"
+          else
+            publish_ms="$(date -u -d "today 00:00:01" +%s000)"
+            publish_date="$(date -u +%F)"
+          fi
+          echo "publish_ms=${publish_ms}" >> "$GITHUB_OUTPUT"
+          echo "publish_date=${publish_date}" >> "$GITHUB_OUTPUT"
+          echo "Publishing daily payload for ${publish_date} with now-ms=${publish_ms}"
+
       - name: Publish daily payload
+        id: publish
         env:
           DAILY_SECRET: ${{ secrets.DAILY_SECRET }}
-        run: node scripts/publish_daily_level.js --json
+        run: |
+          set -euo pipefail
+          node scripts/publish_daily_level.js --json --now-ms "${{ steps.target.outputs.publish_ms }}" | tee /tmp/daily-publish-summary.json
+          node -e "const fs=require('fs'); const summary=JSON.parse(fs.readFileSync('/tmp/daily-publish-summary.json','utf8')); fs.appendFileSync(process.env.GITHUB_OUTPUT, 'daily_id=' + String(summary.dailyId || '') + '\n'); fs.appendFileSync(process.env.GITHUB_OUTPUT, 'preserved=' + (summary.preservedExistingDaily ? 'true' : 'false') + '\n');"
 
       - name: Commit and push daily files
         run: |
+          set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet -- daily/today.json daily/history.json; then
+            echo "No daily file changes to commit."
+            exit 0
+          fi
           git add daily/today.json daily/history.json
-          git commit -m "daily: publish $(date -u +%F)" || exit 0
+          git commit -m "daily: publish ${{ steps.publish.outputs.daily_id }}" || exit 0
+          git pull --rebase origin main
           git push
