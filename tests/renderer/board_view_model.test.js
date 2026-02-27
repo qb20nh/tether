@@ -35,3 +35,35 @@ test('board view model maps path and statuses to classes', () => {
   assert.ok(desired[1][0].classes.includes('movable'));
   assert.ok(desired[1][0].classes.includes('badBlocked'));
 });
+
+test('board view model reuses output matrix when provided', () => {
+  const snapshotA = {
+    rows: 2,
+    cols: 2,
+    gridData: [
+      ['.', '.'],
+      ['.', '.'],
+    ],
+    path: [{ r: 0, c: 0 }],
+  };
+  const snapshotB = {
+    rows: 2,
+    cols: 2,
+    gridData: [
+      ['.', '.'],
+      ['.', '.'],
+    ],
+    path: [{ r: 1, c: 1 }],
+  };
+
+  const reused = buildBoardCellViewModel(snapshotA, {}, (code) => code, null);
+  const cellRef = reused[0][0];
+  const classRef = reused[0][0].classes;
+
+  const next = buildBoardCellViewModel(snapshotB, {}, (code) => code, reused);
+  assert.equal(next, reused);
+  assert.equal(next[0][0], cellRef);
+  assert.equal(next[0][0].classes, classRef);
+  assert.equal(next[0][0].classes.includes('pathStart'), false);
+  assert.equal(next[1][1].classes.includes('pathStart'), true);
+});

@@ -176,6 +176,25 @@ export function createDomRenderer(options = {}) {
     return allVisited && hintsOk && stitchesOk && rpsOk;
   };
 
+  const applyInteractionState = (interactionModel = {}) => {
+    if (!refs) return;
+    if (interactionModel.dropTarget && Number.isInteger(interactionModel.dropTarget.r) && Number.isInteger(interactionModel.dropTarget.c)) {
+      setDropTarget(interactionModel.dropTarget.r, interactionModel.dropTarget.c);
+    } else {
+      clearDropTarget();
+    }
+
+    const ghost = interactionModel.wallGhost;
+    if (ghost?.visible) {
+      showWallDragGhost(ghost.x || 0, ghost.y || 0);
+      moveWallDragGhost(ghost.x || 0, ghost.y || 0);
+    } else {
+      hideWallDragGhost();
+    }
+
+    setDraggingBodyClasses(interactionModel);
+  };
+
   return {
     mount(shellRefs = null) {
       refs = shellRefs || cacheElements();
@@ -303,27 +322,13 @@ export function createDomRenderer(options = {}) {
         }
         : null;
 
-      updateCells(snapshot, evaluation, refs, completionModel);
+      updateCells(snapshot, evaluation, refs, completionModel, interactionModel);
 
       if (Object.prototype.hasOwnProperty.call(uiModel, 'messageHtml')) {
         setMessage(refs.msgEl, uiModel.messageKind || null, uiModel.messageHtml || '');
       }
 
-      if (interactionModel.dropTarget && Number.isInteger(interactionModel.dropTarget.r) && Number.isInteger(interactionModel.dropTarget.c)) {
-        setDropTarget(interactionModel.dropTarget.r, interactionModel.dropTarget.c);
-      } else {
-        clearDropTarget();
-      }
-
-      const ghost = interactionModel.wallGhost;
-      if (ghost?.visible) {
-        showWallDragGhost(ghost.x || 0, ghost.y || 0);
-        moveWallDragGhost(ghost.x || 0, ghost.y || 0);
-      } else {
-        hideWallDragGhost();
-      }
-
-      setDraggingBodyClasses(interactionModel);
+      applyInteractionState(interactionModel);
 
       if (refs.boardWrap) {
         refs.boardWrap.classList.toggle('isComplete', solved);
@@ -342,6 +347,11 @@ export function createDomRenderer(options = {}) {
     resize() {
       if (!refs) return;
       resizeCanvas(refs);
+    },
+
+    updateInteraction(interactionModel = {}) {
+      if (!refs) return;
+      applyInteractionState(interactionModel);
     },
 
     unmount() {

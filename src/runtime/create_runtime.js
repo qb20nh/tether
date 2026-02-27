@@ -14,6 +14,7 @@ const INFINITE_SELECTOR_ACTIONS = Object.freeze({
 const normalizeTheme = (theme) => (theme === 'light' || theme === 'dark' ? theme : 'dark');
 const isRtlLocale = (locale) => /^ar/i.test(locale || '');
 const DAY_MS = 24 * 60 * 60 * 1000;
+const EVALUATE_CACHE_LIMIT = 96;
 
 const applyTextDirection = (locale) => {
   const direction = isRtlLocale(locale) ? 'rtl' : 'ltr';
@@ -136,6 +137,8 @@ export function createRuntime(options) {
   let settingsMenuOpen = false;
   let dailyCountdownTimer = 0;
   let dailyBoardLocked = false;
+  let evaluateCacheBoardVersion = 0;
+  const evaluateCache = new Map();
 
   const sessionSaveData = {
     board: bootState.sessionBoard
@@ -665,6 +668,43 @@ export function createRuntime(options) {
     return `${cursor.r},${cursor.c}`;
   };
 
+  const invalidateEvaluateCache = () => {
+    evaluateCacheBoardVersion += 1;
+    evaluateCache.clear();
+  };
+
+  const buildEvaluateCacheKey = (snapshot, evaluateOptions = {}) => {
+    const suppressEndpointRequirement = evaluateOptions.suppressEndpointRequirement ? '1' : '0';
+    const suppressEndpointKey = typeof evaluateOptions.suppressEndpointKey === 'string'
+      ? evaluateOptions.suppressEndpointKey
+      : '';
+    let pathKey = '';
+    for (let i = 0; i < snapshot.path.length; i++) {
+      const point = snapshot.path[i];
+      pathKey += `${point.r},${point.c};`;
+    }
+    return `${evaluateCacheBoardVersion}|${suppressEndpointRequirement}|${suppressEndpointKey}|${pathKey}`;
+  };
+
+  const evaluateSnapshot = (snapshot, evaluateOptions = {}, useCache = false) => {
+    if (!useCache) return core.evaluate(snapshot, evaluateOptions);
+    const cacheKey = buildEvaluateCacheKey(snapshot, evaluateOptions);
+    const cached = evaluateCache.get(cacheKey);
+    if (cached) {
+      evaluateCache.delete(cacheKey);
+      evaluateCache.set(cacheKey, cached);
+      return cached;
+    }
+
+    const result = core.evaluate(snapshot, evaluateOptions);
+    evaluateCache.set(cacheKey, result);
+    if (evaluateCache.size > EVALUATE_CACHE_LIMIT) {
+      const oldestKey = evaluateCache.keys().next().value;
+      evaluateCache.delete(oldestKey);
+    }
+    return result;
+  };
+
   const renderSnapshot = (snapshot, evaluation, completion = null, options = {}) => {
     const completionAnimationTrigger = Boolean(options.completionAnimationTrigger);
     renderer.renderFrame({
@@ -694,10 +734,12 @@ export function createRuntime(options) {
 
   const refresh = (snapshot, validate = false, options = {}) => {
     const draggedHintSuppressionKey = resolveDraggedHintSuppressionKey(snapshot);
-    const evaluateResult = core.evaluate(snapshot, {
+    const evaluateOptions = {
       suppressEndpointRequirement: Boolean(draggedHintSuppressionKey),
       suppressEndpointKey: draggedHintSuppressionKey,
-    });
+    };
+    const shouldUseEvaluateCache = Boolean(interactionState.isPathDragging);
+    const evaluateResult = evaluateSnapshot(snapshot, evaluateOptions, shouldUseEvaluateCache);
 
     let completion = null;
     if (validate) {
@@ -806,6 +848,7 @@ export function createRuntime(options) {
 
     const snapshot = state.getSnapshot();
     if (transition.rebuildGrid) {
+      invalidateEvaluateCache();
       renderer.rebuildGrid(snapshot);
     }
 
@@ -1038,9 +1081,30 @@ export function createRuntime(options) {
     const updateType = payload?.updateType;
 
     if (updateType === INTERACTION_UPDATES.PATH_DRAG) {
-      interactionState.isPathDragging = Boolean(payload.isPathDragging);
-      interactionState.pathDragSide = payload.pathDragSide ?? null;
-      interactionState.pathDragCursor = payload.pathDragCursor ?? null;
+      const nextIsPathDragging = Boolean(payload.isPathDragging);
+      const nextPathDragSide = payload.pathDragSide ?? null;
+      const rawCursor = payload.pathDragCursor;
+      const nextPathDragCursor = (
+        Number.isInteger(rawCursor?.r) && Number.isInteger(rawCursor?.c)
+          ? { r: rawCursor.r, c: rawCursor.c }
+          : null
+      );
+      const prevCursor = interactionState.pathDragCursor;
+      const cursorChanged = (
+        (prevCursor?.r ?? null) !== (nextPathDragCursor?.r ?? null)
+        || (prevCursor?.c ?? null) !== (nextPathDragCursor?.c ?? null)
+      );
+      const stateChanged = (
+        interactionState.isPathDragging !== nextIsPathDragging
+        || interactionState.pathDragSide !== nextPathDragSide
+        || cursorChanged
+      );
+      if (!stateChanged) return;
+
+      interactionState.isPathDragging = nextIsPathDragging;
+      interactionState.pathDragSide = nextPathDragSide;
+      interactionState.pathDragCursor = nextPathDragCursor;
+      renderer.updateInteraction?.(interactionState);
       queueBoardLayout(false, {
         isPathDragging: interactionState.isPathDragging,
         pathDragSide: interactionState.pathDragSide,
@@ -1050,19 +1114,39 @@ export function createRuntime(options) {
     }
 
     if (updateType === INTERACTION_UPDATES.WALL_DRAG) {
-      interactionState.isWallDragging = Boolean(payload.isWallDragging);
+      const nextWallDragging = Boolean(payload.isWallDragging);
+      const nextVisible = Boolean(payload.visible);
+      const nextX = Number.isFinite(payload.x) ? payload.x : interactionState.wallGhost.x;
+      const nextY = Number.isFinite(payload.y) ? payload.y : interactionState.wallGhost.y;
+      const stateChanged = (
+        interactionState.isWallDragging !== nextWallDragging
+        || interactionState.wallGhost.visible !== nextVisible
+        || interactionState.wallGhost.x !== nextX
+        || interactionState.wallGhost.y !== nextY
+      );
+      if (!stateChanged) return;
+
+      interactionState.isWallDragging = nextWallDragging;
       interactionState.wallGhost = {
-        visible: Boolean(payload.visible),
-        x: Number.isFinite(payload.x) ? payload.x : interactionState.wallGhost.x,
-        y: Number.isFinite(payload.y) ? payload.y : interactionState.wallGhost.y,
+        visible: nextVisible,
+        x: nextX,
+        y: nextY,
       };
-      queueBoardLayout(false);
+      renderer.updateInteraction?.(interactionState);
       return;
     }
 
     if (updateType === INTERACTION_UPDATES.WALL_DROP_TARGET) {
-      interactionState.dropTarget = payload.dropTarget || null;
-      queueBoardLayout(false);
+      const nextDropTarget = payload.dropTarget || null;
+      const prevDropTarget = interactionState.dropTarget;
+      const stateChanged = (
+        (prevDropTarget?.r ?? null) !== (nextDropTarget?.r ?? null)
+        || (prevDropTarget?.c ?? null) !== (nextDropTarget?.c ?? null)
+      );
+      if (!stateChanged) return;
+
+      interactionState.dropTarget = nextDropTarget;
+      renderer.updateInteraction?.(interactionState);
     }
   };
 
@@ -1076,7 +1160,15 @@ export function createRuntime(options) {
     });
 
     if (transition.rebuildGrid) {
+      invalidateEvaluateCache();
       renderer.rebuildGrid(transition.snapshot);
+    }
+    if (payload.commandType === GAME_COMMANDS.WALL_MOVE_ATTEMPT && transition.changed) {
+      invalidateEvaluateCache();
+    }
+
+    if (!transition.changed && !transition.validate && !transition.rebuildGrid) {
+      return;
     }
 
     queueBoardLayout(transition.validate, {

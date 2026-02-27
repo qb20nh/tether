@@ -2,6 +2,8 @@ const TAU = Math.PI * 2;
 const FLOW_STOP_EPSILON = 1e-4;
 const COMPLETE_PATH_THRESHOLD = 0.999;
 const DEFAULT_MAX_PATH_POINTS = 64;
+const FLOAT_BYTES = Float32Array.BYTES_PER_ELEMENT;
+const UINT16_BYTES = Uint16Array.BYTES_PER_ELEMENT;
 
 const clampUnit = (value) => Math.max(0, Math.min(1, value));
 
@@ -489,6 +491,72 @@ export function buildUnifiedPathMesh(points, options = {}) {
   };
 }
 
+const nextPowerOfTwo = (value) => {
+  let size = 1;
+  const target = Math.max(1, value | 0);
+  while (size < target) size <<= 1;
+  return size;
+};
+
+const ensureFloatCapacity = (array, minLength) => {
+  if (array.length >= minLength) return array;
+  return new Float32Array(nextPowerOfTwo(minLength));
+};
+
+const ensureIndexCapacity = (array, minLength) => {
+  if (array.length >= minLength) return array;
+  return new Uint16Array(nextPowerOfTwo(minLength));
+};
+
+const createMutableMeshStorage = () => ({
+  positions: new Float32Array(0),
+  travels: new Float32Array(0),
+  cornerFlags: new Float32Array(0),
+  cornerCenters: new Float32Array(0),
+  cornerAngles: new Float32Array(0),
+  cornerTravels: new Float32Array(0),
+  indices: new Uint16Array(0),
+  vertexCount: 0,
+  indexCount: 0,
+  mainTravel: 0,
+});
+
+const copyIntoMutableMeshStorage = (mesh, out) => {
+  const target = out || createMutableMeshStorage();
+  const vertexCount = Number(mesh?.vertexCount) || 0;
+  const indexCount = Number(mesh?.indexCount) || 0;
+
+  target.positions = ensureFloatCapacity(target.positions, vertexCount * 2);
+  target.travels = ensureFloatCapacity(target.travels, vertexCount);
+  target.cornerFlags = ensureFloatCapacity(target.cornerFlags, vertexCount);
+  target.cornerCenters = ensureFloatCapacity(target.cornerCenters, vertexCount * 2);
+  target.cornerAngles = ensureFloatCapacity(target.cornerAngles, vertexCount * 2);
+  target.cornerTravels = ensureFloatCapacity(target.cornerTravels, vertexCount * 2);
+  target.indices = ensureIndexCapacity(target.indices, indexCount);
+
+  if (vertexCount > 0) {
+    target.positions.set(mesh.positions, 0);
+    target.travels.set(mesh.travels, 0);
+    target.cornerFlags.set(mesh.cornerFlags, 0);
+    target.cornerCenters.set(mesh.cornerCenters, 0);
+    target.cornerAngles.set(mesh.cornerAngles, 0);
+    target.cornerTravels.set(mesh.cornerTravels, 0);
+  }
+  if (indexCount > 0) {
+    target.indices.set(mesh.indices, 0);
+  }
+
+  target.vertexCount = vertexCount;
+  target.indexCount = indexCount;
+  target.mainTravel = Number(mesh?.mainTravel) || 0;
+  return target;
+};
+
+const buildUnifiedPathMeshInto = (points, options = {}, out) => {
+  const mesh = buildUnifiedPathMesh(points, options);
+  return copyIntoMutableMeshStorage(mesh, out);
+};
+
 const createShader = (gl, type, source) => {
   const shader = gl.createShader(type);
   if (!shader) throw new Error('Failed to allocate shader');
@@ -678,11 +746,11 @@ const getUniforms = (gl, program) => ({
   flowDrop: gl.getUniformLocation(program, 'uFlowDrop'),
 });
 
-const toRgb01 = (color) => {
-  const r = clampUnit((Number(color?.r) || 0) / 255);
-  const g = clampUnit((Number(color?.g) || 0) / 255);
-  const b = clampUnit((Number(color?.b) || 0) / 255);
-  return [r, g, b];
+const toRgb01Into = (color, out) => {
+  out.r = clampUnit((Number(color?.r) || 0) / 255);
+  out.g = clampUnit((Number(color?.g) || 0) / 255);
+  out.b = clampUnit((Number(color?.b) || 0) / 255);
+  return out;
 };
 
 export function createPathWebglRenderer(canvas) {
@@ -753,11 +821,212 @@ export function createPathWebglRenderer(canvas) {
   gl.disable(gl.CULL_FACE);
   gl.enable(gl.BLEND);
   gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+  gl.clearColor(0, 0, 0, 0);
 
   let deviceScale = 1;
+  const reusableMesh = createMutableMeshStorage();
+  let geometryCached = false;
+  let cachedPointCount = 0;
+  let cachedWidth = 0;
+  let cachedStartRadius = 0;
+  let cachedArrowLength = 0;
+  let cachedEndHalfWidth = 0;
+  let cachedMaxPathPoints = DEFAULT_MAX_PATH_POINTS;
+  let cachedGeometryToken = NaN;
+  let cachedPoints = new Float32Array(0);
+  const gpuCapacities = {
+    position: 0,
+    travel: 0,
+    cornerFlag: 0,
+    cornerCenter: 0,
+    cornerAngle: 0,
+    cornerTravel: 0,
+    index: 0,
+  };
+  const uniformCache = {
+    canvasWidth: NaN,
+    canvasHeight: NaN,
+    deviceScale: NaN,
+    mainR: NaN,
+    mainG: NaN,
+    mainB: NaN,
+    completeR: NaN,
+    completeG: NaN,
+    completeB: NaN,
+    completionEnabled: NaN,
+    completionBoundary: NaN,
+    completionFeather: NaN,
+    completionProgress: NaN,
+    completionThreshold: NaN,
+    flowEnabled: NaN,
+    flowOffset: NaN,
+    flowCycle: NaN,
+    flowPulse: NaN,
+    flowRise: NaN,
+    flowDrop: NaN,
+  };
+  const mainColorScratch = { r: 1, g: 1, b: 1 };
+  const completeColorScratch = { r: 1, g: 1, b: 1 };
+
+  const setUniform1fCached = (location, key, value) => {
+    if (Object.is(uniformCache[key], value)) return;
+    gl.uniform1f(location, value);
+    uniformCache[key] = value;
+  };
+
+  const setUniform2fCached = (location, keyX, keyY, x, y) => {
+    if (Object.is(uniformCache[keyX], x) && Object.is(uniformCache[keyY], y)) return;
+    gl.uniform2f(location, x, y);
+    uniformCache[keyX] = x;
+    uniformCache[keyY] = y;
+  };
+
+  const setUniform3fCached = (location, keyX, keyY, keyZ, x, y, z) => {
+    if (
+      Object.is(uniformCache[keyX], x)
+      && Object.is(uniformCache[keyY], y)
+      && Object.is(uniformCache[keyZ], z)
+    ) {
+      return;
+    }
+    gl.uniform3f(location, x, y, z);
+    uniformCache[keyX] = x;
+    uniformCache[keyY] = y;
+    uniformCache[keyZ] = z;
+  };
+
+  const ensurePointSignatureCapacity = (pointCount) => {
+    const minLength = pointCount * 2;
+    if (cachedPoints.length >= minLength) return;
+    cachedPoints = new Float32Array(nextPowerOfTwo(minLength));
+  };
+
+  const computeSafePointCount = (points, maxPathPoints) => {
+    const limit = Math.min(points.length, maxPathPoints);
+    let count = 0;
+    for (let i = 0; i < limit; i++) {
+      const x = Number(points[i]?.x);
+      const y = Number(points[i]?.y);
+      if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+      count += 1;
+    }
+    return count;
+  };
+
+  const hasGeometryChange = (points, width, startRadius, arrowLength, endHalfWidth, maxPathPoints) => {
+    const pointCount = computeSafePointCount(points, maxPathPoints);
+    if (!geometryCached) return true;
+    if (cachedPointCount !== pointCount) return true;
+    if (cachedWidth !== width) return true;
+    if (cachedStartRadius !== startRadius) return true;
+    if (cachedArrowLength !== arrowLength) return true;
+    if (cachedEndHalfWidth !== endHalfWidth) return true;
+    if (cachedMaxPathPoints !== maxPathPoints) return true;
+
+    let safeIndex = 0;
+    const limit = Math.min(points.length, maxPathPoints);
+    for (let i = 0; i < limit; i++) {
+      const x = Number(points[i]?.x);
+      const y = Number(points[i]?.y);
+      if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+      const base = safeIndex * 2;
+      if (cachedPoints[base] !== x || cachedPoints[base + 1] !== y) return true;
+      safeIndex += 1;
+    }
+    return false;
+  };
+
+  const updateGeometrySignature = (
+    points,
+    width,
+    startRadius,
+    arrowLength,
+    endHalfWidth,
+    maxPathPoints,
+  ) => {
+    const pointCount = computeSafePointCount(points, maxPathPoints);
+    ensurePointSignatureCapacity(pointCount);
+    let safeIndex = 0;
+    const limit = Math.min(points.length, maxPathPoints);
+    for (let i = 0; i < limit; i++) {
+      const x = Number(points[i]?.x);
+      const y = Number(points[i]?.y);
+      if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+      const base = safeIndex * 2;
+      cachedPoints[base] = x;
+      cachedPoints[base + 1] = y;
+      safeIndex += 1;
+    }
+
+    cachedPointCount = pointCount;
+    cachedWidth = width;
+    cachedStartRadius = startRadius;
+    cachedArrowLength = arrowLength;
+    cachedEndHalfWidth = endHalfWidth;
+    cachedMaxPathPoints = maxPathPoints;
+    geometryCached = true;
+  };
+
+  const ensureGpuCapacity = (kind, target, requiredBytes) => {
+    const required = Math.max(0, requiredBytes | 0);
+    if (required <= gpuCapacities[kind]) return;
+    const nextCapacity = nextPowerOfTwo(required);
+    gl.bufferData(target, nextCapacity, gl.DYNAMIC_DRAW);
+    gpuCapacities[kind] = nextCapacity;
+  };
+
+  const uploadMeshToGpu = (mesh) => {
+    const vertexCount = mesh.vertexCount;
+    const indexCount = mesh.indexCount;
+    const positionsLength = vertexCount * 2;
+    const centersLength = vertexCount * 2;
+    const anglesLength = vertexCount * 2;
+    const cornerTravelsLength = vertexCount * 2;
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+    ensureGpuCapacity('position', gl.ARRAY_BUFFER, positionsLength * FLOAT_BYTES);
+    if (positionsLength > 0) {
+      gl.bufferSubData(gl.ARRAY_BUFFER, 0, mesh.positions, 0, positionsLength);
+    }
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, travelBuffer);
+    ensureGpuCapacity('travel', gl.ARRAY_BUFFER, vertexCount * FLOAT_BYTES);
+    if (vertexCount > 0) {
+      gl.bufferSubData(gl.ARRAY_BUFFER, 0, mesh.travels, 0, vertexCount);
+    }
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, cornerFlagBuffer);
+    ensureGpuCapacity('cornerFlag', gl.ARRAY_BUFFER, vertexCount * FLOAT_BYTES);
+    if (vertexCount > 0) {
+      gl.bufferSubData(gl.ARRAY_BUFFER, 0, mesh.cornerFlags, 0, vertexCount);
+    }
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, cornerCenterBuffer);
+    ensureGpuCapacity('cornerCenter', gl.ARRAY_BUFFER, centersLength * FLOAT_BYTES);
+    if (centersLength > 0) {
+      gl.bufferSubData(gl.ARRAY_BUFFER, 0, mesh.cornerCenters, 0, centersLength);
+    }
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, cornerAngleBuffer);
+    ensureGpuCapacity('cornerAngle', gl.ARRAY_BUFFER, anglesLength * FLOAT_BYTES);
+    if (anglesLength > 0) {
+      gl.bufferSubData(gl.ARRAY_BUFFER, 0, mesh.cornerAngles, 0, anglesLength);
+    }
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, cornerTravelBuffer);
+    ensureGpuCapacity('cornerTravel', gl.ARRAY_BUFFER, cornerTravelsLength * FLOAT_BYTES);
+    if (cornerTravelsLength > 0) {
+      gl.bufferSubData(gl.ARRAY_BUFFER, 0, mesh.cornerTravels, 0, cornerTravelsLength);
+    }
+
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
+    ensureGpuCapacity('index', gl.ELEMENT_ARRAY_BUFFER, indexCount * UINT16_BYTES);
+    if (indexCount > 0) {
+      gl.bufferSubData(gl.ELEMENT_ARRAY_BUFFER, 0, mesh.indices, 0, indexCount);
+    }
+  };
 
   const clear = () => {
-    gl.clearColor(0, 0, 0, 0);
     gl.clear(gl.COLOR_BUFFER_BIT);
   };
 
@@ -785,6 +1054,11 @@ export function createPathWebglRenderer(canvas) {
     const points = Array.isArray(frame.points) ? frame.points : [];
     if (points.length === 0) {
       clear();
+      reusableMesh.vertexCount = 0;
+      reusableMesh.indexCount = 0;
+      reusableMesh.mainTravel = 0;
+      geometryCached = false;
+      cachedGeometryToken = NaN;
       return 0;
     }
 
@@ -792,24 +1066,54 @@ export function createPathWebglRenderer(canvas) {
     const startRadius = Math.max(0, Number(frame.startRadius) || 0);
     const arrowLength = Math.max(0, Number(frame.arrowLength) || 0);
     const endHalfWidth = Math.max(0, Number(frame.endHalfWidth) || 0);
-    const mesh = buildUnifiedPathMesh(points, {
-      width,
-      startRadius,
-      arrowLength,
-      endHalfWidth,
-      maxPathPoints: frame.maxPathPoints || DEFAULT_MAX_PATH_POINTS,
-    });
+    const maxPathPoints = Number.isInteger(frame.maxPathPoints) && frame.maxPathPoints > 0
+      ? frame.maxPathPoints
+      : DEFAULT_MAX_PATH_POINTS;
+    const nextGeometryToken = Number(frame.geometryToken);
+    const hasGeometryToken = Number.isFinite(nextGeometryToken);
+    const geometryChanged = hasGeometryToken
+      ? (!geometryCached || cachedGeometryToken !== nextGeometryToken)
+      : hasGeometryChange(
+        points,
+        width,
+        startRadius,
+        arrowLength,
+        endHalfWidth,
+        maxPathPoints,
+      );
+    if (geometryChanged) {
+      buildUnifiedPathMeshInto(points, {
+        width,
+        startRadius,
+        arrowLength,
+        endHalfWidth,
+        maxPathPoints,
+      }, reusableMesh);
+      updateGeometrySignature(
+        points,
+        width,
+        startRadius,
+        arrowLength,
+        endHalfWidth,
+        maxPathPoints,
+      );
+      if (hasGeometryToken) {
+        cachedGeometryToken = nextGeometryToken;
+      } else {
+        cachedGeometryToken = NaN;
+      }
+    }
 
     clear();
-    if (mesh.indexCount === 0 || mesh.vertexCount === 0) {
-      return mesh.mainTravel;
+    if (reusableMesh.indexCount === 0 || reusableMesh.vertexCount === 0) {
+      return reusableMesh.mainTravel;
     }
 
     const completionProgress = clampUnit(Number(frame.completionProgress) || 0);
     const completionEnabled = frame.isCompletionSolved ? 1 : 0;
     const completionBoundary = completionProgress >= COMPLETE_PATH_THRESHOLD
-      ? (mesh.mainTravel + arrowLength)
-      : (mesh.mainTravel * completionProgress);
+      ? (reusableMesh.mainTravel + arrowLength)
+      : (reusableMesh.mainTravel * completionProgress);
     const completionFeather = Math.max(width * 2.2, 14);
 
     const flowCycle = Math.max(1, Number(frame.flowCycle) || 1);
@@ -819,52 +1123,54 @@ export function createPathWebglRenderer(canvas) {
     const flowRise = Number.isFinite(frame.flowRise) ? frame.flowRise : 0.82;
     const flowDrop = Number.isFinite(frame.flowDrop) ? frame.flowDrop : 0.83;
 
-    const [mainR, mainG, mainB] = toRgb01(frame.mainColorRgb || { r: 255, g: 255, b: 255 });
-    const [doneR, doneG, doneB] = toRgb01(frame.completeColorRgb || { r: 46, g: 204, b: 113 });
+    const mainColor = toRgb01Into(frame.mainColorRgb || { r: 255, g: 255, b: 255 }, mainColorScratch);
+    const completeColor = toRgb01Into(
+      frame.completeColorRgb || { r: 46, g: 204, b: 113 },
+      completeColorScratch,
+    );
 
     gl.useProgram(program);
     gl.bindVertexArray(vao);
 
-    gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, mesh.positions, gl.DYNAMIC_DRAW);
+    if (geometryChanged) {
+      uploadMeshToGpu(reusableMesh);
+    }
 
-    gl.bindBuffer(gl.ARRAY_BUFFER, travelBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, mesh.travels, gl.DYNAMIC_DRAW);
+    setUniform2fCached(uniforms.canvasSizePx, 'canvasWidth', 'canvasHeight', canvas.width, canvas.height);
+    setUniform1fCached(uniforms.deviceScale, 'deviceScale', deviceScale);
+    setUniform3fCached(
+      uniforms.mainColor,
+      'mainR',
+      'mainG',
+      'mainB',
+      mainColor.r,
+      mainColor.g,
+      mainColor.b,
+    );
+    setUniform3fCached(
+      uniforms.completeColor,
+      'completeR',
+      'completeG',
+      'completeB',
+      completeColor.r,
+      completeColor.g,
+      completeColor.b,
+    );
+    setUniform1fCached(uniforms.completionEnabled, 'completionEnabled', completionEnabled);
+    setUniform1fCached(uniforms.completionBoundary, 'completionBoundary', completionBoundary);
+    setUniform1fCached(uniforms.completionFeather, 'completionFeather', completionFeather);
+    setUniform1fCached(uniforms.completionProgress, 'completionProgress', completionProgress);
+    setUniform1fCached(uniforms.completionThreshold, 'completionThreshold', COMPLETE_PATH_THRESHOLD);
+    setUniform1fCached(uniforms.flowEnabled, 'flowEnabled', flowEnabled);
+    setUniform1fCached(uniforms.flowOffset, 'flowOffset', flowOffset);
+    setUniform1fCached(uniforms.flowCycle, 'flowCycle', flowCycle);
+    setUniform1fCached(uniforms.flowPulse, 'flowPulse', flowPulse);
+    setUniform1fCached(uniforms.flowRise, 'flowRise', flowRise);
+    setUniform1fCached(uniforms.flowDrop, 'flowDrop', flowDrop);
 
-    gl.bindBuffer(gl.ARRAY_BUFFER, cornerFlagBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, mesh.cornerFlags, gl.DYNAMIC_DRAW);
-
-    gl.bindBuffer(gl.ARRAY_BUFFER, cornerCenterBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, mesh.cornerCenters, gl.DYNAMIC_DRAW);
-
-    gl.bindBuffer(gl.ARRAY_BUFFER, cornerAngleBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, mesh.cornerAngles, gl.DYNAMIC_DRAW);
-
-    gl.bindBuffer(gl.ARRAY_BUFFER, cornerTravelBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, mesh.cornerTravels, gl.DYNAMIC_DRAW);
-
-    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
-    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, mesh.indices, gl.DYNAMIC_DRAW);
-
-    gl.uniform2f(uniforms.canvasSizePx, canvas.width, canvas.height);
-    gl.uniform1f(uniforms.deviceScale, deviceScale);
-    gl.uniform3f(uniforms.mainColor, mainR, mainG, mainB);
-    gl.uniform3f(uniforms.completeColor, doneR, doneG, doneB);
-    gl.uniform1f(uniforms.completionEnabled, completionEnabled);
-    gl.uniform1f(uniforms.completionBoundary, completionBoundary);
-    gl.uniform1f(uniforms.completionFeather, completionFeather);
-    gl.uniform1f(uniforms.completionProgress, completionProgress);
-    gl.uniform1f(uniforms.completionThreshold, COMPLETE_PATH_THRESHOLD);
-    gl.uniform1f(uniforms.flowEnabled, flowEnabled);
-    gl.uniform1f(uniforms.flowOffset, flowOffset);
-    gl.uniform1f(uniforms.flowCycle, flowCycle);
-    gl.uniform1f(uniforms.flowPulse, flowPulse);
-    gl.uniform1f(uniforms.flowRise, flowRise);
-    gl.uniform1f(uniforms.flowDrop, flowDrop);
-
-    gl.drawElements(gl.TRIANGLES, mesh.indexCount, gl.UNSIGNED_SHORT, 0);
+    gl.drawElements(gl.TRIANGLES, reusableMesh.indexCount, gl.UNSIGNED_SHORT, 0);
     gl.bindVertexArray(null);
-    return mesh.mainTravel;
+    return reusableMesh.mainTravel;
   };
 
   const destroy = () => {

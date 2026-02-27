@@ -253,23 +253,22 @@ export function createDomInputAdapter() {
         pathDrag.moved = true;
       }
 
+      const cursorKey = `${cell.r},${cell.c}`;
+      const cursorChanged = pathDrag ? pathDrag.lastCursorKey !== cursorKey : true;
+      if (!cursorChanged) return;
+
       if (pathDrag && pathDrag.side === 'start') {
         sendGameCommand(GAME_COMMANDS.START_OR_STEP_FROM_START, { r: cell.r, c: cell.c });
       } else {
         sendGameCommand(GAME_COMMANDS.START_OR_STEP, { r: cell.r, c: cell.c });
       }
 
-      const cursorKey = `${cell.r},${cell.c}`;
-      const cursorChanged = pathDrag ? pathDrag.lastCursorKey !== cursorKey : false;
-
-      if (cursorChanged) {
-        if (pathDrag) pathDrag.lastCursorKey = cursorKey;
-        sendInteractionUpdate(INTERACTION_UPDATES.PATH_DRAG, {
-          isPathDragging: true,
-          pathDragSide: pathDrag?.side || null,
-          pathDragCursor: { r: cell.r, c: cell.c },
-        });
-      }
+      if (pathDrag) pathDrag.lastCursorKey = cursorKey;
+      sendInteractionUpdate(INTERACTION_UPDATES.PATH_DRAG, {
+        isPathDragging: true,
+        pathDragSide: pathDrag?.side || null,
+        pathDragCursor: { r: cell.r, c: cell.c },
+      });
       return;
     }
 

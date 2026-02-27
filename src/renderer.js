@@ -19,6 +19,60 @@ let latestPathStatuses = null;
 let latestCompletionModel = null;
 let latestPathMainFlowTravel = 0;
 let colorParserCtx = null;
+let reusablePathPoints = [];
+let reusableCellViewModel = null;
+let resizeCanvasSignature = '';
+let lastFlowMetricCell = NaN;
+let pathThemeCacheInitialized = false;
+let pathThemeLineRaw = '';
+let pathThemeGoodRaw = '';
+let pathThemeMainRgb = { r: 255, g: 255, b: 255 };
+let pathThemeCompleteRgb = { r: 34, g: 197, b: 94 };
+let pathGeometryToken = 0;
+let cachedPathRef = null;
+let cachedPathLength = -1;
+let cachedPathHeadR = NaN;
+let cachedPathHeadC = NaN;
+let cachedPathTailR = NaN;
+let cachedPathTailC = NaN;
+let cachedPathLayoutVersion = -1;
+let reducedMotionQuery = null;
+const pathFlowMetricsCache = { cycle: 128, pulse: 64, speed: -32 };
+const gridOffsetScratch = { x: 0, y: 0 };
+const headOffsetScratch = { x: 0, y: 0 };
+const headPointScratchA = { x: 0, y: 0 };
+const headPointScratchB = { x: 0, y: 0 };
+const headPointScratchC = { x: 0, y: 0 };
+const keyParseScratch = { r: 0, c: 0 };
+const EMPTY_MAP = new Map();
+const pathLayoutMetrics = {
+  ready: false,
+  version: 0,
+  offsetX: 0,
+  offsetY: 0,
+  cell: 56,
+  gap: 0,
+  pad: 0,
+};
+const pathFramePayload = {
+  points: [],
+  geometryToken: 0,
+  width: 0,
+  startRadius: 0,
+  arrowLength: 0,
+  endHalfWidth: 0,
+  mainColorRgb: null,
+  completeColorRgb: null,
+  isCompletionSolved: false,
+  completionProgress: 0,
+  flowEnabled: false,
+  flowOffset: 0,
+  flowCycle: 128,
+  flowPulse: 64,
+  flowSpeed: -32,
+  flowRise: 0.82,
+  flowDrop: 0.83,
+};
 
 const PATH_FLOW_SPEED = -32;
 const PATH_FLOW_CYCLE = 128;
@@ -74,14 +128,22 @@ const getCompletionProgress = (completionModel = latestCompletionModel) => {
   return clampUnit(elapsedMs / durationMs);
 };
 
-const getPathFlowMetrics = (refs = latestPathRefs) => {
-  const cell = getCellSize(refs?.gridEl);
+const getPathFlowMetrics = (refs = latestPathRefs, out = null, cellSize = null) => {
+  const cell = Number.isFinite(cellSize) && cellSize > 0
+    ? cellSize
+    : getCellSize(refs?.gridEl);
   const scale = Number.isFinite(cell) && cell > 0
     ? cell / PATH_FLOW_BASE_CELL
     : 1;
   const cycle = Math.max(18, PATH_FLOW_CYCLE * scale);
   const pulse = Math.max(6, Math.min(PATH_FLOW_PULSE * scale, cycle));
   const speed = PATH_FLOW_SPEED * scale;
+  if (out) {
+    out.cycle = cycle;
+    out.pulse = pulse;
+    out.speed = speed;
+    return out;
+  }
   return { cycle, pulse, speed };
 };
 
@@ -99,14 +161,14 @@ const getHeadLeadTravel = (path, refs = {}, offset = { x: 0, y: 0 }) => {
   const { gridEl } = refs;
   if (!path || path.length < 2) return 0;
 
-  const first = getCellPoint(path[0].r, path[0].c, { gridEl }, offset);
-  const second = getCellPoint(path[1].r, path[1].c, { gridEl }, offset);
+  const first = getCellPoint(path[0].r, path[0].c, { gridEl }, offset, headPointScratchA);
+  const second = getCellPoint(path[1].r, path[1].c, { gridEl }, offset, headPointScratchB);
   const firstSegmentLength = Math.hypot(second.x - first.x, second.y - first.y);
   if (!(firstSegmentLength > 0)) return 0;
 
   if (path.length < 3) return firstSegmentLength;
 
-  const third = getCellPoint(path[2].r, path[2].c, { gridEl }, offset);
+  const third = getCellPoint(path[2].r, path[2].c, { gridEl }, offset, headPointScratchC);
   const inDx = second.x - first.x;
   const inDy = second.y - first.y;
   const outDx = third.x - second.x;
@@ -172,8 +234,7 @@ const getHeadShiftDelta = (nextPath, previousPath, refs = {}, offset = { x: 0, y
 
 const shouldAnimatePathFlow = (snapshot, completionModel = latestCompletionModel) => {
   if (!snapshot || snapshot.path.length <= 1) return false;
-  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return true;
-  return !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  return !isReducedMotionPreferred();
 };
 
 const stopPathAnimation = () => {
@@ -200,24 +261,21 @@ const animatePathFlow = (timestamp) => {
   if (pathAnimationLastTs > 0) {
     const dt = Math.max(0, (timestamp - pathAnimationLastTs) / 1000);
     if (Number.isFinite(dt)) {
-      const flow = getPathFlowMetrics(latestPathRefs);
+      const flowSpeed = Number.isFinite(pathFramePayload.flowSpeed)
+        ? pathFramePayload.flowSpeed
+        : PATH_FLOW_SPEED;
+      const flowCycle = Number.isFinite(pathFramePayload.flowCycle) && pathFramePayload.flowCycle > 0
+        ? pathFramePayload.flowCycle
+        : PATH_FLOW_CYCLE;
       pathAnimationOffset = normalizeFlowOffset(
-        pathAnimationOffset + dt * flow.speed,
-        flow.cycle,
+        pathAnimationOffset + dt * flowSpeed,
+        flowCycle,
       );
     }
   }
 
   pathAnimationLastTs = timestamp;
-  if (latestPathSnapshot && latestPathRefs) {
-    drawAnimatedPath(
-      latestPathSnapshot,
-      latestPathRefs,
-      latestPathStatuses,
-      pathAnimationOffset,
-      latestCompletionModel,
-    );
-  }
+  if (latestPathSnapshot && latestPathRefs) drawIdleAnimatedPath(pathAnimationOffset, latestCompletionModel);
 
   pathAnimationFrame = requestAnimationFrame(animatePathFlow);
 };
@@ -292,7 +350,7 @@ const forceOpaqueColor = (color) => {
   return trimmed;
 };
 
-const parseColorToRgb = (color) => {
+const parseColorToRgb = (color, out = null) => {
   if (typeof color !== 'string' || typeof document === 'undefined') return null;
   if (!colorParserCtx) {
     const canvas = document.createElement('canvas');
@@ -315,25 +373,118 @@ const parseColorToRgb = (color) => {
   const hex = resolved.match(/^#([0-9a-f]{6})$/i);
   if (hex) {
     const value = parseInt(hex[1], 16);
-    return {
-      r: (value >> 16) & 0xff,
-      g: (value >> 8) & 0xff,
-      b: value & 0xff,
-    };
+    const target = out || { r: 0, g: 0, b: 0 };
+    target.r = (value >> 16) & 0xff;
+    target.g = (value >> 8) & 0xff;
+    target.b = value & 0xff;
+    return target;
   }
 
   const rgb = resolved.match(
     /^rgba?\(\s*([+\-]?\d*\.?\d+)\s*,\s*([+\-]?\d*\.?\d+)\s*,\s*([+\-]?\d*\.?\d+)/i,
   );
   if (rgb) {
-    return {
-      r: Math.max(0, Math.min(255, Math.round(Number(rgb[1])))),
-      g: Math.max(0, Math.min(255, Math.round(Number(rgb[2])))),
-      b: Math.max(0, Math.min(255, Math.round(Number(rgb[3])))),
-    };
+    const target = out || { r: 0, g: 0, b: 0 };
+    target.r = Math.max(0, Math.min(255, Math.round(Number(rgb[1]))));
+    target.g = Math.max(0, Math.min(255, Math.round(Number(rgb[2]))));
+    target.b = Math.max(0, Math.min(255, Math.round(Number(rgb[3]))));
+    return target;
   }
 
   return null;
+};
+
+const updatePathThemeCache = (refs = latestPathRefs) => {
+  const styleTarget = refs?.boardWrap || document.documentElement;
+  if (!styleTarget || typeof getComputedStyle !== 'function') return;
+  const styles = getComputedStyle(styleTarget);
+  const nextLineRaw = forceOpaqueColor(styles.getPropertyValue('--line').trim());
+  const nextGoodRaw = forceOpaqueColor(
+    styles.getPropertyValue('--good').trim() || '#22c55e',
+  );
+
+  if (!pathThemeCacheInitialized || pathThemeLineRaw !== nextLineRaw) {
+    const parsed = parseColorToRgb(nextLineRaw, pathThemeMainRgb);
+    if (parsed) pathThemeMainRgb = parsed;
+    pathThemeLineRaw = nextLineRaw;
+  }
+  if (!pathThemeCacheInitialized || pathThemeGoodRaw !== nextGoodRaw) {
+    const parsed = parseColorToRgb(nextGoodRaw, pathThemeCompleteRgb);
+    if (parsed) pathThemeCompleteRgb = parsed;
+    pathThemeGoodRaw = nextGoodRaw;
+  }
+  pathThemeCacheInitialized = true;
+};
+
+const getCachedPathFlowMetrics = (refs = latestPathRefs, cellSize = null) => {
+  const resolvedCell = Number.isFinite(cellSize) && cellSize > 0
+    ? cellSize
+    : getCellSize(refs?.gridEl);
+  if (resolvedCell !== lastFlowMetricCell) {
+    getPathFlowMetrics(refs, pathFlowMetricsCache, resolvedCell);
+    lastFlowMetricCell = resolvedCell;
+  }
+  return pathFlowMetricsCache;
+};
+
+const isReducedMotionPreferred = () => {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return false;
+  if (!reducedMotionQuery) {
+    reducedMotionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
+  }
+  return Boolean(reducedMotionQuery.matches);
+};
+
+const updatePathLayoutMetrics = (offset, cell, gap, pad) => {
+  const nextOffsetX = Number(offset?.x) || 0;
+  const nextOffsetY = Number(offset?.y) || 0;
+  const nextCell = Number.isFinite(cell) && cell > 0 ? cell : pathLayoutMetrics.cell;
+  const nextGap = Number.isFinite(gap) ? gap : pathLayoutMetrics.gap;
+  const nextPad = Number.isFinite(pad) ? pad : pathLayoutMetrics.pad;
+  const changed = (
+    !pathLayoutMetrics.ready
+    || pathLayoutMetrics.offsetX !== nextOffsetX
+    || pathLayoutMetrics.offsetY !== nextOffsetY
+    || pathLayoutMetrics.cell !== nextCell
+    || pathLayoutMetrics.gap !== nextGap
+    || pathLayoutMetrics.pad !== nextPad
+  );
+  if (changed) {
+    pathLayoutMetrics.offsetX = nextOffsetX;
+    pathLayoutMetrics.offsetY = nextOffsetY;
+    pathLayoutMetrics.cell = nextCell;
+    pathLayoutMetrics.gap = nextGap;
+    pathLayoutMetrics.pad = nextPad;
+    pathLayoutMetrics.version += 1;
+    lastFlowMetricCell = NaN;
+  }
+  pathLayoutMetrics.ready = true;
+  return pathLayoutMetrics;
+};
+
+const ensurePathLayoutMetrics = (refs) => {
+  if (pathLayoutMetrics.ready) return pathLayoutMetrics;
+  const offset = getGridCanvasOffset(refs, gridOffsetScratch);
+  const cell = getCellSize(refs?.gridEl);
+  const gridStyles = refs?.gridEl ? getComputedStyle(refs.gridEl) : null;
+  const gap = parsePx(gridStyles?.columnGap || gridStyles?.gap || '0');
+  const pad = parsePx(gridStyles?.paddingLeft || gridStyles?.padding || '0');
+  return updatePathLayoutMetrics(offset, cell, gap, pad);
+};
+
+const drawIdleAnimatedPath = (flowOffset = 0, completionModel = latestCompletionModel) => {
+  const pathRenderer = latestPathRefs?.pathRenderer;
+  if (!pathRenderer) return;
+  if (!latestPathSnapshot || latestPathSnapshot.path.length === 0) {
+    latestPathMainFlowTravel = 0;
+    pathRenderer.clear();
+    return;
+  }
+
+  pathFramePayload.flowOffset = flowOffset;
+  pathFramePayload.isCompletionSolved = Boolean(completionModel?.isSolved);
+  pathFramePayload.completionProgress = getCompletionProgress(completionModel);
+  latestPathMainFlowTravel = pathRenderer.drawPathFrame(pathFramePayload);
 };
 
 
@@ -481,6 +632,38 @@ export function cacheElements() {
     result.symbolCtx = result.symbolCanvas.getContext('2d');
   }
   cachedBoardWrap = result.boardWrap;
+  resizeCanvasSignature = '';
+  lastFlowMetricCell = NaN;
+  pathThemeCacheInitialized = false;
+  reusablePathPoints.length = 0;
+  pathGeometryToken = 0;
+  cachedPathRef = null;
+  cachedPathLength = -1;
+  cachedPathHeadR = NaN;
+  cachedPathHeadC = NaN;
+  cachedPathTailR = NaN;
+  cachedPathTailC = NaN;
+  cachedPathLayoutVersion = -1;
+  pathLayoutMetrics.ready = false;
+  pathLayoutMetrics.version = 0;
+  reducedMotionQuery = null;
+  pathFramePayload.points = [];
+  pathFramePayload.geometryToken = 0;
+  pathFramePayload.width = 0;
+  pathFramePayload.startRadius = 0;
+  pathFramePayload.arrowLength = 0;
+  pathFramePayload.endHalfWidth = 0;
+  pathFramePayload.mainColorRgb = null;
+  pathFramePayload.completeColorRgb = null;
+  pathFramePayload.isCompletionSolved = false;
+  pathFramePayload.completionProgress = 0;
+  pathFramePayload.flowEnabled = false;
+  pathFramePayload.flowOffset = 0;
+  pathFramePayload.flowCycle = PATH_FLOW_CYCLE;
+  pathFramePayload.flowPulse = PATH_FLOW_PULSE;
+  pathFramePayload.flowSpeed = PATH_FLOW_SPEED;
+  pathFramePayload.flowRise = PATH_FLOW_RISE;
+  pathFramePayload.flowDrop = PATH_FLOW_DROP;
 
   return result;
 }
@@ -492,26 +675,36 @@ const createGhost = () => {
   return ghost;
 };
 
-const getGridCanvasOffset = (refs) => {
-  if (!refs.gridEl || !refs.boardWrap) return { x: 0, y: 0 };
+const getGridCanvasOffset = (refs, out = null) => {
+  const target = out || { x: 0, y: 0 };
+  if (!refs.gridEl || !refs.boardWrap) {
+    target.x = 0;
+    target.y = 0;
+    return target;
+  }
   const gridRect = refs.gridEl.getBoundingClientRect();
   const boardRect = refs.boardWrap.getBoundingClientRect();
   const innerLeft = boardRect.left + refs.boardWrap.clientLeft;
   const innerTop = boardRect.top + refs.boardWrap.clientTop;
-  return {
-    x: gridRect.left - innerLeft,
-    y: gridRect.top - innerTop,
-  };
+  target.x = gridRect.left - innerLeft;
+  target.y = gridRect.top - innerTop;
+  return target;
 };
 
-const getCellPoint = (r, c, refs, offset = { x: 0, y: 0 }) => {
+const getCellPoint = (r, c, refs, offset = { x: 0, y: 0 }, out = null) => {
   const p = cellCenter(r, c, refs.gridEl);
-  return { x: p.x + offset.x, y: p.y + offset.y };
+  const target = out || { x: 0, y: 0 };
+  target.x = p.x + offset.x;
+  target.y = p.y + offset.y;
+  return target;
 };
 
-const getVertexPoint = (r, c, refs, offset = { x: 0, y: 0 }) => {
+const getVertexPoint = (r, c, refs, offset = { x: 0, y: 0 }, out = null) => {
   const p = vertexPos(r, c, refs.gridEl);
-  return { x: p.x + offset.x, y: p.y + offset.y };
+  const target = out || { x: 0, y: 0 };
+  target.x = p.x + offset.x;
+  target.y = p.y + offset.y;
+  return target;
 };
 
 const ensureWallGhostEl = () => {
@@ -628,11 +821,33 @@ export function buildGrid(snapshot, refs, icons, iconX) {
   }
 
   lastDropTargetKey = null;
+  reusableCellViewModel = null;
+  resizeCanvasSignature = '';
+  cachedPathRef = null;
+  cachedPathLength = -1;
+  cachedPathLayoutVersion = -1;
 }
+
+const parseGridKey = (value, out = keyParseScratch) => {
+  if (typeof value !== 'string') return null;
+  const commaIndex = value.indexOf(',');
+  if (commaIndex <= 0 || commaIndex >= value.length - 1) return null;
+  const r = Number(value.slice(0, commaIndex));
+  const c = Number(value.slice(commaIndex + 1));
+  if (!Number.isInteger(r) || !Number.isInteger(c)) return null;
+  out.r = r;
+  out.c = c;
+  return out;
+};
 
 export function clearDropTarget() {
   if (!lastDropTargetKey) return;
-  const [r, c] = lastDropTargetKey.split(',').map((v) => Number(v));
+  const parsedKey = parseGridKey(lastDropTargetKey);
+  if (!parsedKey) {
+    lastDropTargetKey = null;
+    return;
+  }
+  const { r, c } = parsedKey;
   if (r >= 0 && c >= 0 && gridCells[r] && gridCells[r][c]) {
     const cell = gridCells[r][c];
     cell.classList.remove('dropTarget', 'wallDropPreview');
@@ -661,48 +876,225 @@ export function setDropTarget(r, c) {
   }
 }
 
-export function updateCells(snapshot, results, refs, completionModel = null) {
+const statusKeySet = (keys) => {
+  const set = new Set();
+  if (!Array.isArray(keys)) return set;
+  for (let i = 0; i < keys.length; i++) {
+    const key = keys[i];
+    if (typeof key === 'string') set.add(key);
+  }
+  return set;
+};
+
+const addStatusDeltaKeys = (nextSet, prevSet, out) => {
+  nextSet.forEach((key) => {
+    if (!prevSet.has(key)) out.add(key);
+  });
+  prevSet.forEach((key) => {
+    if (!nextSet.has(key)) out.add(key);
+  });
+};
+
+const hasSamePrefixPath = (nextPath, prevPath, length) => {
+  for (let i = 0; i < length; i++) {
+    const next = nextPath[i];
+    const prev = prevPath[i];
+    if (!next || !prev || next.r !== prev.r || next.c !== prev.c) return false;
+  }
+  return true;
+};
+
+const resolveTailPathDelta = (prevPath, nextPath) => {
+  if (!Array.isArray(prevPath) || !Array.isArray(nextPath)) return null;
+  const prevLen = prevPath.length;
+  const nextLen = nextPath.length;
+  if (nextLen === prevLen + 1) {
+    if (!hasSamePrefixPath(nextPath, prevPath, prevLen)) return null;
+    return {
+      prevTail: prevLen > 0 ? prevPath[prevLen - 1] : null,
+      nextTail: nextPath[nextLen - 1] || null,
+    };
+  }
+  if (nextLen === prevLen - 1) {
+    if (!hasSamePrefixPath(nextPath, prevPath, nextLen)) return null;
+    return {
+      prevTail: prevLen > 0 ? prevPath[prevLen - 1] : null,
+      nextTail: nextLen > 0 ? nextPath[nextLen - 1] : null,
+    };
+  }
+  return null;
+};
+
+const applyCellSnapshotState = (snapshot, r, c, statusSets) => {
+  const cell = gridCells[r]?.[c];
+  if (!cell) return;
+  const key = keyOf(r, c);
+  const code = snapshot.gridData[r][c];
+  const classes = ['cell'];
+
+  if (code === 'm') classes.push('wall', 'movable');
+  else if (code === '#') classes.push('wall');
+
+  if (snapshot.visited.has(key)) classes.push('visited');
+  if (snapshot.path.length > 0) {
+    const head = snapshot.path[0];
+    if (head && head.r === r && head.c === c) classes.push('pathStart');
+    if (snapshot.path.length > 1) {
+      const tail = snapshot.path[snapshot.path.length - 1];
+      if (tail && tail.r === r && tail.c === c) classes.push('pathEnd');
+    }
+  }
+
+  if (statusSets.badHint.has(key)) classes.push('badHint');
+  if (statusSets.goodHint.has(key)) classes.push('goodHint');
+  if (statusSets.badRps.has(key)) classes.push('badRps');
+  if (statusSets.goodRps.has(key) && !statusSets.badRps.has(key)) classes.push('goodRps');
+  if (statusSets.badBlocked.has(key)) classes.push('badBlocked');
+
+  const targetClass = classes.join(' ');
+  if (cell.className !== targetClass) {
+    cell.className = targetClass;
+  }
+
+  const idxText = snapshot.idxByKey.has(key)
+    ? String(snapshot.idxByKey.get(key) + 1)
+    : '';
+  const idxEl = cell.firstElementChild;
+  if (idxEl && idxEl.textContent !== idxText) {
+    idxEl.textContent = idxText;
+  }
+
+  const markEl = idxEl?.nextElementSibling;
+  const markHtml = resolveCellMarkHtml(code);
+  if (markEl && markEl.innerHTML !== markHtml) {
+    markEl.innerHTML = markHtml;
+  }
+
+  const diagOrderValue = String(r + c);
+  if (cell.style.getPropertyValue('--diag-order') !== diagOrderValue) {
+    cell.style.setProperty('--diag-order', diagOrderValue);
+  }
+
+  const pathOrderValue = idxText ? String(Math.max(0, Number(idxText) - 1)) : '';
+  const currentPathOrder = cell.style.getPropertyValue('--path-order');
+  if (pathOrderValue) {
+    if (currentPathOrder !== pathOrderValue) {
+      cell.style.setProperty('--path-order', pathOrderValue);
+    }
+  } else if (currentPathOrder) {
+    cell.style.removeProperty('--path-order');
+  }
+};
+
+const tryApplyIncrementalEndDragUpdate = (snapshot, results, interactionModel = null) => {
+  if (!interactionModel?.isPathDragging || interactionModel.pathDragSide !== 'end') return false;
+  const prevSnapshot = latestPathSnapshot;
+  if (!prevSnapshot) return false;
+  if (snapshot.rows !== prevSnapshot.rows || snapshot.cols !== prevSnapshot.cols) return false;
+  if (snapshot.gridData !== prevSnapshot.gridData) return false;
+
+  const delta = resolveTailPathDelta(prevSnapshot.path, snapshot.path);
+  if (!delta) return false;
+
+  const hintStatus = results.hintStatus || {};
+  const rpsStatus = results.rpsStatus || {};
+  const blockedStatus = results.blockedStatus || {};
+  const prevHintStatus = latestPathStatuses?.hintStatus || {};
+  const prevRpsStatus = latestPathStatuses?.rpsStatus || {};
+  const prevBlockedStatus = latestPathStatuses?.blockedStatus || {};
+  const statusSets = {
+    badHint: statusKeySet(hintStatus.badKeys),
+    goodHint: statusKeySet(hintStatus.goodKeys),
+    badRps: statusKeySet(rpsStatus.badKeys),
+    goodRps: statusKeySet(rpsStatus.goodKeys),
+    badBlocked: statusKeySet(blockedStatus.badKeys),
+  };
+  const prevSets = {
+    badHint: statusKeySet(prevHintStatus.badKeys),
+    goodHint: statusKeySet(prevHintStatus.goodKeys),
+    badRps: statusKeySet(prevRpsStatus.badKeys),
+    goodRps: statusKeySet(prevRpsStatus.goodKeys),
+    badBlocked: statusKeySet(prevBlockedStatus.badKeys),
+  };
+
+  const touchedKeys = new Set();
+  if (delta.prevTail) touchedKeys.add(keyOf(delta.prevTail.r, delta.prevTail.c));
+  if (delta.nextTail) touchedKeys.add(keyOf(delta.nextTail.r, delta.nextTail.c));
+  addStatusDeltaKeys(statusSets.badHint, prevSets.badHint, touchedKeys);
+  addStatusDeltaKeys(statusSets.goodHint, prevSets.goodHint, touchedKeys);
+  addStatusDeltaKeys(statusSets.badRps, prevSets.badRps, touchedKeys);
+  addStatusDeltaKeys(statusSets.goodRps, prevSets.goodRps, touchedKeys);
+  addStatusDeltaKeys(statusSets.badBlocked, prevSets.badBlocked, touchedKeys);
+
+  touchedKeys.forEach((key) => {
+    const parsed = parseGridKey(key);
+    if (!parsed) return;
+    const r = parsed.r;
+    const c = parsed.c;
+    if (r < 0 || c < 0 || r >= snapshot.rows || c >= snapshot.cols) return;
+    applyCellSnapshotState(snapshot, r, c, statusSets);
+  });
+
+  return true;
+};
+
+export function updateCells(
+  snapshot,
+  results,
+  refs,
+  completionModel = null,
+  interactionModel = null,
+) {
   const { hintStatus, stitchStatus, rpsStatus, blockedStatus } = results;
-  const desired = buildBoardCellViewModel(
+  const usedIncremental = tryApplyIncrementalEndDragUpdate(
     snapshot,
     { hintStatus, rpsStatus, blockedStatus },
-    resolveCellMarkHtml,
+    interactionModel,
   );
+  if (!usedIncremental) {
+    reusableCellViewModel = buildBoardCellViewModel(
+      snapshot,
+      { hintStatus, rpsStatus, blockedStatus },
+      resolveCellMarkHtml,
+      reusableCellViewModel,
+    );
+    const desired = reusableCellViewModel;
 
-  for (let r = 0; r < snapshot.rows; r++) {
-    for (let c = 0; c < snapshot.cols; c++) {
-      const cell = gridCells[r][c];
-      const state = desired[r][c];
-      const targetStr = state.classes.join(' ');
+    for (let r = 0; r < snapshot.rows; r++) {
+      for (let c = 0; c < snapshot.cols; c++) {
+        const cell = gridCells[r][c];
+        const state = desired[r][c];
+        const targetStr = state.classes.join(' ');
 
-      if (cell.className !== targetStr) {
-        cell.className = targetStr;
-      }
-
-      const idxEl = cell.firstElementChild;
-      if (idxEl && idxEl.textContent !== state.idx) {
-        idxEl.textContent = state.idx;
-      }
-
-      const markEl = idxEl?.nextElementSibling;
-      if (markEl && markEl.innerHTML !== state.markHtml) {
-        markEl.innerHTML = state.markHtml;
-      }
-
-      const diagOrderValue = String(r + c);
-      const currentDiagOrder = cell.style.getPropertyValue('--diag-order');
-      if (currentDiagOrder !== diagOrderValue) {
-        cell.style.setProperty('--diag-order', diagOrderValue);
-      }
-
-      const pathOrderValue = state.idx ? String(Math.max(0, Number(state.idx) - 1)) : '';
-      const currentPathOrder = cell.style.getPropertyValue('--path-order');
-      if (pathOrderValue) {
-        if (currentPathOrder !== pathOrderValue) {
-          cell.style.setProperty('--path-order', pathOrderValue);
+        if (cell.className !== targetStr) {
+          cell.className = targetStr;
         }
-      } else if (currentPathOrder) {
-        cell.style.removeProperty('--path-order');
+
+        const idxEl = cell.firstElementChild;
+        if (idxEl && idxEl.textContent !== state.idx) {
+          idxEl.textContent = state.idx;
+        }
+
+        const markEl = idxEl?.nextElementSibling;
+        if (markEl && markEl.innerHTML !== state.markHtml) {
+          markEl.innerHTML = state.markHtml;
+        }
+
+        const diagOrderValue = String(r + c);
+        const currentDiagOrder = cell.style.getPropertyValue('--diag-order');
+        if (currentDiagOrder !== diagOrderValue) {
+          cell.style.setProperty('--diag-order', diagOrderValue);
+        }
+
+        const pathOrderValue = state.idx ? String(Math.max(0, Number(state.idx) - 1)) : '';
+        const currentPathOrder = cell.style.getPropertyValue('--path-order');
+        if (pathOrderValue) {
+          if (currentPathOrder !== pathOrderValue) {
+            cell.style.setProperty('--path-order', pathOrderValue);
+          }
+        } else if (currentPathOrder) {
+          cell.style.removeProperty('--path-order');
+        }
       }
     }
   }
@@ -712,7 +1104,10 @@ export function updateCells(snapshot, results, refs, completionModel = null) {
 
 export function drawAll(snapshot, refs, statuses, completionModel = null) {
   const previousPath = latestPathSnapshot?.path || null;
-  const flow = getPathFlowMetrics(refs);
+  const layout = ensurePathLayoutMetrics(refs);
+  const flow = getCachedPathFlowMetrics(refs, layout.cell);
+  updatePathThemeCache(refs);
+  const animateFlow = shouldAnimatePathFlow(snapshot, completionModel);
 
   if (isPathReversed(snapshot.path, previousPath)) {
     const reverseTravel = latestPathMainFlowTravel;
@@ -728,7 +1123,12 @@ export function drawAll(snapshot, refs, statuses, completionModel = null) {
       );
     }
   } else {
-    const shift = getHeadShiftDelta(snapshot.path, previousPath, refs);
+    const shift = getHeadShiftDelta(
+      snapshot.path,
+      previousPath,
+      refs,
+      getGridCanvasOffset(refs, headOffsetScratch),
+    );
     if (shift !== 0) {
       pathAnimationOffset = normalizeFlowOffset(
         pathAnimationOffset + shift,
@@ -742,10 +1142,10 @@ export function drawAll(snapshot, refs, statuses, completionModel = null) {
   latestPathStatuses = statuses;
   latestCompletionModel = completionModel;
 
-  const offset = shouldAnimatePathFlow(snapshot, completionModel) ? pathAnimationOffset : 0;
+  const offset = animateFlow ? pathAnimationOffset : 0;
   drawAllInternal(snapshot, refs, statuses, offset, completionModel);
 
-  if (shouldAnimatePathFlow(snapshot, completionModel)) {
+  if (animateFlow) {
     schedulePathAnimation();
   } else {
     stopPathAnimation();
@@ -772,45 +1172,79 @@ export function drawAnimatedPath(snapshot, refs, statuses, flowOffset = 0, compl
     return;
   }
 
-  const offset = getGridCanvasOffset(refs);
-  const size = getCellSize(refs.gridEl);
+  const layout = ensurePathLayoutMetrics(refs);
+  const size = layout.cell;
   const width = Math.max(7, Math.floor(size * 0.15));
   const arrowLength = Math.max(Math.floor(size * 0.24), 13);
   const startRadius = Math.max(Math.floor(width * 0.9), 6);
   const endHalfWidth = Math.max(6, Math.floor(width * 0.95));
 
-  const themeStyles = getComputedStyle(refs.boardWrap || document.documentElement);
-  const colorMain = forceOpaqueColor(themeStyles.getPropertyValue('--line').trim());
-  const colorComplete = forceOpaqueColor(
-    themeStyles.getPropertyValue('--good').trim() || '#22c55e',
-  );
-  const colorMainRgb = parseColorToRgb(colorMain) || { r: 255, g: 255, b: 255 };
-  const colorCompleteRgb = parseColorToRgb(colorComplete) || { r: 34, g: 197, b: 94 };
+  if (!pathThemeCacheInitialized) updatePathThemeCache(refs);
   const completionProgress = getCompletionProgress(completionModel);
   const isCompletionSolved = Boolean(completionModel?.isSolved);
   const showFlowRibbon = shouldAnimatePathFlow(snapshot, completionModel);
-  const flowMetrics = getPathFlowMetrics(refs);
+  const flowMetrics = getCachedPathFlowMetrics(refs, size);
 
-  const adjustedPoints = snapshot.path.map((point) =>
-    getCellPoint(point.r, point.c, refs, offset));
+  const step = size + layout.gap;
+  const half = size * 0.5;
+  const path = snapshot.path;
+  const pathLength = path.length;
+  const head = path[0];
+  const tail = path[pathLength - 1];
+  const pointsChanged = (
+    cachedPathRef !== path
+    || cachedPathLayoutVersion !== layout.version
+    || cachedPathLength !== pathLength
+    || cachedPathHeadR !== head.r
+    || cachedPathHeadC !== head.c
+    || cachedPathTailR !== tail.r
+    || cachedPathTailC !== tail.c
+  );
 
-  latestPathMainFlowTravel = pathRenderer.drawPathFrame({
-    points: adjustedPoints,
-    width,
-    startRadius,
-    arrowLength,
-    endHalfWidth,
-    mainColorRgb: colorMainRgb,
-    completeColorRgb: colorCompleteRgb,
-    isCompletionSolved,
-    completionProgress,
-    flowEnabled: showFlowRibbon,
-    flowOffset,
-    flowCycle: flowMetrics.cycle,
-    flowPulse: flowMetrics.pulse,
-    flowRise: PATH_FLOW_RISE,
-    flowDrop: PATH_FLOW_DROP,
-  });
+  if (pointsChanged) {
+    if (reusablePathPoints.length < pathLength) {
+      for (let i = reusablePathPoints.length; i < pathLength; i++) {
+        reusablePathPoints.push({ x: 0, y: 0 });
+      }
+    }
+    reusablePathPoints.length = pathLength;
+    for (let i = 0; i < pathLength; i++) {
+      const point = path[i];
+      const pooled = reusablePathPoints[i];
+      pooled.x = layout.offsetX + layout.pad + (point.c * step) + half;
+      pooled.y = layout.offsetY + layout.pad + (point.r * step) + half;
+    }
+
+    cachedPathRef = path;
+    cachedPathLayoutVersion = layout.version;
+    cachedPathLength = pathLength;
+    cachedPathHeadR = head.r;
+    cachedPathHeadC = head.c;
+    cachedPathTailR = tail.r;
+    cachedPathTailC = tail.c;
+    pathGeometryToken += 1;
+  } else if (reusablePathPoints.length !== pathLength) {
+    reusablePathPoints.length = pathLength;
+  }
+
+  pathFramePayload.points = reusablePathPoints;
+  pathFramePayload.geometryToken = pathGeometryToken;
+  pathFramePayload.width = width;
+  pathFramePayload.startRadius = startRadius;
+  pathFramePayload.arrowLength = arrowLength;
+  pathFramePayload.endHalfWidth = endHalfWidth;
+  pathFramePayload.mainColorRgb = pathThemeMainRgb;
+  pathFramePayload.completeColorRgb = pathThemeCompleteRgb;
+  pathFramePayload.isCompletionSolved = isCompletionSolved;
+  pathFramePayload.completionProgress = completionProgress;
+  pathFramePayload.flowEnabled = showFlowRibbon;
+  pathFramePayload.flowOffset = flowOffset;
+  pathFramePayload.flowCycle = flowMetrics.cycle;
+  pathFramePayload.flowPulse = flowMetrics.pulse;
+  pathFramePayload.flowSpeed = flowMetrics.speed;
+  pathFramePayload.flowRise = PATH_FLOW_RISE;
+  pathFramePayload.flowDrop = PATH_FLOW_DROP;
+  latestPathMainFlowTravel = pathRenderer.drawPathFrame(pathFramePayload);
 }
 
 function drawAllInternal(snapshot, refs, statuses, flowOffset = 0, completionModel = null) {
@@ -818,11 +1252,11 @@ function drawAllInternal(snapshot, refs, statuses, flowOffset = 0, completionMod
   drawAnimatedPath(snapshot, refs, statuses, flowOffset, completionModel);
 }
 
-function drawCrossStitches(snapshot, refs, ctx, vertexStatus = new Map()) {
+function drawCrossStitches(snapshot, refs, ctx, vertexStatus = EMPTY_MAP) {
   ctx.save();
   ctx.globalAlpha = 1;
 
-  const offset = getGridCanvasOffset(refs);
+  const offset = getGridCanvasOffset(refs, gridOffsetScratch);
   const cell = getCellSize(refs.gridEl);
   const stitchLineHalf = Math.max(2, cell * 0.18);
   const stitchWidth = Math.max(1, cell * 0.06);
@@ -839,15 +1273,9 @@ function drawCrossStitches(snapshot, refs, ctx, vertexStatus = new Map()) {
     return entry?.[key] || 'pending';
   };
 
-  const lineData = [];
-
-  const collectLine = (x1, y1, x2, y2, status) => {
-    lineData.push({ x1, y1, x2, y2, state: status || 'pending' });
-  };
-
-  const drawShadowLine = (x1, y1, x2, y2) => {
-    ctx.strokeStyle = shadowOpaque;
-    ctx.lineWidth = stitchWidth * 2.0;
+  const drawLine = (x1, y1, x2, y2, color, width) => {
+    ctx.strokeStyle = color;
+    ctx.lineWidth = width;
     ctx.lineCap = 'round';
     ctx.beginPath();
     ctx.moveTo(x1, y1);
@@ -856,66 +1284,66 @@ function drawCrossStitches(snapshot, refs, ctx, vertexStatus = new Map()) {
   };
 
   for (const [vr, vc] of snapshot.stitches) {
-    const vk = keyOf(vr, vc);
-    const entry = vertexStatus.get(vk) || 'pending';
-    const diagAState = resolveDiagStatus(entry, 'diagA');
-    const diagBState = resolveDiagStatus(entry, 'diagB');
-    const { x, y } = getVertexPoint(vr, vc, refs, offset);
-    collectLine(x - stitchLineHalf, y - stitchLineHalf, x + stitchLineHalf, y + stitchLineHalf, diagAState);
-    collectLine(x + stitchLineHalf, y - stitchLineHalf, x - stitchLineHalf, y + stitchLineHalf, diagBState);
+    const point = getVertexPoint(vr, vc, refs, offset, headPointScratchA);
+    drawLine(
+      point.x - stitchLineHalf,
+      point.y - stitchLineHalf,
+      point.x + stitchLineHalf,
+      point.y + stitchLineHalf,
+      shadowOpaque,
+      stitchWidth * 2.0,
+    );
+    drawLine(
+      point.x + stitchLineHalf,
+      point.y - stitchLineHalf,
+      point.x - stitchLineHalf,
+      point.y + stitchLineHalf,
+      shadowOpaque,
+      stitchWidth * 2.0,
+    );
   }
 
-  for (const line of lineData) {
-    drawShadowLine(line.x1, line.y1, line.x2, line.y2);
-  }
+  const drawStatePass = (state, color) => {
+    for (const [vr, vc] of snapshot.stitches) {
+      const vk = keyOf(vr, vc);
+      const entry = vertexStatus.get(vk) || 'pending';
+      const diagAState = resolveDiagStatus(entry, 'diagA');
+      const diagBState = resolveDiagStatus(entry, 'diagB');
+      const point = getVertexPoint(vr, vc, refs, offset, headPointScratchB);
+      if (diagAState === state) {
+        drawLine(
+          point.x - stitchLineHalf,
+          point.y - stitchLineHalf,
+          point.x + stitchLineHalf,
+          point.y + stitchLineHalf,
+          color,
+          stitchWidth,
+        );
+      }
+      if (diagBState === state) {
+        drawLine(
+          point.x + stitchLineHalf,
+          point.y - stitchLineHalf,
+          point.x - stitchLineHalf,
+          point.y + stitchLineHalf,
+          color,
+          stitchWidth,
+        );
+      }
+    }
+  };
 
-  const pendingLines = [];
-  const goodLines = [];
-  const badLines = [];
-
-  for (const line of lineData) {
-    if (line.state === 'bad') badLines.push(line);
-    else if (line.state === 'good') goodLines.push(line);
-    else pendingLines.push(line);
-  }
-
-  for (const line of pendingLines) {
-    ctx.strokeStyle = colorPending;
-    ctx.lineWidth = stitchWidth;
-    ctx.lineCap = 'round';
-    ctx.beginPath();
-    ctx.moveTo(line.x1, line.y1);
-    ctx.lineTo(line.x2, line.y2);
-    ctx.stroke();
-  }
-
-  for (const line of goodLines) {
-    ctx.strokeStyle = colorGood;
-    ctx.lineWidth = stitchWidth;
-    ctx.lineCap = 'round';
-    ctx.beginPath();
-    ctx.moveTo(line.x1, line.y1);
-    ctx.lineTo(line.x2, line.y2);
-    ctx.stroke();
-  }
-
-  for (const line of badLines) {
-    ctx.strokeStyle = colorBad;
-    ctx.lineWidth = stitchWidth;
-    ctx.lineCap = 'round';
-    ctx.beginPath();
-    ctx.moveTo(line.x1, line.y1);
-    ctx.lineTo(line.x2, line.y2);
-    ctx.stroke();
-  }
+  drawStatePass('pending', colorPending);
+  drawStatePass('good', colorGood);
+  drawStatePass('bad', colorBad);
 
   ctx.restore();
 }
 
-function drawCornerCounts(snapshot, refs, ctx, cornerVertexStatus = new Map()) {
+function drawCornerCounts(snapshot, refs, ctx, cornerVertexStatus = EMPTY_MAP) {
   if (!snapshot.cornerCounts || snapshot.cornerCounts.length === 0) return;
 
-  const offset = getGridCanvasOffset(refs);
+  const offset = getGridCanvasOffset(refs, gridOffsetScratch);
   const cell = getCellSize(refs.gridEl);
   const cornerRadius = Math.max(6, cell * 0.17);
   const cornerLineWidth = Math.max(1, cell * 0.04);
@@ -939,7 +1367,7 @@ function drawCornerCounts(snapshot, refs, ctx, cornerVertexStatus = new Map()) {
     if (state === 'good') accentColor = colorGood;
     else if (state === 'bad') accentColor = colorBad;
 
-    const { x, y } = getVertexPoint(vr, vc, refs, offset);
+    const { x, y } = getVertexPoint(vr, vc, refs, offset, headPointScratchC);
 
     ctx.beginPath();
     ctx.fillStyle = 'rgb(11, 15, 20)';
@@ -960,6 +1388,23 @@ function drawCornerCounts(snapshot, refs, ctx, cornerVertexStatus = new Map()) {
 export function resizeCanvas(refs) {
   const { boardWrap, canvas, pathRenderer, symbolCanvas, symbolCtx } = refs;
   if (!boardWrap || !canvas || !pathRenderer || !symbolCanvas || !symbolCtx) return;
+  const dpr = window.devicePixelRatio || 1;
+  const viewportWidth = window.visualViewport?.width || window.innerWidth || 0;
+  const viewportHeight = window.visualViewport?.height || window.innerHeight || 0;
+  const nextSignature = [
+    activeBoardSize.rows,
+    activeBoardSize.cols,
+    boardWrap.clientWidth,
+    boardWrap.clientHeight,
+    boardWrap.offsetWidth,
+    boardWrap.offsetHeight,
+    dpr,
+    viewportWidth,
+    viewportHeight,
+  ].join('|');
+  if (nextSignature === resizeCanvasSignature) return;
+  resizeCanvasSignature = nextSignature;
+
   syncBoardCellSize(refs);
 
   const wrapRect = boardWrap.getBoundingClientRect();
@@ -970,7 +1415,24 @@ export function resizeCanvas(refs) {
   const borderBottom = parseFloat(styles.borderBottomWidth || '0') || 0;
   const cw = Math.max(0, wrapRect.width - borderLeft - borderRight);
   const ch = Math.max(0, wrapRect.height - borderTop - borderBottom);
+  const gridRect = refs.gridEl.getBoundingClientRect();
+  const innerLeft = wrapRect.left + boardWrap.clientLeft;
+  const innerTop = wrapRect.top + boardWrap.clientTop;
+  const offset = {
+    x: gridRect.left - innerLeft,
+    y: gridRect.top - innerTop,
+  };
+  const gridStyles = getComputedStyle(refs.gridEl);
+  const gap = parsePx(gridStyles.columnGap || gridStyles.gap || '0');
+  const pad = parsePx(gridStyles.paddingLeft || gridStyles.padding || '0');
+  const cellFromStyle = parsePx(
+    boardWrap.style.getPropertyValue('--cell')
+    || refs.gridEl.style.getPropertyValue('--cell')
+    || styles.getPropertyValue('--cell'),
+  );
+  const cell = cellFromStyle > 0 ? cellFromStyle : getCellSize(refs.gridEl);
+  updatePathLayoutMetrics(offset, cell, gap, pad);
 
-  pathRenderer.resize(cw, ch, window.devicePixelRatio || 1);
+  pathRenderer.resize(cw, ch, dpr);
   configureHiDPICanvas(symbolCanvas, symbolCtx, cw, ch);
 }
