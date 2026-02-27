@@ -98,9 +98,15 @@ export const APP_SHELL_TEMPLATE = (t = (k) => k, localeOptions = [], currentLoca
             ></select>
           </div>
           <div id="${ELEMENT_IDS.DAILY_META}" class="dailyMeta" hidden>
-            <strong id="${ELEMENT_IDS.DAILY_DATE_VALUE}" class="dailyMetaValue">-</strong>
+            <span class="dailyMetaItem">
+              <span class="dailyMetaLabel" data-i18n="ui.dailyDateLabel">${t('ui.dailyDateLabel')}</span>
+              <strong id="${ELEMENT_IDS.DAILY_DATE_VALUE}" class="dailyMetaValue">-</strong>
+            </span>
             <span class="dailyMetaSeparator" aria-hidden="true">•</span>
-            <strong id="${ELEMENT_IDS.DAILY_COUNTDOWN_VALUE}" class="dailyMetaValue">00:00:00</strong>
+            <span class="dailyMetaItem">
+              <span class="dailyMetaLabel" data-i18n="ui.dailyResetLabel">${t('ui.dailyResetLabel')}</span>
+              <strong id="${ELEMENT_IDS.DAILY_COUNTDOWN_VALUE}" class="dailyMetaValue">00:00:00</strong>
+            </span>
           </div>
           <button id="${ELEMENT_IDS.RESET_BTN}" title="${t('ui.resetTitle')}" data-i18n="ui.reset" data-i18n-title="ui.resetTitle">${t(
   'ui.reset',

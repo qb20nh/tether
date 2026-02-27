@@ -421,6 +421,21 @@ header h1.brandTitle {
   display: none;
 }
 
+.dailyMetaItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.dailyMetaLabel {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+}
+
 .dailyMetaSeparator {
   color: var(--muted);
   font-size: 13px;
