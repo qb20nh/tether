@@ -408,35 +408,31 @@ header h1.brandTitle {
 .dailyMeta {
   display: inline-flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   padding: 6px 10px;
   border-radius: 10px;
   border: 1px solid var(--control-border);
   background: var(--control-bg);
   min-width: 0;
+  font-variant-numeric: tabular-nums;
 }
 
 .dailyMeta[hidden] {
   display: none;
 }
 
-.dailyMetaItem {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 6px;
-  min-width: 0;
-  white-space: nowrap;
-}
-
-.dailyMetaLabel {
+.dailyMetaSeparator {
   color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
 }
 
 .dailyMetaValue {
   font-size: 14px;
   font-weight: 700;
   color: var(--text);
-  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
   letter-spacing: 0.2px;
 }
 
@@ -614,6 +610,25 @@ button:disabled:active {
   overflow: hidden;
   border: var(--board-border) solid rgba(255, 255, 255, 0.10);
   background: rgba(255, 255, 255, 0.03);
+}
+
+.boardWrap.isDailyLocked {
+  filter: grayscale(0.95) saturate(0.35) brightness(0.72);
+}
+
+.boardWrap.isDailyLocked::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: rgba(10, 14, 20, 0.46);
+  pointer-events: none;
+  z-index: 5;
+}
+
+.boardWrap.isDailyLocked #grid,
+.boardWrap.isDailyLocked #pathCanvas,
+.boardWrap.isDailyLocked #symbolCanvas {
+  pointer-events: none;
 }
 
 #grid {
@@ -1489,12 +1504,8 @@ button:disabled:active {
     flex: 1 1 100%;
     width: 100%;
     justify-content: space-between;
-    gap: 8px;
+    gap: 6px;
     padding: 6px 8px;
-  }
-
-  .dailyMetaItem {
-    gap: 4px;
   }
 
   #resetBtn,

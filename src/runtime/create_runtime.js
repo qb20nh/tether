@@ -135,6 +135,7 @@ export function createRuntime(options) {
   let pendingValidateSource = null;
   let settingsMenuOpen = false;
   let dailyCountdownTimer = 0;
+  let dailyBoardLocked = false;
 
   const sessionSaveData = {
     board: bootState.sessionBoard
@@ -252,6 +253,46 @@ export function createRuntime(options) {
     refs.settingsToggle.setAttribute('title', label);
   };
 
+  const isDailyExpired = () =>
+    Number.isInteger(dailyResetUtcMs) && Date.now() >= dailyResetUtcMs;
+
+  const applyDailyBoardLockState = (snapshot = null) => {
+    const refs = renderer.getRefs();
+    const activeSnapshot = snapshot || state.getSnapshot();
+    const isDailySnapshot = Boolean(
+      activeSnapshot
+      && Number.isInteger(activeSnapshot.levelIndex)
+      && typeof core.isDailyAbsIndex === 'function'
+      && core.isDailyAbsIndex(activeSnapshot.levelIndex),
+    );
+    const nextLocked = Boolean(
+      hasDailyLevel
+      && activeDailyId
+      && isDailySnapshot
+      && isDailyExpired()
+      && !isLevelPreviouslyCleared(activeSnapshot.levelIndex),
+    );
+
+    const changed = nextLocked !== dailyBoardLocked;
+    dailyBoardLocked = nextLocked;
+
+    if (nextLocked) {
+      interactionState.isPathDragging = false;
+      interactionState.pathDragSide = null;
+      interactionState.pathDragCursor = null;
+      interactionState.isWallDragging = false;
+      interactionState.wallGhost = { visible: false, x: 0, y: 0 };
+      interactionState.dropTarget = null;
+    }
+
+    if (refs?.boardWrap) refs.boardWrap.classList.toggle('isDailyLocked', nextLocked);
+    if (refs?.gridEl) refs.gridEl.setAttribute('aria-disabled', String(nextLocked));
+    if (refs?.resetBtn) refs.resetBtn.disabled = nextLocked;
+    if (refs?.reverseBtn) refs.reverseBtn.disabled = nextLocked;
+
+    return changed;
+  };
+
   const clearDailyCountdownTimer = () => {
     if (!dailyCountdownTimer) return;
     clearInterval(dailyCountdownTimer);
@@ -265,7 +306,7 @@ export function createRuntime(options) {
     if (!hasDailyLevel || !activeDailyId) {
       refs.dailyMeta.hidden = true;
       refs.dailyDateValue.textContent = '-';
-      refs.dailyCountdownValue.textContent = '--:--:--';
+      refs.dailyCountdownValue.textContent = '00:00:00';
       return;
     }
 
@@ -273,25 +314,31 @@ export function createRuntime(options) {
     refs.dailyDateValue.textContent = formatDailyDateLabel(activeDailyId);
 
     if (!Number.isInteger(dailyResetUtcMs)) {
-      refs.dailyCountdownValue.textContent = '--:--:--';
+      refs.dailyCountdownValue.textContent = '00:00:00';
       return;
     }
 
     const remainingMs = dailyResetUtcMs - Date.now();
-    if (remainingMs <= 0) {
-      refs.dailyCountdownValue.textContent = translate('ui.dailyResetNow');
-      return;
-    }
     refs.dailyCountdownValue.textContent = formatCountdownHms(remainingMs);
   };
 
   const startDailyCountdown = () => {
     clearDailyCountdownTimer();
-    renderDailyMeta();
-    if (!hasDailyLevel || !activeDailyId || !Number.isInteger(dailyResetUtcMs)) return;
-    if (dailyResetUtcMs <= Date.now()) return;
-    dailyCountdownTimer = window.setInterval(() => {
+    const syncDailyUi = () => {
       renderDailyMeta();
+      const lockChanged = applyDailyBoardLockState(state.getSnapshot());
+      if (lockChanged) {
+        queueBoardLayout(false, {
+          isPathDragging: false,
+          pathDragSide: null,
+          pathDragCursor: null,
+        });
+      }
+    };
+    syncDailyUi();
+    if (!hasDailyLevel || !activeDailyId || !Number.isInteger(dailyResetUtcMs)) return;
+    dailyCountdownTimer = window.setInterval(() => {
+      syncDailyUi();
     }, 1000);
   };
 
@@ -664,6 +711,8 @@ export function createRuntime(options) {
       }
     }
 
+    applyDailyBoardLockState(snapshot);
+
     const completionAnimationTrigger = Boolean(
       completion?.kind === 'good'
       && options.validationSource === GAME_COMMANDS.FINALIZE_PATH,
@@ -755,6 +804,7 @@ export function createRuntime(options) {
     }
 
     showLevelGoal(targetIndex);
+    applyDailyBoardLockState(snapshot);
     syncMutableBoardStateFromSnapshot(snapshot);
     refreshLevelOptions();
     queueBoardLayout(false);
@@ -782,6 +832,7 @@ export function createRuntime(options) {
 
     applyDataAttributes(appEl, translate);
     renderDailyMeta();
+    applyDailyBoardLockState(state.getSnapshot());
     applyPanelVisibility(refs.guidePanel, refs.guideToggleBtn, 'guide', refs.guidePanel.classList.contains('is-hidden'));
     applyPanelVisibility(refs.legendPanel, refs.legendToggleBtn, 'legend', refs.legendPanel.classList.contains('is-hidden'));
 
@@ -920,6 +971,7 @@ export function createRuntime(options) {
     }
 
     if (actionType === UI_ACTIONS.RESET_CLICK) {
+      if (dailyBoardLocked) return;
       state.dispatch({ type: 'path/reset', payload: {} });
       const snapshot = state.getSnapshot();
       refresh(snapshot, false);
@@ -930,6 +982,7 @@ export function createRuntime(options) {
     }
 
     if (actionType === UI_ACTIONS.REVERSE_CLICK) {
+      if (dailyBoardLocked) return;
       state.dispatch({ type: 'path/reverse', payload: {} });
       refresh(state.getSnapshot(), true);
       queueSessionSave();
@@ -974,6 +1027,7 @@ export function createRuntime(options) {
   };
 
   const handleInteractionUpdate = (payload) => {
+    if (dailyBoardLocked) return;
     const updateType = payload?.updateType;
 
     if (updateType === INTERACTION_UPDATES.PATH_DRAG) {
@@ -1006,6 +1060,7 @@ export function createRuntime(options) {
   };
 
   const handleGameCommand = (payload) => {
+    if (dailyBoardLocked) return;
     if (!payload?.commandType) return;
 
     const transition = state.dispatch({
