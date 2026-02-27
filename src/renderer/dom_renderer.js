@@ -348,6 +348,7 @@ export function createDomRenderer(options = {}) {
       clearDropTarget();
       hideWallDragGhost();
       setDraggingBodyClasses({ isWallDragging: false, isPathDragging: false });
+      refs?.pathRenderer?.destroy?.();
       if (refs?.boardWrap) {
         refs.boardWrap.classList.remove('isComplete', 'isCompleting', 'isCompletePulse');
       }
