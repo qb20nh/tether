@@ -25,6 +25,10 @@ const toFinitePoint = (point) => {
 const createEmptyMesh = () => ({
   positions: new Float32Array(0),
   travels: new Float32Array(0),
+  cornerFlags: new Float32Array(0),
+  cornerCenters: new Float32Array(0),
+  cornerAngles: new Float32Array(0),
+  cornerTravels: new Float32Array(0),
   indices: new Uint16Array(0),
   vertexCount: 0,
   indexCount: 0,
@@ -78,6 +82,11 @@ const buildCornerTurns = (points, segmentLengths, segmentUx, segmentUy, cornerRa
       tangentInY,
       tangentOutX,
       tangentOutY,
+      inUx,
+      inUy,
+      outUx,
+      outUy,
+      turnSigned: centerSweep < 0 ? -1 : 1,
       cx,
       cy,
       centerAngleIn,
@@ -186,11 +195,30 @@ export function buildUnifiedPathMesh(points, options = {}) {
 
   const positions = [];
   const travels = [];
+  const cornerFlags = [];
+  const cornerCenters = [];
+  const cornerAngles = [];
+  const cornerTravels = [];
   const indices = [];
 
-  const addVertex = (x, y, travel) => {
+  const addVertex = (
+    x,
+    y,
+    travel,
+    cornerFlag = 0,
+    cornerCx = 0,
+    cornerCy = 0,
+    cornerAngleIn = 0,
+    cornerSweep = 0,
+    cornerTravelStart = 0,
+    cornerTravelSpan = 0,
+  ) => {
     positions.push(x, y);
     travels.push(travel);
+    cornerFlags.push(cornerFlag);
+    cornerCenters.push(cornerCx, cornerCy);
+    cornerAngles.push(cornerAngleIn, cornerSweep);
+    cornerTravels.push(cornerTravelStart, cornerTravelSpan);
     return (travels.length - 1);
   };
 
@@ -198,7 +226,16 @@ export function buildUnifiedPathMesh(points, options = {}) {
     indices.push(a, b, c);
   };
 
-  const addQuad = (x1, y1, x2, y2, radius, tStart, tEnd) => {
+  const addQuad = (
+    x1,
+    y1,
+    x2,
+    y2,
+    radius,
+    tStart,
+    tEnd,
+    cornerMeta = null,
+  ) => {
     const dx = x2 - x1;
     const dy = y2 - y1;
     const len = Math.hypot(dx, dy);
@@ -209,10 +246,61 @@ export function buildUnifiedPathMesh(points, options = {}) {
     const px = -uy * radius;
     const py = ux * radius;
 
-    const v0 = addVertex(x1 + px, y1 + py, tStart);
-    const v1 = addVertex(x1 - px, y1 - py, tStart);
-    const v2 = addVertex(x2 + px, y2 + py, tEnd);
-    const v3 = addVertex(x2 - px, y2 - py, tEnd);
+    const cornerFlag = cornerMeta ? 1 : 0;
+    const cornerCx = cornerMeta?.cx || 0;
+    const cornerCy = cornerMeta?.cy || 0;
+    const cornerAngleIn = cornerMeta?.angleIn || 0;
+    const cornerSweep = cornerMeta?.sweep || 0;
+    const cornerTravelStart = cornerMeta?.travelStart || 0;
+    const cornerTravelSpan = cornerMeta?.travelSpan || 0;
+    const v0 = addVertex(
+      x1 + px,
+      y1 + py,
+      tStart,
+      cornerFlag,
+      cornerCx,
+      cornerCy,
+      cornerAngleIn,
+      cornerSweep,
+      cornerTravelStart,
+      cornerTravelSpan,
+    );
+    const v1 = addVertex(
+      x1 - px,
+      y1 - py,
+      tStart,
+      cornerFlag,
+      cornerCx,
+      cornerCy,
+      cornerAngleIn,
+      cornerSweep,
+      cornerTravelStart,
+      cornerTravelSpan,
+    );
+    const v2 = addVertex(
+      x2 + px,
+      y2 + py,
+      tEnd,
+      cornerFlag,
+      cornerCx,
+      cornerCy,
+      cornerAngleIn,
+      cornerSweep,
+      cornerTravelStart,
+      cornerTravelSpan,
+    );
+    const v3 = addVertex(
+      x2 - px,
+      y2 - py,
+      tEnd,
+      cornerFlag,
+      cornerCx,
+      cornerCy,
+      cornerAngleIn,
+      cornerSweep,
+      cornerTravelStart,
+      cornerTravelSpan,
+    );
     addTriangle(v0, v1, v2);
     addTriangle(v2, v1, v3);
   };
@@ -271,33 +359,83 @@ export function buildUnifiedPathMesh(points, options = {}) {
     const travelStart = cornerPrimitive.travelStart;
     const travelEnd = cornerPrimitive.travelEnd;
     const travelSpan = Math.max(0, travelEnd - travelStart);
-    const turnAbs = Math.max(0, corner.absTurn || Math.abs(corner.centerSweep || 0));
-    const cornerSteps = Math.max(2, Math.ceil((turnAbs / Math.PI) * 18));
-    const outerRadius = width;
+    const cornerMeta = {
+      cx: corner.cx,
+      cy: corner.cy,
+      angleIn: corner.centerAngleIn,
+      sweep: corner.centerSweep,
+      travelStart,
+      travelSpan,
+    };
+    const base = safePoints[i + 1];
 
-    for (let step = 0; step < cornerSteps; step++) {
-      const t0 = step / cornerSteps;
-      const t1 = (step + 1) / cornerSteps;
-      const angle0 = corner.centerAngleIn + (corner.centerSweep * t0);
-      const angle1 = corner.centerAngleIn + (corner.centerSweep * t1);
-      const travel0 = travelStart + (travelSpan * t0);
-      const travel1 = travelStart + (travelSpan * t1);
+    addQuad(
+      corner.tangentInX,
+      corner.tangentInY,
+      base.x,
+      base.y,
+      halfWidth,
+      travelStart,
+      travelStart,
+      cornerMeta,
+    );
+    addQuad(
+      base.x,
+      base.y,
+      corner.tangentOutX,
+      corner.tangentOutY,
+      halfWidth,
+      travelStart,
+      travelStart,
+      cornerMeta,
+    );
 
-      const c0 = addVertex(corner.cx, corner.cy, travel0);
-      const o0 = addVertex(
-        corner.cx + Math.cos(angle0) * outerRadius,
-        corner.cy + Math.sin(angle0) * outerRadius,
-        travel0,
+    const inOuterNx = corner.turnSigned > 0 ? corner.inUy : -corner.inUy;
+    const inOuterNy = corner.turnSigned > 0 ? -corner.inUx : corner.inUx;
+    const outOuterNx = corner.turnSigned > 0 ? corner.outUy : -corner.outUy;
+    const outOuterNy = corner.turnSigned > 0 ? -corner.outUx : corner.outUx;
+    const joinAngleIn = Math.atan2(inOuterNy, inOuterNx);
+    const joinAngleOut = Math.atan2(outOuterNy, outOuterNx);
+    let joinSweep = angleDeltaSigned(joinAngleIn, joinAngleOut);
+    if (corner.turnSigned > 0 && joinSweep < 0) joinSweep += TAU;
+    if (corner.turnSigned < 0 && joinSweep > 0) joinSweep -= TAU;
+    const joinSteps = Math.max(2, Math.ceil((Math.abs(joinSweep) / Math.PI) * 18));
+    if (!(Math.abs(joinSweep) > FLOW_STOP_EPSILON)) continue;
+
+    const joinTravel = travelStart;
+    const centerIndex = addVertex(
+      base.x,
+      base.y,
+      joinTravel,
+      1,
+      cornerMeta.cx,
+      cornerMeta.cy,
+      cornerMeta.angleIn,
+      cornerMeta.sweep,
+      cornerMeta.travelStart,
+      cornerMeta.travelSpan,
+    );
+    let previousRimIndex = -1;
+
+    for (let step = 0; step <= joinSteps; step++) {
+      const t = step / joinSteps;
+      const angle = joinAngleIn + (joinSweep * t);
+      const rimX = base.x + Math.cos(angle) * halfWidth;
+      const rimY = base.y + Math.sin(angle) * halfWidth;
+      const rimIndex = addVertex(
+        rimX,
+        rimY,
+        joinTravel,
+        1,
+        cornerMeta.cx,
+        cornerMeta.cy,
+        cornerMeta.angleIn,
+        cornerMeta.sweep,
+        cornerMeta.travelStart,
+        cornerMeta.travelSpan,
       );
-      const c1 = addVertex(corner.cx, corner.cy, travel1);
-      const o1 = addVertex(
-        corner.cx + Math.cos(angle1) * outerRadius,
-        corner.cy + Math.sin(angle1) * outerRadius,
-        travel1,
-      );
-
-      addTriangle(c0, o0, o1);
-      addTriangle(c0, o1, c1);
+      if (step > 0) addTriangle(centerIndex, previousRimIndex, rimIndex);
+      previousRimIndex = rimIndex;
     }
   }
 
@@ -340,6 +478,10 @@ export function buildUnifiedPathMesh(points, options = {}) {
   return {
     positions: new Float32Array(positions),
     travels: new Float32Array(travels),
+    cornerFlags: new Float32Array(cornerFlags),
+    cornerCenters: new Float32Array(cornerCenters),
+    cornerAngles: new Float32Array(cornerAngles),
+    cornerTravels: new Float32Array(cornerTravels),
     indices: new Uint16Array(indices),
     vertexCount: travels.length,
     indexCount: indices.length,
@@ -384,9 +526,18 @@ const VERTEX_SHADER_SOURCE = `#version 300 es
 precision highp float;
 layout(location = 0) in vec2 aPosition;
 layout(location = 1) in float aTravel;
+layout(location = 2) in float aCornerFlag;
+layout(location = 3) in vec2 aCornerCenter;
+layout(location = 4) in vec2 aCornerAngle;
+layout(location = 5) in vec2 aCornerTravel;
 uniform vec2 uCanvasSizePx;
 uniform float uDeviceScale;
 out float vTravel;
+out vec2 vPositionCss;
+flat out float vCornerFlag;
+flat out vec2 vCornerCenter;
+flat out vec2 vCornerAngle;
+flat out vec2 vCornerTravel;
 
 void main() {
   vec2 pixel = aPosition * uDeviceScale;
@@ -396,12 +547,22 @@ void main() {
   );
   gl_Position = vec4(clip, 0.0, 1.0);
   vTravel = aTravel;
+  vPositionCss = aPosition;
+  vCornerFlag = aCornerFlag;
+  vCornerCenter = aCornerCenter;
+  vCornerAngle = aCornerAngle;
+  vCornerTravel = aCornerTravel;
 }
 `;
 
 const FRAGMENT_SHADER_SOURCE = `#version 300 es
 precision highp float;
 in float vTravel;
+in vec2 vPositionCss;
+flat in float vCornerFlag;
+flat in vec2 vCornerCenter;
+flat in vec2 vCornerAngle;
+flat in vec2 vCornerTravel;
 uniform vec3 uMainColor;
 uniform vec3 uCompleteColor;
 uniform float uCompletionEnabled;
@@ -417,14 +578,41 @@ uniform float uFlowRise;
 uniform float uFlowDrop;
 out vec4 outColor;
 
+const float PI = 3.141592653589793;
+const float TAU = 6.283185307179586;
+
 float clampUnit(float value) {
   return clamp(value, 0.0, 1.0);
+}
+
+float normalizeAngle(float angle) {
+  float normalized = mod(angle, TAU);
+  return normalized >= 0.0 ? normalized : normalized + TAU;
+}
+
+float angleDeltaSigned(float from, float to) {
+  float delta = normalizeAngle(to - from);
+  return delta > PI ? delta - TAU : delta;
 }
 
 float normalizeModulo(float value, float modulus) {
   if (!(modulus > 0.0)) return 0.0;
   float modValue = mod(value, modulus);
   return modValue >= 0.0 ? modValue : modValue + modulus;
+}
+
+float resolveTravel(float fallbackTravel) {
+  if (vCornerFlag < 0.5) return fallbackTravel;
+  float sweep = vCornerAngle.y;
+  if (abs(sweep) <= 0.0001) return vCornerTravel.x;
+
+  float angle = atan(
+    vPositionCss.y - vCornerCenter.y,
+    vPositionCss.x - vCornerCenter.x
+  );
+  float delta = angleDeltaSigned(vCornerAngle.x, angle);
+  float unit = clampUnit(delta / sweep);
+  return vCornerTravel.x + unit * vCornerTravel.y;
 }
 
 float completionMixAtTravel(float travel) {
@@ -459,11 +647,12 @@ float flowAlphaAtTravel(float travel) {
 }
 
 void main() {
-  float completionMix = completionMixAtTravel(vTravel);
+  float travel = resolveTravel(vTravel);
+  float completionMix = completionMixAtTravel(travel);
   vec3 color = mix(uMainColor, uCompleteColor, completionMix);
 
   if (uFlowEnabled > 0.5) {
-    float glow = clampUnit(flowAlphaAtTravel(vTravel));
+    float glow = clampUnit(flowAlphaAtTravel(travel));
     color = mix(color, vec3(1.0), glow);
   }
 
@@ -513,8 +702,21 @@ export function createPathWebglRenderer(canvas) {
   const vao = gl.createVertexArray();
   const positionBuffer = gl.createBuffer();
   const travelBuffer = gl.createBuffer();
+  const cornerFlagBuffer = gl.createBuffer();
+  const cornerCenterBuffer = gl.createBuffer();
+  const cornerAngleBuffer = gl.createBuffer();
+  const cornerTravelBuffer = gl.createBuffer();
   const indexBuffer = gl.createBuffer();
-  if (!vao || !positionBuffer || !travelBuffer || !indexBuffer) {
+  if (
+    !vao
+    || !positionBuffer
+    || !travelBuffer
+    || !cornerFlagBuffer
+    || !cornerCenterBuffer
+    || !cornerAngleBuffer
+    || !cornerTravelBuffer
+    || !indexBuffer
+  ) {
     throw new Error('Failed to allocate WebGL buffers');
   }
 
@@ -527,6 +729,22 @@ export function createPathWebglRenderer(canvas) {
   gl.bindBuffer(gl.ARRAY_BUFFER, travelBuffer);
   gl.enableVertexAttribArray(1);
   gl.vertexAttribPointer(1, 1, gl.FLOAT, false, 0, 0);
+
+  gl.bindBuffer(gl.ARRAY_BUFFER, cornerFlagBuffer);
+  gl.enableVertexAttribArray(2);
+  gl.vertexAttribPointer(2, 1, gl.FLOAT, false, 0, 0);
+
+  gl.bindBuffer(gl.ARRAY_BUFFER, cornerCenterBuffer);
+  gl.enableVertexAttribArray(3);
+  gl.vertexAttribPointer(3, 2, gl.FLOAT, false, 0, 0);
+
+  gl.bindBuffer(gl.ARRAY_BUFFER, cornerAngleBuffer);
+  gl.enableVertexAttribArray(4);
+  gl.vertexAttribPointer(4, 2, gl.FLOAT, false, 0, 0);
+
+  gl.bindBuffer(gl.ARRAY_BUFFER, cornerTravelBuffer);
+  gl.enableVertexAttribArray(5);
+  gl.vertexAttribPointer(5, 2, gl.FLOAT, false, 0, 0);
 
   gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
   gl.bindVertexArray(null);
@@ -613,6 +831,18 @@ export function createPathWebglRenderer(canvas) {
     gl.bindBuffer(gl.ARRAY_BUFFER, travelBuffer);
     gl.bufferData(gl.ARRAY_BUFFER, mesh.travels, gl.DYNAMIC_DRAW);
 
+    gl.bindBuffer(gl.ARRAY_BUFFER, cornerFlagBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, mesh.cornerFlags, gl.DYNAMIC_DRAW);
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, cornerCenterBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, mesh.cornerCenters, gl.DYNAMIC_DRAW);
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, cornerAngleBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, mesh.cornerAngles, gl.DYNAMIC_DRAW);
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, cornerTravelBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, mesh.cornerTravels, gl.DYNAMIC_DRAW);
+
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
     gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, mesh.indices, gl.DYNAMIC_DRAW);
 
@@ -640,6 +870,10 @@ export function createPathWebglRenderer(canvas) {
   const destroy = () => {
     gl.deleteBuffer(positionBuffer);
     gl.deleteBuffer(travelBuffer);
+    gl.deleteBuffer(cornerFlagBuffer);
+    gl.deleteBuffer(cornerCenterBuffer);
+    gl.deleteBuffer(cornerAngleBuffer);
+    gl.deleteBuffer(cornerTravelBuffer);
     gl.deleteBuffer(indexBuffer);
     gl.deleteVertexArray(vao);
     gl.deleteProgram(program);
