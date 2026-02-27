@@ -4,6 +4,14 @@ import { cellCenter, getCellSize, vertexPos } from './geometry.js';
 import { ICONS } from './icons.js';
 import { buildBoardCellViewModel } from './renderer/board_view_model.js';
 import { createPathWebglRenderer } from './renderer/path_webgl_renderer.js';
+import {
+  pointsMatch,
+  cellDistance,
+  clampUnit,
+  normalizeAngle,
+  angleDeltaSigned,
+  clampNumber,
+} from './math.js';
 
 let gridCells = [];
 let lastDropTargetKey = null;
@@ -83,11 +91,7 @@ const PATH_FLOW_DROP = 0.83;
 const TAU = Math.PI * 2;
 const CANVAS_ALIGN_OFFSET_CSS_PX = 0.5;
 
-const pointsMatch = (a, b) => a && b && a.r === b.r && a.c === b.c;
-const cellDistance = (a, b) => {
-  if (!a || !b) return 1;
-  return Math.hypot(a.r - b.r, a.c - b.c);
-};
+
 
 const isPathReversed = (nextPath, previousPath) => {
   if (!Array.isArray(nextPath) || !Array.isArray(previousPath)) return false;
@@ -106,7 +110,7 @@ const normalizeFlowOffset = (value, cycle = PATH_FLOW_CYCLE) => {
   return mod >= 0 ? mod : mod + cycle;
 };
 
-const clampUnit = (value) => Math.max(0, Math.min(1, value));
+
 
 const getNowMs = () => {
   if (typeof performance !== 'undefined' && typeof performance.now === 'function') {
@@ -147,15 +151,7 @@ const getPathFlowMetrics = (refs = latestPathRefs, out = null, cellSize = null) 
   return { cycle, pulse, speed };
 };
 
-const normalizeAngle = (angle) => {
-  const normalized = angle % TAU;
-  return normalized >= 0 ? normalized : normalized + TAU;
-};
 
-const angleDeltaSigned = (from, to) => {
-  const delta = normalizeAngle(to - from);
-  return delta > Math.PI ? delta - TAU : delta;
-};
 
 const getHeadLeadTravel = (path, refs = {}, offset = { x: 0, y: 0 }) => {
   const { gridEl } = refs;
@@ -286,7 +282,7 @@ const schedulePathAnimation = () => {
   pathAnimationFrame = requestAnimationFrame(animatePathFlow);
 };
 
-const clampNumber = (value, min, max) => Math.max(min, Math.min(max, value));
+
 
 const parsePx = (value) => {
   const parsed = parseFloat(value);

@@ -1,4 +1,7 @@
 import { INTENT_TYPES, UI_ACTIONS, INTERACTION_UPDATES, GAME_COMMANDS } from './intents.js';
+import { applyTheme as applyThemeCore, refreshThemeButton as refreshThemeButtonCore, requestLightThemeConfirmation as requestLightThemeConfirmationCore, setThemeSwitchPrompt as setThemeSwitchPromptCore, refreshSettingsToggle as refreshSettingsToggleCore, normalizeTheme } from './theme_manager.js';
+import { formatDailyDateLabel, formatCountdownHms, utcStartMsFromDateId } from './daily_timer.js';
+import { createProgressManager } from './progress_manager.js';
 
 const PATH_BRACKET_TUTORIAL_LEVEL_INDEX = 0;
 const MOVABLE_BRACKET_TUTORIAL_LEVEL_INDEX = 7;
@@ -10,8 +13,6 @@ const INFINITE_SELECTOR_ACTIONS = Object.freeze({
   next: '__next_page__',
   last: '__last__',
 });
-
-const normalizeTheme = (theme) => (theme === 'light' || theme === 'dark' ? theme : 'dark');
 const isRtlLocale = (locale) => /^ar/i.test(locale || '');
 const DAY_MS = 24 * 60 * 60 * 1000;
 const EVALUATE_CACHE_LIMIT = 96;
@@ -40,26 +41,7 @@ const applyDataAttributes = (appEl, translate) => {
   });
 };
 
-const utcStartMsFromDateId = (dateId) => {
-  if (typeof dateId !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(dateId)) return null;
-  const [y, m, d] = dateId.split('-').map((part) => Number.parseInt(part, 10));
-  if (!Number.isInteger(y) || !Number.isInteger(m) || !Number.isInteger(d)) return null;
-  return Date.UTC(y, m - 1, d, 0, 0, 0, 0);
-};
 
-const formatDailyDateLabel = (dateId) => {
-  if (typeof dateId !== 'string' || dateId.length === 0) return '-';
-  return `${dateId} UTC`;
-};
-
-const formatCountdownHms = (remainingMs) => {
-  const totalSeconds = Math.max(0, Math.floor(remainingMs / 1000));
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = totalSeconds % 60;
-  const pad2 = (value) => String(value).padStart(2, '0');
-  return `${pad2(hours)}:${pad2(minutes)}:${pad2(seconds)}`;
-};
 
 export function createRuntime(options) {
   const {
@@ -100,8 +82,16 @@ export function createRuntime(options) {
 
   const bootState = persistence.readBootState();
 
-  let campaignProgress = Number.isInteger(bootState.campaignProgress) ? bootState.campaignProgress : 0;
-  let infiniteProgress = Number.isInteger(bootState.infiniteProgress) ? bootState.infiniteProgress : 0;
+  const progressManager = createProgressManager(bootState, campaignCount, maxInfiniteIndex, persistence);
+  const {
+    readCampaignProgress,
+    readInfiniteProgress,
+    isCampaignCompleted,
+    markCampaignLevelCleared,
+    markInfiniteLevelCleared,
+    isCampaignLevelUnlocked,
+  } = progressManager;
+
   let dailySolvedDate = typeof bootState.dailySolvedDate === 'string' ? bootState.dailySolvedDate : null;
   let activeTheme = normalizeTheme(bootState.theme);
 
@@ -169,16 +159,8 @@ export function createRuntime(options) {
     : null;
 
   const applyTheme = (theme) => {
-    activeTheme = normalizeTheme(theme);
-    const root = document.documentElement;
-    root.dataset.theme = activeTheme;
-    root.classList.toggle('theme-light', activeTheme === 'light');
-    persistence.writeTheme(activeTheme);
+    activeTheme = applyThemeCore(theme, persistence);
   };
-
-  const readCampaignProgress = () => campaignProgress;
-  const readInfiniteProgress = () => infiniteProgress;
-  const isCampaignCompleted = () => campaignProgress >= campaignCount;
 
   const setUiMessage = (kind, html) => {
     currentMessageKind = kind;
@@ -210,51 +192,10 @@ export function createRuntime(options) {
     refs.settingsToggle.setAttribute('aria-expanded', String(settingsMenuOpen));
   };
 
-  const refreshThemeButton = () => {
-    const refs = renderer.getRefs();
-    if (!refs?.themeToggle) return;
-    const isDark = activeTheme === 'dark';
-    const nextLabel = isDark ? translate('ui.themeLight') : translate('ui.themeDark');
-    refs.themeToggle.textContent = nextLabel;
-    refs.themeToggle.setAttribute('aria-label', nextLabel);
-    refs.themeToggle.setAttribute('title', nextLabel);
-  };
-
-  const setThemeSwitchPrompt = (nextTheme) => {
-    const refs = renderer.getRefs();
-    if (!refs?.themeSwitchMessage) return;
-    const targetLabel = nextTheme === 'light' ? translate('ui.themeLight') : translate('ui.themeDark');
-    const fallback = targetLabel ? `Switch to ${targetLabel}?` : translate('ui.themeLight');
-    refs.themeSwitchMessage.textContent =
-      translate('ui.themeSwitchPrompt', { theme: targetLabel || '' }) || fallback;
-  };
-
-  const requestLightThemeConfirmation = (targetTheme) => {
-    const refs = renderer.getRefs();
-    if (!refs?.themeSwitchDialog || typeof refs.themeSwitchDialog.showModal !== 'function') {
-      return false;
-    }
-    if (refs.themeSwitchDialog.open) return true;
-
-    refs.themeSwitchDialog.dataset.pendingTheme = targetTheme;
-    setThemeSwitchPrompt(targetTheme);
-
-    try {
-      refs.themeSwitchDialog.showModal();
-      return true;
-    } catch {
-      delete refs.themeSwitchDialog.dataset.pendingTheme;
-      return false;
-    }
-  };
-
-  const refreshSettingsToggle = () => {
-    const refs = renderer.getRefs();
-    if (!refs?.settingsToggle) return;
-    const label = `${translate('ui.language')} / ${translate('ui.theme')}`;
-    refs.settingsToggle.setAttribute('aria-label', label);
-    refs.settingsToggle.setAttribute('title', label);
-  };
+  const refreshThemeButton = () => refreshThemeButtonCore(activeTheme, renderer.getRefs(), translate);
+  const setThemeSwitchPrompt = (nextTheme) => setThemeSwitchPromptCore(nextTheme, renderer.getRefs(), translate);
+  const requestLightThemeConfirmation = (targetTheme) => requestLightThemeConfirmationCore(targetTheme, renderer.getRefs(), translate);
+  const refreshSettingsToggle = () => refreshSettingsToggleCore(renderer.getRefs(), translate);
 
   const isDailyExpired = () =>
     Number.isInteger(dailyResetUtcMs) && Date.now() >= dailyResetUtcMs;
@@ -351,24 +292,7 @@ export function createRuntime(options) {
     }, 1000);
   };
 
-  const isCampaignLevelUnlocked = (index) => index <= readCampaignProgress();
 
-  const markCampaignLevelCleared = (index) => {
-    const nextProgress = Math.max(readCampaignProgress(), index + 1);
-    const clampedProgress = Math.min(nextProgress, campaignCount);
-    if (clampedProgress === campaignProgress) return false;
-    campaignProgress = clampedProgress;
-    persistence.writeCampaignProgress(campaignProgress);
-    return true;
-  };
-
-  const markInfiniteLevelCleared = (infiniteIndex) => {
-    const nextProgress = Math.min(maxInfiniteIndex, Math.max(readInfiniteProgress(), infiniteIndex + 1));
-    if (nextProgress === infiniteProgress) return false;
-    infiniteProgress = nextProgress;
-    persistence.writeInfiniteProgress(infiniteProgress);
-    return true;
-  };
 
   const isDailyLevelIndex = (levelIndex) =>
     typeof core.isDailyAbsIndex === 'function' && core.isDailyAbsIndex(levelIndex);
@@ -594,7 +518,11 @@ export function createRuntime(options) {
 
     if (refs.levelSelectGroup && refs.infiniteSel) {
       const infiniteActive = core.isInfiniteAbsIndex(currentIndex);
+      const dailyActive = isDailyLevelIndex(currentIndex);
+
       refs.levelSelectGroup.classList.toggle('isInfiniteActive', infiniteActive);
+      refs.levelSelectGroup.classList.toggle('isDailyActive', dailyActive);
+
       refs.infiniteSel.hidden = !infiniteActive;
       refs.infiniteSel.disabled = !infiniteActive;
 

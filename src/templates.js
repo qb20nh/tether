@@ -87,7 +87,7 @@ export const APP_SHELL_TEMPLATE = (t = (k) => k, localeOptions = [], currentLoca
           <label id="${ELEMENT_IDS.LEVEL_LABEL}" class="small" for="${ELEMENT_IDS.LEVEL_SEL}" data-i18n="ui.levelLabel">${t(
   'ui.levelLabel',
 )}</label>
-          <div id="${ELEMENT_IDS.LEVEL_SELECT_GROUP}" class="levelSelectGroup">
+        <div id="${ELEMENT_IDS.LEVEL_SELECT_GROUP}" class="levelSelectGroup">
             <select id="${ELEMENT_IDS.LEVEL_SEL}" aria-label="${t('ui.levelSelectAria')}" data-i18n-aria-label="ui.levelSelectAria"></select>
             <select
               id="${ELEMENT_IDS.INFINITE_SEL}"
@@ -96,17 +96,17 @@ export const APP_SHELL_TEMPLATE = (t = (k) => k, localeOptions = [], currentLoca
               hidden
               disabled
             ></select>
-          </div>
-          <div id="${ELEMENT_IDS.DAILY_META}" class="dailyMeta" hidden>
-            <span class="dailyMetaItem">
-              <span class="dailyMetaLabel" data-i18n="ui.dailyDateLabel">${t('ui.dailyDateLabel')}</span>
-              <strong id="${ELEMENT_IDS.DAILY_DATE_VALUE}" class="dailyMetaValue">-</strong>
-            </span>
-            <span class="dailyMetaSeparator" aria-hidden="true">•</span>
-            <span class="dailyMetaItem">
-              <span class="dailyMetaLabel" data-i18n="ui.dailyResetLabel">${t('ui.dailyResetLabel')}</span>
-              <strong id="${ELEMENT_IDS.DAILY_COUNTDOWN_VALUE}" class="dailyMetaValue">00:00:00</strong>
-            </span>
+            <div id="${ELEMENT_IDS.DAILY_META}" class="dailyMeta" hidden>
+              <span class="dailyMetaItem">
+                <span class="dailyMetaLabel" data-i18n="ui.dailyDateLabel">${t('ui.dailyDateLabel')}</span>
+                <strong id="${ELEMENT_IDS.DAILY_DATE_VALUE}" class="dailyMetaValue">-</strong>
+              </span>
+              <span class="dailyMetaSeparator" aria-hidden="true">•</span>
+              <span class="dailyMetaItem">
+                <span class="dailyMetaLabel" data-i18n="ui.dailyResetLabel">${t('ui.dailyResetLabel')}</span>
+                <strong id="${ELEMENT_IDS.DAILY_COUNTDOWN_VALUE}" class="dailyMetaValue">00:00:00</strong>
+              </span>
+            </div>
           </div>
           <button id="${ELEMENT_IDS.RESET_BTN}" title="${t('ui.resetTitle')}" data-i18n="ui.reset" data-i18n-title="ui.resetTitle">${t(
   'ui.reset',
