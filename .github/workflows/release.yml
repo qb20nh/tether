@@ -1,0 +1,403 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  validate_and_plan_release:
+    runs-on: ubuntu-latest
+    outputs:
+      tag_name: ${{ steps.validate.outputs.tag_name }}
+      core_version: ${{ steps.validate.outputs.core_version }}
+      is_prerelease: ${{ steps.validate.outputs.is_prerelease }}
+      should_release: ${{ steps.validate.outputs.should_release }}
+      skip_reason: ${{ steps.validate.outputs.skip_reason }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate tag, signature, versions, and release eligibility
+        id: validate
+        env:
+          RELEASE_TAG_GPG_PUBLIC_KEY: ${{ secrets.RELEASE_TAG_GPG_PUBLIC_KEY }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          TAG_NAME="${GITHUB_REF_NAME:?missing tag ref}"
+          if [[ "${TAG_NAME}" != v* ]]; then
+            echo "Tag must start with 'v': ${TAG_NAME}"
+            exit 1
+          fi
+          TAG_BODY="${TAG_NAME#v}"
+
+          SEMVER_REGEX='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-((0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)(\.(0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))*))?(\+([0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*))?$'
+
+          require_semver() {
+            local value="$1"
+            local name="$2"
+            if ! printf '%s\n' "${value}" | grep -Eq "${SEMVER_REGEX}"; then
+              echo "${name} is not valid semver: ${value}"
+              exit 1
+            fi
+          }
+
+          core_of() {
+            printf '%s\n' "$1" | sed -E 's/^([0-9]+\.[0-9]+\.[0-9]+).*/\1/'
+          }
+
+          require_semver "${TAG_BODY}" "Tag body"
+          TAG_CORE="$(core_of "${TAG_BODY}")"
+
+          IS_PRERELEASE=false
+          if printf '%s\n' "${TAG_BODY}" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+-'; then
+            IS_PRERELEASE=true
+          fi
+
+          package_version="$(jq -r '.version' package.json)"
+          tauri_version="$(jq -r '.version' src-tauri/tauri.conf.json)"
+          cargo_version="$(awk '
+            BEGIN { in_package=0 }
+            /^\[package\]/ { in_package=1; next }
+            /^\[/ { if (in_package) exit }
+            in_package && match($0, /^version[[:space:]]*=[[:space:]]*"([^"]+)"/, m) { print m[1]; exit }
+          ' src-tauri/Cargo.toml)"
+
+          if [[ -z "${cargo_version}" ]]; then
+            echo "Could not read package.version from src-tauri/Cargo.toml"
+            exit 1
+          fi
+
+          require_semver "${package_version}" "package.json version"
+          require_semver "${tauri_version}" "tauri.conf.json version"
+          require_semver "${cargo_version}" "Cargo.toml package version"
+
+          package_core="$(core_of "${package_version}")"
+          tauri_core="$(core_of "${tauri_version}")"
+          cargo_core="$(core_of "${cargo_version}")"
+
+          if [[ "${package_core}" != "${TAG_CORE}" ]]; then
+            echo "package.json core version mismatch: expected ${TAG_CORE}, found ${package_core}"
+            exit 1
+          fi
+          if [[ "${tauri_core}" != "${TAG_CORE}" ]]; then
+            echo "src-tauri/tauri.conf.json core version mismatch: expected ${TAG_CORE}, found ${tauri_core}"
+            exit 1
+          fi
+          if [[ "${cargo_core}" != "${TAG_CORE}" ]]; then
+            echo "src-tauri/Cargo.toml core version mismatch: expected ${TAG_CORE}, found ${cargo_core}"
+            exit 1
+          fi
+
+          if [[ -z "${RELEASE_TAG_GPG_PUBLIC_KEY}" ]]; then
+            echo "RELEASE_TAG_GPG_PUBLIC_KEY secret is empty"
+            exit 1
+          fi
+
+          printf '%s\n' "${RELEASE_TAG_GPG_PUBLIC_KEY}" | gpg --batch --import
+          git verify-tag "${TAG_NAME}"
+
+          SHOULD_RELEASE=true
+          SKIP_REASON="new core release"
+          EXISTING_RELEASE_TAG=""
+          release_tags=()
+
+          page=1
+          while :; do
+            page_json="$(curl -fsSL \
+              -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases?per_page=100&page=${page}")"
+            page_count="$(jq 'length' <<<"${page_json}")"
+
+            if [[ "${page_count}" -eq 0 ]]; then
+              break
+            fi
+
+            while IFS= read -r release_tag; do
+              release_tags+=("${release_tag}")
+            done < <(jq -r '.[].tag_name // empty' <<<"${page_json}")
+
+            if [[ "${page_count}" -lt 100 ]]; then
+              break
+            fi
+            page=$((page + 1))
+          done
+
+          for release_tag in "${release_tags[@]}"; do
+            if [[ -z "${release_tag}" ]]; then
+              continue
+            fi
+
+            release_body="${release_tag}"
+            if [[ "${release_body}" == v* ]]; then
+              release_body="${release_body#v}"
+            fi
+
+            if ! printf '%s\n' "${release_body}" | grep -Eq "${SEMVER_REGEX}"; then
+              continue
+            fi
+
+            release_core="$(core_of "${release_body}")"
+            if [[ "${release_core}" == "${TAG_CORE}" ]]; then
+              EXISTING_RELEASE_TAG="${release_tag}"
+              SHOULD_RELEASE=false
+              SKIP_REASON="core version ${TAG_CORE} already released as ${EXISTING_RELEASE_TAG}"
+              break
+            fi
+          done
+
+          if [[ "${SHOULD_RELEASE}" == "true" ]]; then
+            echo "No existing release found for core ${TAG_CORE}; release build will run."
+          else
+            echo "Skipping release build: ${SKIP_REASON}"
+          fi
+
+          {
+            echo "tag_name=${TAG_NAME}"
+            echo "core_version=${TAG_CORE}"
+            echo "is_prerelease=${IS_PRERELEASE}"
+            echo "should_release=${SHOULD_RELEASE}"
+            echo "skip_reason=${SKIP_REASON}"
+          } >> "${GITHUB_OUTPUT}"
+
+  build_desktop:
+    needs: validate_and_plan_release
+    if: needs.validate_and_plan_release.outputs.should_release == 'true'
+    runs-on: ${{ matrix.runs_on }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - id: linux-x64
+            runs_on: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+            tauri_args: ""
+          - id: linux-arm64
+            runs_on: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            tauri_args: ""
+          - id: windows-x64
+            runs_on: windows-latest
+            target: x86_64-pc-windows-msvc
+            tauri_args: ""
+          - id: windows-x86
+            runs_on: windows-latest
+            target: i686-pc-windows-msvc
+            tauri_args: ""
+          - id: windows-arm64
+            runs_on: windows-11-arm
+            target: aarch64-pc-windows-msvc
+            tauri_args: "--bundles nsis"
+          - id: macos-x64
+            runs_on: macos-15-intel
+            target: x86_64-apple-darwin
+            tauri_args: ""
+          - id: macos-arm64
+            runs_on: macos-latest
+            target: aarch64-apple-darwin
+            tauri_args: ""
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache Rust artifacts
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Install Linux native dependencies
+        if: startsWith(matrix.runs_on, 'ubuntu')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf
+
+      - name: Build desktop artifacts
+        env:
+          NATIVE_BUILD: "1"
+        run: npx tauri build --target "${{ matrix.target }}" ${{ matrix.tauri_args }}
+
+      - name: Upload desktop artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ matrix.id }}
+          path: src-tauri/target/${{ matrix.target }}/release/bundle/**/*
+          if-no-files-found: error
+          retention-days: 7
+
+  build_android:
+    needs: validate_and_plan_release
+    if: needs.validate_and_plan_release.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build web assets for native wrappers
+        env:
+          NATIVE_BUILD: "1"
+        run: npm run build
+
+      - name: Sync Capacitor Android
+        run: npx cap sync android
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Decode Android keystore
+        id: keystore
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${ANDROID_KEYSTORE_BASE64}" ]]; then
+            echo "ANDROID_KEYSTORE_BASE64 secret is empty"
+            exit 1
+          fi
+          keystore_path="${RUNNER_TEMP}/release-keystore.jks"
+          printf '%s' "${ANDROID_KEYSTORE_BASE64}" | base64 --decode > "${keystore_path}"
+          echo "keystore_path=${keystore_path}" >> "${GITHUB_OUTPUT}"
+
+      - name: Build signed APK
+        run: |
+          npx cap build android \
+            --androidreleasetype APK \
+            --keystorepath "${{ steps.keystore.outputs.keystore_path }}" \
+            --keystorepass "${{ secrets.ANDROID_KEYSTORE_PASSWORD }}" \
+            --keystorealias "${{ secrets.ANDROID_KEY_ALIAS }}" \
+            --keystorealiaspass "${{ secrets.ANDROID_KEY_PASSWORD }}"
+
+      - name: Build signed AAB
+        run: |
+          npx cap build android \
+            --androidreleasetype AAB \
+            --keystorepath "${{ steps.keystore.outputs.keystore_path }}" \
+            --keystorepass "${{ secrets.ANDROID_KEYSTORE_PASSWORD }}" \
+            --keystorealias "${{ secrets.ANDROID_KEY_ALIAS }}" \
+            --keystorealiaspass "${{ secrets.ANDROID_KEY_PASSWORD }}"
+
+      - name: Verify signed Android outputs
+        run: |
+          set -euo pipefail
+          apk_dir="android/app/build/outputs/apk/release"
+          aab_dir="android/app/build/outputs/bundle/release"
+
+          if [[ ! -d "${apk_dir}" ]]; then
+            echo "APK output directory missing: ${apk_dir}"
+            exit 1
+          fi
+          if [[ ! -d "${aab_dir}" ]]; then
+            echo "AAB output directory missing: ${aab_dir}"
+            exit 1
+          fi
+
+          if find "${apk_dir}" -type f -name '*-unsigned.apk' | grep -q .; then
+            echo "Unsigned APK output detected in ${apk_dir}"
+            find "${apk_dir}" -type f -name '*-unsigned.apk'
+            exit 1
+          fi
+
+          apk_count="$(find "${apk_dir}" -type f -name '*.apk' | wc -l | tr -d ' ')"
+          if [[ "${apk_count}" -eq 0 ]]; then
+            echo "No signed APK files found in ${apk_dir}"
+            exit 1
+          fi
+
+          aab_count="$(find "${aab_dir}" -type f -name '*.aab' | wc -l | tr -d ' ')"
+          if [[ "${aab_count}" -eq 0 ]]; then
+            echo "No AAB files found in ${aab_dir}"
+            exit 1
+          fi
+
+      - name: Upload Android artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-release
+          path: |
+            android/app/build/outputs/apk/release/*.apk
+            android/app/build/outputs/bundle/release/*.aab
+          if-no-files-found: error
+          retention-days: 7
+
+  publish_release:
+    needs:
+      - validate_and_plan_release
+      - build_desktop
+      - build_android
+    if: needs.validate_and_plan_release.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+
+      - name: List release artifacts
+        run: find release-artifacts -type f | sort
+
+      - name: Create draft GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.validate_and_plan_release.outputs.tag_name }}
+          name: Tether ${{ needs.validate_and_plan_release.outputs.tag_name }}
+          draft: true
+          prerelease: ${{ needs.validate_and_plan_release.outputs.is_prerelease == 'true' }}
+          generate_release_notes: true
+          files: release-artifacts/**/*
+          fail_on_unmatched_files: true
+
+  skip_notice:
+    needs: validate_and_plan_release
+    if: needs.validate_and_plan_release.outputs.should_release != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Explain why build/publish was skipped
+        run: |
+          echo "Skipping build and release for tag: ${{ needs.validate_and_plan_release.outputs.tag_name }}"
+          echo "Reason: ${{ needs.validate_and_plan_release.outputs.skip_reason }}"
