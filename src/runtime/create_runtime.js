@@ -966,7 +966,7 @@ export function createRuntime(options) {
     if (actionType === UI_ACTIONS.REVERSE_CLICK) {
       if (dailyBoardLocked) return;
       state.dispatch({ type: 'path/reverse', payload: {} });
-      refresh(state.getSnapshot(), true);
+      refresh(state.getSnapshot(), true, { validationSource: GAME_COMMANDS.FINALIZE_PATH });
       queueSessionSave();
       return;
     }
