@@ -12,7 +12,7 @@ import {
 import { createDefaultAdapters } from './runtime/default_adapters.js';
 import { createRuntime } from './runtime/create_runtime.js';
 
-const DAILY_PAYLOAD_URL = './daily/today.json';
+const DAILY_PAYLOAD_URL = import.meta.env.VITE_DAILY_URL || './daily/today.json';
 const DAILY_HARD_INVALIDATE_GRACE_MS = 60 * 1000;
 
 let runtimeInstance = null;

@@ -65,6 +65,9 @@ body {
   color: var(--text);
   font-size: 17px;
   color-scheme: var(--color-scheme);
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
 }
 
 body.isWallDragging,
@@ -114,8 +117,8 @@ body.isPathDragging * {
 .app {
   --app-max-inline: 1040px;
   --app-inline: min(calc(100dvw - 12px), var(--app-max-inline));
-  --app-pad-top: 6px;
-  --app-pad-bottom: 10px;
+  --app-pad-top: max(6px, env(safe-area-inset-top));
+  --app-pad-bottom: max(10px, env(safe-area-inset-bottom));
   --ui-reserve: clamp(250px, 36dvh, 370px);
   max-width: 1040px;
   width: min(calc(100vw - 12px), 1040px);
