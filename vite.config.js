@@ -5,7 +5,7 @@ export default defineConfig(({ mode }) => {
     // for resources that change daily, since native apps shouldn't ship with static day-old state.
     const isNativeBuild = process.env.NATIVE_BUILD === '1';
     // Fallback to the production GitHub pages URL if NATIVE_BUILD is true
-    const dailyUrl = isNativeBuild ? 'https://qb20nh.github.io/tether/daily/today.json' : './daily/today.json';
+    const dailyUrl = isNativeBuild ? 'https://apps.qb20nh.dev/tether/daily/today.json' : './daily/today.json';
 
     return {
         // Base configuration suitable for most native wrappers

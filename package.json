@@ -12,7 +12,7 @@
     "build": "vite build",
     "build:native": "NATIVE_BUILD=1 vite build",
     "preview": "vite preview",
-    "tauri": "npm run build:native && tauri",
+    "tauri": "npm run build:native && env NO_STRIP=1 tauri",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "bugs": {
