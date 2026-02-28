@@ -11,6 +11,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
+    "tauri": "tauri",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "bugs": {
@@ -18,6 +19,7 @@
   },
   "homepage": "https://github.com/qb20nh/tether#readme",
   "devDependencies": {
+    "@tauri-apps/cli": "^2.10.0",
     "terser": "^5.46.0",
     "vite": "^7.3.1"
   }
