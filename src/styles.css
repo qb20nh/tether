@@ -683,13 +683,17 @@ button:disabled:active {
 #grid {
   display: grid;
   --interactive-pulse: 0;
-  animation: none;
   gap: var(--gap);
   padding: var(--gap);
   background: rgba(255, 255, 255, 0.04);
   width: calc(var(--grid-cols) * var(--cell) + (var(--grid-cols) - 1) * var(--gap) + (var(--gap) * 2));
   height: calc(var(--grid-rows) * var(--cell) + (var(--grid-rows) - 1) * var(--gap) + (var(--gap) * 2));
   margin: 0 auto;
+}
+
+.boardWrap.tutorialPathBrackets #grid:has(.pathStart, .pathEnd),
+.boardWrap.tutorialMovableBrackets #grid:has(.wall.movable) {
+  animation: interactivePulseClock 1.2s ease-in-out infinite;
 }
 
 @property --interactive-pulse {
@@ -937,7 +941,6 @@ button:disabled:active {
   opacity: calc(0.84 + (var(--interactive-pulse, 0) * 0.16));
   transform: scale(calc(1 + (var(--interactive-pulse, 0) * 0.035)));
   filter: brightness(calc(1 + (var(--interactive-pulse, 0) * 0.2)));
-  animation: interactivePulseClock 1.2s ease-in-out infinite;
 }
 
 .cell.pathStart:hover {
