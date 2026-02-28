@@ -72,11 +72,11 @@ jobs:
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          if git diff --quiet -- daily/today.json daily/history.json; then
+          if git diff --quiet -- public/daily/today.json public/daily/history.json; then
             echo "No daily file changes to commit."
             exit 0
           fi
-          git add daily/today.json daily/history.json
+          git add public/daily/today.json public/daily/history.json
           git commit -m "daily: publish ${{ steps.publish.outputs.daily_id }}" || exit 0
           git pull --rebase origin main
           git push

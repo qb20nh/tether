@@ -1,5 +1,7 @@
 import { ELEMENT_IDS } from './config.js';
 
+import LOGO_URL from './logo.svg';
+
 const buildOptionList = (localeOptions, currentLocale) =>
   (localeOptions || [])
     .map(
@@ -13,7 +15,7 @@ export const APP_SHELL_TEMPLATE = (t = (k) => k, localeOptions = [], currentLoca
   <header>
     <div class="topbarRow">
       <h1 class="brandTitle">
-        <img class="brandLogo" src="./src/logo.svg" width="16" height="16" alt="" aria-hidden="true" />
+        <img class="brandLogo" src="${LOGO_URL}" width="16" height="16" alt="" aria-hidden="true" />
         <span>TETHER</span>
       </h1>
         <div class="topbarControls">

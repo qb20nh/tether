@@ -100,4 +100,7 @@ const loadOverrideMap = async () => {
   return decodePackedOverrides(payloadBytes);
 };
 
-export const INFINITE_OVERRIDE_BY_INDEX = await loadOverrideMap();
+export const INFINITE_OVERRIDE_BY_INDEX = await loadOverrideMap().catch((err) => {
+  console.error("Failed to load infinite overrides payload:", err);
+  return Object.freeze(Object.create(null));
+});

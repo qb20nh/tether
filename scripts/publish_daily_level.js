@@ -22,8 +22,8 @@ const PAYLOAD_SCHEMA_VERSION = 1;
 const DEFAULTS = {
   manifestFile: path.resolve(process.cwd(), 'src/daily_pool_manifest.json'),
   overridesFile: path.resolve(process.cwd(), 'src/daily_overrides.bin.gz'),
-  historyFile: path.resolve(process.cwd(), 'daily/history.json'),
-  todayFile: path.resolve(process.cwd(), 'daily/today.json'),
+  historyFile: path.resolve(process.cwd(), 'public/daily/history.json'),
+  todayFile: path.resolve(process.cwd(), 'public/daily/today.json'),
   nowMs: null,
   dailySecret: null,
   json: false,
@@ -211,10 +211,10 @@ export const publishDailyLevel = (rawOptions = {}) => {
   const existingTodayPayload = normalizeTodayPayload(readJson(opts.todayFile, null));
   const stableGeneratedAtUtcMs = (
     existingTodayPayload
-    && existingTodayPayload.dailyId === dailyId
-    && existingTodayPayload.dailySlot === dailySlot
-    && existingTodayPayload.canonicalKey === materialized.canonicalKey
-    && existingTodayPayload.generatedAtUtcMs > 0
+      && existingTodayPayload.dailyId === dailyId
+      && existingTodayPayload.dailySlot === dailySlot
+      && existingTodayPayload.canonicalKey === materialized.canonicalKey
+      && existingTodayPayload.generatedAtUtcMs > 0
       ? existingTodayPayload.generatedAtUtcMs
       : nowMs
   );
