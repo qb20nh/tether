@@ -5,16 +5,61 @@ export const utcStartMsFromDateId = (dateId) => {
     return Date.UTC(y, m - 1, d, 0, 0, 0, 0);
 };
 
-export const formatDailyDateLabel = (dateId) => {
-    if (typeof dateId !== 'string' || dateId.length === 0) return '-';
-    return dateId;
+const parseUtcDateFromDateId = (dateId) => {
+    const startMs = utcStartMsFromDateId(dateId);
+    if (!Number.isInteger(startMs)) return null;
+    return new Date(startMs);
 };
 
-export const formatCountdownHms = (remainingMs) => {
+const formatDateByLocale = (date, locale, options) => {
+    try {
+        return new Intl.DateTimeFormat(locale || undefined, {
+            timeZone: 'UTC',
+            ...options,
+        }).format(date);
+    } catch {
+        return null;
+    }
+};
+
+export const formatDailyDateLabel = (dateId, locale) => {
+    if (typeof dateId !== 'string' || dateId.length === 0) return '-';
+    const date = parseUtcDateFromDateId(dateId);
+    if (!date) return dateId;
+    const formatted = formatDateByLocale(date, locale, {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+    });
+    return formatted || dateId;
+};
+
+export const formatDailyMonthDayLabel = (dateId, locale) => {
+    if (typeof dateId !== 'string' || dateId.length === 0) return '-';
+    const date = parseUtcDateFromDateId(dateId);
+    if (!date) return dateId;
+    const formatted = formatDateByLocale(date, locale, {
+        month: 'long',
+        day: 'numeric',
+    });
+    return formatted || dateId;
+};
+
+export const formatCountdownHms = (remainingMs, locale) => {
     const totalSeconds = Math.max(0, Math.floor(remainingMs / 1000));
     const hours = Math.floor(totalSeconds / 3600);
     const minutes = Math.floor((totalSeconds % 3600) / 60);
     const seconds = totalSeconds % 60;
-    const pad2 = (value) => String(value).padStart(2, '0');
-    return `${pad2(hours)}:${pad2(minutes)}:${pad2(seconds)}`;
+    const formatNumber = (() => {
+        try {
+            const numberFormat = new Intl.NumberFormat(locale || undefined, {
+                minimumIntegerDigits: 2,
+                useGrouping: false,
+            });
+            return (value) => numberFormat.format(value);
+        } catch {
+            return (value) => String(value).padStart(2, '0');
+        }
+    })();
+    return `${formatNumber(hours)}:${formatNumber(minutes)}:${formatNumber(seconds)}`;
 };

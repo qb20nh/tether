@@ -1,6 +1,6 @@
 import { INTENT_TYPES, UI_ACTIONS, INTERACTION_UPDATES, GAME_COMMANDS } from './intents.js';
 import { applyTheme as applyThemeCore, refreshThemeButton as refreshThemeButtonCore, requestLightThemeConfirmation as requestLightThemeConfirmationCore, setThemeSwitchPrompt as setThemeSwitchPromptCore, refreshSettingsToggle as refreshSettingsToggleCore, normalizeTheme } from './theme_manager.js';
-import { formatDailyDateLabel, formatCountdownHms, utcStartMsFromDateId } from './daily_timer.js';
+import { formatDailyDateLabel, formatDailyMonthDayLabel, formatCountdownHms, utcStartMsFromDateId } from './daily_timer.js';
 import { createProgressManager } from './progress_manager.js';
 
 const PATH_BRACKET_TUTORIAL_LEVEL_INDEX = 0;
@@ -256,20 +256,22 @@ export function createRuntime(options) {
     if (!hasDailyLevel || !activeDailyId || !isDailySnapshot) {
       refs.dailyMeta.hidden = true;
       refs.dailyDateValue.textContent = '-';
-      refs.dailyCountdownValue.textContent = '00:00:00';
+      refs.dailyCountdownValue.textContent = formatCountdownHms(0, activeLocale);
       return;
     }
 
     refs.dailyMeta.hidden = false;
-    refs.dailyDateValue.textContent = formatDailyDateLabel(activeDailyId);
+    refs.dailyDateValue.textContent = formatDailyDateLabel(activeDailyId, activeLocale);
 
     if (!Number.isInteger(dailyResetUtcMs)) {
-      refs.dailyCountdownValue.textContent = '00:00:00';
+      refs.dailyCountdownValue.textContent = formatCountdownHms(0, activeLocale);
       return;
     }
 
     const remainingMs = dailyResetUtcMs - Date.now();
-    refs.dailyCountdownValue.textContent = formatCountdownHms(remainingMs);
+    refs.dailyCountdownValue.textContent = remainingMs <= 0
+      ? translate('ui.dailyResetNow')
+      : formatCountdownHms(remainingMs, activeLocale);
   };
 
   const startDailyCountdown = () => {
@@ -507,9 +509,12 @@ export function createRuntime(options) {
       optionHtml += `<option value="${infiniteAbsIndex}" ${infiniteAbsIndex === currentIndex ? 'selected' : ''}>${infiniteLabel}</option>`;
     }
 
-    const dailyLabel = hasDailyLevel
-      ? translate('ui.dailyLevelOption')
-      : translate('ui.dailyUnavailable');
+    const dailyLabel = (() => {
+      if (!hasDailyLevel) return translate('ui.dailyUnavailable');
+      const base = translate('ui.dailyLevelOption');
+      if (!activeDailyId) return base;
+      return `${base}(${formatDailyMonthDayLabel(activeDailyId, activeLocale)})`;
+    })();
     const dailyDisabled = hasDailyLevel ? '' : 'disabled';
     optionHtml += `<option value="${dailyAbsIndex}" ${dailyDisabled} ${dailyAbsIndex === currentIndex ? 'selected' : ''}>${dailyLabel}</option>`;
 
