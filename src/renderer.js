@@ -25,9 +25,11 @@ let latestPathSnapshot = null;
 let latestPathRefs = null;
 let latestPathStatuses = null;
 let latestCompletionModel = null;
+let latestTutorialFlags = null;
 let latestPathMainFlowTravel = 0;
 let colorParserCtx = null;
 let reusablePathPoints = [];
+let reusableTutorialBracketPoints = [];
 let reusableCellViewModel = null;
 let resizeCanvasSignature = '';
 let lastFlowMetricCell = NaN;
@@ -44,6 +46,8 @@ let cachedPathHeadC = NaN;
 let cachedPathTailR = NaN;
 let cachedPathTailC = NaN;
 let cachedPathLayoutVersion = -1;
+let tutorialBracketSignature = '';
+let tutorialBracketGeometryToken = 0;
 let reducedMotionQuery = null;
 const pathFlowMetricsCache = { cycle: 128, pulse: 64, speed: -32 };
 const gridOffsetScratch = { x: 0, y: 0 };
@@ -53,6 +57,8 @@ const headPointScratchB = { x: 0, y: 0 };
 const headPointScratchC = { x: 0, y: 0 };
 const keyParseScratch = { r: 0, c: 0 };
 const EMPTY_MAP = new Map();
+const TUTORIAL_BRACKET_COLOR_RGB = { r: 120, g: 190, b: 255 };
+const tutorialBracketColorScratch = { r: 120, g: 190, b: 255 };
 const pathLayoutMetrics = {
   ready: false,
   version: 0,
@@ -80,6 +86,11 @@ const pathFramePayload = {
   flowSpeed: -32,
   flowRise: 0.82,
   flowDrop: 0.83,
+  tutorialBracketCenters: [],
+  tutorialBracketGeometryToken: 0,
+  tutorialBracketCellSize: 0,
+  tutorialBracketPulseEnabled: false,
+  tutorialBracketColorRgb: null,
 };
 
 const PATH_FLOW_SPEED = -32;
@@ -228,9 +239,14 @@ const getHeadShiftDelta = (nextPath, previousPath, refs = {}, offset = { x: 0, y
   return 0;
 };
 
-const shouldAnimatePathFlow = (snapshot, completionModel = latestCompletionModel) => {
-  if (!snapshot || snapshot.path.length <= 1) return false;
-  return !isReducedMotionPreferred();
+const shouldAnimatePathFlow = (
+  snapshot,
+  completionModel = latestCompletionModel,
+  tutorialFlags = latestTutorialFlags,
+) => {
+  if (isReducedMotionPreferred()) return false;
+  if (snapshot && snapshot.path.length > 1) return true;
+  return Boolean(tutorialFlags?.path || tutorialFlags?.movable);
 };
 
 const stopPathAnimation = () => {
@@ -471,7 +487,7 @@ const ensurePathLayoutMetrics = (refs) => {
 const drawIdleAnimatedPath = (flowOffset = 0, completionModel = latestCompletionModel) => {
   const pathRenderer = latestPathRefs?.pathRenderer;
   if (!pathRenderer) return;
-  if (!latestPathSnapshot || latestPathSnapshot.path.length === 0) {
+  if (!latestPathSnapshot) {
     latestPathMainFlowTravel = 0;
     pathRenderer.clear();
     return;
@@ -481,6 +497,106 @@ const drawIdleAnimatedPath = (flowOffset = 0, completionModel = latestCompletion
   pathFramePayload.isCompletionSolved = Boolean(completionModel?.isSolved);
   pathFramePayload.completionProgress = getCompletionProgress(completionModel);
   latestPathMainFlowTravel = pathRenderer.drawPathFrame(pathFramePayload);
+};
+
+const updateTutorialBracketPayload = (snapshot, layout, tutorialFlags = null) => {
+  const pathEnabled = Boolean(tutorialFlags?.path);
+  const movableEnabled = Boolean(tutorialFlags?.movable);
+  const step = layout.cell + layout.gap;
+  const half = layout.cell * 0.5;
+  let count = 0;
+  let signature = `${layout.version}|${pathEnabled ? 1 : 0}|${movableEnabled ? 1 : 0}|`;
+
+  const ensurePoint = (index) => {
+    if (!reusableTutorialBracketPoints[index]) {
+      reusableTutorialBracketPoints[index] = { x: 0, y: 0 };
+    }
+    return reusableTutorialBracketPoints[index];
+  };
+
+  if (pathEnabled && snapshot.path.length > 0) {
+    const head = snapshot.path[0];
+    const headPoint = ensurePoint(count);
+    headPoint.x = layout.offsetX + layout.pad + (head.c * step) + half;
+    headPoint.y = layout.offsetY + layout.pad + (head.r * step) + half;
+    signature += `${head.r},${head.c};`;
+    count += 1;
+
+    if (snapshot.path.length > 1) {
+      const tail = snapshot.path[snapshot.path.length - 1];
+      const tailPoint = ensurePoint(count);
+      tailPoint.x = layout.offsetX + layout.pad + (tail.c * step) + half;
+      tailPoint.y = layout.offsetY + layout.pad + (tail.r * step) + half;
+      signature += `${tail.r},${tail.c};`;
+      count += 1;
+    }
+  }
+
+  if (movableEnabled) {
+    for (let r = 0; r < snapshot.rows; r++) {
+      for (let c = 0; c < snapshot.cols; c++) {
+        if (snapshot.gridData[r][c] !== 'm') continue;
+        const point = ensurePoint(count);
+        point.x = layout.offsetX + layout.pad + (c * step) + half;
+        point.y = layout.offsetY + layout.pad + (r * step) + half;
+        signature += `${r},${c};`;
+        count += 1;
+      }
+    }
+  }
+
+  if (reusableTutorialBracketPoints.length !== count) {
+    reusableTutorialBracketPoints.length = count;
+  }
+  if (signature !== tutorialBracketSignature) {
+    tutorialBracketSignature = signature;
+    tutorialBracketGeometryToken += 1;
+  }
+
+  const resolveTutorialBracketColor = () => {
+    let firstCell = null;
+    let hoveredCell = null;
+    let activeCell = null;
+
+    const considerCell = (r, c) => {
+      const cell = gridCells[r]?.[c];
+      if (!cell) return;
+      if (!firstCell) firstCell = cell;
+      if (typeof cell.matches !== 'function') return;
+      if (!activeCell && cell.matches(':active')) activeCell = cell;
+      if (!hoveredCell && cell.matches(':hover')) hoveredCell = cell;
+    };
+
+    if (pathEnabled && snapshot.path.length > 0) {
+      const head = snapshot.path[0];
+      considerCell(head.r, head.c);
+      if (snapshot.path.length > 1) {
+        const tail = snapshot.path[snapshot.path.length - 1];
+        considerCell(tail.r, tail.c);
+      }
+    }
+
+    if (movableEnabled) {
+      for (let r = 0; r < snapshot.rows; r++) {
+        for (let c = 0; c < snapshot.cols; c++) {
+          if (snapshot.gridData[r][c] !== 'm') continue;
+          considerCell(r, c);
+        }
+      }
+    }
+
+    const sourceCell = activeCell || hoveredCell || firstCell;
+    if (!sourceCell || typeof getComputedStyle !== 'function') return TUTORIAL_BRACKET_COLOR_RGB;
+    const cssColor = getComputedStyle(sourceCell).getPropertyValue('--interactive-corner-color');
+    const parsed = parseColorToRgb(cssColor, tutorialBracketColorScratch);
+    return parsed || TUTORIAL_BRACKET_COLOR_RGB;
+  };
+
+  pathFramePayload.tutorialBracketCenters = reusableTutorialBracketPoints;
+  pathFramePayload.tutorialBracketGeometryToken = tutorialBracketGeometryToken;
+  pathFramePayload.tutorialBracketCellSize = layout.cell;
+  pathFramePayload.tutorialBracketPulseEnabled = !isReducedMotionPreferred();
+  pathFramePayload.tutorialBracketColorRgb = resolveTutorialBracketColor();
 };
 
 
@@ -665,6 +781,15 @@ export function cacheElements() {
   pathFramePayload.flowSpeed = PATH_FLOW_SPEED;
   pathFramePayload.flowRise = PATH_FLOW_RISE;
   pathFramePayload.flowDrop = PATH_FLOW_DROP;
+  pathFramePayload.tutorialBracketCenters = [];
+  pathFramePayload.tutorialBracketGeometryToken = 0;
+  pathFramePayload.tutorialBracketCellSize = 0;
+  pathFramePayload.tutorialBracketPulseEnabled = false;
+  pathFramePayload.tutorialBracketColorRgb = null;
+  latestTutorialFlags = null;
+  reusableTutorialBracketPoints = [];
+  tutorialBracketSignature = '';
+  tutorialBracketGeometryToken = 0;
 
   return result;
 }
@@ -1045,6 +1170,7 @@ export function updateCells(
   refs,
   completionModel = null,
   interactionModel = null,
+  tutorialFlags = null,
 ) {
   const { hintStatus, stitchStatus, rpsStatus, blockedStatus } = results;
   const usedIncremental = tryApplyIncrementalEndDragUpdate(
@@ -1100,15 +1226,27 @@ export function updateCells(
     }
   }
 
-  drawAll(snapshot, refs, { hintStatus, stitchStatus, rpsStatus, blockedStatus }, completionModel);
+  drawAll(
+    snapshot,
+    refs,
+    { hintStatus, stitchStatus, rpsStatus, blockedStatus },
+    completionModel,
+    tutorialFlags,
+  );
 }
 
-export function drawAll(snapshot, refs, statuses, completionModel = null) {
+export function drawAll(
+  snapshot,
+  refs,
+  statuses,
+  completionModel = null,
+  tutorialFlags = null,
+) {
   const previousPath = latestPathSnapshot?.path || null;
   const layout = ensurePathLayoutMetrics(refs);
   const flow = getCachedPathFlowMetrics(refs, layout.cell);
   updatePathThemeCache(refs);
-  const animateFlow = shouldAnimatePathFlow(snapshot, completionModel);
+  const animateFlow = shouldAnimatePathFlow(snapshot, completionModel, tutorialFlags);
 
   if (isPathReversed(snapshot.path, previousPath)) {
     const reverseTravel = latestPathMainFlowTravel;
@@ -1142,9 +1280,10 @@ export function drawAll(snapshot, refs, statuses, completionModel = null) {
   latestPathRefs = refs;
   latestPathStatuses = statuses;
   latestCompletionModel = completionModel;
+  latestTutorialFlags = tutorialFlags;
 
   const offset = animateFlow ? pathAnimationOffset : 0;
-  drawAllInternal(snapshot, refs, statuses, offset, completionModel);
+  drawAllInternal(snapshot, refs, statuses, offset, completionModel, tutorialFlags);
 
   if (animateFlow) {
     schedulePathAnimation();
@@ -1163,11 +1302,18 @@ export function drawStaticSymbols(snapshot, refs, statuses) {
   drawCrossStitches(snapshot, refs, symbolCtx, statuses?.stitchStatus?.vertexStatus);
 }
 
-export function drawAnimatedPath(snapshot, refs, statuses, flowOffset = 0, completionModel = null) {
+export function drawAnimatedPath(
+  snapshot,
+  refs,
+  statuses,
+  flowOffset = 0,
+  completionModel = null,
+  tutorialFlags = null,
+) {
   const { pathRenderer } = refs;
   if (!pathRenderer) return;
 
-  if (!snapshot || snapshot.path.length === 0) {
+  if (!snapshot) {
     latestPathMainFlowTravel = 0;
     pathRenderer.clear();
     return;
@@ -1183,50 +1329,71 @@ export function drawAnimatedPath(snapshot, refs, statuses, flowOffset = 0, compl
   if (!pathThemeCacheInitialized) updatePathThemeCache(refs);
   const completionProgress = getCompletionProgress(completionModel);
   const isCompletionSolved = Boolean(completionModel?.isSolved);
-  const showFlowRibbon = shouldAnimatePathFlow(snapshot, completionModel);
+  const showFlowRibbon = !isReducedMotionPreferred() && snapshot.path.length > 1;
   const flowMetrics = getCachedPathFlowMetrics(refs, size);
 
   const step = size + layout.gap;
   const half = size * 0.5;
   const path = snapshot.path;
   const pathLength = path.length;
-  const head = path[0];
-  const tail = path[pathLength - 1];
-  const pointsChanged = (
-    cachedPathRef !== path
-    || cachedPathLayoutVersion !== layout.version
-    || cachedPathLength !== pathLength
-    || cachedPathHeadR !== head.r
-    || cachedPathHeadC !== head.c
-    || cachedPathTailR !== tail.r
-    || cachedPathTailC !== tail.c
-  );
+  const head = pathLength > 0 ? path[0] : null;
+  const tail = pathLength > 0 ? path[pathLength - 1] : null;
 
-  if (pointsChanged) {
-    if (reusablePathPoints.length < pathLength) {
-      for (let i = reusablePathPoints.length; i < pathLength; i++) {
-        reusablePathPoints.push({ x: 0, y: 0 });
+  if (pathLength > 0) {
+    const pointsChanged = (
+      cachedPathRef !== path
+      || cachedPathLayoutVersion !== layout.version
+      || cachedPathLength !== pathLength
+      || cachedPathHeadR !== head.r
+      || cachedPathHeadC !== head.c
+      || cachedPathTailR !== tail.r
+      || cachedPathTailC !== tail.c
+    );
+    if (!pointsChanged && reusablePathPoints.length === pathLength) {
+      // Keep previous pooled coordinates; no geometry mutation needed.
+    } else {
+      if (reusablePathPoints.length < pathLength) {
+        for (let i = reusablePathPoints.length; i < pathLength; i++) {
+          reusablePathPoints.push({ x: 0, y: 0 });
+        }
       }
-    }
-    reusablePathPoints.length = pathLength;
-    for (let i = 0; i < pathLength; i++) {
-      const point = path[i];
-      const pooled = reusablePathPoints[i];
-      pooled.x = layout.offsetX + layout.pad + (point.c * step) + half;
-      pooled.y = layout.offsetY + layout.pad + (point.r * step) + half;
-    }
+      reusablePathPoints.length = pathLength;
+      for (let i = 0; i < pathLength; i++) {
+        const point = path[i];
+        const pooled = reusablePathPoints[i];
+        pooled.x = layout.offsetX + layout.pad + (point.c * step) + half;
+        pooled.y = layout.offsetY + layout.pad + (point.r * step) + half;
+      }
 
-    cachedPathRef = path;
-    cachedPathLayoutVersion = layout.version;
-    cachedPathLength = pathLength;
-    cachedPathHeadR = head.r;
-    cachedPathHeadC = head.c;
-    cachedPathTailR = tail.r;
-    cachedPathTailC = tail.c;
-    pathGeometryToken += 1;
-  } else if (reusablePathPoints.length !== pathLength) {
-    reusablePathPoints.length = pathLength;
+      cachedPathRef = path;
+      cachedPathLayoutVersion = layout.version;
+      cachedPathLength = pathLength;
+      cachedPathHeadR = head.r;
+      cachedPathHeadC = head.c;
+      cachedPathTailR = tail.r;
+      cachedPathTailC = tail.c;
+      pathGeometryToken += 1;
+    }
+  } else {
+    reusablePathPoints.length = 0;
+    const emptyGeometryChanged = (
+      cachedPathLength !== 0
+      || cachedPathLayoutVersion !== layout.version
+      || cachedPathRef !== path
+    );
+    if (emptyGeometryChanged) {
+      cachedPathRef = path;
+      cachedPathLayoutVersion = layout.version;
+      cachedPathLength = 0;
+      cachedPathHeadR = NaN;
+      cachedPathHeadC = NaN;
+      cachedPathTailR = NaN;
+      cachedPathTailC = NaN;
+      pathGeometryToken += 1;
+    }
   }
+
+  updateTutorialBracketPayload(snapshot, layout, tutorialFlags);
 
   pathFramePayload.points = reusablePathPoints;
   pathFramePayload.geometryToken = pathGeometryToken;
@@ -1248,9 +1415,16 @@ export function drawAnimatedPath(snapshot, refs, statuses, flowOffset = 0, compl
   latestPathMainFlowTravel = pathRenderer.drawPathFrame(pathFramePayload);
 }
 
-function drawAllInternal(snapshot, refs, statuses, flowOffset = 0, completionModel = null) {
+function drawAllInternal(
+  snapshot,
+  refs,
+  statuses,
+  flowOffset = 0,
+  completionModel = null,
+  tutorialFlags = null,
+) {
   drawStaticSymbols(snapshot, refs, statuses);
-  drawAnimatedPath(snapshot, refs, statuses, flowOffset, completionModel);
+  drawAnimatedPath(snapshot, refs, statuses, flowOffset, completionModel, tutorialFlags);
 }
 
 function drawCrossStitches(snapshot, refs, ctx, vertexStatus = EMPTY_MAP) {

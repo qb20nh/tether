@@ -322,7 +322,14 @@ export function createDomRenderer(options = {}) {
         }
         : null;
 
-      updateCells(snapshot, evaluation, refs, completionModel, interactionModel);
+      updateCells(
+        snapshot,
+        evaluation,
+        refs,
+        completionModel,
+        interactionModel,
+        uiModel.tutorialFlags || null,
+      );
 
       if (Object.prototype.hasOwnProperty.call(uiModel, 'messageHtml')) {
         setMessage(refs.msgEl, uiModel.messageKind || null, uiModel.messageHtml || '');
@@ -334,11 +341,8 @@ export function createDomRenderer(options = {}) {
         refs.boardWrap.classList.toggle('isComplete', solved);
         refs.boardWrap.classList.toggle('isCompleting', solved && completionCascadeState.isCompleting);
         if (!solved) refs.boardWrap.classList.remove('isCompletePulse');
-      }
-
-      if (refs.boardWrap && uiModel.tutorialFlags) {
-        refs.boardWrap.classList.toggle('tutorialPathBrackets', Boolean(uiModel.tutorialFlags.path));
-        refs.boardWrap.classList.toggle('tutorialMovableBrackets', Boolean(uiModel.tutorialFlags.movable));
+        const hasTutorialBrackets = Boolean(uiModel.tutorialFlags?.path || uiModel.tutorialFlags?.movable);
+        refs.boardWrap.classList.toggle('tutorialBracketNormalBlend', hasTutorialBrackets);
       }
 
       hasRenderedFrame = true;

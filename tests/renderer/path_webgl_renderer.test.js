@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   buildUnifiedPathMesh,
+  buildTutorialBracketMesh,
   createPathWebglRenderer,
 } from '../../src/renderer/path_webgl_renderer.js';
 
@@ -155,6 +156,23 @@ test('buildUnifiedPathMesh handles two-point path and keeps indices in range', (
   assertTravelFinite(mesh);
 });
 
+test('buildTutorialBracketMesh handles empty and finite points', () => {
+  const empty = buildTutorialBracketMesh([]);
+  assert.equal(empty.vertexCount, 0);
+  assert.equal(empty.indexCount, 0);
+
+  const mesh = buildTutorialBracketMesh([
+    { x: 12, y: 18 },
+    { x: 48, y: 54 },
+    { x: Number.NaN, y: 10 },
+  ]);
+  assert.equal(mesh.vertexCount, 8);
+  assert.equal(mesh.indexCount, 12);
+  assert.equal(mesh.centers.length, 16);
+  assert.equal(mesh.corners.length, 16);
+  assertIndexBounds(mesh);
+});
+
 test('createPathWebglRenderer throws when WebGL2 is unavailable', () => {
   const fakeCanvas = {
     getContext(kind) {
@@ -219,6 +237,56 @@ test('createPathWebglRenderer skips geometry uploads when geometry is unchanged'
       ],
     });
     assert.equal(fake.counters.bufferSubData > uploadCountAfterSecond, true);
+    renderer.destroy();
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+test('createPathWebglRenderer draws tutorial brackets without a path and reuses bracket geometry', () => {
+  const originalWindow = globalThis.window;
+  globalThis.window = { devicePixelRatio: 1 };
+  try {
+    const fake = createFakeWebgl2();
+    const fakeCanvas = {
+      width: 0,
+      height: 0,
+      clientWidth: 120,
+      clientHeight: 120,
+      style: {},
+      getContext(kind) {
+        if (kind === 'webgl2') return fake.gl;
+        return null;
+      },
+    };
+
+    const renderer = createPathWebglRenderer(fakeCanvas);
+    const frame = {
+      points: [],
+      tutorialBracketCenters: [
+        { x: 20, y: 20 },
+        { x: 80, y: 20 },
+        { x: 20, y: 80 },
+      ],
+      tutorialBracketGeometryToken: 4,
+      tutorialBracketCellSize: 40,
+      tutorialBracketPulseEnabled: true,
+      tutorialBracketColorRgb: { r: 120, g: 190, b: 255 },
+      flowOffset: 10,
+      flowCycle: 128,
+    };
+
+    renderer.drawPathFrame(frame);
+    const drawCountAfterFirst = fake.counters.drawElements;
+    const uploadCountAfterFirst = fake.counters.bufferSubData;
+    assert.equal(drawCountAfterFirst > 0, true);
+
+    renderer.drawPathFrame(frame);
+    const drawCountAfterSecond = fake.counters.drawElements;
+    const uploadCountAfterSecond = fake.counters.bufferSubData;
+    assert.equal(drawCountAfterSecond > drawCountAfterFirst, true);
+    assert.equal(uploadCountAfterSecond, uploadCountAfterFirst);
+
     renderer.destroy();
   } finally {
     globalThis.window = originalWindow;

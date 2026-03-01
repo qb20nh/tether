@@ -2,6 +2,7 @@ const TAU = Math.PI * 2;
 const FLOW_STOP_EPSILON = 1e-4;
 const COMPLETE_PATH_THRESHOLD = 0.999;
 const DEFAULT_MAX_PATH_POINTS = 64;
+const BRACKET_PULSE_CYCLES = 3.0;
 const FLOAT_BYTES = Float32Array.BYTES_PER_ELEMENT;
 const UINT16_BYTES = Uint16Array.BYTES_PER_ELEMENT;
 
@@ -35,6 +36,14 @@ const createEmptyMesh = () => ({
   vertexCount: 0,
   indexCount: 0,
   mainTravel: 0,
+});
+
+const createEmptyBracketMesh = () => ({
+  centers: new Float32Array(0),
+  corners: new Float32Array(0),
+  indices: new Uint16Array(0),
+  vertexCount: 0,
+  indexCount: 0,
 });
 
 const buildCornerTurns = (points, segmentLengths, segmentUx, segmentUy, cornerRadius) => {
@@ -557,6 +566,102 @@ const buildUnifiedPathMeshInto = (points, options = {}, out) => {
   return copyIntoMutableMeshStorage(mesh, out);
 };
 
+const toFiniteCenter = (point) => {
+  const x = Number(point?.x);
+  const y = Number(point?.y);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+  return { x, y };
+};
+
+const createMutableBracketStorage = () => ({
+  centers: new Float32Array(0),
+  corners: new Float32Array(0),
+  indices: new Uint16Array(0),
+  vertexCount: 0,
+  indexCount: 0,
+});
+
+const copyIntoMutableBracketStorage = (mesh, out) => {
+  const target = out || createMutableBracketStorage();
+  const vertexCount = Number(mesh?.vertexCount) || 0;
+  const indexCount = Number(mesh?.indexCount) || 0;
+  target.centers = ensureFloatCapacity(target.centers, vertexCount * 2);
+  target.corners = ensureFloatCapacity(target.corners, vertexCount * 2);
+  target.indices = ensureIndexCapacity(target.indices, indexCount);
+
+  if (vertexCount > 0) {
+    target.centers.set(mesh.centers, 0);
+    target.corners.set(mesh.corners, 0);
+  }
+  if (indexCount > 0) {
+    target.indices.set(mesh.indices, 0);
+  }
+
+  target.vertexCount = vertexCount;
+  target.indexCount = indexCount;
+  return target;
+};
+
+export const buildTutorialBracketMesh = (centers) => {
+  if (!Array.isArray(centers) || centers.length === 0) return createEmptyBracketMesh();
+  const safeCenters = centers
+    .map(toFiniteCenter)
+    .filter(Boolean);
+  if (safeCenters.length === 0) return createEmptyBracketMesh();
+
+  const maxBracketCount = Math.floor(65535 / 4);
+  const bracketCount = Math.min(safeCenters.length, maxBracketCount);
+  const positions = new Float32Array(bracketCount * 8);
+  const corners = new Float32Array(bracketCount * 8);
+  const indices = new Uint16Array(bracketCount * 6);
+  let vertexBase = 0;
+  let indexBase = 0;
+
+  for (let i = 0; i < bracketCount; i++) {
+    const center = safeCenters[i];
+    const vertexOffset = i * 8;
+    positions[vertexOffset] = center.x;
+    positions[vertexOffset + 1] = center.y;
+    positions[vertexOffset + 2] = center.x;
+    positions[vertexOffset + 3] = center.y;
+    positions[vertexOffset + 4] = center.x;
+    positions[vertexOffset + 5] = center.y;
+    positions[vertexOffset + 6] = center.x;
+    positions[vertexOffset + 7] = center.y;
+
+    corners[vertexOffset] = -1;
+    corners[vertexOffset + 1] = -1;
+    corners[vertexOffset + 2] = -1;
+    corners[vertexOffset + 3] = 1;
+    corners[vertexOffset + 4] = 1;
+    corners[vertexOffset + 5] = -1;
+    corners[vertexOffset + 6] = 1;
+    corners[vertexOffset + 7] = 1;
+
+    indices[indexBase] = vertexBase;
+    indices[indexBase + 1] = vertexBase + 1;
+    indices[indexBase + 2] = vertexBase + 2;
+    indices[indexBase + 3] = vertexBase + 2;
+    indices[indexBase + 4] = vertexBase + 1;
+    indices[indexBase + 5] = vertexBase + 3;
+    vertexBase += 4;
+    indexBase += 6;
+  }
+
+  return {
+    centers: positions,
+    corners,
+    indices,
+    vertexCount: bracketCount * 4,
+    indexCount: bracketCount * 6,
+  };
+};
+
+const buildTutorialBracketMeshInto = (centers, out) => {
+  const mesh = buildTutorialBracketMesh(centers);
+  return copyIntoMutableBracketStorage(mesh, out);
+};
+
 const createShader = (gl, type, source) => {
   const shader = gl.createShader(type);
   if (!shader) throw new Error('Failed to allocate shader');
@@ -728,6 +833,67 @@ void main() {
 }
 `;
 
+const BRACKET_VERTEX_SHADER_SOURCE = `#version 300 es
+precision highp float;
+layout(location = 0) in vec2 aCenter;
+layout(location = 1) in vec2 aCorner;
+uniform vec2 uCanvasSizePx;
+uniform float uDeviceScale;
+uniform float uHalfSize;
+out vec2 vLocalPx;
+
+void main() {
+  vec2 positionCss = aCenter + (aCorner * uHalfSize);
+  vec2 pixel = positionCss * uDeviceScale;
+  vec2 clip = vec2(
+    (pixel.x / uCanvasSizePx.x) * 2.0 - 1.0,
+    1.0 - (pixel.y / uCanvasSizePx.y) * 2.0
+  );
+  gl_Position = vec4(clip, 0.0, 1.0);
+  vLocalPx = aCorner * uHalfSize;
+}
+`;
+
+const BRACKET_FRAGMENT_SHADER_SOURCE = `#version 300 es
+precision highp float;
+in vec2 vLocalPx;
+uniform float uCornerAnchor;
+uniform float uCornerRadius;
+uniform float uCornerThickness;
+uniform vec3 uColor;
+uniform float uPulse;
+out vec4 outColor;
+
+float ringMask(vec2 point, vec2 center, vec2 quadrantSign, float innerRadius, float outerRadius) {
+  vec2 delta = point - center;
+  float distanceFromCenter = length(delta);
+  float aa = max(0.35, fwidth(distanceFromCenter) * 0.95);
+  float outerMask = 1.0 - smoothstep(outerRadius - aa, outerRadius + aa, distanceFromCenter);
+  float innerMask = smoothstep(innerRadius - aa, innerRadius + aa, distanceFromCenter);
+  float quadrantMask = step(0.0, quadrantSign.x * delta.x) * step(0.0, quadrantSign.y * delta.y);
+  return innerMask * outerMask * quadrantMask;
+}
+
+void main() {
+  vec2 point = vLocalPx;
+  float outerRadius = max(0.0, uCornerRadius);
+  float innerRadius = max(0.0, outerRadius - max(0.0, uCornerThickness));
+  float inwardShift = min(uCornerAnchor, (uCornerRadius * 0.16) * uPulse);
+  vec2 anchor = vec2(max(0.0, uCornerAnchor - inwardShift));
+
+  float mask = 0.0;
+  mask = max(mask, ringMask(point, vec2(-anchor.x, -anchor.y), vec2(-1.0, -1.0), innerRadius, outerRadius));
+  mask = max(mask, ringMask(point, vec2(anchor.x, -anchor.y), vec2(1.0, -1.0), innerRadius, outerRadius));
+  mask = max(mask, ringMask(point, vec2(-anchor.x, anchor.y), vec2(-1.0, 1.0), innerRadius, outerRadius));
+  mask = max(mask, ringMask(point, vec2(anchor.x, anchor.y), vec2(1.0, 1.0), innerRadius, outerRadius));
+  if (mask <= 0.001) discard;
+
+  float alpha = (0.88 + (uPulse * 0.12)) * mask;
+  vec3 color = mix(uColor, vec3(1.0), 0.14 + (uPulse * 0.18));
+  outColor = vec4(color, alpha);
+}
+`;
+
 const getUniforms = (gl, program) => ({
   canvasSizePx: gl.getUniformLocation(program, 'uCanvasSizePx'),
   deviceScale: gl.getUniformLocation(program, 'uDeviceScale'),
@@ -744,6 +910,17 @@ const getUniforms = (gl, program) => ({
   flowPulse: gl.getUniformLocation(program, 'uFlowPulse'),
   flowRise: gl.getUniformLocation(program, 'uFlowRise'),
   flowDrop: gl.getUniformLocation(program, 'uFlowDrop'),
+});
+
+const getBracketUniforms = (gl, program) => ({
+  canvasSizePx: gl.getUniformLocation(program, 'uCanvasSizePx'),
+  deviceScale: gl.getUniformLocation(program, 'uDeviceScale'),
+  halfSize: gl.getUniformLocation(program, 'uHalfSize'),
+  cornerAnchor: gl.getUniformLocation(program, 'uCornerAnchor'),
+  cornerRadius: gl.getUniformLocation(program, 'uCornerRadius'),
+  cornerThickness: gl.getUniformLocation(program, 'uCornerThickness'),
+  color: gl.getUniformLocation(program, 'uColor'),
+  pulse: gl.getUniformLocation(program, 'uPulse'),
 });
 
 const toRgb01Into = (color, out) => {
@@ -766,6 +943,8 @@ export function createPathWebglRenderer(canvas) {
 
   const program = createProgram(gl, VERTEX_SHADER_SOURCE, FRAGMENT_SHADER_SOURCE);
   const uniforms = getUniforms(gl, program);
+  const bracketProgram = createProgram(gl, BRACKET_VERTEX_SHADER_SOURCE, BRACKET_FRAGMENT_SHADER_SOURCE);
+  const bracketUniforms = getBracketUniforms(gl, bracketProgram);
 
   const vao = gl.createVertexArray();
   const positionBuffer = gl.createBuffer();
@@ -775,6 +954,10 @@ export function createPathWebglRenderer(canvas) {
   const cornerAngleBuffer = gl.createBuffer();
   const cornerTravelBuffer = gl.createBuffer();
   const indexBuffer = gl.createBuffer();
+  const bracketVao = gl.createVertexArray();
+  const bracketCenterBuffer = gl.createBuffer();
+  const bracketCornerBuffer = gl.createBuffer();
+  const bracketIndexBuffer = gl.createBuffer();
   if (
     !vao
     || !positionBuffer
@@ -784,6 +967,10 @@ export function createPathWebglRenderer(canvas) {
     || !cornerAngleBuffer
     || !cornerTravelBuffer
     || !indexBuffer
+    || !bracketVao
+    || !bracketCenterBuffer
+    || !bracketCornerBuffer
+    || !bracketIndexBuffer
   ) {
     throw new Error('Failed to allocate WebGL buffers');
   }
@@ -817,6 +1004,18 @@ export function createPathWebglRenderer(canvas) {
   gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
   gl.bindVertexArray(null);
 
+  gl.bindVertexArray(bracketVao);
+  gl.bindBuffer(gl.ARRAY_BUFFER, bracketCenterBuffer);
+  gl.enableVertexAttribArray(0);
+  gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+
+  gl.bindBuffer(gl.ARRAY_BUFFER, bracketCornerBuffer);
+  gl.enableVertexAttribArray(1);
+  gl.vertexAttribPointer(1, 2, gl.FLOAT, false, 0, 0);
+
+  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, bracketIndexBuffer);
+  gl.bindVertexArray(null);
+
   gl.disable(gl.DEPTH_TEST);
   gl.disable(gl.CULL_FACE);
   gl.enable(gl.BLEND);
@@ -834,6 +1033,11 @@ export function createPathWebglRenderer(canvas) {
   let cachedMaxPathPoints = DEFAULT_MAX_PATH_POINTS;
   let cachedGeometryToken = NaN;
   let cachedPoints = new Float32Array(0);
+  const reusableBracketMesh = createMutableBracketStorage();
+  let bracketGeometryCached = false;
+  let cachedBracketPointCount = 0;
+  let cachedBracketGeometryToken = NaN;
+  let cachedBracketPoints = new Float32Array(0);
   const gpuCapacities = {
     position: 0,
     travel: 0,
@@ -842,6 +1046,9 @@ export function createPathWebglRenderer(canvas) {
     cornerAngle: 0,
     cornerTravel: 0,
     index: 0,
+    bracketCenter: 0,
+    bracketCorner: 0,
+    bracketIndex: 0,
   };
   const uniformCache = {
     canvasWidth: NaN,
@@ -864,9 +1071,18 @@ export function createPathWebglRenderer(canvas) {
     flowPulse: NaN,
     flowRise: NaN,
     flowDrop: NaN,
+    bracketHalfSize: NaN,
+    bracketCornerAnchor: NaN,
+    bracketCornerRadius: NaN,
+    bracketCornerThickness: NaN,
+    bracketPulse: NaN,
+    bracketColorR: NaN,
+    bracketColorG: NaN,
+    bracketColorB: NaN,
   };
   const mainColorScratch = { r: 1, g: 1, b: 1 };
   const completeColorScratch = { r: 1, g: 1, b: 1 };
+  const bracketColorScratch = { r: 1, g: 1, b: 1 };
 
   const setUniform1fCached = (location, key, value) => {
     if (Object.is(uniformCache[key], value)) return;
@@ -967,6 +1183,58 @@ export function createPathWebglRenderer(canvas) {
     geometryCached = true;
   };
 
+  const ensureBracketPointSignatureCapacity = (pointCount) => {
+    const minLength = pointCount * 2;
+    if (cachedBracketPoints.length >= minLength) return;
+    cachedBracketPoints = new Float32Array(nextPowerOfTwo(minLength));
+  };
+
+  const computeSafeBracketPointCount = (points) => {
+    const limit = points.length;
+    let count = 0;
+    for (let i = 0; i < limit; i++) {
+      const x = Number(points[i]?.x);
+      const y = Number(points[i]?.y);
+      if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+      count += 1;
+    }
+    return count;
+  };
+
+  const hasBracketGeometryChange = (points) => {
+    const pointCount = computeSafeBracketPointCount(points);
+    if (!bracketGeometryCached) return true;
+    if (cachedBracketPointCount !== pointCount) return true;
+
+    let safeIndex = 0;
+    for (let i = 0; i < points.length; i++) {
+      const x = Number(points[i]?.x);
+      const y = Number(points[i]?.y);
+      if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+      const base = safeIndex * 2;
+      if (cachedBracketPoints[base] !== x || cachedBracketPoints[base + 1] !== y) return true;
+      safeIndex += 1;
+    }
+    return false;
+  };
+
+  const updateBracketGeometrySignature = (points) => {
+    const pointCount = computeSafeBracketPointCount(points);
+    ensureBracketPointSignatureCapacity(pointCount);
+    let safeIndex = 0;
+    for (let i = 0; i < points.length; i++) {
+      const x = Number(points[i]?.x);
+      const y = Number(points[i]?.y);
+      if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+      const base = safeIndex * 2;
+      cachedBracketPoints[base] = x;
+      cachedBracketPoints[base + 1] = y;
+      safeIndex += 1;
+    }
+    cachedBracketPointCount = pointCount;
+    bracketGeometryCached = true;
+  };
+
   const ensureGpuCapacity = (kind, target, requiredBytes) => {
     const required = Math.max(0, requiredBytes | 0);
     if (required <= gpuCapacities[kind]) return;
@@ -1026,6 +1294,31 @@ export function createPathWebglRenderer(canvas) {
     }
   };
 
+  const uploadTutorialBracketMeshToGpu = (mesh) => {
+    const vertexCount = mesh.vertexCount;
+    const indexCount = mesh.indexCount;
+    const centersLength = vertexCount * 2;
+    const cornersLength = vertexCount * 2;
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, bracketCenterBuffer);
+    ensureGpuCapacity('bracketCenter', gl.ARRAY_BUFFER, centersLength * FLOAT_BYTES);
+    if (centersLength > 0) {
+      gl.bufferSubData(gl.ARRAY_BUFFER, 0, mesh.centers, 0, centersLength);
+    }
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, bracketCornerBuffer);
+    ensureGpuCapacity('bracketCorner', gl.ARRAY_BUFFER, cornersLength * FLOAT_BYTES);
+    if (cornersLength > 0) {
+      gl.bufferSubData(gl.ARRAY_BUFFER, 0, mesh.corners, 0, cornersLength);
+    }
+
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, bracketIndexBuffer);
+    ensureGpuCapacity('bracketIndex', gl.ELEMENT_ARRAY_BUFFER, indexCount * UINT16_BYTES);
+    if (indexCount > 0) {
+      gl.bufferSubData(gl.ELEMENT_ARRAY_BUFFER, 0, mesh.indices, 0, indexCount);
+    }
+  };
+
   const clear = () => {
     gl.clear(gl.COLOR_BUFFER_BIT);
   };
@@ -1052,14 +1345,26 @@ export function createPathWebglRenderer(canvas) {
 
   const drawPathFrame = (frame = {}) => {
     const points = Array.isArray(frame.points) ? frame.points : [];
-    if (points.length === 0) {
-      clear();
+    const bracketCenters = Array.isArray(frame.tutorialBracketCenters)
+      ? frame.tutorialBracketCenters
+      : [];
+    const bracketCellSize = Math.max(0, Number(frame.tutorialBracketCellSize) || 0);
+    const hasPathPoints = points.length > 0;
+    const hasTutorialBrackets = bracketCellSize > 0 && bracketCenters.length > 0;
+
+    const flowCycle = Math.max(1, Number(frame.flowCycle) || 1);
+    const flowPulse = Math.max(1, Math.min(Number(frame.flowPulse) || 1, flowCycle));
+    const flowOffset = Number(frame.flowOffset) || 0;
+    const flowEnabled = frame.flowEnabled ? 1 : 0;
+    const flowRise = Number.isFinite(frame.flowRise) ? frame.flowRise : 0.82;
+    const flowDrop = Number.isFinite(frame.flowDrop) ? frame.flowDrop : 0.83;
+
+    if (!hasPathPoints) {
       reusableMesh.vertexCount = 0;
       reusableMesh.indexCount = 0;
       reusableMesh.mainTravel = 0;
       geometryCached = false;
       cachedGeometryToken = NaN;
-      return 0;
     }
 
     const width = Math.max(1, Number(frame.width) || 1);
@@ -1069,107 +1374,183 @@ export function createPathWebglRenderer(canvas) {
     const maxPathPoints = Number.isInteger(frame.maxPathPoints) && frame.maxPathPoints > 0
       ? frame.maxPathPoints
       : DEFAULT_MAX_PATH_POINTS;
-    const nextGeometryToken = Number(frame.geometryToken);
-    const hasGeometryToken = Number.isFinite(nextGeometryToken);
-    const geometryChanged = hasGeometryToken
-      ? (!geometryCached || cachedGeometryToken !== nextGeometryToken)
-      : hasGeometryChange(
-        points,
-        width,
-        startRadius,
-        arrowLength,
-        endHalfWidth,
-        maxPathPoints,
-      );
-    if (geometryChanged) {
-      buildUnifiedPathMeshInto(points, {
-        width,
-        startRadius,
-        arrowLength,
-        endHalfWidth,
-        maxPathPoints,
-      }, reusableMesh);
-      updateGeometrySignature(
-        points,
-        width,
-        startRadius,
-        arrowLength,
-        endHalfWidth,
-        maxPathPoints,
-      );
-      if (hasGeometryToken) {
-        cachedGeometryToken = nextGeometryToken;
-      } else {
-        cachedGeometryToken = NaN;
+    let geometryChanged = false;
+    if (hasPathPoints) {
+      const nextGeometryToken = Number(frame.geometryToken);
+      const hasGeometryToken = Number.isFinite(nextGeometryToken);
+      geometryChanged = hasGeometryToken
+        ? (!geometryCached || cachedGeometryToken !== nextGeometryToken)
+        : hasGeometryChange(
+          points,
+          width,
+          startRadius,
+          arrowLength,
+          endHalfWidth,
+          maxPathPoints,
+        );
+      if (geometryChanged) {
+        buildUnifiedPathMeshInto(points, {
+          width,
+          startRadius,
+          arrowLength,
+          endHalfWidth,
+          maxPathPoints,
+        }, reusableMesh);
+        updateGeometrySignature(
+          points,
+          width,
+          startRadius,
+          arrowLength,
+          endHalfWidth,
+          maxPathPoints,
+        );
+        if (hasGeometryToken) {
+          cachedGeometryToken = nextGeometryToken;
+        } else {
+          cachedGeometryToken = NaN;
+        }
       }
     }
 
+    let bracketGeometryChanged = false;
+    if (hasTutorialBrackets) {
+      const nextBracketGeometryToken = Number(frame.tutorialBracketGeometryToken);
+      const hasBracketGeometryToken = Number.isFinite(nextBracketGeometryToken);
+      bracketGeometryChanged = hasBracketGeometryToken
+        ? (!bracketGeometryCached || cachedBracketGeometryToken !== nextBracketGeometryToken)
+        : hasBracketGeometryChange(bracketCenters);
+      if (bracketGeometryChanged) {
+        buildTutorialBracketMeshInto(bracketCenters, reusableBracketMesh);
+        updateBracketGeometrySignature(bracketCenters);
+        if (hasBracketGeometryToken) {
+          cachedBracketGeometryToken = nextBracketGeometryToken;
+        } else {
+          cachedBracketGeometryToken = NaN;
+        }
+      }
+    } else {
+      reusableBracketMesh.vertexCount = 0;
+      reusableBracketMesh.indexCount = 0;
+      bracketGeometryCached = false;
+      cachedBracketGeometryToken = NaN;
+    }
+
+    if (!hasPathPoints && !hasTutorialBrackets) {
+      clear();
+      return 0;
+    }
+
     clear();
-    if (reusableMesh.indexCount === 0 || reusableMesh.vertexCount === 0) {
-      return reusableMesh.mainTravel;
+    if (hasPathPoints && reusableMesh.indexCount > 0 && reusableMesh.vertexCount > 0) {
+      const completionProgress = clampUnit(Number(frame.completionProgress) || 0);
+      const completionEnabled = frame.isCompletionSolved ? 1 : 0;
+      const completionBoundary = completionProgress >= COMPLETE_PATH_THRESHOLD
+        ? (reusableMesh.mainTravel + arrowLength)
+        : (reusableMesh.mainTravel * completionProgress);
+      const completionFeather = Math.max(width * 2.2, 14);
+      const mainColor = toRgb01Into(frame.mainColorRgb || { r: 255, g: 255, b: 255 }, mainColorScratch);
+      const completeColor = toRgb01Into(
+        frame.completeColorRgb || { r: 46, g: 204, b: 113 },
+        completeColorScratch,
+      );
+
+      gl.useProgram(program);
+      gl.bindVertexArray(vao);
+
+      if (geometryChanged) {
+        uploadMeshToGpu(reusableMesh);
+      }
+
+      setUniform2fCached(uniforms.canvasSizePx, 'canvasWidth', 'canvasHeight', canvas.width, canvas.height);
+      setUniform1fCached(uniforms.deviceScale, 'deviceScale', deviceScale);
+      setUniform3fCached(
+        uniforms.mainColor,
+        'mainR',
+        'mainG',
+        'mainB',
+        mainColor.r,
+        mainColor.g,
+        mainColor.b,
+      );
+      setUniform3fCached(
+        uniforms.completeColor,
+        'completeR',
+        'completeG',
+        'completeB',
+        completeColor.r,
+        completeColor.g,
+        completeColor.b,
+      );
+      setUniform1fCached(uniforms.completionEnabled, 'completionEnabled', completionEnabled);
+      setUniform1fCached(uniforms.completionBoundary, 'completionBoundary', completionBoundary);
+      setUniform1fCached(uniforms.completionFeather, 'completionFeather', completionFeather);
+      setUniform1fCached(uniforms.completionProgress, 'completionProgress', completionProgress);
+      setUniform1fCached(uniforms.completionThreshold, 'completionThreshold', COMPLETE_PATH_THRESHOLD);
+      setUniform1fCached(uniforms.flowEnabled, 'flowEnabled', flowEnabled);
+      setUniform1fCached(uniforms.flowOffset, 'flowOffset', flowOffset);
+      setUniform1fCached(uniforms.flowCycle, 'flowCycle', flowCycle);
+      setUniform1fCached(uniforms.flowPulse, 'flowPulse', flowPulse);
+      setUniform1fCached(uniforms.flowRise, 'flowRise', flowRise);
+      setUniform1fCached(uniforms.flowDrop, 'flowDrop', flowDrop);
+
+      gl.drawElements(gl.TRIANGLES, reusableMesh.indexCount, gl.UNSIGNED_SHORT, 0);
+      gl.bindVertexArray(null);
     }
 
-    const completionProgress = clampUnit(Number(frame.completionProgress) || 0);
-    const completionEnabled = frame.isCompletionSolved ? 1 : 0;
-    const completionBoundary = completionProgress >= COMPLETE_PATH_THRESHOLD
-      ? (reusableMesh.mainTravel + arrowLength)
-      : (reusableMesh.mainTravel * completionProgress);
-    const completionFeather = Math.max(width * 2.2, 14);
+    if (hasTutorialBrackets && reusableBracketMesh.indexCount > 0 && reusableBracketMesh.vertexCount > 0) {
+      const bracketColor = toRgb01Into(
+        frame.tutorialBracketColorRgb || { r: 120, g: 190, b: 255 },
+        bracketColorScratch,
+      );
+      const bracketPulseEnabled = frame.tutorialBracketPulseEnabled ? 1 : 0;
+      const phaseUnit = (() => {
+        const mod = flowOffset % flowCycle;
+        const normalized = mod >= 0 ? mod : mod + flowCycle;
+        return normalized / flowCycle;
+      })();
+      const pulse = bracketPulseEnabled > 0
+        ? (0.5 - (0.5 * Math.cos(phaseUnit * TAU * BRACKET_PULSE_CYCLES)))
+        : 1;
+      const halfSize = bracketCellSize * 0.5;
+      const inset = bracketCellSize * 0.05;
+      const cornerRadius = Math.max(1, (bracketCellSize * 0.2142857143) - inset);
+      const cornerThickness = Math.max(1.2, cornerRadius * 0.31);
+      const cornerAnchor = Math.max(0, halfSize - inset - cornerRadius);
 
-    const flowCycle = Math.max(1, Number(frame.flowCycle) || 1);
-    const flowPulse = Math.max(1, Math.min(Number(frame.flowPulse) || 1, flowCycle));
-    const flowOffset = Number(frame.flowOffset) || 0;
-    const flowEnabled = frame.flowEnabled ? 1 : 0;
-    const flowRise = Number.isFinite(frame.flowRise) ? frame.flowRise : 0.82;
-    const flowDrop = Number.isFinite(frame.flowDrop) ? frame.flowDrop : 0.83;
+      gl.useProgram(bracketProgram);
+      gl.bindVertexArray(bracketVao);
 
-    const mainColor = toRgb01Into(frame.mainColorRgb || { r: 255, g: 255, b: 255 }, mainColorScratch);
-    const completeColor = toRgb01Into(
-      frame.completeColorRgb || { r: 46, g: 204, b: 113 },
-      completeColorScratch,
-    );
+      if (bracketGeometryChanged) {
+        uploadTutorialBracketMeshToGpu(reusableBracketMesh);
+      }
 
-    gl.useProgram(program);
-    gl.bindVertexArray(vao);
+      setUniform2fCached(
+        bracketUniforms.canvasSizePx,
+        'bracketCanvasWidth',
+        'bracketCanvasHeight',
+        canvas.width,
+        canvas.height,
+      );
+      setUniform1fCached(bracketUniforms.deviceScale, 'bracketDeviceScale', deviceScale);
+      setUniform1fCached(bracketUniforms.halfSize, 'bracketHalfSize', halfSize);
+      setUniform1fCached(bracketUniforms.cornerAnchor, 'bracketCornerAnchor', cornerAnchor);
+      setUniform1fCached(bracketUniforms.cornerRadius, 'bracketCornerRadius', cornerRadius);
+      setUniform1fCached(bracketUniforms.cornerThickness, 'bracketCornerThickness', cornerThickness);
+      setUniform3fCached(
+        bracketUniforms.color,
+        'bracketColorR',
+        'bracketColorG',
+        'bracketColorB',
+        bracketColor.r,
+        bracketColor.g,
+        bracketColor.b,
+      );
+      setUniform1fCached(bracketUniforms.pulse, 'bracketPulse', pulse);
 
-    if (geometryChanged) {
-      uploadMeshToGpu(reusableMesh);
+      gl.drawElements(gl.TRIANGLES, reusableBracketMesh.indexCount, gl.UNSIGNED_SHORT, 0);
+      gl.bindVertexArray(null);
     }
 
-    setUniform2fCached(uniforms.canvasSizePx, 'canvasWidth', 'canvasHeight', canvas.width, canvas.height);
-    setUniform1fCached(uniforms.deviceScale, 'deviceScale', deviceScale);
-    setUniform3fCached(
-      uniforms.mainColor,
-      'mainR',
-      'mainG',
-      'mainB',
-      mainColor.r,
-      mainColor.g,
-      mainColor.b,
-    );
-    setUniform3fCached(
-      uniforms.completeColor,
-      'completeR',
-      'completeG',
-      'completeB',
-      completeColor.r,
-      completeColor.g,
-      completeColor.b,
-    );
-    setUniform1fCached(uniforms.completionEnabled, 'completionEnabled', completionEnabled);
-    setUniform1fCached(uniforms.completionBoundary, 'completionBoundary', completionBoundary);
-    setUniform1fCached(uniforms.completionFeather, 'completionFeather', completionFeather);
-    setUniform1fCached(uniforms.completionProgress, 'completionProgress', completionProgress);
-    setUniform1fCached(uniforms.completionThreshold, 'completionThreshold', COMPLETE_PATH_THRESHOLD);
-    setUniform1fCached(uniforms.flowEnabled, 'flowEnabled', flowEnabled);
-    setUniform1fCached(uniforms.flowOffset, 'flowOffset', flowOffset);
-    setUniform1fCached(uniforms.flowCycle, 'flowCycle', flowCycle);
-    setUniform1fCached(uniforms.flowPulse, 'flowPulse', flowPulse);
-    setUniform1fCached(uniforms.flowRise, 'flowRise', flowRise);
-    setUniform1fCached(uniforms.flowDrop, 'flowDrop', flowDrop);
-
-    gl.drawElements(gl.TRIANGLES, reusableMesh.indexCount, gl.UNSIGNED_SHORT, 0);
-    gl.bindVertexArray(null);
     return reusableMesh.mainTravel;
   };
 
@@ -1181,8 +1562,13 @@ export function createPathWebglRenderer(canvas) {
     gl.deleteBuffer(cornerAngleBuffer);
     gl.deleteBuffer(cornerTravelBuffer);
     gl.deleteBuffer(indexBuffer);
+    gl.deleteBuffer(bracketCenterBuffer);
+    gl.deleteBuffer(bracketCornerBuffer);
+    gl.deleteBuffer(bracketIndexBuffer);
     gl.deleteVertexArray(vao);
+    gl.deleteVertexArray(bracketVao);
     gl.deleteProgram(program);
+    gl.deleteProgram(bracketProgram);
   };
 
   resize(canvas.clientWidth || 1, canvas.clientHeight || 1, window.devicePixelRatio || 1);
