@@ -1,6 +1,6 @@
 export const LEVELS = [
   {
-    "name": "튜토리얼 1) 기본 (3x3)",
+    "name": "기본 1) 기본",
     "nameKey": "level.tutorial_1.name",
     "desc": "아무 칸에서 시작해 모든 칸을 정확히 1번씩 방문하세요.",
     "descKey": "level.tutorial_1.desc",
@@ -40,7 +40,7 @@ export const LEVELS = [
     }
   },
   {
-    "name": "튜토리얼 2) Turn(any)",
+    "name": "기본 2) Turn(any)",
     "nameKey": "level.tutorial_2.name",
     "desc": "이 아이콘(꺾임)은 해당 칸에서 반드시 방향을 꺾어야 합니다.",
     "descKey": "level.tutorial_2.desc",
@@ -81,7 +81,7 @@ export const LEVELS = [
     }
   },
   {
-    "name": "튜토리얼 3) Straight + H/V",
+    "name": "기본 3) Straight + H/V",
     "nameKey": "level.tutorial_3.name",
     "desc": "직진/가로/세로 힌트는 해당 칸에서 '직진' 형태를 강제합니다.",
     "descKey": "level.tutorial_3.desc",
@@ -122,7 +122,7 @@ export const LEVELS = [
     }
   },
   {
-    "name": "튜토리얼 4) CW / CCW",
+    "name": "기본 4) CW / CCW",
     "nameKey": "level.tutorial_4.name",
     "desc": "CW(r)는 이전→다음 이동이 시계 방향 회전이어야 하고, CCW(l)는 반시계 방향 회전이어야 합니다.",
     "descKey": "level.tutorial_4.desc",
@@ -163,7 +163,7 @@ export const LEVELS = [
     }
   },
   {
-    "name": "튜토리얼 5) Cross Stitch",
+    "name": "기본 5) Cross Stitch",
     "nameKey": "level.tutorial_5.name",
     "desc": "X 꼭짓점에서는 두 대각선 연결(↘︎↖︎, ↙︎↗︎)이 모두 강제됩니다. 따라서 대각선 이동이 필요합니다.",
     "descKey": "level.tutorial_5.desc",
@@ -209,7 +209,7 @@ export const LEVELS = [
     }
   },
   {
-    "name": "튜토리얼 6) Corner Count (0-3)",
+    "name": "기본 6) Corner Count (0-3)",
     "nameKey": "level.tutorial_6.name",
     "desc": "숫자는 해당 꼭짓점 주변 4칸 사이에서 경로가 만드는 연결 수(0~3)를 뜻합니다.",
     "descKey": "level.tutorial_6.desc",
@@ -262,7 +262,7 @@ export const LEVELS = [
     }
   },
   {
-    "name": "튜토리얼 7) 가위/바위/보 순서",
+    "name": "기본 7) 가위/바위/보 순서",
     "nameKey": "level.tutorial_7.name",
     "desc": "이 심볼 타일만 따로 봤을 때 방문 순서가 가위→바위→보→가위…(승자 순환)여야 합니다.",
     "descKey": "level.tutorial_7.desc",
@@ -303,7 +303,7 @@ export const LEVELS = [
     }
   },
   {
-    "name": "튜토리얼 8) 움직이는 벽",
+    "name": "기본 8) 움직이는 벽",
     "nameKey": "level.tutorial_8.name",
     "desc": "벽(이동 가능)을 드래그해서 빈 칸으로 옮기세요. (힌트/가위바위보 타일 위에는 놓을 수 없음)",
     "descKey": "level.tutorial_8.desc",
@@ -345,7 +345,7 @@ export const LEVELS = [
     }
   },
   {
-    "name": "파일럿 1) Basic (4x4)",
+    "name": "Practice 1) Basic",
     "nameKey": "level.pilot_1.name",
     "desc": "힌트 섞인 기본형.",
     "descKey": "level.pilot_1.desc",
@@ -386,7 +386,7 @@ export const LEVELS = [
     }
   },
   {
-    "name": "파일럿 2) Axis Locks (5x5)",
+    "name": "Practice 2) Axis Locks",
     "nameKey": "level.pilot_2.name",
     "desc": "가로/세로 직진 힌트로 공간을 잠그는 유형.",
     "descKey": "level.pilot_2.desc",
@@ -428,7 +428,7 @@ export const LEVELS = [
     }
   },
   {
-    "name": "파일럿 3) CW/CCW + Walls (5x5)",
+    "name": "Practice 3) CW/CCW + Walls",
     "nameKey": "level.pilot_3.name",
     "desc": "방향성 꺾임 + 벽 조합.",
     "descKey": "level.pilot_3.desc",
@@ -470,7 +470,7 @@ export const LEVELS = [
     }
   },
   {
-    "name": "파일럿 4) Cross Stitch (5x5)",
+    "name": "Practice 4) Cross Stitch",
     "nameKey": "level.pilot_4.name",
     "desc": "스티치 1개.",
     "descKey": "level.pilot_4.desc",
@@ -517,7 +517,7 @@ export const LEVELS = [
     }
   },
   {
-    "name": "파일럿 5) Multi Stitch + CW/CCW (6x6)",
+    "name": "Practice 5) Multi Stitch + CW/CCW",
     "nameKey": "level.pilot_5.name",
     "desc": "스티치 다중 + 방향성 꺾임.",
     "descKey": "level.pilot_5.desc",
@@ -573,7 +573,7 @@ export const LEVELS = [
     }
   },
   {
-    "name": "파일럿 6) Stitch in a Broken Field (6x6)",
+    "name": "Practice 6) Stitch in a Broken Field",
     "nameKey": "level.pilot_6.name",
     "desc": "벽이 많을 때 스티치가 만드는 강제 분기.",
     "descKey": "level.pilot_6.desc",
@@ -621,7 +621,7 @@ export const LEVELS = [
     }
   },
   {
-    "name": "파일럿 7) Stress (7x7)",
+    "name": "Practice 7) Stress",
     "nameKey": "level.pilot_7.name",
     "desc": "스티치 + 벽 + 방향 힌트 혼합.",
     "descKey": "level.pilot_7.desc",
@@ -674,7 +674,7 @@ export const LEVELS = [
     }
   },
   {
-    "name": "파일럿 8) RPS Spread (5x5)",
+    "name": "Practice 8) RPS Spread",
     "nameKey": "level.pilot_8.name",
     "desc": "가위/바위/보 타일을 순서대로 '통과'하도록 경로를 설계해 보세요.",
     "descKey": "level.pilot_8.desc",
@@ -716,7 +716,7 @@ export const LEVELS = [
     }
   },
   {
-    "name": "파일럿 9) RPS + Stitch (5x5)",
+    "name": "Practice 9) RPS + Stitch",
     "nameKey": "level.pilot_9.name",
     "desc": "RPS 순서 제약 + 스티치(대각선 강제) 결합.",
     "descKey": "level.pilot_9.desc",
@@ -763,7 +763,7 @@ export const LEVELS = [
     }
   },
   {
-    "name": "파일럿 10) Movable Walls x2 (6x6)",
+    "name": "Practice 10) Movable Walls x2",
     "nameKey": "level.pilot_10.name",
     "desc": "이동 가능한 벽 2개. 퍼즐을 풀기 전에 벽을 재배치해 보세요.",
     "descKey": "level.pilot_10.desc",
@@ -806,7 +806,7 @@ export const LEVELS = [
     }
   },
   {
-    "name": "파일럿 11) Corner Weave (6x6)",
+    "name": "Practice 11) Corner Weave",
     "nameKey": "level.pilot_11.name",
     "desc": "Corner count + 방향성 힌트 + 스티치 조합. 제약을 만족하는 순서가 다른 해법이 2개 이상 존재합니다.",
     "descKey": "level.pilot_11.desc",
@@ -879,7 +879,7 @@ export const LEVELS = [
     }
   },
   {
-    "name": "파일럿 12) Trinity Weave (7x7)",
+    "name": "Practice 12) Trinity Weave",
     "nameKey": "level.pilot_12.name",
     "desc": "가위바위보 제약과 스티치가 교차하는 최고 난이도 퍼즐입니다.",
     "descKey": "level.pilot_12.desc",

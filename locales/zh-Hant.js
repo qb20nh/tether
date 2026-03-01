@@ -20,6 +20,7 @@ export default {
     "prevInfiniteDisabledFirst": "目前是無限 #1。",
     "infiniteLevelOption": "無限 #{{n}}",
     "dailyLevelOption": "每日",
+    "dailyLevelOptionWithDate": "{{label}}（{{date}}）",
     "dailyUnavailable": "每日（不可用）",
     "dailyComplete": "每日已完成",
     "dailyDateLabel": "日期",
@@ -61,7 +62,7 @@ export default {
   },
   "level": {
     "tutorial_1": {
-      "name": "教學1）基礎 (3x3)",
+      "name": "教學1）基礎",
       "desc": "從任意格子開始，造訪每個格子恰好一次。"
     },
     "tutorial_2": {
@@ -93,51 +94,51 @@ export default {
       "desc": "將可移動牆拖到空格上。 (不能放在提示或 RPS 格上)"
     },
     "pilot_1": {
-      "name": "試煉1）基礎 (4x4)",
+      "name": "練習1）基礎",
       "desc": "含混合提示的基礎版面。"
     },
     "pilot_2": {
-      "name": "試煉2）軸向鎖定 (5x5)",
+      "name": "練習2）軸向鎖定",
       "desc": "水平／垂直直行提示會鎖定空間。"
     },
     "pilot_3": {
-      "name": "試煉3）順逆時針 + 牆 (5x5)",
+      "name": "練習3）順逆時針 + 牆",
       "desc": "方向轉彎配合牆。"
     },
     "pilot_4": {
-      "name": "試煉4）十字鉤 (5x5)",
+      "name": "練習4）十字鉤",
       "desc": "單一十字鉤約束。"
     },
     "pilot_5": {
-      "name": "試煉5）多重十字鉤 + 順逆時針 (6x6)",
+      "name": "練習5）多重十字鉤 + 順逆時針",
       "desc": "多個十字鉤與方向轉彎組合。"
     },
     "pilot_6": {
-      "name": "試煉6）斷裂區域中的十字鉤 (6x6)",
+      "name": "練習6）斷裂區域中的十字鉤",
       "desc": "牆與十字鉤一起製造分岔選擇。"
     },
     "pilot_7": {
-      "name": "試煉7）壓力 (7x7)",
+      "name": "練習7）壓力",
       "desc": "十字鉤、牆和方向提示混合。"
     },
     "pilot_8": {
-      "name": "試煉8）RPS 擴散 (5x5)",
+      "name": "練習8）RPS 擴散",
       "desc": "設計一條路徑，按順序通過剪刀/石頭/布。"
     },
     "pilot_9": {
-      "name": "試煉9）RPS + 十字鉤 (5x5)",
+      "name": "練習9）RPS + 十字鉤",
       "desc": "RPS 順序與十字鉤（對角線強制）約束組合。"
     },
     "pilot_10": {
-      "name": "試煉10）雙可移動牆 (6x6)",
+      "name": "練習10）雙可移動牆",
       "desc": "兩個可移動牆。解題前先重新擺放。"
     },
     "pilot_11": {
-      "name": "試煉11）角落編織 (6x6)",
+      "name": "練習11）角落編織",
       "desc": "由角落數、方向提示與交錯約束組成。"
     },
     "pilot_12": {
-      "name": "試煉12）三位一體編織 (7x7)",
+      "name": "練習12）三位一體編織",
       "desc": "石頭剪刀布約束與縫線約束交叉的謎題。"
     }
   }

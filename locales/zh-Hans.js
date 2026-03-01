@@ -20,6 +20,7 @@ export default {
     "prevInfiniteDisabledFirst": "当前是无限 #1。",
     "infiniteLevelOption": "无限 #{{n}}",
     "dailyLevelOption": "每日",
+    "dailyLevelOptionWithDate": "{{label}}（{{date}}）",
     "dailyUnavailable": "每日（不可用）",
     "dailyComplete": "每日已完成",
     "dailyDateLabel": "日期",
@@ -61,7 +62,7 @@ export default {
   },
   "level": {
     "tutorial_1": {
-      "name": "教程1）基础 (3x3)",
+      "name": "教程1）基础",
       "desc": "从任意格子开始，访问每个格子恰好一次。"
     },
     "tutorial_2": {
@@ -93,51 +94,51 @@ export default {
       "desc": "将可移动墙拖到空格上。 (不能放在提示或 RPS 格上)"
     },
     "pilot_1": {
-      "name": "试炼1）基础 (4x4)",
+      "name": "练习1）基础",
       "desc": "带有混合提示的基础布局。"
     },
     "pilot_2": {
-      "name": "试炼2）坐标锁 (5x5)",
+      "name": "练习2）坐标锁",
       "desc": "水平/垂直直行提示会锁定路径空间。"
     },
     "pilot_3": {
-      "name": "试炼3）顺逆时针 + 墙 (5x5)",
+      "name": "练习3）顺逆时针 + 墙",
       "desc": "方向转弯与墙组合。"
     },
     "pilot_4": {
-      "name": "试炼4）十字针 (5x5)",
+      "name": "练习4）十字针",
       "desc": "单个十字针约束。"
     },
     "pilot_5": {
-      "name": "试炼5）多重十字针 + 顺逆时针 (6x6)",
+      "name": "练习5）多重十字针 + 顺逆时针",
       "desc": "多个十字针与方向转弯组合。"
     },
     "pilot_6": {
-      "name": "试炼6）断裂区域中的十字针 (6x6)",
+      "name": "练习6）断裂区域中的十字针",
       "desc": "墙和十字针共同形成分支决策。"
     },
     "pilot_7": {
-      "name": "试炼7）高压 (7x7)",
+      "name": "练习7）高压",
       "desc": "十字针、墙和方向提示混合。"
     },
     "pilot_8": {
-      "name": "试炼8）RPS 扩散 (5x5)",
+      "name": "练习8）RPS 扩散",
       "desc": "设计一条路径按顺序经过剪刀/石头/布。"
     },
     "pilot_9": {
-      "name": "试炼9）RPS + 十字针 (5x5)",
+      "name": "练习9）RPS + 十字针",
       "desc": "RPS顺序与十字针（对角线强制）约束组合。"
     },
     "pilot_10": {
-      "name": "试炼10）两个可移动墙 (6x6)",
+      "name": "练习10）两个可移动墙",
       "desc": "两个可移动墙。解题前先重新摆放。"
     },
     "pilot_11": {
-      "name": "试炼11）角点编织 (6x6)",
+      "name": "练习11）角点编织",
       "desc": "由角点计数、方向提示和缝线约束组成。"
     },
     "pilot_12": {
-      "name": "试炼12）三位一体编织 (7x7)",
+      "name": "练习12）三位一体编织",
       "desc": "石头剪刀布约束与缝线约束交叉的谜题。"
     }
   }

@@ -16,6 +16,7 @@ const INFINITE_SELECTOR_ACTIONS = Object.freeze({
 const isRtlLocale = (locale) => /^ar/i.test(locale || '');
 const DAY_MS = 24 * 60 * 60 * 1000;
 const EVALUATE_CACHE_LIMIT = 96;
+const LEVEL_SIZE_SUFFIX_RE = /\s*[（(]\s*\d+\s*[xX×]\s*\d+\s*[)）]\s*$/u;
 
 const applyTextDirection = (locale) => {
   const direction = isRtlLocale(locale) ? 'rtl' : 'ltr';
@@ -168,11 +169,31 @@ export function createRuntime(options) {
   };
 
   const resolveLevelName = (level) => {
+    const stripBoardSizeSuffix = (value) => String(value || '').replace(LEVEL_SIZE_SUFFIX_RE, '').trim();
+    const resolveBoardSizeLabel = (targetLevel) => {
+      const grid = targetLevel?.grid;
+      if (!Array.isArray(grid) || grid.length === 0) return '';
+      const firstRow = grid[0];
+      if (typeof firstRow !== 'string' || firstRow.length === 0) return '';
+      return `${firstRow.length}x${grid.length}`;
+    };
+
+    let name = '';
     if (level?.nameKey) {
       const translated = translate(level.nameKey);
-      if (translated !== level.nameKey) return translated;
+      if (translated !== level.nameKey) {
+        name = translated;
+      }
     }
-    return level?.name || '';
+    if (!name) {
+      name = level?.name || '';
+    }
+
+    const baseName = stripBoardSizeSuffix(name);
+    const sizeLabel = resolveBoardSizeLabel(level);
+    if (!sizeLabel) return baseName;
+    if (!baseName) return sizeLabel;
+    return `${baseName} (${sizeLabel})`;
   };
 
   const applyPanelVisibility = (panelEl, buttonEl, panel, isHidden) => {
@@ -513,7 +534,10 @@ export function createRuntime(options) {
       if (!hasDailyLevel) return translate('ui.dailyUnavailable');
       const base = translate('ui.dailyLevelOption');
       if (!activeDailyId) return base;
-      return `${base}(${formatDailyMonthDayLabel(activeDailyId, activeLocale)})`;
+      const date = formatDailyMonthDayLabel(activeDailyId, activeLocale);
+      const templated = translate('ui.dailyLevelOptionWithDate', { label: base, date });
+      if (templated !== 'ui.dailyLevelOptionWithDate') return templated;
+      return `${base}(${date})`;
     })();
     const dailyDisabled = hasDailyLevel ? '' : 'disabled';
     optionHtml += `<option value="${dailyAbsIndex}" ${dailyDisabled} ${dailyAbsIndex === currentIndex ? 'selected' : ''}>${dailyLabel}</option>`;

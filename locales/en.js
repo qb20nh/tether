@@ -20,6 +20,7 @@ export default {
     "prevInfiniteDisabledFirst": "You are at the first infinite level.",
     "infiniteLevelOption": "Infinite #{{n}}",
     "dailyLevelOption": "Daily",
+    "dailyLevelOptionWithDate": "{{label}} ({{date}})",
     "dailyUnavailable": "Daily (Unavailable)",
     "dailyComplete": "Daily complete",
     "dailyDateLabel": "Date",
@@ -61,7 +62,7 @@ export default {
   },
   "level": {
     "tutorial_1": {
-      "name": "Tutorial 1) Basic (3x3)",
+      "name": "Tutorial 1) Basic",
       "desc": "Start on any cell and visit every cell exactly once."
     },
     "tutorial_2": {
@@ -93,51 +94,51 @@ export default {
       "desc": "Drag the movable wall to an empty cell. (Cannot place on hint/RPS tiles)"
     },
     "pilot_1": {
-      "name": "Pilot 1) Basic (4x4)",
+      "name": "Practice 1) Basic",
       "desc": "A basic layout with mixed hints."
     },
     "pilot_2": {
-      "name": "Pilot 2) Axis Locks (5x5)",
+      "name": "Practice 2) Axis Locks",
       "desc": "Spaces are locked by horizontal/vertical straight clues."
     },
     "pilot_3": {
-      "name": "Pilot 3) CW/CCW + Walls (5x5)",
+      "name": "Practice 3) CW/CCW + Walls",
       "desc": "Directional turns combined with walls."
     },
     "pilot_4": {
-      "name": "Pilot 4) Cross Stitch (5x5)",
+      "name": "Practice 4) Cross Stitch",
       "desc": "One stitch constraint."
     },
     "pilot_5": {
-      "name": "Pilot 5) Multi Stitch + CW/CCW (6x6)",
+      "name": "Practice 5) Multi Stitch + CW/CCW",
       "desc": "Multiple stitches with directional turns."
     },
     "pilot_6": {
-      "name": "Pilot 6) Stitch in a Broken Field (6x6)",
+      "name": "Practice 6) Stitch in a Broken Field",
       "desc": "Walls force branch decisions via stitches."
     },
     "pilot_7": {
-      "name": "Pilot 7) Stress (7x7)",
+      "name": "Practice 7) Stress",
       "desc": "A mix of stitches, walls, and directional clues."
     },
     "pilot_8": {
-      "name": "Pilot 8) RPS Spread (5x5)",
+      "name": "Practice 8) RPS Spread",
       "desc": "Design a path to pass through Scissors/Rock/Paper in order."
     },
     "pilot_9": {
-      "name": "Pilot 9) RPS + Stitch (5x5)",
+      "name": "Practice 9) RPS + Stitch",
       "desc": "Combined RPS ordering and stitch (forced diagonal) constraints."
     },
     "pilot_10": {
-      "name": "Pilot 10) Movable Walls x2 (6x6)",
+      "name": "Practice 10) Movable Walls x2",
       "desc": "Two movable walls. Rearrange them before solving."
     },
     "pilot_11": {
-      "name": "Pilot 11) Corner Weave (6x6)",
+      "name": "Practice 11) Corner Weave",
       "desc": "A mix of corner counts, directional hints, and stitches."
     },
     "pilot_12": {
-      "name": "Pilot 12) Trinity Weave (7x7)",
+      "name": "Practice 12) Trinity Weave",
       "desc": "A puzzle where Rock-Paper-Scissors constraints cross stitches."
     }
   }

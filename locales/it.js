@@ -20,6 +20,7 @@ export default {
     "prevInfiniteDisabledFirst": "Sei a Infinito #1.",
     "infiniteLevelOption": "Infinito #{{n}}",
     "dailyLevelOption": "Giornaliero",
+    "dailyLevelOptionWithDate": "{{label}} ({{date}})",
     "dailyUnavailable": "Giornaliero (Non disponibile)",
     "dailyComplete": "Giornaliero completato",
     "dailyDateLabel": "Data",
@@ -61,7 +62,7 @@ export default {
   },
   "level": {
     "tutorial_1": {
-      "name": "Lezione 1) Base (3x3)",
+      "name": "Lezione 1) Base",
       "desc": "Inizia da qualsiasi cella e visita ogni cella esattamente una volta."
     },
     "tutorial_2": {
@@ -93,51 +94,51 @@ export default {
       "desc": "Trascina il muro mobile su una cella vuota (non puoi metterlo su suggerimenti o tessere RPS)."
     },
     "pilot_1": {
-      "name": "Pilota 1) Base (4x4)",
+      "name": "Esercizio 1) Base",
       "desc": "Un layout di base con suggerimenti misti."
     },
     "pilot_2": {
-      "name": "Pilota 2) Blocco d’asse (5x5)",
+      "name": "Esercizio 2) Blocco d’asse",
       "desc": "Gli spazi sono bloccati da indicazioni diritte orizzontali/verticali."
     },
     "pilot_3": {
-      "name": "Pilota 3) CW/CCW + Muri (5x5)",
+      "name": "Esercizio 3) CW/CCW + Muri",
       "desc": "Curve direzionali combinate con muri."
     },
     "pilot_4": {
-      "name": "Pilota 4) Cucitura incrociata (5x5)",
+      "name": "Esercizio 4) Cucitura incrociata",
       "desc": "Una condizione di cucitura."
     },
     "pilot_5": {
-      "name": "Pilota 5) Cuciture multiple + CW/CCW (6x6)",
+      "name": "Esercizio 5) Cuciture multiple + CW/CCW",
       "desc": "Più cuciture con curve direzionali."
     },
     "pilot_6": {
-      "name": "Pilota 6) Cuciture in area spezzata (6x6)",
+      "name": "Esercizio 6) Cuciture in area spezzata",
       "desc": "I muri costringono scelte di diramazione tramite cuciture."
     },
     "pilot_7": {
-      "name": "Pilota 7) Stress (7x7)",
+      "name": "Esercizio 7) Stress",
       "desc": "Una combinazione di cuciture, muri e suggerimenti direzionali."
     },
     "pilot_8": {
-      "name": "Pilota 8) Diffusione RPS (5x5)",
+      "name": "Esercizio 8) Diffusione RPS",
       "desc": "Disegna un percorso che passi per Forbice/Sasso/Carta in ordine."
     },
     "pilot_9": {
-      "name": "Pilota 9) RPS + Cucitura (5x5)",
+      "name": "Esercizio 9) RPS + Cucitura",
       "desc": "Combinazione di vincoli RPS ordinati e cucitura (diagonale forzata)."
     },
     "pilot_10": {
-      "name": "Pilota 10) Due muri mobili (6x6)",
+      "name": "Esercizio 10) Due muri mobili",
       "desc": "Due muri mobili. Riordinali prima di iniziare."
     },
     "pilot_11": {
-      "name": "Pilota 11) Intreccio d'angoli (6x6)",
+      "name": "Esercizio 11) Intreccio d'angoli",
       "desc": "Un mix di conteggi d'angolo, suggerimenti direzionali e cuciture."
     },
     "pilot_12": {
-      "name": "Pilota 12) Trama trinitaria (7x7)",
+      "name": "Esercizio 12) Trama trinitaria",
       "desc": "Un rompicapo in cui i vincoli RPS si incrociano con le cuciture."
     }
   }

@@ -20,6 +20,7 @@ export default {
     "prevInfiniteDisabledFirst": "Você está no Infinito #1.",
     "infiniteLevelOption": "Infinito #{{n}}",
     "dailyLevelOption": "Diário",
+    "dailyLevelOptionWithDate": "{{label}} ({{date}})",
     "dailyUnavailable": "Diário (Indisponível)",
     "dailyComplete": "Diário concluído",
     "dailyDateLabel": "Data",
@@ -61,7 +62,7 @@ export default {
   },
   "level": {
     "tutorial_1": {
-      "name": "Lição 1) Básico (3x3)",
+      "name": "Lição 1) Básico",
       "desc": "Comece em qualquer célula e visite cada célula exatamente uma vez."
     },
     "tutorial_2": {
@@ -93,51 +94,51 @@ export default {
       "desc": "Arraste a parede móvel para uma célula vazia. (Não pode ficar em dicas/tiles RPS)"
     },
     "pilot_1": {
-      "name": "Piloto 1) Básico (4x4)",
+      "name": "Prática 1) Básico",
       "desc": "Um layout básico com pistas mistas."
     },
     "pilot_2": {
-      "name": "Piloto 2) Travamentos de eixo (5x5)",
+      "name": "Prática 2) Travamentos de eixo",
       "desc": "Os espaços são travados por pistas horizontais/verticais retas."
     },
     "pilot_3": {
-      "name": "Piloto 3) CW/CCW + Paredes (5x5)",
+      "name": "Prática 3) CW/CCW + Paredes",
       "desc": "Viradas direcionais combinadas com paredes."
     },
     "pilot_4": {
-      "name": "Piloto 4) Costura cruzada (5x5)",
+      "name": "Prática 4) Costura cruzada",
       "desc": "Uma única restrição de costura."
     },
     "pilot_5": {
-      "name": "Piloto 5) Múltiplas costuras + CW/CCW (6x6)",
+      "name": "Prática 5) Múltiplas costuras + CW/CCW",
       "desc": "Múltiplas costuras com viradas direcionais."
     },
     "pilot_6": {
-      "name": "Piloto 6) Costura em campo quebrado (6x6)",
+      "name": "Prática 6) Costura em campo quebrado",
       "desc": "As paredes forçam decisões de ramificação por costuras."
     },
     "pilot_7": {
-      "name": "Piloto 7) Estresse (7x7)",
+      "name": "Prática 7) Estresse",
       "desc": "Uma mistura de costuras, paredes e pistas de direção."
     },
     "pilot_8": {
-      "name": "Piloto 8) Dispersão RPS (5x5)",
+      "name": "Prática 8) Dispersão RPS",
       "desc": "Desenhe um caminho para passar por Tesoura/Pedra/Papel nesta ordem."
     },
     "pilot_9": {
-      "name": "Piloto 9) RPS + Costura (5x5)",
+      "name": "Prática 9) RPS + Costura",
       "desc": "Ordem de RPS e restrições de costura (diagonal obrigatória) combinadas."
     },
     "pilot_10": {
-      "name": "Piloto 10) Duas paredes móveis (6x6)",
+      "name": "Prática 10) Duas paredes móveis",
       "desc": "Duas paredes móveis. Rearranje antes de resolver."
     },
     "pilot_11": {
-      "name": "Piloto 11) Tecido de cantos (6x6)",
+      "name": "Prática 11) Tecido de cantos",
       "desc": "Uma mistura de contagem de cantos, dicas direcionais e costuras."
     },
     "pilot_12": {
-      "name": "Piloto 12) Tecido trinitário (7x7)",
+      "name": "Prática 12) Tecido trinitário",
       "desc": "Um quebra-cabeça em que as restrições de Pedra, Papel e Tesoura cruzam as costuras."
     }
   }
