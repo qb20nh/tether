@@ -1226,7 +1226,7 @@ export const selectDefaultInfiniteCandidate = (infiniteIndex) => {
 export const selectDefaultInfiniteVariant = (infiniteIndex) =>
   selectDefaultInfiniteCandidate(infiniteIndex).variantId;
 
-const LEVEL_CACHE_LIMIT = 256;
+const LEVEL_CACHE_LIMIT = 64;
 const generatedLevelCache = new Map();
 
 const getCachedLevel = (infiniteIndex) => {

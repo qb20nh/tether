@@ -31,6 +31,13 @@ const DAILY_PAYLOAD_URL = resolveDailyPayloadUrl();
 const DAILY_HARD_INVALIDATE_GRACE_MS = 60 * 1000;
 
 let runtimeInstance = null;
+let runtimeTeardownBound = false;
+
+const teardownRuntime = () => {
+  if (!runtimeInstance) return;
+  runtimeInstance.destroy();
+  runtimeInstance = null;
+};
 
 const utcDateIdFromMs = (ms) => {
   const date = new Date(ms);
@@ -216,6 +223,12 @@ const setupDailyHardInvalidationWatcher = (bootDaily) => {
 };
 
 export async function initTetherApp() {
+  if (!runtimeTeardownBound) {
+    window.addEventListener('pagehide', teardownRuntime);
+    window.addEventListener('beforeunload', teardownRuntime);
+    runtimeTeardownBound = true;
+  }
+
   mountStyles();
 
   const appEl = document.getElementById(ELEMENT_IDS.APP);

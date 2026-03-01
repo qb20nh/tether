@@ -11,7 +11,7 @@ export function createLevelProvider(options = {}) {
     : generateInfiniteLevel;
   const cacheLimit = Number.isInteger(options.cacheLimit) && options.cacheLimit > 0
     ? options.cacheLimit
-    : 48;
+    : 24;
 
   const dailyLevel = options.dailyLevel && Array.isArray(options.dailyLevel.grid)
     ? options.dailyLevel

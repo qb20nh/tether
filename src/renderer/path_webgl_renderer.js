@@ -1569,6 +1569,12 @@ export function createPathWebglRenderer(canvas) {
     gl.deleteVertexArray(bracketVao);
     gl.deleteProgram(program);
     gl.deleteProgram(bracketProgram);
+    const loseContextExt = typeof gl.getExtension === 'function'
+      ? gl.getExtension('WEBGL_lose_context')
+      : null;
+    if (loseContextExt && typeof loseContextExt.loseContext === 'function') {
+      loseContextExt.loseContext();
+    }
   };
 
   resize(canvas.clientWidth || 1, canvas.clientHeight || 1, window.devicePixelRatio || 1);

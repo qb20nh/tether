@@ -16,7 +16,7 @@ const INFINITE_SELECTOR_ACTIONS = Object.freeze({
 });
 const isRtlLocale = (locale) => /^ar/i.test(locale || '');
 const DAY_MS = 24 * 60 * 60 * 1000;
-const EVALUATE_CACHE_LIMIT = 96;
+const EVALUATE_CACHE_LIMIT = 24;
 const TUTORIAL_PRACTICE_NAME_PREFIX_RE = /^\s*.+?\d+\s*[)）]\s*/u;
 
 const applyTextDirection = (locale) => {
@@ -802,6 +802,29 @@ export function createRuntime(options) {
     return `${cursor.r},${cursor.c}`;
   };
 
+  const isPathDragCursorOnActiveEndpoint = (
+    snapshot,
+    isPathDragging,
+    pathDragSide,
+    pathDragCursor,
+  ) => {
+    if (!isPathDragging) return false;
+    const side = pathDragSide;
+    const cursor = pathDragCursor;
+    if (side !== 'start' && side !== 'end') return false;
+    if (!cursor || !Number.isInteger(cursor.r) || !Number.isInteger(cursor.c)) return false;
+    if (!snapshot || snapshot.path.length === 0) return false;
+
+    const endpoint = side === 'start'
+      ? snapshot.path[0]
+      : snapshot.path[snapshot.path.length - 1];
+    return Boolean(
+      endpoint
+      && endpoint.r === cursor.r
+      && endpoint.c === cursor.c
+    );
+  };
+
   const invalidateEvaluateCache = () => {
     evaluateCacheBoardVersion += 1;
     evaluateCache.clear();
@@ -1259,15 +1282,38 @@ export function createRuntime(options) {
       );
       if (!stateChanged) return;
 
+      const snapshot = state.getSnapshot();
+      const prevSuppressEndpoint = isPathDragCursorOnActiveEndpoint(
+        snapshot,
+        interactionState.isPathDragging,
+        interactionState.pathDragSide,
+        interactionState.pathDragCursor,
+      );
+      const nextSuppressEndpoint = isPathDragCursorOnActiveEndpoint(
+        snapshot,
+        nextIsPathDragging,
+        nextPathDragSide,
+        nextPathDragCursor,
+      );
+      const shouldQueueLayout = (
+        interactionState.isPathDragging !== nextIsPathDragging
+        || interactionState.pathDragSide !== nextPathDragSide
+        || prevSuppressEndpoint !== nextSuppressEndpoint
+      );
+      const endedPathDrag = interactionState.isPathDragging && !nextIsPathDragging;
+
       interactionState.isPathDragging = nextIsPathDragging;
       interactionState.pathDragSide = nextPathDragSide;
       interactionState.pathDragCursor = nextPathDragCursor;
+      if (endedPathDrag) evaluateCache.clear();
       renderer.updateInteraction?.(interactionState);
-      queueBoardLayout(false, {
-        isPathDragging: interactionState.isPathDragging,
-        pathDragSide: interactionState.pathDragSide,
-        pathDragCursor: interactionState.pathDragCursor,
-      });
+      if (shouldQueueLayout) {
+        queueBoardLayout(false, {
+          isPathDragging: interactionState.isPathDragging,
+          pathDragSide: interactionState.pathDragSide,
+          pathDragCursor: interactionState.pathDragCursor,
+        });
+      }
       return;
     }
 

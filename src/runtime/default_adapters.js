@@ -15,7 +15,7 @@ export function createDefaultAdapters(options = {}) {
     : null;
 
   const levelProvider = createLevelProvider({
-    cacheLimit: options.infiniteCacheLimit || 48,
+    cacheLimit: options.infiniteCacheLimit || 24,
     dailyLevel,
     dailyId,
   });

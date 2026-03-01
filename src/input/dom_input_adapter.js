@@ -27,6 +27,9 @@ export function createDomInputAdapter() {
   let activePointerId = null;
   let wallDrag = null;
   let pathDrag = null;
+  let dragGridMetrics = null;
+  let wallDragFrame = 0;
+  let wallDragQueuedPoint = null;
 
   const addListener = (target, event, handler, options) => {
     if (!target?.addEventListener) return;
@@ -62,20 +65,33 @@ export function createDomInputAdapter() {
     });
   };
 
-  const cellFromPoint = (x, y) => {
-    const el = document.elementFromPoint(x, y);
-    if (!el) return null;
-    const cell = el.closest('.cell');
-    if (!cell) return null;
-    return {
-      r: parseInt(cell.dataset.r, 10),
-      c: parseInt(cell.dataset.c, 10),
+  const queueWallDragGhostUpdate = (x, y) => {
+    wallDragQueuedPoint = {
+      x: Number(x) || 0,
+      y: Number(y) || 0,
     };
+    if (wallDragFrame) return;
+    wallDragFrame = requestAnimationFrame(() => {
+      wallDragFrame = 0;
+      if (!wallDragQueuedPoint) return;
+      sendInteractionUpdate(INTERACTION_UPDATES.WALL_DRAG, {
+        visible: true,
+        x: wallDragQueuedPoint.x,
+        y: wallDragQueuedPoint.y,
+        isWallDragging: true,
+      });
+    });
   };
 
-  const snapWallCellFromPoint = (x, y, snapshot) => {
-    if (!refs.gridEl || !snapshot) return null;
+  const clearQueuedWallDragGhostUpdate = () => {
+    wallDragQueuedPoint = null;
+    if (!wallDragFrame) return;
+    cancelAnimationFrame(wallDragFrame);
+    wallDragFrame = 0;
+  };
 
+  const captureGridMetrics = (snapshot = null) => {
+    if (!refs?.gridEl || !snapshot) return null;
     const rows = Number.isInteger(snapshot.rows) ? snapshot.rows : 0;
     const cols = Number.isInteger(snapshot.cols) ? snapshot.cols : 0;
     if (rows <= 0 || cols <= 0) return null;
@@ -87,24 +103,57 @@ export function createDomInputAdapter() {
     const step = size + gap;
     if (!(step > 0)) return null;
 
-    const margin = Math.max(6, step * 0.5);
-    if (x < rect.left - margin || x > rect.right + margin || y < rect.top - margin || y > rect.bottom + margin) {
+    return {
+      rows,
+      cols,
+      left: rect.left,
+      top: rect.top,
+      right: rect.right,
+      bottom: rect.bottom,
+      size,
+      step,
+      pad,
+    };
+  };
+
+  const cellFromPoint = (x, y) => {
+    const el = document.elementFromPoint(x, y);
+    if (!el) return null;
+    const cell = el.closest('.cell');
+    if (!cell) return null;
+    return {
+      r: parseInt(cell.dataset.r, 10),
+      c: parseInt(cell.dataset.c, 10),
+    };
+  };
+
+  const snapWallCellFromPoint = (x, y, snapshot, metrics = null) => {
+    const resolved = metrics || captureGridMetrics(snapshot);
+    if (!resolved) return null;
+
+    const margin = Math.max(6, resolved.step * 0.5);
+    if (
+      x < resolved.left - margin
+      || x > resolved.right + margin
+      || y < resolved.top - margin
+      || y > resolved.bottom + margin
+    ) {
       return null;
     }
 
-    const localX = x - rect.left - pad - (size * 0.5);
-    const localY = y - rect.top - pad - (size * 0.5);
+    const localX = x - resolved.left - resolved.pad - (resolved.size * 0.5);
+    const localY = y - resolved.top - resolved.pad - (resolved.size * 0.5);
 
     const clamp = (value, lo, hi) => Math.max(lo, Math.min(hi, value));
-    const c = clamp(Math.round(localX / step), 0, cols - 1);
-    const r = clamp(Math.round(localY / step), 0, rows - 1);
+    const c = clamp(Math.round(localX / resolved.step), 0, resolved.cols - 1);
+    const r = clamp(Math.round(localY / resolved.step), 0, resolved.rows - 1);
     return { r, c };
   };
 
-  const wallCellFromPoint = (x, y, snapshot) => {
+  const wallCellFromPoint = (x, y, snapshot, metrics = null) => {
     const direct = cellFromPoint(x, y);
     if (direct) return direct;
-    return snapWallCellFromPoint(x, y, snapshot);
+    return snapWallCellFromPoint(x, y, snapshot, metrics);
   };
 
   const isUsableCell = (snapshot, r, c) => {
@@ -137,6 +186,7 @@ export function createDomInputAdapter() {
         from: { r: cell.r, c: cell.c },
         hover: null,
       };
+      dragGridMetrics = captureGridMetrics(snapshot);
       refs.gridEl.setPointerCapture(e.pointerId);
       sendInteractionUpdate(INTERACTION_UPDATES.WALL_DRAG, {
         visible: true,
@@ -163,6 +213,7 @@ export function createDomInputAdapter() {
         origin: { r: cell.r, c: cell.c },
         lastCursorKey: `${cell.r},${cell.c}`,
       };
+      dragGridMetrics = captureGridMetrics(nextSnapshot);
       activePointerId = e.pointerId;
       refs.gridEl.setPointerCapture(e.pointerId);
       sendInteractionUpdate(INTERACTION_UPDATES.PATH_DRAG, {
@@ -186,6 +237,7 @@ export function createDomInputAdapter() {
       origin: { r: cell.r, c: cell.c },
       lastCursorKey: `${cell.r},${cell.c}`,
     };
+    dragGridMetrics = captureGridMetrics(snapshot);
 
     dragMode = 'path';
     activePointerId = e.pointerId;
@@ -220,10 +272,14 @@ export function createDomInputAdapter() {
           const shouldResolveByPointer = !cell || (drRaw <= 1 && dcRaw <= 1);
 
           if (shouldResolveByPointer) {
-            const rect = refs.gridEl.getBoundingClientRect();
-            const px = e.clientX - rect.left;
-            const py = e.clientY - rect.top;
-            const size = getCellSize(refs.gridEl);
+            const metrics = dragGridMetrics || captureGridMetrics(snapshotForInput);
+            if (metrics) dragGridMetrics = metrics;
+            const rect = metrics
+              ? null
+              : refs.gridEl.getBoundingClientRect();
+            const px = metrics ? (e.clientX - metrics.left) : (e.clientX - rect.left);
+            const py = metrics ? (e.clientY - metrics.top) : (e.clientY - rect.top);
+            const size = metrics ? metrics.size : getCellSize(refs.gridEl);
             const holdCell = { r: headNode.r, c: headNode.c };
 
             const candidates = buildPathDragCandidates({
@@ -240,7 +296,12 @@ export function createDomInputAdapter() {
               pointer: { x: px, y: py },
               holdCell,
               size,
-              cellCenter: (r, c) => cellCenter(r, c, refs.gridEl),
+              cellCenter: metrics
+                ? ((r, c) => ({
+                  x: metrics.pad + (c * metrics.step) + (metrics.size * 0.5),
+                  y: metrics.pad + (r * metrics.step) + (metrics.size * 0.5),
+                }))
+                : ((r, c) => cellCenter(r, c, refs.gridEl)),
             });
           }
         }
@@ -274,27 +335,32 @@ export function createDomInputAdapter() {
 
     if (dragMode === 'wall') {
       if (e.cancelable) e.preventDefault();
-      sendInteractionUpdate(INTERACTION_UPDATES.WALL_DRAG, {
-        visible: true,
-        x: e.clientX,
-        y: e.clientY,
-        isWallDragging: true,
-      });
+      queueWallDragGhostUpdate(e.clientX, e.clientY);
 
       const snapshot = readSnapshot();
-      const cell = wallCellFromPoint(e.clientX, e.clientY, snapshot);
+      const metrics = dragGridMetrics || captureGridMetrics(snapshot);
+      if (metrics) dragGridMetrics = metrics;
+      const cell = wallCellFromPoint(e.clientX, e.clientY, snapshot, metrics);
+      const previousHover = wallDrag.hover;
       if (!cell) {
-        wallDrag.hover = null;
-        sendInteractionUpdate(INTERACTION_UPDATES.WALL_DROP_TARGET, { dropTarget: null });
+        if (previousHover) {
+          wallDrag.hover = null;
+          sendInteractionUpdate(INTERACTION_UPDATES.WALL_DROP_TARGET, { dropTarget: null });
+        }
         return;
       }
 
       if (canDropWall(snapshot, wallDrag.from, cell)) {
-        wallDrag.hover = { r: cell.r, c: cell.c };
-        sendInteractionUpdate(INTERACTION_UPDATES.WALL_DROP_TARGET, { dropTarget: wallDrag.hover });
+        const sameHover = previousHover && previousHover.r === cell.r && previousHover.c === cell.c;
+        if (!sameHover) {
+          wallDrag.hover = { r: cell.r, c: cell.c };
+          sendInteractionUpdate(INTERACTION_UPDATES.WALL_DROP_TARGET, { dropTarget: wallDrag.hover });
+        }
       } else {
-        wallDrag.hover = null;
-        sendInteractionUpdate(INTERACTION_UPDATES.WALL_DROP_TARGET, { dropTarget: null });
+        if (previousHover) {
+          wallDrag.hover = null;
+          sendInteractionUpdate(INTERACTION_UPDATES.WALL_DROP_TARGET, { dropTarget: null });
+        }
       }
     }
   };
@@ -305,10 +371,12 @@ export function createDomInputAdapter() {
     const wallMoveFrom = wallDrag?.from || null;
     const wallMoveTo = wallDrag?.hover || null;
 
+    clearQueuedWallDragGhostUpdate();
     dragMode = null;
     activePointerId = null;
     wallDrag = null;
     pathDrag = null;
+    dragGridMetrics = null;
 
     sendInteractionUpdate(INTERACTION_UPDATES.WALL_DROP_TARGET, { dropTarget: null });
     sendInteractionUpdate(INTERACTION_UPDATES.WALL_DRAG, {
@@ -421,10 +489,12 @@ export function createDomInputAdapter() {
 
     unbind() {
       clearListeners();
+      clearQueuedWallDragGhostUpdate();
       dragMode = null;
       activePointerId = null;
       wallDrag = null;
       pathDrag = null;
+      dragGridMetrics = null;
     },
   };
 }

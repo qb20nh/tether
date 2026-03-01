@@ -21,6 +21,7 @@ let activeBoardSize = { rows: 0, cols: 0 };
 let pathAnimationOffset = 0;
 let pathAnimationFrame = 0;
 let pathAnimationLastTs = 0;
+let pathAnimationLastDrawTs = 0;
 let latestPathSnapshot = null;
 let latestPathRefs = null;
 let latestPathStatuses = null;
@@ -49,6 +50,8 @@ let cachedPathLayoutVersion = -1;
 let tutorialBracketSignature = '';
 let tutorialBracketGeometryToken = 0;
 let reducedMotionQuery = null;
+let wallGhostOffsetLeft = 0;
+let wallGhostOffsetTop = 0;
 const pathFlowMetricsCache = { cycle: 128, pulse: 64, speed: -32 };
 const gridOffsetScratch = { x: 0, y: 0 };
 const headOffsetScratch = { x: 0, y: 0 };
@@ -101,6 +104,7 @@ const PATH_FLOW_RISE = 0.82;
 const PATH_FLOW_DROP = 0.83;
 const TAU = Math.PI * 2;
 const CANVAS_ALIGN_OFFSET_CSS_PX = 0.5;
+const PATH_FLOW_DRAW_INTERVAL_MS = 1000 / 45;
 
 
 
@@ -250,10 +254,10 @@ const shouldAnimatePathFlow = (
 };
 
 const stopPathAnimation = () => {
-  if (!pathAnimationFrame) return;
-  cancelAnimationFrame(pathAnimationFrame);
+  if (pathAnimationFrame) cancelAnimationFrame(pathAnimationFrame);
   pathAnimationFrame = 0;
   pathAnimationLastTs = 0;
+  pathAnimationLastDrawTs = 0;
 };
 
 const animatePathFlow = (timestamp) => {
@@ -287,7 +291,14 @@ const animatePathFlow = (timestamp) => {
   }
 
   pathAnimationLastTs = timestamp;
-  if (latestPathSnapshot && latestPathRefs) drawIdleAnimatedPath(pathAnimationOffset, latestCompletionModel);
+  const shouldDraw = (
+    pathAnimationLastDrawTs <= 0
+    || (timestamp - pathAnimationLastDrawTs) >= PATH_FLOW_DRAW_INTERVAL_MS
+  );
+  if (shouldDraw && latestPathSnapshot && latestPathRefs) {
+    drawIdleAnimatedPath(pathAnimationOffset, latestCompletionModel);
+    pathAnimationLastDrawTs = timestamp;
+  }
 
   pathAnimationFrame = requestAnimationFrame(animatePathFlow);
 };
@@ -295,6 +306,7 @@ const animatePathFlow = (timestamp) => {
 const schedulePathAnimation = () => {
   if (pathAnimationFrame) return;
   pathAnimationLastTs = 0;
+  pathAnimationLastDrawTs = 0;
   pathAnimationFrame = requestAnimationFrame(animatePathFlow);
 };
 
@@ -761,6 +773,8 @@ export function cacheElements() {
   cachedPathTailR = NaN;
   cachedPathTailC = NaN;
   cachedPathLayoutVersion = -1;
+  wallGhostOffsetLeft = 0;
+  wallGhostOffsetTop = 0;
   pathLayoutMetrics.ready = false;
   pathLayoutMetrics.version = 0;
   reducedMotionQuery = null;
@@ -842,26 +856,33 @@ const ensureWallGhostEl = () => {
   return wallGhostEl;
 };
 
+const refreshWallGhostOffset = () => {
+  if (!cachedBoardWrap) return;
+  const rect = cachedBoardWrap.getBoundingClientRect();
+  wallGhostOffsetLeft = rect.left + cachedBoardWrap.clientLeft;
+  wallGhostOffsetTop = rect.top + cachedBoardWrap.clientTop;
+};
+
 export const showWallDragGhost = (x, y) => {
   const ghost = ensureWallGhostEl();
   if (!ghost || !cachedBoardWrap) return;
+  refreshWallGhostOffset();
   ghost.style.display = 'grid';
   moveWallDragGhost(x, y);
 };
 
 export const moveWallDragGhost = (x, y) => {
   if (!wallGhostEl || !cachedBoardWrap) return;
-  const rect = cachedBoardWrap.getBoundingClientRect();
-  const innerLeft = rect.left + cachedBoardWrap.clientLeft;
-  const innerTop = rect.top + cachedBoardWrap.clientTop;
-  wallGhostEl.style.left = `${x - innerLeft}px`;
-  wallGhostEl.style.top = `${y - innerTop}px`;
+  wallGhostEl.style.left = `${x - wallGhostOffsetLeft}px`;
+  wallGhostEl.style.top = `${y - wallGhostOffsetTop}px`;
 };
 
 export const hideWallDragGhost = () => {
   if (!wallGhostEl) return;
   wallGhostEl.remove();
   wallGhostEl = null;
+  wallGhostOffsetLeft = 0;
+  wallGhostOffsetTop = 0;
 };
 
 export function setMessage(msgEl, kind, html) {
@@ -1607,6 +1628,7 @@ export function resizeCanvas(refs) {
   );
   const cell = cellFromStyle > 0 ? cellFromStyle : getCellSize(refs.gridEl);
   updatePathLayoutMetrics(offset, cell, gap, pad);
+  if (wallGhostEl) refreshWallGhostOffset();
 
   pathRenderer.resize(cw, ch, dpr);
   configureHiDPICanvas(symbolCanvas, symbolCtx, cw, ch);

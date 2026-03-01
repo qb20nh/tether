@@ -2,21 +2,28 @@ export const getCellSize = (scope = document.documentElement) => {
   const source =
     scope && scope instanceof Element ? scope : document.documentElement;
 
-  if (source instanceof Element) {
-    const probe =
-      source.classList.contains('cell')
-        ? source
-        : source.querySelector('.cell');
-    if (probe) {
-      const measured = probe.getBoundingClientRect().width;
-      if (Number.isFinite(measured) && measured > 0) return measured;
-    }
+  const parseCellVar = (el) => {
+    if (!el || !(el instanceof Element)) return NaN;
+    const inlineRaw = el.style.getPropertyValue('--cell').trim();
+    const inlineParsed = parseFloat(inlineRaw);
+    if (Number.isFinite(inlineParsed) && inlineParsed > 0) return inlineParsed;
 
+    const computedRaw = getComputedStyle(el).getPropertyValue('--cell').trim();
+    const computedParsed = parseFloat(computedRaw);
+    return Number.isFinite(computedParsed) && computedParsed > 0
+      ? computedParsed
+      : NaN;
+  };
+
+  if (source instanceof Element) {
     const gridEl =
       source.id === 'grid'
         ? source
         : source.querySelector('#grid');
     if (gridEl) {
+      const byCssVar = parseCellVar(gridEl);
+      if (Number.isFinite(byCssVar) && byCssVar > 0) return byCssVar;
+
       const styles = getComputedStyle(gridEl);
       const cols = parseFloat(styles.getPropertyValue('--grid-cols').trim()) || 0;
       const gap = parseFloat(styles.columnGap || styles.gap || '0') || 0;
@@ -27,6 +34,9 @@ export const getCellSize = (scope = document.documentElement) => {
         if (Number.isFinite(inferred) && inferred > 0) return inferred;
       }
     }
+
+    const bySourceCssVar = parseCellVar(source);
+    if (Number.isFinite(bySourceCssVar) && bySourceCssVar > 0) return bySourceCssVar;
   }
 
   const raw = getComputedStyle(source).getPropertyValue('--cell').trim();

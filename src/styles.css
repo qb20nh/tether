@@ -791,7 +791,6 @@ button:disabled:active {
     border-color 120ms ease,
     transform 80ms ease,
     box-shadow 120ms ease,
-    filter 120ms ease,
     --interactive-corner-color var(--complete-cell-duration-ms) ease-out;
 }
 
@@ -808,17 +807,11 @@ button:disabled:active {
 
 .cell:hover {
   border-color: rgba(255, 255, 255, 0.18);
-  box-shadow:
-    0 0 0 var(--cell-shadow-2) rgba(255, 255, 255, 0.10) inset,
-    0 var(--cell-shadow-elev-y-md) var(--cell-shadow-elev-blur-md) rgba(0, 0, 0, 0.22);
-  filter: brightness(1.06);
+  box-shadow: 0 0 0 var(--cell-shadow-2) rgba(255, 255, 255, 0.10) inset;
 }
 
 .cell:active {
-  box-shadow:
-    0 0 0 var(--cell-shadow-2) rgba(255, 255, 255, 0.14) inset,
-    0 var(--cell-shadow-elev-y-sm) var(--cell-shadow-elev-blur-sm) rgba(0, 0, 0, 0.20);
-  filter: brightness(1.12);
+  box-shadow: 0 0 0 var(--cell-shadow-2) rgba(255, 255, 255, 0.14) inset;
 }
 
 .cell.wall {
@@ -831,14 +824,12 @@ button:disabled:active {
   box-shadow:
     0 0 0 var(--cell-shadow-2) rgba(255, 255, 255, 0.08) inset,
     0 0 0 var(--cell-shadow-1) rgba(255, 255, 255, 0.06);
-  filter: brightness(1.09);
 }
 
 .cell.wall:active {
   box-shadow:
     0 0 0 var(--cell-shadow-2) rgba(255, 255, 255, 0.12) inset,
     0 0 0 var(--cell-shadow-1) rgba(255, 255, 255, 0.09);
-  filter: brightness(1.14);
 }
 
 .cell.wall.movable {
@@ -854,7 +845,6 @@ button:disabled:active {
     0 0 0 var(--cell-shadow-2) rgba(120, 190, 255, 0.22),
     0 var(--cell-shadow-elev-y-lg) var(--cell-shadow-elev-blur-lg) rgba(20, 55, 100, 0.28);
   transform: translateY(-1px);
-  filter: brightness(1.12);
 }
 
 .cell.wall.movable:active {
@@ -863,7 +853,6 @@ button:disabled:active {
   box-shadow:
     0 0 0 var(--cell-shadow-3) rgba(120, 190, 255, 0.24) inset,
     0 0 0 var(--cell-shadow-2) rgba(120, 190, 255, 0.30);
-  filter: brightness(1.16);
 }
 
 .theme-light .cell.wall.movable {
@@ -951,7 +940,6 @@ button:disabled:active {
   box-shadow:
     0 0 0 var(--cell-shadow-3) rgba(120, 190, 255, 0.16) inset,
     0 0 0 var(--cell-shadow-2) rgba(120, 190, 255, 0.20);
-  filter: brightness(1.1);
 }
 
 .cell.tail {
@@ -994,7 +982,6 @@ button:disabled:active {
   box-shadow:
     0 0 0 var(--cell-shadow-3) rgba(120, 190, 255, 0.30) inset,
     0 0 0 var(--cell-shadow-2) rgba(120, 190, 255, 0.28);
-  filter: brightness(1.18);
   --interactive-corner-color: rgba(120, 190, 255, 1);
 }
 
@@ -1004,7 +991,6 @@ button:disabled:active {
   box-shadow:
     0 0 0 var(--cell-shadow-3) rgba(120, 190, 255, 0.30) inset,
     0 0 0 var(--cell-shadow-2) rgba(120, 190, 255, 0.28);
-  filter: brightness(1.18);
   --interactive-corner-color: rgba(120, 190, 255, 1);
 }
 
@@ -1013,7 +999,6 @@ button:disabled:active {
   z-index: 3;
   cursor: grabbing;
   transform: translateY(1px);
-  filter: brightness(1.22);
   --interactive-corner-color: rgba(120, 190, 255, 1);
 }
 
@@ -1300,13 +1285,6 @@ button:disabled:active {
     0 0 0 var(--cell-shadow-3) rgba(255, 92, 92, 0.34) inset,
     0 0 0 var(--cell-shadow-2) rgba(255, 92, 92, 0.25),
     0 0 0 var(--cell-shadow-1) rgba(255, 92, 92, 0.38) !important;
-  filter: brightness(1.1) saturate(1.08);
-}
-
-.cell.badHint:active,
-.cell.badBlocked:active,
-.cell.badRps:active {
-  filter: brightness(1.16) saturate(1.12);
 }
 
 .cell.goodHint {
@@ -1332,12 +1310,6 @@ button:disabled:active {
     0 0 0 var(--cell-shadow-3) rgba(46, 204, 113, 0.34) inset,
     0 0 0 var(--cell-shadow-2) rgba(46, 204, 113, 0.24),
     0 0 0 var(--cell-shadow-1) rgba(46, 204, 113, 0.35) !important;
-  filter: brightness(1.1) saturate(1.08);
-}
-
-.cell.goodHint:active,
-.cell.goodRps:active {
-  filter: brightness(1.16) saturate(1.12);
 }
 
 .cell.dropTarget {
@@ -1353,7 +1325,6 @@ button:disabled:active {
   box-shadow:
     0 0 0 var(--cell-shadow-4) rgba(106, 166, 255, 0.18) inset,
     0 0 0 var(--cell-shadow-2) rgba(106, 166, 255, 0.24);
-  filter: brightness(1.14);
 }
 
 .cell.wallDropPreview {
@@ -1378,7 +1349,6 @@ button:disabled:active {
   width: 66%;
   height: 66%;
   color: var(--text);
-  filter: drop-shadow(0 calc(var(--cell) * 0.036) calc(var(--cell) * 0.11) rgba(0, 0, 0, 0.4));
   mix-blend-mode: normal;
 }
 
