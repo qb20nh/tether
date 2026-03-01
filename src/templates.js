@@ -19,7 +19,7 @@ export const APP_SHELL_TEMPLATE = (t = (k) => k, localeOptions = [], currentLoca
         <span>TETHER</span>
       </h1>
         <div class="topbarControls">
-          <div id="${ELEMENT_IDS.SCORE_META}" class="scoreMeta" aria-live="polite" hidden>
+          <div id="${ELEMENT_IDS.SCORE_META}" class="scoreMeta isInactive" aria-live="polite" aria-hidden="true">
             <span class="scoreMetaItem">
               <span id="${ELEMENT_IDS.INFINITE_SCORE_LABEL}" class="scoreMetaLabel">∞</span>
               <strong id="${ELEMENT_IDS.INFINITE_SCORE_VALUE}" class="scoreMetaValue">0</strong>

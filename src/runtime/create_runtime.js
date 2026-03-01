@@ -17,7 +17,7 @@ const INFINITE_SELECTOR_ACTIONS = Object.freeze({
 const isRtlLocale = (locale) => /^ar/i.test(locale || '');
 const DAY_MS = 24 * 60 * 60 * 1000;
 const EVALUATE_CACHE_LIMIT = 96;
-const LEVEL_SIZE_SUFFIX_RE = /\s*[（(]\s*\d+\s*[xX×]\s*\d+\s*[)）]\s*$/u;
+const TUTORIAL_PRACTICE_NAME_PREFIX_RE = /^\s*.+?\d+\s*[)）]\s*/u;
 
 const applyTextDirection = (locale) => {
   const direction = isRtlLocale(locale) ? 'rtl' : 'ltr';
@@ -171,13 +171,10 @@ export function createRuntime(options) {
   };
 
   const resolveLevelName = (level) => {
-    const stripBoardSizeSuffix = (value) => String(value || '').replace(LEVEL_SIZE_SUFFIX_RE, '').trim();
-    const resolveBoardSizeLabel = (targetLevel) => {
-      const grid = targetLevel?.grid;
-      if (!Array.isArray(grid) || grid.length === 0) return '';
-      const firstRow = grid[0];
-      if (typeof firstRow !== 'string' || firstRow.length === 0) return '';
-      return `${firstRow.length}x${grid.length}`;
+    const stripTutorialPracticePrefix = (value, nameKey) => {
+      if (typeof nameKey !== 'string') return value;
+      if (!nameKey.startsWith('level.tutorial_') && !nameKey.startsWith('level.pilot_')) return value;
+      return value.replace(TUTORIAL_PRACTICE_NAME_PREFIX_RE, '').trim();
     };
 
     let name = '';
@@ -191,11 +188,11 @@ export function createRuntime(options) {
       name = level?.name || '';
     }
 
-    const baseName = stripBoardSizeSuffix(name);
-    const sizeLabel = resolveBoardSizeLabel(level);
-    if (!sizeLabel) return baseName;
-    if (!baseName) return sizeLabel;
-    return `${baseName} (${sizeLabel})`;
+    const baseName = stripTutorialPracticePrefix(
+      String(name || '').trim(),
+      level?.nameKey,
+    );
+    return baseName;
   };
 
   const applyPanelVisibility = (panelEl, buttonEl, panel, isHidden) => {
@@ -339,6 +336,23 @@ export function createRuntime(options) {
     return raw.replace(/\s*#\s*$/, '').trim();
   };
 
+  const resolveCampaignBuckets = () => {
+    const tutorialIndices = [];
+    const practiceIndices = [];
+
+    for (let i = 0; i < campaignCount; i += 1) {
+      const level = core.getLevel(i);
+      const nameKey = typeof level?.nameKey === 'string' ? level.nameKey : '';
+      if (nameKey.startsWith('level.tutorial_')) {
+        tutorialIndices.push(i);
+      } else if (nameKey.startsWith('level.pilot_')) {
+        practiceIndices.push(i);
+      }
+    }
+
+    return { tutorialIndices, practiceIndices };
+  };
+
   const resolveScoreContext = (levelIndex) => {
     if (isDailyLevelIndex(levelIndex)) {
       if (!activeDailyId) return null;
@@ -365,9 +379,14 @@ export function createRuntime(options) {
     const infiniteItem = refs.infiniteScoreLabel?.closest('.scoreMetaItem') || null;
     const dailyItem = refs.dailyScoreLabel?.closest('.scoreMetaItem') || null;
     const separator = refs.scoreMeta.querySelector('.scoreMetaSeparator');
+    const setScoreMetaActive = (active) => {
+      refs.scoreMeta.hidden = false;
+      refs.scoreMeta.classList.toggle('isInactive', !active);
+      refs.scoreMeta.setAttribute('aria-hidden', active ? 'false' : 'true');
+    };
 
     if (isDailyLevelIndex(levelIndex)) {
-      refs.scoreMeta.hidden = false;
+      setScoreMetaActive(true);
       if (infiniteItem) infiniteItem.hidden = true;
       if (dailyItem) dailyItem.hidden = false;
       if (separator) separator.hidden = true;
@@ -381,7 +400,7 @@ export function createRuntime(options) {
     }
 
     if (core.isInfiniteAbsIndex(levelIndex)) {
-      refs.scoreMeta.hidden = false;
+      setScoreMetaActive(true);
       if (infiniteItem) infiniteItem.hidden = false;
       if (dailyItem) dailyItem.hidden = true;
       if (separator) separator.hidden = true;
@@ -395,7 +414,7 @@ export function createRuntime(options) {
       return;
     }
 
-    refs.scoreMeta.hidden = true;
+    setScoreMetaActive(false);
   };
 
   const registerSolvedScore = (snapshot) => {
@@ -597,21 +616,59 @@ export function createRuntime(options) {
     const refs = renderer.getRefs();
     const currentIndex = state.getSnapshot().levelIndex;
 
-    let optionHtml = '';
-    for (let i = 0; i < campaignCount; i++) {
-      const level = core.getLevel(i);
-      const disabled = !isCampaignLevelUnlocked(i);
-      optionHtml += `<option value="${i}" ${disabled ? 'disabled' : ''}${i === currentIndex ? 'selected' : ''}>${resolveLevelName(level)}</option>`;
-    }
+    const campaignOptions = [];
+    const modeOptions = [];
+    const { tutorialIndices, practiceIndices } = resolveCampaignBuckets();
+    const tutorialSet = new Set(tutorialIndices);
+    const practiceSet = new Set(practiceIndices);
+    const infiniteActive = core.isInfiniteAbsIndex(currentIndex);
+    const dailyActive = isDailyLevelIndex(currentIndex);
+    const campaignActive = !infiniteActive && !dailyActive;
+    const firstTutorialIndex = tutorialIndices[0];
+    const firstPracticeIndex = practiceIndices[0];
+    const buildOption = (value, label, options = {}) => {
+      const selected = options.selected ? 'selected' : '';
+      const disabled = options.disabled ? 'disabled' : '';
+      return `<option value="${value}" ${disabled} ${selected}>${label}</option>`;
+    };
+    const appendGroup = (labelKey, options) => {
+      if (options.length === 0) return '';
+      return `<optgroup label="${translate(labelKey)}">${options.join('')}</optgroup>`;
+    };
 
     const selectorInfiniteIndex = core.isInfiniteAbsIndex(currentIndex)
       ? core.clampInfiniteIndex(core.toInfiniteIndex(currentIndex))
       : core.clampInfiniteIndex(readInfiniteProgress());
     const infiniteAbsIndex = core.ensureInfiniteAbsIndex(selectorInfiniteIndex);
+    const selectedPrimaryValue = (() => {
+      if (dailyActive) return dailyAbsIndex;
+      if (infiniteActive) return infiniteAbsIndex;
+      if (practiceSet.has(currentIndex) && Number.isInteger(firstPracticeIndex)) return firstPracticeIndex;
+      if (tutorialSet.has(currentIndex) && Number.isInteger(firstTutorialIndex)) return firstTutorialIndex;
+      if (Number.isInteger(firstTutorialIndex)) return firstTutorialIndex;
+      if (Number.isInteger(firstPracticeIndex)) return firstPracticeIndex;
+      return 0;
+    })();
+
+    if (Number.isInteger(firstTutorialIndex)) {
+      campaignOptions.push(buildOption(firstTutorialIndex, translate('ui.levelGroupTutorial'), {
+        disabled: !isCampaignLevelUnlocked(firstTutorialIndex),
+        selected: selectedPrimaryValue === firstTutorialIndex,
+      }));
+    }
+    if (Number.isInteger(firstPracticeIndex)) {
+      campaignOptions.push(buildOption(firstPracticeIndex, translate('ui.levelGroupPractice'), {
+        disabled: !isCampaignLevelUnlocked(firstPracticeIndex),
+        selected: selectedPrimaryValue === firstPracticeIndex,
+      }));
+    }
+
     const translated = resolveInfiniteModeLabel();
     const fallback = resolveLevelName(core.getLevel(infiniteAbsIndex));
     const infiniteLabel = translated === 'ui.infiniteLevelOption' ? fallback : translated;
-    optionHtml += `<option value="${infiniteAbsIndex}" ${infiniteAbsIndex === currentIndex ? 'selected' : ''}>${infiniteLabel}</option>`;
+    modeOptions.push(buildOption(infiniteAbsIndex, infiniteLabel, {
+      selected: selectedPrimaryValue === infiniteAbsIndex,
+    }));
 
     const dailyLabel = (() => {
       if (!hasDailyLevel) return translate('ui.dailyUnavailable');
@@ -622,28 +679,61 @@ export function createRuntime(options) {
       if (templated !== 'ui.dailyLevelOptionWithDate') return templated;
       return `${base}(${date})`;
     })();
-    const dailyDisabled = hasDailyLevel ? '' : 'disabled';
-    optionHtml += `<option value="${dailyAbsIndex}" ${dailyDisabled} ${dailyAbsIndex === currentIndex ? 'selected' : ''}>${dailyLabel}</option>`;
+    modeOptions.push(buildOption(dailyAbsIndex, dailyLabel, {
+      disabled: !hasDailyLevel,
+      selected: selectedPrimaryValue === dailyAbsIndex,
+    }));
+
+    const optionHtml = [
+      appendGroup('ui.levelGroupCampaign', campaignOptions),
+      appendGroup('ui.levelGroupModes', modeOptions),
+    ].join('');
 
     refs.levelSel.innerHTML = optionHtml;
-    refs.levelSel.value = String(currentIndex);
+    refs.levelSel.value = String(selectedPrimaryValue);
 
     if (refs.levelSelectGroup && refs.infiniteSel) {
-      const infiniteActive = core.isInfiniteAbsIndex(currentIndex);
-      const dailyActive = isDailyLevelIndex(currentIndex);
+      const secondaryActive = campaignActive || infiniteActive;
 
+      refs.levelSelectGroup.classList.toggle('isCampaignActive', campaignActive);
       refs.levelSelectGroup.classList.toggle('isInfiniteActive', infiniteActive);
       refs.levelSelectGroup.classList.toggle('isDailyActive', dailyActive);
       if (refs.levelSelectGroup.parentElement) {
+        refs.levelSelectGroup.parentElement.classList.toggle('isCampaignActive', campaignActive);
         refs.levelSelectGroup.parentElement.classList.toggle('isInfiniteActive', infiniteActive);
         refs.levelSelectGroup.parentElement.classList.toggle('isDailyActive', dailyActive);
       }
 
-      refs.infiniteSel.hidden = !infiniteActive;
-      refs.infiniteSel.disabled = !infiniteActive;
+      refs.infiniteSel.hidden = !secondaryActive;
+      refs.infiniteSel.disabled = !secondaryActive;
 
-      if (!infiniteActive) {
+      if (!secondaryActive) {
         refs.infiniteSel.innerHTML = '';
+      } else if (campaignActive) {
+        const activeCampaignIndices = (
+          practiceSet.has(currentIndex) && practiceIndices.length > 0
+            ? practiceIndices
+            : (tutorialIndices.length > 0 ? tutorialIndices : practiceIndices)
+        );
+        if (activeCampaignIndices.length === 0) {
+          refs.infiniteSel.innerHTML = '';
+          refs.infiniteSel.hidden = true;
+          refs.infiniteSel.disabled = true;
+        } else {
+          const selectedCampaignIndex = activeCampaignIndices.includes(currentIndex)
+            ? currentIndex
+            : activeCampaignIndices[0];
+          let campaignOptionHtml = '';
+          for (let i = 0; i < activeCampaignIndices.length; i += 1) {
+            const levelIndex = activeCampaignIndices[i];
+            const disabled = !isCampaignLevelUnlocked(levelIndex) ? 'disabled' : '';
+            const levelName = resolveLevelName(core.getLevel(levelIndex));
+            const levelLabel = levelName ? `${i + 1}) ${levelName}` : String(i + 1);
+            campaignOptionHtml += `<option value="${levelIndex}" ${levelIndex === selectedCampaignIndex ? 'selected' : ''} ${disabled}>${levelLabel}</option>`;
+          }
+          refs.infiniteSel.innerHTML = campaignOptionHtml;
+          refs.infiniteSel.value = String(selectedCampaignIndex);
+        }
       } else {
         const currentInfiniteIndex = core.clampInfiniteIndex(core.toInfiniteIndex(currentIndex));
         const latestUnlockedInfiniteIndex = Math.max(
@@ -963,9 +1053,30 @@ export function createRuntime(options) {
     refreshThemeButton();
   };
 
-  const handleInfiniteSelect = (selectedValue) => {
+  const handleSecondaryLevelSelect = (selectedValue) => {
     const snapshot = state.getSnapshot();
-    if (!core.isInfiniteAbsIndex(snapshot.levelIndex)) return;
+    if (!core.isInfiniteAbsIndex(snapshot.levelIndex)) {
+      if (isDailyLevelIndex(snapshot.levelIndex)) {
+        refreshLevelOptions();
+        return;
+      }
+      const parsedCampaignIndex = parseInt(selectedValue, 10);
+      if (
+        !Number.isInteger(parsedCampaignIndex)
+        || parsedCampaignIndex < 0
+        || parsedCampaignIndex >= campaignCount
+        || !isCampaignLevelUnlocked(parsedCampaignIndex)
+      ) {
+        refreshLevelOptions();
+        return;
+      }
+      if (parsedCampaignIndex === snapshot.levelIndex) {
+        refreshLevelOptions();
+        return;
+      }
+      loadLevel(parsedCampaignIndex);
+      return;
+    }
 
     const currentInfiniteIndex = core.clampInfiniteIndex(core.toInfiniteIndex(snapshot.levelIndex));
     const latestUnlockedInfiniteIndex = Math.max(
@@ -1012,7 +1123,7 @@ export function createRuntime(options) {
     }
 
     if (actionType === UI_ACTIONS.INFINITE_SELECT) {
-      handleInfiniteSelect(payload.value);
+      handleSecondaryLevelSelect(payload.value);
       return;
     }
 

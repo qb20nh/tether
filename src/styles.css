@@ -396,7 +396,8 @@ header h1.brandTitle {
   width: 100%;
 }
 
-.levelSelectGroup.isInfiniteActive {
+.levelSelectGroup.isInfiniteActive,
+.levelSelectGroup.isCampaignActive {
   flex: 0 0 var(--level-select-total-width);
   width: var(--level-select-total-width);
   max-width: 100%;
@@ -404,7 +405,9 @@ header h1.brandTitle {
 }
 
 .levelSelectGroup.isInfiniteActive #levelSel,
+.levelSelectGroup.isCampaignActive #levelSel,
 .levelSelectGroup.isInfiniteActive #infiniteSel,
+.levelSelectGroup.isCampaignActive #infiniteSel,
 .levelSelectGroup.isDailyActive #levelSel {
   flex: 1 1 0;
   width: 0;
@@ -495,6 +498,11 @@ header h1.brandTitle {
   margin-top: 0;
   flex: 0 0 auto;
   font-variant-numeric: tabular-nums;
+}
+
+.scoreMeta.isInactive {
+  visibility: hidden;
+  pointer-events: none;
 }
 
 .scoreMeta[hidden],
@@ -1601,10 +1609,11 @@ button:disabled:active {
     flex: 0 0 auto;
   }
 
-  .left.isDailyActive #levelLabel,
-  .left.isInfiniteActive #levelLabel {
-    flex: 1 1 100%;
-  }
+.left.isDailyActive #levelLabel,
+.left.isCampaignActive #levelLabel,
+.left.isInfiniteActive #levelLabel {
+  flex: 1 1 100%;
+}
 
   .levelSelectGroup {
     display: contents;
@@ -1616,12 +1625,14 @@ button:disabled:active {
     order: 2;
   }
 
-  .left.isInfiniteActive #levelSel,
-  .left.isInfiniteActive #infiniteSel {
-    flex: 1 1 calc(50% - 3px);
-    max-width: calc(50% - 3px);
-    order: 2;
-  }
+.left.isInfiniteActive #levelSel,
+.left.isCampaignActive #levelSel,
+.left.isCampaignActive #infiniteSel,
+.left.isInfiniteActive #infiniteSel {
+  flex: 1 1 calc(50% - 3px);
+  max-width: calc(50% - 3px);
+  order: 2;
+}
 
   #resetBtn {
     flex: 1 1 calc(50% - 3px);
