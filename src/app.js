@@ -12,7 +12,22 @@ import {
 import { createDefaultAdapters } from './runtime/default_adapters.js';
 import { createRuntime } from './runtime/create_runtime.js';
 
-const DAILY_PAYLOAD_URL = import.meta.env.VITE_DAILY_URL || './daily/today.json';
+const DAILY_PAYLOAD_FILE = 'daily/today.json';
+const resolveDailyPayloadUrl = () => {
+  const configured = typeof import.meta.env.VITE_DAILY_URL === 'string'
+    ? import.meta.env.VITE_DAILY_URL.trim()
+    : '';
+  if (configured) {
+    return new URL(configured, window.location.href).toString();
+  }
+
+  const baseUrl = typeof import.meta.env.BASE_URL === 'string' && import.meta.env.BASE_URL.length > 0
+    ? import.meta.env.BASE_URL
+    : './';
+  const resolvedBaseUrl = new URL(baseUrl, window.location.href);
+  return new URL(DAILY_PAYLOAD_FILE, resolvedBaseUrl).toString();
+};
+const DAILY_PAYLOAD_URL = resolveDailyPayloadUrl();
 const DAILY_HARD_INVALIDATE_GRACE_MS = 60 * 1000;
 
 let runtimeInstance = null;

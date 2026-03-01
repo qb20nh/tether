@@ -1095,7 +1095,7 @@ export function updateCells(
     }
   }
 
-  drawAll(snapshot, refs, { hintStatus, stitchStatus, rpsStatus }, completionModel);
+  drawAll(snapshot, refs, { hintStatus, stitchStatus, rpsStatus, blockedStatus }, completionModel);
 }
 
 export function drawAll(snapshot, refs, statuses, completionModel = null) {
