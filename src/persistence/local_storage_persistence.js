@@ -1,3 +1,5 @@
+import { normalizeScoreState } from '../runtime/score_manager.js';
+
 const GUIDE_KEY = 'tetherGuideHidden';
 const LEGEND_KEY = 'tetherLegendHidden';
 const LEVEL_PROGRESS_KEY = 'tetherLevelProgress';
@@ -6,6 +8,8 @@ const INFINITE_PROGRESS_KEY = 'tetherInfiniteProgress';
 const INFINITE_PROGRESS_VERSION = 1;
 const DAILY_SOLVED_KEY = 'tetherDailySolved';
 const DAILY_SOLVED_VERSION = 1;
+const SCORE_STATE_KEY = 'tetherScoreState';
+const SCORE_STATE_VERSION = 1;
 const THEME_KEY = 'tetherTheme';
 const SESSION_SAVE_KEY = 'tetherSessionSave';
 const SESSION_SEAL_KEY = 'tetherSessionSeal';
@@ -188,6 +192,7 @@ export function createLocalStoragePersistence(options = {}) {
   let campaignProgressCache = null;
   let infiniteProgressCache = null;
   let dailySolvedDateCache = null;
+  let scoreStateCache = null;
   let cachedTheme = null;
   let cachedSessionSeal = null;
   let volatileSessionSeal = null;
@@ -301,6 +306,31 @@ export function createLocalStoragePersistence(options = {}) {
     } catch {
       dailySolvedDateCache = '';
       return dailySolvedDateCache;
+    }
+  };
+
+  const readScoreState = () => {
+    if (scoreStateCache !== null) return normalizeScoreState(scoreStateCache);
+    try {
+      const raw = readStorage(SCORE_STATE_KEY);
+      if (!raw) {
+        scoreStateCache = normalizeScoreState({});
+        return normalizeScoreState(scoreStateCache);
+      }
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== 'object') {
+        scoreStateCache = normalizeScoreState({});
+        return normalizeScoreState(scoreStateCache);
+      }
+      if (Number.isInteger(parsed.version) && parsed.version !== SCORE_STATE_VERSION) {
+        scoreStateCache = normalizeScoreState({});
+        return normalizeScoreState(scoreStateCache);
+      }
+      scoreStateCache = normalizeScoreState(parsed);
+      return normalizeScoreState(scoreStateCache);
+    } catch {
+      scoreStateCache = normalizeScoreState({});
+      return normalizeScoreState(scoreStateCache);
     }
   };
 
@@ -517,6 +547,15 @@ export function createLocalStoragePersistence(options = {}) {
     writeStorage(DAILY_SOLVED_KEY, JSON.stringify(payload));
   };
 
+  const writeScoreState = (scoreState) => {
+    scoreStateCache = normalizeScoreState(scoreState);
+    const payload = {
+      version: SCORE_STATE_VERSION,
+      ...scoreStateCache,
+    };
+    writeStorage(SCORE_STATE_KEY, JSON.stringify(payload));
+  };
+
   const writeHiddenPanel = (panel, hidden) => {
     const key = PANEL_KEY_BY_NAME[panel];
     if (!key) return;
@@ -574,6 +613,7 @@ export function createLocalStoragePersistence(options = {}) {
       campaignProgress,
       infiniteProgress,
       dailySolvedDate: readDailySolvedDate() || null,
+      scoreState: readScoreState(),
       sessionBoard: readSessionSave(),
     };
   };
@@ -585,6 +625,7 @@ export function createLocalStoragePersistence(options = {}) {
     writeCampaignProgress,
     writeInfiniteProgress,
     writeDailySolvedDate,
+    writeScoreState,
     writeSessionBoard,
     clearSessionBoard,
   };
@@ -596,6 +637,7 @@ export const STORAGE_KEYS = Object.freeze({
   LEVEL_PROGRESS_KEY,
   INFINITE_PROGRESS_KEY,
   DAILY_SOLVED_KEY,
+  SCORE_STATE_KEY,
   THEME_KEY,
   SESSION_SAVE_KEY,
   SESSION_SEAL_KEY,
@@ -604,6 +646,7 @@ export const STORAGE_KEYS = Object.freeze({
 export const STORAGE_DEFAULTS = Object.freeze({
   DEFAULT_THEME,
   DAILY_SOLVED_VERSION,
+  SCORE_STATE_VERSION,
   SESSION_SAVE_VERSION,
   SESSION_SIG_HEX_LEN,
   DEFAULT_HIDDEN_BY_PANEL,

@@ -46,6 +46,12 @@ test('localStorage persistence round-trips and validates session signature', () 
   assert.equal(boot.hiddenPanels.guide, false);
   assert.equal(boot.hiddenPanels.legend, true);
   assert.equal(boot.dailySolvedDate, null);
+  assert.deepEqual(boot.scoreState, {
+    infiniteTotal: 0,
+    dailyTotal: 0,
+    infiniteByLevel: {},
+    dailyByDate: {},
+  });
   assert.equal(boot.sessionBoard, null);
 
   persistence.writeTheme('light');
@@ -53,6 +59,16 @@ test('localStorage persistence round-trips and validates session signature', () 
   persistence.writeCampaignProgress(5);
   persistence.writeInfiniteProgress(3);
   persistence.writeDailySolvedDate('2026-02-27');
+  persistence.writeScoreState({
+    infiniteTotal: 3,
+    dailyTotal: 1,
+    infiniteByLevel: {
+      4: ['sig-a', 'sig-b'],
+    },
+    dailyByDate: {
+      '2026-02-27': ['sig-x'],
+    },
+  });
   persistence.writeSessionBoard({
     levelIndex: 4,
     path: [[0, 0], [0, 1], [1, 1]],
@@ -65,6 +81,16 @@ test('localStorage persistence round-trips and validates session signature', () 
   assert.equal(boot.campaignProgress, 5);
   assert.equal(boot.infiniteProgress, 3);
   assert.equal(boot.dailySolvedDate, '2026-02-27');
+  assert.deepEqual(boot.scoreState, {
+    infiniteTotal: 3,
+    dailyTotal: 1,
+    infiniteByLevel: {
+      4: ['sig-a', 'sig-b'],
+    },
+    dailyByDate: {
+      '2026-02-27': ['sig-x'],
+    },
+  });
   assert.deepEqual(boot.sessionBoard.path, [[0, 0], [0, 1], [1, 1]]);
 
   const raw = storage.getItem(STORAGE_KEYS.SESSION_SAVE_KEY);
@@ -75,6 +101,41 @@ test('localStorage persistence round-trips and validates session signature', () 
   boot = persistence.readBootState();
   assert.equal(boot.sessionBoard, null);
   assert.equal(storage.getItem(STORAGE_KEYS.SESSION_SAVE_KEY), null);
+});
+
+test('score state falls back to defaults when payload is malformed', () => {
+  const storage = createFakeStorage();
+  const fakeWindow = {
+    localStorage: storage,
+    matchMedia: () => ({ matches: false }),
+    crypto: {
+      getRandomValues(bytes) {
+        for (let i = 0; i < bytes.length; i++) bytes[i] = i + 1;
+      },
+    },
+  };
+
+  storage.setItem(STORAGE_KEYS.SCORE_STATE_KEY, JSON.stringify({
+    version: 999,
+    infiniteTotal: 999,
+    dailyTotal: 999,
+    infiniteByLevel: { 1: ['x'] },
+    dailyByDate: { '2026-03-01': ['y'] },
+  }));
+
+  const persistence = createLocalStoragePersistence({
+    windowObj: fakeWindow,
+    campaignLevelCount: 10,
+    maxInfiniteIndex: 20,
+  });
+
+  const boot = persistence.readBootState();
+  assert.deepEqual(boot.scoreState, {
+    infiniteTotal: 0,
+    dailyTotal: 0,
+    infiniteByLevel: {},
+    dailyByDate: {},
+  });
 });
 
 test('daily session save is rejected when saved dailyId does not match active daily', () => {

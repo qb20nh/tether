@@ -21,6 +21,7 @@ test('default adapters expose required contract methods', () => {
   assert.equal(typeof adapters.persistence.writeTheme, 'function');
   assert.equal(typeof adapters.persistence.writeSessionBoard, 'function');
   assert.equal(typeof adapters.persistence.writeDailySolvedDate, 'function');
+  assert.equal(typeof adapters.persistence.writeScoreState, 'function');
 
   assert.equal(typeof adapters.renderer.mount, 'function');
   assert.equal(typeof adapters.renderer.renderFrame, 'function');

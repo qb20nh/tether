@@ -2,6 +2,7 @@ import { INTENT_TYPES, UI_ACTIONS, INTERACTION_UPDATES, GAME_COMMANDS } from './
 import { applyTheme as applyThemeCore, refreshThemeButton as refreshThemeButtonCore, requestLightThemeConfirmation as requestLightThemeConfirmationCore, setThemeSwitchPrompt as setThemeSwitchPromptCore, refreshSettingsToggle as refreshSettingsToggleCore, normalizeTheme } from './theme_manager.js';
 import { formatDailyDateLabel, formatDailyMonthDayLabel, formatCountdownHms, utcStartMsFromDateId } from './daily_timer.js';
 import { createProgressManager } from './progress_manager.js';
+import { SCORE_MODES, buildCanonicalSolutionSignature, createScoreManager } from './score_manager.js';
 
 const PATH_BRACKET_TUTORIAL_LEVEL_INDEX = 0;
 const MOVABLE_BRACKET_TUTORIAL_LEVEL_INDEX = 7;
@@ -92,6 +93,7 @@ export function createRuntime(options) {
     markInfiniteLevelCleared,
     isCampaignLevelUnlocked,
   } = progressManager;
+  const scoreManager = createScoreManager(bootState.scoreState, persistence);
 
   let dailySolvedDate = typeof bootState.dailySolvedDate === 'string' ? bootState.dailySolvedDate : null;
   let activeTheme = normalizeTheme(bootState.theme);
@@ -335,6 +337,89 @@ export function createRuntime(options) {
   const resolveInfiniteModeLabel = () => {
     const raw = translate('ui.infiniteLevelOption', { n: '' });
     return raw.replace(/\s*#\s*$/, '').trim();
+  };
+
+  const resolveScoreContext = (levelIndex) => {
+    if (isDailyLevelIndex(levelIndex)) {
+      if (!activeDailyId) return null;
+      return {
+        mode: SCORE_MODES.DAILY,
+        levelKey: activeDailyId,
+      };
+    }
+
+    if (!core.isInfiniteAbsIndex(levelIndex)) return null;
+    return {
+      mode: SCORE_MODES.INFINITE,
+      levelKey: String(core.clampInfiniteIndex(core.toInfiniteIndex(levelIndex))),
+    };
+  };
+
+  const renderScoreMeta = () => {
+    const refs = renderer.getRefs();
+    if (!refs?.scoreMeta || !refs?.infiniteScoreValue || !refs?.dailyScoreValue) return;
+
+    const snapshot = state.getSnapshot();
+    const levelIndex = snapshot?.levelIndex;
+    const totals = scoreManager.readTotals();
+    const infiniteItem = refs.infiniteScoreLabel?.closest('.scoreMetaItem') || null;
+    const dailyItem = refs.dailyScoreLabel?.closest('.scoreMetaItem') || null;
+    const separator = refs.scoreMeta.querySelector('.scoreMetaSeparator');
+
+    if (isDailyLevelIndex(levelIndex)) {
+      refs.scoreMeta.hidden = false;
+      if (infiniteItem) infiniteItem.hidden = true;
+      if (dailyItem) dailyItem.hidden = false;
+      if (separator) separator.hidden = true;
+      if (refs.dailyScoreLabel) refs.dailyScoreLabel.textContent = translate('ui.dailyLevelOption');
+      const distinctCount = scoreManager.readDistinctCount({
+        mode: SCORE_MODES.DAILY,
+        levelKey: activeDailyId,
+      });
+      refs.dailyScoreValue.textContent = `${totals.dailyTotal} (${distinctCount})`;
+      return;
+    }
+
+    if (core.isInfiniteAbsIndex(levelIndex)) {
+      refs.scoreMeta.hidden = false;
+      if (infiniteItem) infiniteItem.hidden = false;
+      if (dailyItem) dailyItem.hidden = true;
+      if (separator) separator.hidden = true;
+      if (refs.infiniteScoreLabel) refs.infiniteScoreLabel.textContent = resolveInfiniteModeLabel();
+      const infiniteLevelKey = String(core.clampInfiniteIndex(core.toInfiniteIndex(levelIndex)));
+      const distinctCount = scoreManager.readDistinctCount({
+        mode: SCORE_MODES.INFINITE,
+        levelKey: infiniteLevelKey,
+      });
+      refs.infiniteScoreValue.textContent = `${totals.infiniteTotal} (${distinctCount})`;
+      return;
+    }
+
+    refs.scoreMeta.hidden = true;
+  };
+
+  const registerSolvedScore = (snapshot) => {
+    const context = resolveScoreContext(snapshot.levelIndex);
+    if (!context) return null;
+
+    const signature = buildCanonicalSolutionSignature(snapshot);
+    if (!signature) return null;
+
+    const result = scoreManager.registerSolved({
+      mode: context.mode,
+      levelKey: context.levelKey,
+      signature,
+    });
+    renderScoreMeta();
+    return result;
+  };
+
+  const appendScoreToCompletionMessage = (baseMessage, scoreResult) => {
+    if (!scoreResult) return baseMessage;
+    const modeLabel = scoreResult.mode === SCORE_MODES.INFINITE
+      ? resolveInfiniteModeLabel()
+      : translate('ui.dailyLevelOption');
+    return `${baseMessage}<br><b>${modeLabel}: +${scoreResult.awarded}</b> (${scoreResult.modeTotal})`;
   };
 
   const setDisabledReasonTitle = (buttonEl, reasonKey) => {
@@ -706,8 +791,9 @@ export function createRuntime(options) {
     if (validate) {
       completion = core.checkCompletion(snapshot, evaluateResult, translate);
       if (completion.kind === 'good') {
+        const scoreResult = registerSolvedScore(snapshot);
         onLevelCleared(snapshot.levelIndex);
-        setUiMessage(completion.kind, completion.message);
+        setUiMessage(completion.kind, appendScoreToCompletionMessage(completion.message, scoreResult));
       } else {
         setUiMessage(null, core.goalText(snapshot.levelIndex, translate));
       }
@@ -817,6 +903,7 @@ export function createRuntime(options) {
     applyDailyBoardLockState(snapshot);
     syncMutableBoardStateFromSnapshot(snapshot);
     refreshLevelOptions();
+    renderScoreMeta();
     renderDailyMeta();
     queueBoardLayout(false);
     queueSessionSave();
@@ -840,6 +927,7 @@ export function createRuntime(options) {
     }
 
     refreshLevelOptions();
+    renderScoreMeta();
 
     applyDataAttributes(appEl, translate);
     renderDailyMeta();
@@ -1254,6 +1342,23 @@ export function createHeadlessRuntime(options) {
   let campaignProgress = Number.isInteger(bootState.campaignProgress) ? bootState.campaignProgress : 0;
   let infiniteProgress = Number.isInteger(bootState.infiniteProgress) ? bootState.infiniteProgress : 0;
   let dailySolvedDate = typeof bootState.dailySolvedDate === 'string' ? bootState.dailySolvedDate : null;
+  const scoreManager = createScoreManager(bootState.scoreState, persistence);
+
+  const resolveScoreContext = (levelIndex) => {
+    if (typeof core.isDailyAbsIndex === 'function' && core.isDailyAbsIndex(levelIndex)) {
+      const dailyId = typeof core.getDailyId === 'function' ? core.getDailyId() : null;
+      if (!dailyId) return null;
+      return {
+        mode: SCORE_MODES.DAILY,
+        levelKey: dailyId,
+      };
+    }
+    if (!core.isInfiniteAbsIndex(levelIndex)) return null;
+    return {
+      mode: SCORE_MODES.INFINITE,
+      levelKey: String(core.clampInfiniteIndex(core.toInfiniteIndex(levelIndex))),
+    };
+  };
 
   const markCleared = (levelIndex) => {
     if (typeof core.isDailyAbsIndex === 'function' && core.isDailyAbsIndex(levelIndex)) {
@@ -1281,6 +1386,17 @@ export function createHeadlessRuntime(options) {
     const result = core.evaluate(snapshot, {});
     const completion = validate ? core.checkCompletion(snapshot, result, (k) => k) : null;
     if (completion?.kind === 'good') {
+      const scoreContext = resolveScoreContext(snapshot.levelIndex);
+      if (scoreContext) {
+        const signature = buildCanonicalSolutionSignature(snapshot);
+        if (signature) {
+          scoreManager.registerSolved({
+            mode: scoreContext.mode,
+            levelKey: scoreContext.levelKey,
+            signature,
+          });
+        }
+      }
       markCleared(snapshot.levelIndex);
       persistence.clearSessionBoard();
     }

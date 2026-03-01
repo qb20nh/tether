@@ -1,3 +1,5 @@
+import { normalizeScoreState } from '../runtime/score_manager.js';
+
 export function createMemoryPersistence(initialState = {}, options = {}) {
   const dailyAbsIndex = Number.isInteger(options.dailyAbsIndex) ? options.dailyAbsIndex : null;
   const activeDailyId = typeof options.activeDailyId === 'string' && options.activeDailyId.length > 0
@@ -13,6 +15,7 @@ export function createMemoryPersistence(initialState = {}, options = {}) {
     campaignProgress: Number.isInteger(initialState.campaignProgress) ? initialState.campaignProgress : 0,
     infiniteProgress: Number.isInteger(initialState.infiniteProgress) ? initialState.infiniteProgress : 0,
     dailySolvedDate: typeof initialState.dailySolvedDate === 'string' ? initialState.dailySolvedDate : null,
+    scoreState: normalizeScoreState(initialState.scoreState),
     sessionBoard: initialState.sessionBoard || null,
   };
 
@@ -27,6 +30,7 @@ export function createMemoryPersistence(initialState = {}, options = {}) {
         campaignProgress: state.campaignProgress,
         infiniteProgress: state.infiniteProgress,
         dailySolvedDate: state.dailySolvedDate,
+        scoreState: normalizeScoreState(state.scoreState),
         sessionBoard: state.sessionBoard
           ? {
             levelIndex: state.sessionBoard.levelIndex,
@@ -59,6 +63,10 @@ export function createMemoryPersistence(initialState = {}, options = {}) {
 
     writeDailySolvedDate(dailyId) {
       state.dailySolvedDate = typeof dailyId === 'string' ? dailyId : state.dailySolvedDate;
+    },
+
+    writeScoreState(scoreState) {
+      state.scoreState = normalizeScoreState(scoreState);
     },
 
     writeSessionBoard(board) {

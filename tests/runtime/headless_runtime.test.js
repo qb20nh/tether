@@ -16,6 +16,25 @@ const LEVEL = {
   cornerCounts: [],
 };
 
+const INFINITE_SCORE_LEVEL = {
+  name: 'Infinite Score',
+  grid: [
+    '...',
+    '.s.',
+    '...',
+  ],
+  stitches: [],
+  cornerCounts: [],
+};
+
+const playPath = (runtime, cells) => {
+  for (let i = 0; i < cells.length; i += 1) {
+    const [r, c] = cells[i];
+    runtime.dispatch('path/start-or-step', { r, c });
+  }
+  return runtime.dispatch('path/finalize-after-pointer', {});
+};
+
 test('headless runtime executes commands and updates progress', () => {
   const levelProvider = createLevelProvider({
     levels: [LEVEL],
@@ -81,4 +100,52 @@ test('headless runtime clears daily level without touching campaign or infinite 
     infiniteProgress: 0,
     dailySolvedDate: '2026-02-27',
   });
+  assert.deepEqual(persistence.readBootState().scoreState, {
+    infiniteTotal: 0,
+    dailyTotal: 1,
+    infiniteByLevel: {},
+    dailyByDate: {
+      '2026-02-27': ['-|-|-||-'],
+    },
+  });
+});
+
+test('headless runtime scores unique infinite solutions and ignores equivalent duplicates', () => {
+  const levelProvider = createLevelProvider({
+    levels: [],
+    infiniteMaxLevels: 4,
+    generateInfiniteLevel: () => INFINITE_SCORE_LEVEL,
+  });
+  const core = createDefaultCore(levelProvider);
+  const state = createGameStateStore((i) => core.getLevel(i));
+  const persistence = createMemoryPersistence();
+  const runtime = createHeadlessRuntime({ core, state, persistence });
+
+  runtime.start(0);
+
+  const pathA = [
+    [0, 0], [0, 1], [0, 2], [1, 2], [1, 1], [1, 0], [2, 0], [2, 1], [2, 2],
+  ];
+  const pathB = [
+    [0, 0], [1, 0], [2, 0], [2, 1], [1, 1], [0, 1], [0, 2], [1, 2], [2, 2],
+  ];
+
+  const first = playPath(runtime, pathA);
+  assert.equal(first.completion.kind, 'good');
+  assert.equal(persistence.readBootState().scoreState.infiniteTotal, 1);
+
+  runtime.dispatch('path/reset', {});
+  const duplicate = playPath(runtime, [...pathA].reverse());
+  assert.equal(duplicate.completion.kind, 'good');
+  assert.equal(persistence.readBootState().scoreState.infiniteTotal, 1);
+
+  runtime.dispatch('path/reset', {});
+  const secondUnique = playPath(runtime, pathB);
+  assert.equal(secondUnique.completion.kind, 'good');
+
+  const scoreState = persistence.readBootState().scoreState;
+  assert.equal(scoreState.infiniteTotal, 3);
+  assert.equal(scoreState.dailyTotal, 0);
+  assert.equal(Array.isArray(scoreState.infiniteByLevel['0']), true);
+  assert.equal(scoreState.infiniteByLevel['0'].length, 2);
 });

@@ -183,6 +183,7 @@ header h1.brandTitle {
   display: flex;
   align-items: center;
   justify-content: flex-end;
+  gap: 8px;
 }
 
 .settingsToggle {
@@ -477,6 +478,59 @@ header h1.brandTitle {
   white-space: nowrap;
   letter-spacing: 0.2px;
   flex-shrink: 0;
+}
+
+.scoreMeta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--control-border);
+  background: var(--control-bg);
+  min-width: 0;
+  width: fit-content;
+  max-width: 100%;
+  margin-top: 0;
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+}
+
+.scoreMeta[hidden],
+.scoreMetaItem[hidden],
+.scoreMetaSeparator[hidden] {
+  display: none !important;
+}
+
+.scoreMetaItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.scoreMetaLabel {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.scoreMetaValue {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+  white-space: nowrap;
+  letter-spacing: 0.2px;
+}
+
+.scoreMetaSeparator {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
 }
 
 select,
@@ -1487,7 +1541,7 @@ button:disabled:active {
     width: auto;
     flex-wrap: nowrap;
     justify-content: flex-end;
-    gap: 0;
+    gap: 6px;
   }
 
   .settingsToggle {
@@ -1588,6 +1642,14 @@ button:disabled:active {
     gap: 6px;
     padding: 6px 8px;
     order: 5;
+  }
+
+  .scoreMeta {
+    display: inline-flex;
+    width: auto;
+    justify-content: flex-end;
+    gap: 6px;
+    padding: 5px 7px;
   }
 
   .panelTitle {
