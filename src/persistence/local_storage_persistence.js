@@ -384,7 +384,6 @@ export function createLocalStoragePersistence(options = {}) {
       return levelIndex <= readCampaignProgress();
     }
 
-    if (readCampaignProgress() < campaignLevelCount) return false;
     const infiniteIndex = levelIndex - campaignLevelCount;
     if (!Number.isInteger(infiniteIndex) || infiniteIndex < 0) return false;
     return infiniteIndex <= clampInfiniteProgress(readInfiniteProgress());

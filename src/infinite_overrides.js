@@ -4,6 +4,8 @@
 const FORMAT_MAGIC = 0x49; // 'I'
 const FORMAT_VERSION = 1;
 const IS_NODE = typeof process !== 'undefined' && Boolean(process?.versions?.node);
+const GZIP_MAGIC_0 = 0x1f;
+const GZIP_MAGIC_1 = 0x8b;
 
 const readCompressedOverrideBytes = async () => {
   const url = new URL('./infinite_overrides.bin.gz', import.meta.url);
@@ -94,13 +96,30 @@ const decodePackedOverrides = (bytes) => {
   return Object.freeze(overrides);
 };
 
+const hasGzipHeader = (bytes) => (
+  Boolean(bytes)
+  && bytes.length >= 2
+  && bytes[0] === GZIP_MAGIC_0
+  && bytes[1] === GZIP_MAGIC_1
+);
+
+const decodeOverridePayloadBytes = async (bytes) => {
+  const payloadBytes = hasGzipHeader(bytes) ? await gunzipBytes(bytes) : bytes;
+  return decodePackedOverrides(payloadBytes);
+};
+
 const loadOverrideMap = async () => {
   const compressedBytes = await readCompressedOverrideBytes();
-  const payloadBytes = await gunzipBytes(compressedBytes);
-  return decodePackedOverrides(payloadBytes);
+  return decodeOverridePayloadBytes(compressedBytes);
 };
 
 export const INFINITE_OVERRIDE_BY_INDEX = await loadOverrideMap().catch((err) => {
   console.error("Failed to load infinite overrides payload:", err);
   return Object.freeze(Object.create(null));
 });
+
+export const __TEST__ = {
+  decodePackedOverrides,
+  decodeOverridePayloadBytes,
+  hasGzipHeader,
+};

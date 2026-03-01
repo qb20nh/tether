@@ -178,3 +178,39 @@ test('daily session save is rejected when saved dailyId does not match active da
   assert.equal(boot.sessionBoard, null);
   assert.equal(storage.getItem(STORAGE_KEYS.SESSION_SAVE_KEY), null);
 });
+
+test('infinite session save restores even before campaign completion', () => {
+  const storage = createFakeStorage();
+  const fakeWindow = {
+    localStorage: storage,
+    matchMedia: () => ({ matches: false }),
+    crypto: {
+      getRandomValues(bytes) {
+        for (let i = 0; i < bytes.length; i++) bytes[i] = i + 1;
+      },
+    },
+  };
+
+  const campaignLevelCount = 10;
+  const persistence = createLocalStoragePersistence({
+    windowObj: fakeWindow,
+    campaignLevelCount,
+    maxInfiniteIndex: 20,
+  });
+
+  persistence.writeCampaignProgress(0);
+  persistence.writeInfiniteProgress(2);
+  persistence.writeSessionBoard({
+    levelIndex: campaignLevelCount + 2,
+    path: [[0, 0], [0, 1]],
+    movableWalls: [],
+  });
+
+  const boot = persistence.readBootState();
+  assert.deepEqual(boot.sessionBoard, {
+    levelIndex: campaignLevelCount + 2,
+    path: [[0, 0], [0, 1]],
+    movableWalls: [],
+    dailyId: null,
+  });
+});

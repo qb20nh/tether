@@ -604,16 +604,14 @@ export function createRuntime(options) {
       optionHtml += `<option value="${i}" ${disabled ? 'disabled' : ''}${i === currentIndex ? 'selected' : ''}>${resolveLevelName(level)}</option>`;
     }
 
-    if (isCampaignCompleted()) {
-      const selectorInfiniteIndex = core.isInfiniteAbsIndex(currentIndex)
-        ? core.clampInfiniteIndex(core.toInfiniteIndex(currentIndex))
-        : core.clampInfiniteIndex(readInfiniteProgress());
-      const infiniteAbsIndex = core.ensureInfiniteAbsIndex(selectorInfiniteIndex);
-      const translated = resolveInfiniteModeLabel();
-      const fallback = resolveLevelName(core.getLevel(infiniteAbsIndex));
-      const infiniteLabel = translated === 'ui.infiniteLevelOption' ? fallback : translated;
-      optionHtml += `<option value="${infiniteAbsIndex}" ${infiniteAbsIndex === currentIndex ? 'selected' : ''}>${infiniteLabel}</option>`;
-    }
+    const selectorInfiniteIndex = core.isInfiniteAbsIndex(currentIndex)
+      ? core.clampInfiniteIndex(core.toInfiniteIndex(currentIndex))
+      : core.clampInfiniteIndex(readInfiniteProgress());
+    const infiniteAbsIndex = core.ensureInfiniteAbsIndex(selectorInfiniteIndex);
+    const translated = resolveInfiniteModeLabel();
+    const fallback = resolveLevelName(core.getLevel(infiniteAbsIndex));
+    const infiniteLabel = translated === 'ui.infiniteLevelOption' ? fallback : translated;
+    optionHtml += `<option value="${infiniteAbsIndex}" ${infiniteAbsIndex === currentIndex ? 'selected' : ''}>${infiniteLabel}</option>`;
 
     const dailyLabel = (() => {
       if (!hasDailyLevel) return translate('ui.dailyUnavailable');
