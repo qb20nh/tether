@@ -20,6 +20,8 @@ export default {
     "prevInfiniteDisabledFirst": "Vous êtes à Infini #1.",
     "infiniteLevelOption": "Infini #{{n}}",
     "dailyLevelOption": "Quotidien",
+    "scoreInfiniteLabel": "Score (Infini)",
+    "scoreDailyLabel": "Score (Quotidien)",
     "dailyLevelOptionWithDate": "{{label}} ({{date}})",
     "dailyUnavailable": "Quotidien (Indisponible)",
     "dailyComplete": "Quotidien terminé",

@@ -20,6 +20,8 @@ export default {
     "prevInfiniteDisabledFirst": "현재 첫 번째 무한 레벨입니다.",
     "infiniteLevelOption": "무한 #{{n}}",
     "dailyLevelOption": "데일리",
+    "scoreInfiniteLabel": "점수(무한)",
+    "scoreDailyLabel": "점수(데일리)",
     "dailyLevelOptionWithDate": "{{label}}({{date}})",
     "dailyUnavailable": "데일리 (사용 불가)",
     "dailyComplete": "데일리 완료",

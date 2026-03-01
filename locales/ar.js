@@ -20,6 +20,8 @@ export default {
     "prevInfiniteDisabledFirst": "أنت في المستوى اللانهائي #1.",
     "infiniteLevelOption": "لا نهائي #{{n}}",
     "dailyLevelOption": "يومي",
+    "scoreInfiniteLabel": "النقاط (لا نهائي)",
+    "scoreDailyLabel": "النقاط (يومي)",
     "dailyLevelOptionWithDate": "{{label}} ({{date}})",
     "dailyUnavailable": "يومي (غير متاح)",
     "dailyComplete": "تم إنهاء اليومي",

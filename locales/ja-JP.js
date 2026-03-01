@@ -20,6 +20,8 @@ export default {
     "prevInfiniteDisabledFirst": "現在は無限 #1 です。",
     "infiniteLevelOption": "無限 #{{n}}",
     "dailyLevelOption": "デイリー",
+    "scoreInfiniteLabel": "スコア（無限）",
+    "scoreDailyLabel": "スコア（デイリー）",
     "dailyLevelOptionWithDate": "{{label}}（{{date}}）",
     "dailyUnavailable": "デイリー（利用不可）",
     "dailyComplete": "デイリークリア",

@@ -20,6 +20,8 @@ export default {
     "prevInfiniteDisabledFirst": "当前是无限 #1。",
     "infiniteLevelOption": "无限 #{{n}}",
     "dailyLevelOption": "每日",
+    "scoreInfiniteLabel": "分数（无限）",
+    "scoreDailyLabel": "分数（每日）",
     "dailyLevelOptionWithDate": "{{label}}（{{date}}）",
     "dailyUnavailable": "每日（不可用）",
     "dailyComplete": "每日已完成",

@@ -371,7 +371,7 @@ export function createRuntime(options) {
       if (infiniteItem) infiniteItem.hidden = true;
       if (dailyItem) dailyItem.hidden = false;
       if (separator) separator.hidden = true;
-      if (refs.dailyScoreLabel) refs.dailyScoreLabel.textContent = translate('ui.dailyLevelOption');
+      if (refs.dailyScoreLabel) refs.dailyScoreLabel.textContent = translate('ui.scoreDailyLabel');
       const distinctCount = scoreManager.readDistinctCount({
         mode: SCORE_MODES.DAILY,
         levelKey: activeDailyId,
@@ -385,7 +385,7 @@ export function createRuntime(options) {
       if (infiniteItem) infiniteItem.hidden = false;
       if (dailyItem) dailyItem.hidden = true;
       if (separator) separator.hidden = true;
-      if (refs.infiniteScoreLabel) refs.infiniteScoreLabel.textContent = resolveInfiniteModeLabel();
+      if (refs.infiniteScoreLabel) refs.infiniteScoreLabel.textContent = translate('ui.scoreInfiniteLabel');
       const infiniteLevelKey = String(core.clampInfiniteIndex(core.toInfiniteIndex(levelIndex)));
       const distinctCount = scoreManager.readDistinctCount({
         mode: SCORE_MODES.INFINITE,

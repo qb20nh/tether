@@ -20,6 +20,8 @@ export default {
     "prevInfiniteDisabledFirst": "Du bist bei Endlos #1.",
     "infiniteLevelOption": "Endlos #{{n}}",
     "dailyLevelOption": "Täglich",
+    "scoreInfiniteLabel": "Punkte (Endlos)",
+    "scoreDailyLabel": "Punkte (Täglich)",
     "dailyLevelOptionWithDate": "{{label}} ({{date}})",
     "dailyUnavailable": "Täglich (Nicht verfügbar)",
     "dailyComplete": "Täglich abgeschlossen",
