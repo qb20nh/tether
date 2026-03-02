@@ -51,6 +51,11 @@ let pathStartPinPresenceState = null;
 let pathFlowVisibilityState = null;
 let pathReverseTipSwapState = null;
 let pathReverseGradientBlendState = null;
+let pathStartRetainedArcState = null;
+let pathEndRetainedArcState = null;
+let pathEndArrowRotateState = null;
+let pathStartFlowRotateState = null;
+let pathRetainedArcTokenSeed = 0;
 let tutorialBracketSignature = '';
 let tutorialBracketGeometryToken = 0;
 let reducedMotionQuery = null;
@@ -114,6 +119,16 @@ const pathFramePayload = {
   tutorialBracketPulseEnabled: false,
   tutorialBracketColorRgb: null,
   drawTutorialBracketsInPathLayer: false,
+  endArrowDirX: NaN,
+  endArrowDirY: NaN,
+  startFlowDirX: NaN,
+  startFlowDirY: NaN,
+  retainedStartArcWidth: 0,
+  retainedEndArcWidth: 0,
+  retainedStartArcPoints: [],
+  retainedEndArcPoints: [],
+  retainedStartArcGeometryToken: NaN,
+  retainedEndArcGeometryToken: NaN,
 };
 
 const PATH_FLOW_SPEED = -32;
@@ -125,6 +140,7 @@ const PATH_FLOW_RISE = 0.82;
 const PATH_FLOW_DROP = 0.83;
 const PATH_TIP_ARRIVAL_DURATION_MS = 200;
 const PATH_TIP_RETRACT_CUTOFF_MS = 100;
+const PATH_RETAINED_ARC_SETTLE_DURATION_MS = 100;
 const PATH_REVERSE_TIP_SWAP_DURATION_MS = 200;
 const PATH_REVERSE_GRADIENT_BLEND_DURATION_MS = 200;
 const PATH_TIP_ARRIVAL_DISTANCE_CELL_FACTOR = 0.5;
@@ -140,6 +156,7 @@ const PATH_TIP_ARRIVAL_BEZIER_Y2 = 1;
 const PATH_TIP_ARRIVAL_ADJACENT_MAX = Math.SQRT2 + 1e-3;
 const PATH_TIP_CENTER_SNAP_EPSILON_PX = 0.5;
 const FLOW_TRAVEL_ANGLE_TOLERANCE = 1e-4;
+const RETAINED_ARC_COVERAGE_EPSILON_PX = 0.5;
 const arrivalOffsetScratchA = {
   x: 0,
   y: 0,
@@ -177,6 +194,20 @@ const reverseGradientBlendScratch = {
   fromTravelSpan: 0,
   active: false,
 };
+const endArrowDirectionScratch = { x: NaN, y: NaN, active: false };
+const startFlowDirectionScratch = { x: NaN, y: NaN, active: false };
+const retainedArcRenderScratchA = {
+  points: [],
+  geometryToken: NaN,
+  active: false,
+};
+const retainedArcRenderScratchB = {
+  points: [],
+  geometryToken: NaN,
+  active: false,
+};
+let reusableStartRetainedArcPoints = [];
+let reusableEndRetainedArcPoints = [];
 
 const isPathReversed = (nextPath, previousPath) => {
   if (!Array.isArray(nextPath) || !Array.isArray(previousPath)) return false;
@@ -287,6 +318,27 @@ const clearPathReverseGradientBlendState = () => {
   pathReverseGradientBlendState = null;
 };
 
+const clearPathStartRetainedArcState = () => {
+  pathStartRetainedArcState = null;
+};
+
+const clearPathEndRetainedArcState = () => {
+  pathEndRetainedArcState = null;
+};
+
+const clearPathRetainedArcStates = () => {
+  clearPathStartRetainedArcState();
+  clearPathEndRetainedArcState();
+};
+
+const clearPathEndArrowRotateState = () => {
+  pathEndArrowRotateState = null;
+};
+
+const clearPathStartFlowRotateState = () => {
+  pathStartFlowRotateState = null;
+};
+
 const isEndRetractTransition = (prevPath, nextPath) => {
   if (!Array.isArray(prevPath) || !Array.isArray(nextPath)) return false;
   const prevLen = prevPath.length;
@@ -344,6 +396,529 @@ const isRetractUnturnTransition = (side, prevTip, nextTip, nextPath) => {
   const outC = prevTip.c - nextTip.c;
   if ((inR === 0 && inC === 0) || (outR === 0 && outC === 0)) return false;
   return ((inR * outC) - (inC * outR)) !== 0;
+};
+
+const normalizeDirectionInto = (dx, dy, out) => {
+  const len = Math.hypot(dx, dy);
+  if (!(len > 0)) return null;
+  out.x = dx / len;
+  out.y = dy / len;
+  return out;
+};
+
+const updatePathEndArrowRotateState = (
+  prevPath,
+  nextPath,
+  nowMs = getNowMs(),
+) => {
+  if (isReducedMotionPreferred()) {
+    clearPathEndArrowRotateState();
+    return;
+  }
+  const pathChanged = !pathsMatch(prevPath, nextPath);
+  if (!pathChanged) return;
+
+  if (!isEndRetractTransition(prevPath, nextPath)) {
+    clearPathEndArrowRotateState();
+    return;
+  }
+
+  const prevTip = getPathTipFromPath(prevPath, 'end');
+  const nextTip = getPathTipFromPath(nextPath, 'end');
+  const neighbor = Array.isArray(nextPath) ? nextPath[nextPath.length - 2] : null;
+  if (!prevTip || !nextTip || !neighbor) {
+    clearPathEndArrowRotateState();
+    return;
+  }
+  if (!isRetractUnturnTransition('end', prevTip, nextTip, nextPath)) {
+    clearPathEndArrowRotateState();
+    return;
+  }
+
+  const fromDir = normalizeDirectionInto(
+    prevTip.c - nextTip.c,
+    prevTip.r - nextTip.r,
+    headPointScratchA,
+  );
+  const toDir = normalizeDirectionInto(
+    nextTip.c - neighbor.c,
+    nextTip.r - neighbor.r,
+    headPointScratchB,
+  );
+  if (!fromDir || !toDir) {
+    clearPathEndArrowRotateState();
+    return;
+  }
+
+  const fromAngle = Math.atan2(fromDir.y, fromDir.x);
+  const toAngle = Math.atan2(toDir.y, toDir.x);
+  pathEndArrowRotateState = {
+    startTimeMs: nowMs,
+    targetR: nextTip.r,
+    targetC: nextTip.c,
+    neighborR: neighbor.r,
+    neighborC: neighbor.c,
+    fromAngle,
+    deltaAngle: angleDeltaSigned(fromAngle, toAngle),
+    cutoffMs: PATH_TIP_RETRACT_CUTOFF_MS,
+  };
+};
+
+const resolvePathEndArrowDirection = (
+  path,
+  nowMs = getNowMs(),
+  out = endArrowDirectionScratch,
+) => {
+  out.x = NaN;
+  out.y = NaN;
+  out.active = false;
+
+  if (isReducedMotionPreferred()) {
+    clearPathEndArrowRotateState();
+    return out;
+  }
+
+  const state = pathEndArrowRotateState;
+  if (!state) return out;
+  const pathLength = Array.isArray(path) ? path.length : 0;
+  if (pathLength < 2) {
+    clearPathEndArrowRotateState();
+    return out;
+  }
+
+  const tail = path[pathLength - 1];
+  const neighbor = path[pathLength - 2];
+  if (
+    !tail
+    || !neighbor
+    || tail.r !== state.targetR
+    || tail.c !== state.targetC
+    || neighbor.r !== state.neighborR
+    || neighbor.c !== state.neighborC
+  ) {
+    clearPathEndArrowRotateState();
+    return out;
+  }
+
+  const elapsed = nowMs - state.startTimeMs;
+  const visibleDuration = Number.isFinite(state.cutoffMs) && state.cutoffMs > 0
+    ? state.cutoffMs
+    : PATH_TIP_ARRIVAL_DURATION_MS;
+  if (elapsed >= visibleDuration) {
+    clearPathEndArrowRotateState();
+    return out;
+  }
+  const linearProgress = clampUnit(elapsed / PATH_TIP_ARRIVAL_DURATION_MS);
+  const eased = easeOutCubic(linearProgress);
+  const angle = state.fromAngle + (state.deltaAngle * eased);
+  out.x = Math.cos(angle);
+  out.y = Math.sin(angle);
+  out.active = true;
+  return out;
+};
+
+const hasActivePathEndArrowRotate = (
+  path,
+  nowMs = getNowMs(),
+) => resolvePathEndArrowDirection(path, nowMs, endArrowDirectionScratch).active;
+
+const applyPathEndArrowDirectionToPayload = (path, nowMs = getNowMs()) => {
+  const direction = resolvePathEndArrowDirection(path, nowMs, endArrowDirectionScratch);
+  pathFramePayload.endArrowDirX = direction.active ? direction.x : NaN;
+  pathFramePayload.endArrowDirY = direction.active ? direction.y : NaN;
+  return direction.active;
+};
+
+const updatePathStartFlowRotateState = (
+  prevPath,
+  nextPath,
+  nowMs = getNowMs(),
+) => {
+  if (isReducedMotionPreferred()) {
+    clearPathStartFlowRotateState();
+    return;
+  }
+  const pathChanged = !pathsMatch(prevPath, nextPath);
+  if (!pathChanged) return;
+
+  if (!isStartRetractTransition(prevPath, nextPath)) {
+    clearPathStartFlowRotateState();
+    return;
+  }
+
+  const prevTip = getPathTipFromPath(prevPath, 'start');
+  const nextTip = getPathTipFromPath(nextPath, 'start');
+  const neighbor = Array.isArray(nextPath) ? nextPath[1] : null;
+  if (!prevTip || !nextTip || !neighbor) {
+    clearPathStartFlowRotateState();
+    return;
+  }
+  if (!isRetractUnturnTransition('start', prevTip, nextTip, nextPath)) {
+    clearPathStartFlowRotateState();
+    return;
+  }
+
+  const fromDir = normalizeDirectionInto(
+    nextTip.c - prevTip.c,
+    nextTip.r - prevTip.r,
+    headPointScratchA,
+  );
+  const toDir = normalizeDirectionInto(
+    neighbor.c - nextTip.c,
+    neighbor.r - nextTip.r,
+    headPointScratchB,
+  );
+  if (!fromDir || !toDir) {
+    clearPathStartFlowRotateState();
+    return;
+  }
+
+  const fromAngle = Math.atan2(fromDir.y, fromDir.x);
+  const toAngle = Math.atan2(toDir.y, toDir.x);
+  pathStartFlowRotateState = {
+    startTimeMs: nowMs,
+    targetR: nextTip.r,
+    targetC: nextTip.c,
+    neighborR: neighbor.r,
+    neighborC: neighbor.c,
+    fromAngle,
+    deltaAngle: angleDeltaSigned(fromAngle, toAngle),
+    cutoffMs: PATH_TIP_RETRACT_CUTOFF_MS,
+  };
+};
+
+const resolvePathStartFlowDirection = (
+  path,
+  nowMs = getNowMs(),
+  out = startFlowDirectionScratch,
+) => {
+  out.x = NaN;
+  out.y = NaN;
+  out.active = false;
+
+  if (isReducedMotionPreferred()) {
+    clearPathStartFlowRotateState();
+    return out;
+  }
+
+  const state = pathStartFlowRotateState;
+  if (!state) return out;
+  const pathLength = Array.isArray(path) ? path.length : 0;
+  if (pathLength < 2) {
+    clearPathStartFlowRotateState();
+    return out;
+  }
+
+  const head = path[0];
+  const neighbor = path[1];
+  if (
+    !head
+    || !neighbor
+    || head.r !== state.targetR
+    || head.c !== state.targetC
+    || neighbor.r !== state.neighborR
+    || neighbor.c !== state.neighborC
+  ) {
+    clearPathStartFlowRotateState();
+    return out;
+  }
+
+  const elapsed = nowMs - state.startTimeMs;
+  const visibleDuration = Number.isFinite(state.cutoffMs) && state.cutoffMs > 0
+    ? state.cutoffMs
+    : PATH_TIP_ARRIVAL_DURATION_MS;
+  if (elapsed >= visibleDuration) {
+    clearPathStartFlowRotateState();
+    return out;
+  }
+  const linearProgress = clampUnit(elapsed / PATH_TIP_ARRIVAL_DURATION_MS);
+  const eased = easeOutCubic(linearProgress);
+  const angle = state.fromAngle + (state.deltaAngle * eased);
+  out.x = Math.cos(angle);
+  out.y = Math.sin(angle);
+  out.active = true;
+  return out;
+};
+
+const hasActivePathStartFlowRotate = (
+  path,
+  nowMs = getNowMs(),
+) => resolvePathStartFlowDirection(path, nowMs, startFlowDirectionScratch).active;
+
+const applyPathStartFlowDirectionToPayload = (path, nowMs = getNowMs()) => {
+  const direction = resolvePathStartFlowDirection(path, nowMs, startFlowDirectionScratch);
+  pathFramePayload.startFlowDirX = direction.active ? direction.x : NaN;
+  pathFramePayload.startFlowDirY = direction.active ? direction.y : NaN;
+  return direction.active;
+};
+
+const clearSinglePathRetainedArcState = (side) => {
+  if (side === 'start') clearPathStartRetainedArcState();
+  else if (side === 'end') clearPathEndRetainedArcState();
+};
+
+const updateSinglePathRetainedArcState = (
+  side,
+  prevPath,
+  nextPath,
+  nowMs = getNowMs(),
+  pathChanged = true,
+) => {
+  if (side !== 'start' && side !== 'end') return;
+  const clearState = () => clearSinglePathRetainedArcState(side);
+  if (!pathChanged) return;
+
+  const isRetract = side === 'start'
+    ? isStartRetractTransition(prevPath, nextPath)
+    : isEndRetractTransition(prevPath, nextPath);
+  if (!isRetract) {
+    clearState();
+    return;
+  }
+
+  const prevTip = getPathTipFromPath(prevPath, side);
+  const nextTip = getPathTipFromPath(nextPath, side);
+  if (!prevTip || !nextTip) {
+    clearState();
+    return;
+  }
+  if (!isRetractUnturnTransition(side, prevTip, nextTip, nextPath)) {
+    clearState();
+    return;
+  }
+  const neighbor = side === 'start'
+    ? nextPath?.[1] || null
+    : nextPath?.[nextPath.length - 2] || null;
+  if (!neighbor) {
+    clearState();
+    return;
+  }
+
+  const nextState = {
+    side,
+    startTimeMs: nowMs,
+    settleStartTimeMs: NaN,
+    cornerR: nextTip.r,
+    cornerC: nextTip.c,
+    movingR: prevTip.r,
+    movingC: prevTip.c,
+    arcInR: side === 'start' ? prevTip.r : neighbor.r,
+    arcInC: side === 'start' ? prevTip.c : neighbor.c,
+    arcOutR: side === 'start' ? neighbor.r : prevTip.r,
+    arcOutC: side === 'start' ? neighbor.c : prevTip.c,
+    geometryTokenSeed: (pathRetainedArcTokenSeed += 1),
+  };
+  if (side === 'start') pathStartRetainedArcState = nextState;
+  else pathEndRetainedArcState = nextState;
+};
+
+const updatePathRetainedArcStates = (
+  prevPath,
+  nextPath,
+  nowMs = getNowMs(),
+) => {
+  if (isReducedMotionPreferred()) {
+    clearPathRetainedArcStates();
+    return;
+  }
+  const pathChanged = !pathsMatch(prevPath, nextPath);
+  if (!pathChanged) return;
+
+  updateSinglePathRetainedArcState('start', prevPath, nextPath, nowMs, pathChanged);
+  updateSinglePathRetainedArcState('end', prevPath, nextPath, nowMs, pathChanged);
+};
+
+const isRetainedArcStateCompatibleWithPath = (state, path) => {
+  if (!state || !Array.isArray(path) || path.length <= 0) return false;
+  if (state.side === 'start') {
+    const head = path[0];
+    return Boolean(head && head.r === state.cornerR && head.c === state.cornerC);
+  }
+  const tail = path[path.length - 1];
+  return Boolean(tail && tail.r === state.cornerR && tail.c === state.cornerC);
+};
+
+const getCellPointFromLayout = (r, c, out = headPointScratchA) => {
+  if (!pathLayoutMetrics.ready) return null;
+  const row = Number(r);
+  const col = Number(c);
+  if (!Number.isFinite(row) || !Number.isFinite(col)) return null;
+  const step = pathLayoutMetrics.cell + pathLayoutMetrics.gap;
+  const half = pathLayoutMetrics.cell * 0.5;
+  out.x = pathLayoutMetrics.offsetX + pathLayoutMetrics.pad + (col * step) + half;
+  out.y = pathLayoutMetrics.offsetY + pathLayoutMetrics.pad + (row * step) + half;
+  return out;
+};
+
+const clearArcPointPool = (points) => {
+  if (Array.isArray(points)) points.length = 0;
+};
+
+const ensureArcPointPoolLength = (points, length) => {
+  if (!Array.isArray(points)) return;
+  if (points.length < length) {
+    for (let i = points.length; i < length; i++) {
+      points.push({ x: 0, y: 0 });
+    }
+  }
+  points.length = length;
+};
+
+const buildRetainedArcPolyline = (
+  state,
+  width,
+  outPoints,
+  settleUnit = 0,
+) => {
+  clearArcPointPool(outPoints);
+  if (!state || !(width > 0)) return null;
+  const p0 = getCellPointFromLayout(state.arcInR, state.arcInC, headPointScratchA);
+  const p1 = getCellPointFromLayout(state.cornerR, state.cornerC, headPointScratchB);
+  const p2 = getCellPointFromLayout(state.arcOutR, state.arcOutC, headPointScratchC);
+  if (!p0 || !p1 || !p2) return null;
+
+  const inDx = p1.x - p0.x;
+  const inDy = p1.y - p0.y;
+  const outDx = p2.x - p1.x;
+  const outDy = p2.y - p1.y;
+  const inLen = Math.hypot(inDx, inDy);
+  const outLen = Math.hypot(outDx, outDy);
+  if (!(inLen > 0) || !(outLen > 0)) return null;
+  const inUx = inDx / inLen;
+  const inUy = inDy / inLen;
+  const outUx = outDx / outLen;
+  const outUy = outDy / outLen;
+  const inAngle = Math.atan2(inUy, inUx);
+  const outAngle = Math.atan2(outUy, outUx);
+  const turn = angleDeltaSigned(inAngle, outAngle);
+  const absTurn = Math.abs(turn);
+  if (
+    absTurn <= FLOW_TRAVEL_ANGLE_TOLERANCE
+    || absTurn >= Math.PI - FLOW_TRAVEL_ANGLE_TOLERANCE
+  ) {
+    return null;
+  }
+
+  const targetAbsTurn = Math.min(absTurn, Math.PI / 4);
+  const unit = clampUnit(settleUnit);
+  const desiredAbsTurn = absTurn + ((targetAbsTurn - absTurn) * easeOutCubic(unit));
+  if (!(desiredAbsTurn > FLOW_TRAVEL_ANGLE_TOLERANCE)) return null;
+
+  const turnSign = turn < 0 ? -1 : 1;
+  const desiredOutAngle = inAngle + (turnSign * desiredAbsTurn);
+  const desiredOutUx = Math.cos(desiredOutAngle);
+  const desiredOutUy = Math.sin(desiredOutAngle);
+
+  const radius = width * 0.5;
+  const tangentOffset = radius * Math.tan(desiredAbsTurn * 0.5);
+  if (!(tangentOffset > 0) || !Number.isFinite(tangentOffset)) return null;
+
+  const tangentInX = p1.x - inUx * tangentOffset;
+  const tangentInY = p1.y - inUy * tangentOffset;
+  const tangentOutX = p1.x + desiredOutUx * tangentOffset;
+  const tangentOutY = p1.y + desiredOutUy * tangentOffset;
+  ensureArcPointPoolLength(outPoints, 3);
+  outPoints[0].x = tangentInX;
+  outPoints[0].y = tangentInY;
+  outPoints[1].x = p1.x;
+  outPoints[1].y = p1.y;
+  outPoints[2].x = tangentOutX;
+  outPoints[2].y = tangentOutY;
+  return outPoints;
+};
+
+const getMaxDistancePointToPoints = (
+  px,
+  py,
+  points,
+) => {
+  if (!Array.isArray(points) || points.length <= 0) return Infinity;
+  let maxDistance = 0;
+  for (let i = 0; i < points.length; i++) {
+    const point = points[i];
+    const x = Number(point?.x);
+    const y = Number(point?.y);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+    maxDistance = Math.max(maxDistance, Math.hypot(px - x, py - y));
+  }
+  return maxDistance;
+};
+
+const resolveSinglePathRetainedArc = (
+  side,
+  path,
+  width,
+  coverageRadius,
+  nowMs,
+  tipMoving,
+  tipCenterX,
+  tipCenterY,
+  out,
+) => {
+  out.points = [];
+  out.geometryToken = NaN;
+  out.active = false;
+
+  if (isReducedMotionPreferred()) {
+    clearPathRetainedArcStates();
+    return out;
+  }
+
+  const state = side === 'start' ? pathStartRetainedArcState : pathEndRetainedArcState;
+  if (!state) return out;
+  if (!isRetainedArcStateCompatibleWithPath(state, path)) {
+    clearSinglePathRetainedArcState(side);
+    return out;
+  }
+
+  if (tipMoving) {
+    state.settleStartTimeMs = NaN;
+  } else if (!Number.isFinite(state.settleStartTimeMs)) {
+    state.settleStartTimeMs = nowMs;
+  }
+  const settleUnit = Number.isFinite(state.settleStartTimeMs)
+    ? clampUnit((nowMs - state.settleStartTimeMs) / PATH_RETAINED_ARC_SETTLE_DURATION_MS)
+    : 0;
+  const arcPoints = buildRetainedArcPolyline(
+    state,
+    width,
+    side === 'start' ? reusableStartRetainedArcPoints : reusableEndRetainedArcPoints,
+    settleUnit,
+  );
+  if (!arcPoints || arcPoints.length < 2) {
+    clearSinglePathRetainedArcState(side);
+    return out;
+  }
+
+  if (Number.isFinite(tipCenterX) && Number.isFinite(tipCenterY) && coverageRadius > 0) {
+    const maxCenterlineDistance = getMaxDistancePointToPoints(tipCenterX, tipCenterY, arcPoints);
+    const fullyCoveredDistance = coverageRadius - (width * 0.5) - RETAINED_ARC_COVERAGE_EPSILON_PX;
+    if (fullyCoveredDistance > 0 && maxCenterlineDistance <= fullyCoveredDistance) {
+      clearSinglePathRetainedArcState(side);
+      return out;
+    }
+  }
+
+  out.points = arcPoints;
+  out.geometryToken = (
+    state.geometryTokenSeed * 1e6
+  ) + pathLayoutMetrics.version;
+  out.active = true;
+  return out;
+};
+
+const hasActivePathRetainedArc = (path) => {
+  if (isReducedMotionPreferred()) {
+    clearPathRetainedArcStates();
+    return false;
+  }
+  if (pathStartRetainedArcState && !isRetainedArcStateCompatibleWithPath(pathStartRetainedArcState, path)) {
+    clearPathStartRetainedArcState();
+  }
+  if (pathEndRetainedArcState && !isRetainedArcStateCompatibleWithPath(pathEndRetainedArcState, path)) {
+    clearPathEndRetainedArcState();
+  }
+  return Boolean(pathStartRetainedArcState || pathEndRetainedArcState);
 };
 
 const updateSinglePathTipArrivalState = (
@@ -963,22 +1538,79 @@ const getPathRenderPointsForFrame = (
   path,
   nowMs = getNowMs(),
   flowWidth = pathFramePayload.width,
+  startRadius = pathFramePayload.startRadius,
+  endHalfWidth = pathFramePayload.endHalfWidth,
 ) => {
   if (isReducedMotionPreferred()) {
     clearPathTipArrivalStates();
     clearPathStartPinPresenceState();
     clearPathFlowVisibilityState();
+    clearPathRetainedArcStates();
+    clearPathEndArrowRotateState();
+    clearPathStartFlowRotateState();
     return {
       points: reusablePathPoints,
       geometryToken: pathGeometryToken,
       flowTravelCompensation: 0,
       segmentRetractTipScale: 1,
+      retainedStartArcPoints: [],
+      retainedStartArcGeometryToken: NaN,
+      retainedEndArcPoints: [],
+      retainedEndArcGeometryToken: NaN,
     };
   }
 
   const pathLength = Array.isArray(path) ? path.length : 0;
+  const resolvedWidth = Number.isFinite(flowWidth) && flowWidth > 0
+    ? flowWidth
+    : Math.max(1, Number(pathFramePayload.width) || 1);
+  const startCoverageRadius = Math.max(0, Number(startRadius) || 0);
+  const endCoverageRadius = Math.max(
+    resolvedWidth * 0.5,
+    Math.max(0, Number(endHalfWidth) || 0),
+  );
+
+  const resolveRetainedArcs = (
+    startTipCenterX = NaN,
+    startTipCenterY = NaN,
+    endTipCenterX = NaN,
+    endTipCenterY = NaN,
+    startTipMoving = false,
+    endTipMoving = false,
+  ) => {
+    const startArc = resolveSinglePathRetainedArc(
+      'start',
+      path,
+      resolvedWidth,
+      startCoverageRadius,
+      nowMs,
+      startTipMoving,
+      startTipCenterX,
+      startTipCenterY,
+      retainedArcRenderScratchA,
+    );
+    const endArc = resolveSinglePathRetainedArc(
+      'end',
+      path,
+      resolvedWidth,
+      endCoverageRadius,
+      nowMs,
+      endTipMoving,
+      endTipCenterX,
+      endTipCenterY,
+      retainedArcRenderScratchB,
+    );
+    return {
+      retainedStartArcPoints: startArc.points,
+      retainedStartArcGeometryToken: startArc.geometryToken,
+      retainedEndArcPoints: endArc.points,
+      retainedEndArcGeometryToken: endArc.geometryToken,
+    };
+  };
+
   if (pathLength <= 0 || reusablePathPoints.length !== pathLength) {
     if (pathLength <= 0) {
+      const retainedArcs = resolveRetainedArcs();
       const syntheticPoints = resolveStartPinDisappearRenderPoints(path, nowMs);
       if (syntheticPoints) {
         return {
@@ -986,14 +1618,24 @@ const getPathRenderPointsForFrame = (
           geometryToken: NaN,
           flowTravelCompensation: 0,
           segmentRetractTipScale: 1,
+          ...retainedArcs,
         };
       }
+      return {
+        points: reusablePathPoints,
+        geometryToken: pathGeometryToken,
+        flowTravelCompensation: 0,
+        segmentRetractTipScale: 1,
+        ...retainedArcs,
+      };
     }
+    const retainedArcs = resolveRetainedArcs();
     return {
       points: reusablePathPoints,
       geometryToken: pathGeometryToken,
       flowTravelCompensation: 0,
       segmentRetractTipScale: 1,
+      ...retainedArcs,
     };
   }
 
@@ -1003,12 +1645,35 @@ const getPathRenderPointsForFrame = (
   const endOffset = resolvePathTipArrivalOffset('end', endTip, nowMs, arrivalOffsetScratchB);
   const startHasRetract = startOffset.active && startOffset.mode === 'retract';
   const endHasRetract = endOffset.active && endOffset.mode === 'retract';
+  const startTargetPoint = reusablePathPoints[0] || null;
+  const endTargetPoint = reusablePathPoints[pathLength - 1] || null;
+  const startTipCenterX = startTargetPoint
+    ? startTargetPoint.x + (startHasRetract ? startOffset.x : 0)
+    : NaN;
+  const startTipCenterY = startTargetPoint
+    ? startTargetPoint.y + (startHasRetract ? startOffset.y : 0)
+    : NaN;
+  const endTipCenterX = endTargetPoint
+    ? endTargetPoint.x + (endHasRetract ? endOffset.x : 0)
+    : NaN;
+  const endTipCenterY = endTargetPoint
+    ? endTargetPoint.y + (endHasRetract ? endOffset.y : 0)
+    : NaN;
+  const retainedArcs = resolveRetainedArcs(
+    startTipCenterX,
+    startTipCenterY,
+    endTipCenterX,
+    endTipCenterY,
+    startHasRetract,
+    endHasRetract,
+  );
   if (!startOffset.active && !endOffset.active) {
     return {
       points: reusablePathPoints,
       geometryToken: pathGeometryToken,
       flowTravelCompensation: 0,
       segmentRetractTipScale: 1,
+      ...retainedArcs,
     };
   }
 
@@ -1054,13 +1719,10 @@ const getPathRenderPointsForFrame = (
 
   let flowTravelCompensation = 0;
   if (pathLength > 1 && startOffset.active) {
-    const resolvedFlowWidth = Number.isFinite(flowWidth) && flowWidth > 0
-      ? flowWidth
-      : Math.max(1, Number(pathFramePayload.width) || 1);
-    const baseTravel = getPathMainTravelFromPoints(reusablePathPoints, resolvedFlowWidth);
+    const baseTravel = getPathMainTravelFromPoints(reusablePathPoints, resolvedWidth);
     const renderTravel = getPathMainTravelFromPoints(
       reusableArrivalPathPoints,
-      resolvedFlowWidth,
+      resolvedWidth,
     );
     if (Number.isFinite(baseTravel) && Number.isFinite(renderTravel)) {
       flowTravelCompensation = baseTravel - renderTravel;
@@ -1086,6 +1748,7 @@ const getPathRenderPointsForFrame = (
     geometryToken: NaN,
     flowTravelCompensation,
     segmentRetractTipScale,
+    ...retainedArcs,
   };
 };
 
@@ -1303,6 +1966,9 @@ const animatePathFlow = (timestamp) => {
   );
   const animateFlowVisibility = hasActivePathFlowVisibility(latestPathSnapshot.path, nowMs);
   const animateTipArrivals = hasActivePathTipArrivals(nowMs);
+  const animateRetainedArc = hasActivePathRetainedArc(latestPathSnapshot.path, nowMs);
+  const animateEndArrowRotate = hasActivePathEndArrowRotate(latestPathSnapshot.path, nowMs);
+  const animateStartFlowRotate = hasActivePathStartFlowRotate(latestPathSnapshot.path, nowMs);
   const animateStartPinPresence = hasActivePathStartPinPresence(latestPathSnapshot.path, nowMs);
   const animateReverseTipSwap = hasActivePathReverseTipSwap(latestPathSnapshot.path, nowMs);
   const animateReverseGradientBlend = hasActivePathReverseGradientBlend(
@@ -1314,6 +1980,9 @@ const animatePathFlow = (timestamp) => {
     !animateFlow
     && !animateFlowVisibility
     && !animateTipArrivals
+    && !animateRetainedArc
+    && !animateEndArrowRotate
+    && !animateStartFlowRotate
     && !animateStartPinPresence
     && !animateReverseTipSwap
     && !animateReverseGradientBlend
@@ -1589,10 +2258,20 @@ const drawIdleAnimatedPath = (
     latestPathSnapshot.path,
     nowMs,
     pathFramePayload.width,
+    pathFramePayload.baseStartRadius,
+    pathFramePayload.baseEndHalfWidth,
   );
   pathFramePayload.points = renderPoints.points;
+  pathFramePayload.retainedStartArcPoints = renderPoints.retainedStartArcPoints;
+  pathFramePayload.retainedStartArcGeometryToken = renderPoints.retainedStartArcGeometryToken;
+  pathFramePayload.retainedEndArcPoints = renderPoints.retainedEndArcPoints;
+  pathFramePayload.retainedEndArcGeometryToken = renderPoints.retainedEndArcGeometryToken;
+  pathFramePayload.retainedStartArcWidth = pathFramePayload.width;
+  pathFramePayload.retainedEndArcWidth = pathFramePayload.width;
   const reverseTipSwapActive = applyPathReverseTipSwapToPayload(latestPathSnapshot.path, nowMs);
   const startPinPresenceActive = applyPathStartPinPresenceToPayload(latestPathSnapshot.path, nowMs);
+  const endArrowRotateActive = applyPathEndArrowDirectionToPayload(latestPathSnapshot.path, nowMs);
+  const startFlowRotateActive = applyPathStartFlowDirectionToPayload(latestPathSnapshot.path, nowMs);
   const segmentRetractTipScale = clampUnit(
     Number.isFinite(renderPoints.segmentRetractTipScale)
       ? renderPoints.segmentRetractTipScale
@@ -1600,8 +2279,18 @@ const drawIdleAnimatedPath = (
   );
   pathFramePayload.arrowLength *= segmentRetractTipScale;
   pathFramePayload.endHalfWidth *= segmentRetractTipScale;
+  const baseStartRadius = Number(pathFramePayload.baseStartRadius) || 0;
+  const baseEndHalfWidth = Number(pathFramePayload.baseEndHalfWidth) || 0;
+  const startTipWidthScale = baseStartRadius > 0
+    ? clampUnit((Number(pathFramePayload.startRadius) || 0) / baseStartRadius)
+    : 1;
+  const endTipWidthScale = baseEndHalfWidth > 0
+    ? clampUnit((Number(pathFramePayload.endHalfWidth) || 0) / baseEndHalfWidth)
+    : 1;
+  pathFramePayload.retainedStartArcWidth = Math.max(0.5, pathFramePayload.width * startTipWidthScale);
+  pathFramePayload.retainedEndArcWidth = Math.max(0.5, pathFramePayload.width * endTipWidthScale);
   pathFramePayload.geometryToken = (
-    reverseTipSwapActive || startPinPresenceActive
+    reverseTipSwapActive || startPinPresenceActive || endArrowRotateActive || startFlowRotateActive
   ) ? NaN : renderPoints.geometryToken;
   const flowVisibility = resolvePathFlowVisibilityMix(
     latestPathSnapshot.path,
@@ -1609,8 +2298,17 @@ const drawIdleAnimatedPath = (
     flowVisibilityMixScratch,
   );
   const flowMix = clampUnit(Number.isFinite(flowVisibility.mix) ? flowVisibility.mix : 1);
-  const hasRenderableFlowPoints = Array.isArray(pathFramePayload.points)
+  const hasRenderableMainFlowPoints = Array.isArray(pathFramePayload.points)
     && pathFramePayload.points.length > 1;
+  const hasRenderableRetainedStartFlowPoints = Array.isArray(pathFramePayload.retainedStartArcPoints)
+    && pathFramePayload.retainedStartArcPoints.length > 1;
+  const hasRenderableRetainedEndFlowPoints = Array.isArray(pathFramePayload.retainedEndArcPoints)
+    && pathFramePayload.retainedEndArcPoints.length > 1;
+  const hasRenderableFlowPoints = (
+    hasRenderableMainFlowPoints
+    || hasRenderableRetainedStartFlowPoints
+    || hasRenderableRetainedEndFlowPoints
+  );
   pathFramePayload.flowEnabled = (
     !isReducedMotionPreferred()
     && hasRenderableFlowPoints
@@ -2047,10 +2745,18 @@ export function cacheElements() {
   pathLayoutMetrics.ready = false;
   pathLayoutMetrics.version = 0;
   reducedMotionQuery = null;
+  clearPathTipArrivalStates();
   clearPathReverseTipSwapState();
   clearPathReverseGradientBlendState();
   clearPathStartPinPresenceState();
   clearPathFlowVisibilityState();
+  clearPathRetainedArcStates();
+  clearPathEndArrowRotateState();
+  clearPathStartFlowRotateState();
+  pathRetainedArcTokenSeed = 0;
+  reusableArrivalPathPoints.length = 0;
+  reusableStartRetainedArcPoints.length = 0;
+  reusableEndRetainedArcPoints.length = 0;
   pathFramePayload.points = [];
   pathFramePayload.geometryToken = 0;
   pathFramePayload.width = 0;
@@ -2084,6 +2790,16 @@ export function cacheElements() {
   pathFramePayload.tutorialBracketPulseEnabled = false;
   pathFramePayload.tutorialBracketColorRgb = null;
   pathFramePayload.drawTutorialBracketsInPathLayer = false;
+  pathFramePayload.endArrowDirX = NaN;
+  pathFramePayload.endArrowDirY = NaN;
+  pathFramePayload.startFlowDirX = NaN;
+  pathFramePayload.startFlowDirY = NaN;
+  pathFramePayload.retainedStartArcWidth = 0;
+  pathFramePayload.retainedEndArcWidth = 0;
+  pathFramePayload.retainedStartArcPoints = [];
+  pathFramePayload.retainedEndArcPoints = [];
+  pathFramePayload.retainedStartArcGeometryToken = NaN;
+  pathFramePayload.retainedEndArcGeometryToken = NaN;
   latestTutorialFlags = null;
   reusableTutorialBracketPoints = [];
   tutorialBracketSignature = '';
@@ -2258,7 +2974,13 @@ export function buildGrid(snapshot, refs, icons, iconX) {
   cachedPathLength = -1;
   cachedPathLayoutVersion = -1;
   clearPathTipArrivalStates();
+  clearPathRetainedArcStates();
+  clearPathEndArrowRotateState();
+  clearPathStartFlowRotateState();
+  pathRetainedArcTokenSeed = 0;
   reusableArrivalPathPoints.length = 0;
+  reusableStartRetainedArcPoints.length = 0;
+  reusableEndRetainedArcPoints.length = 0;
 }
 
 const parseGridKey = (value, out = keyParseScratch) => {
@@ -2562,6 +3284,9 @@ export function drawAll(
     layout.cell + layout.gap,
     nowMs,
   );
+  updatePathRetainedArcStates(previousPath, snapshot.path, nowMs);
+  updatePathEndArrowRotateState(previousPath, snapshot.path, nowMs);
+  updatePathStartFlowRotateState(previousPath, snapshot.path, nowMs);
   updatePathStartPinPresenceState(previousPath, snapshot.path, nowMs);
   updatePathFlowVisibilityState(previousPath, snapshot.path, nowMs);
   updatePathReverseTipSwapState(previousPath, snapshot.path, nowMs);
@@ -2613,6 +3338,9 @@ export function drawAll(
   drawAllInternal(snapshot, refs, statuses, offset, completionModel, tutorialFlags);
 
   const animateTipArrivals = hasActivePathTipArrivals(nowMs);
+  const animateRetainedArc = hasActivePathRetainedArc(snapshot.path, nowMs);
+  const animateEndArrowRotate = hasActivePathEndArrowRotate(snapshot.path, nowMs);
+  const animateStartFlowRotate = hasActivePathStartFlowRotate(snapshot.path, nowMs);
   const animateStartPinPresence = hasActivePathStartPinPresence(snapshot.path, nowMs);
   const animateReverseTipSwap = hasActivePathReverseTipSwap(snapshot.path, nowMs);
   const animateReverseGradientBlend = hasActivePathReverseGradientBlend(
@@ -2624,6 +3352,9 @@ export function drawAll(
     animateFlow
     || animateFlowVisibility
     || animateTipArrivals
+    || animateRetainedArc
+    || animateEndArrowRotate
+    || animateStartFlowRotate
     || animateStartPinPresence
     || animateReverseTipSwap
     || animateReverseGradientBlend
@@ -2809,12 +3540,24 @@ export function drawAnimatedPath(
   updateTutorialBracketPayload(snapshot, layout, tutorialFlags);
 
   const nowMs = getNowMs();
-  const renderPoints = getPathRenderPointsForFrame(path, nowMs, width);
+  const renderPoints = getPathRenderPointsForFrame(
+    path,
+    nowMs,
+    width,
+    startRadius,
+    endHalfWidth,
+  );
   pathFramePayload.baseStartRadius = startRadius;
   pathFramePayload.baseArrowLength = arrowLength;
   pathFramePayload.baseEndHalfWidth = endHalfWidth;
   const reverseTipSwapActive = applyPathReverseTipSwapToPayload(path, nowMs);
   pathFramePayload.points = renderPoints.points;
+  pathFramePayload.retainedStartArcPoints = renderPoints.retainedStartArcPoints;
+  pathFramePayload.retainedStartArcGeometryToken = renderPoints.retainedStartArcGeometryToken;
+  pathFramePayload.retainedEndArcPoints = renderPoints.retainedEndArcPoints;
+  pathFramePayload.retainedEndArcGeometryToken = renderPoints.retainedEndArcGeometryToken;
+  pathFramePayload.retainedStartArcWidth = width;
+  pathFramePayload.retainedEndArcWidth = width;
   pathFramePayload.width = width;
   if (!reverseTipSwapActive) {
     pathFramePayload.startRadius = startRadius;
@@ -2822,6 +3565,8 @@ export function drawAnimatedPath(
     pathFramePayload.endHalfWidth = endHalfWidth;
   }
   const startPinPresenceActive = applyPathStartPinPresenceToPayload(path, nowMs);
+  const endArrowRotateActive = applyPathEndArrowDirectionToPayload(path, nowMs);
+  const startFlowRotateActive = applyPathStartFlowDirectionToPayload(path, nowMs);
   const segmentRetractTipScale = clampUnit(
     Number.isFinite(renderPoints.segmentRetractTipScale)
       ? Math.sqrt(renderPoints.segmentRetractTipScale)
@@ -2829,8 +3574,16 @@ export function drawAnimatedPath(
   );
   pathFramePayload.arrowLength *= segmentRetractTipScale;
   pathFramePayload.endHalfWidth *= segmentRetractTipScale;
+  const startTipWidthScale = startRadius > 0
+    ? clampUnit((Number(pathFramePayload.startRadius) || 0) / startRadius)
+    : 1;
+  const endTipWidthScale = endHalfWidth > 0
+    ? clampUnit((Number(pathFramePayload.endHalfWidth) || 0) / endHalfWidth)
+    : 1;
+  pathFramePayload.retainedStartArcWidth = Math.max(0.5, width * startTipWidthScale);
+  pathFramePayload.retainedEndArcWidth = Math.max(0.5, width * endTipWidthScale);
   pathFramePayload.geometryToken = (
-    reverseTipSwapActive || startPinPresenceActive
+    reverseTipSwapActive || startPinPresenceActive || endArrowRotateActive || startFlowRotateActive
   ) ? NaN : renderPoints.geometryToken;
   pathFramePayload.mainColorRgb = pathThemeMainRgb;
   pathFramePayload.completeColorRgb = pathThemeCompleteRgb;
@@ -2838,8 +3591,17 @@ export function drawAnimatedPath(
   pathFramePayload.completionProgress = completionProgress;
   const flowVisibility = resolvePathFlowVisibilityMix(path, nowMs, flowVisibilityMixScratch);
   const flowMix = clampUnit(Number.isFinite(flowVisibility.mix) ? flowVisibility.mix : 1);
-  const hasRenderableFlowPoints = Array.isArray(pathFramePayload.points)
+  const hasRenderableMainFlowPoints = Array.isArray(pathFramePayload.points)
     && pathFramePayload.points.length > 1;
+  const hasRenderableRetainedStartFlowPoints = Array.isArray(pathFramePayload.retainedStartArcPoints)
+    && pathFramePayload.retainedStartArcPoints.length > 1;
+  const hasRenderableRetainedEndFlowPoints = Array.isArray(pathFramePayload.retainedEndArcPoints)
+    && pathFramePayload.retainedEndArcPoints.length > 1;
+  const hasRenderableFlowPoints = (
+    hasRenderableMainFlowPoints
+    || hasRenderableRetainedStartFlowPoints
+    || hasRenderableRetainedEndFlowPoints
+  );
   pathFramePayload.flowEnabled = (
     !isReducedMotionPreferred()
     && hasRenderableFlowPoints

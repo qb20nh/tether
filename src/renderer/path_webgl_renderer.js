@@ -171,9 +171,21 @@ export function buildUnifiedPathMesh(points, options = {}) {
   const startRadius = Math.max(0, Number(options.startRadius) || 0);
   const arrowLength = Math.max(0, Number(options.arrowLength) || 0);
   const endHalfWidth = Math.max(0, Number(options.endHalfWidth) || 0);
+  const startFlowDirX = Number(options.startFlowDirX);
+  const startFlowDirY = Number(options.startFlowDirY);
+  const hasStartFlowOverride = Number.isFinite(startFlowDirX)
+    && Number.isFinite(startFlowDirY)
+    && Math.hypot(startFlowDirX, startFlowDirY) > FLOW_STOP_EPSILON;
+  const endArrowDirX = Number(options.endArrowDirX);
+  const endArrowDirY = Number(options.endArrowDirY);
+  const hasEndArrowOverride = Number.isFinite(endArrowDirX)
+    && Number.isFinite(endArrowDirY)
+    && Math.hypot(endArrowDirX, endArrowDirY) > FLOW_STOP_EPSILON;
   const reverseHeadArrowLength = Math.max(0, Number(options.reverseHeadArrowLength) || 0);
   const reverseHeadArrowHalfWidth = Math.max(0, Number(options.reverseHeadArrowHalfWidth) || 0);
   const reverseTailCircleRadius = Math.max(0, Number(options.reverseTailCircleRadius) || 0);
+  const renderStartCap = options.renderStartCap !== false;
+  const renderEndCap = options.renderEndCap !== false;
 
   const segmentCount = Math.max(0, safePoints.length - 1);
   const segmentLengths = new Array(segmentCount).fill(0);
@@ -347,13 +359,23 @@ export function buildUnifiedPathMesh(points, options = {}) {
   };
 
   const head = safePoints[0];
-  const headTravelAt = firstSegmentIndex >= 0
-    ? ((x, y) => (
-      ((x - head.x) * segmentUx[firstSegmentIndex])
-      + ((y - head.y) * segmentUy[firstSegmentIndex])
-    ))
-    : (() => 0);
-  addCircle(head.x, head.y, startRadius, 18, headTravelAt);
+  const headTravelUx = (() => {
+    if (hasStartFlowOverride) return startFlowDirX / Math.hypot(startFlowDirX, startFlowDirY);
+    if (firstSegmentIndex >= 0) return segmentUx[firstSegmentIndex];
+    return 0;
+  })();
+  const headTravelUy = (() => {
+    if (hasStartFlowOverride) return startFlowDirY / Math.hypot(startFlowDirX, startFlowDirY);
+    if (firstSegmentIndex >= 0) return segmentUy[firstSegmentIndex];
+    return 0;
+  })();
+  const headTravelAt = (x, y) => (
+    ((x - head.x) * headTravelUx)
+    + ((y - head.y) * headTravelUy)
+  );
+  if (renderStartCap) {
+    addCircle(head.x, head.y, startRadius, 18, headTravelAt);
+  }
   if (reverseHeadArrowLength > 0 && reverseHeadArrowHalfWidth > 0 && firstSegmentIndex >= 0) {
     const ux = -segmentUx[firstSegmentIndex];
     const uy = -segmentUy[firstSegmentIndex];
@@ -483,19 +505,30 @@ export function buildUnifiedPathMesh(points, options = {}) {
 
   if (lastSegmentIndex >= 0) {
     const tail = safePoints[safePoints.length - 1];
+    const tailTravelUx = hasEndArrowOverride
+      ? (endArrowDirX / Math.hypot(endArrowDirX, endArrowDirY))
+      : segmentUx[lastSegmentIndex];
+    const tailTravelUy = hasEndArrowOverride
+      ? (endArrowDirY / Math.hypot(endArrowDirX, endArrowDirY))
+      : segmentUy[lastSegmentIndex];
     const tailTravelAt = (x, y) => (
       flow.mainTravel
-      + ((x - tail.x) * segmentUx[lastSegmentIndex])
-      + ((y - tail.y) * segmentUy[lastSegmentIndex])
+      + ((x - tail.x) * tailTravelUx)
+      + ((y - tail.y) * tailTravelUy)
     );
-    addCircle(tail.x, tail.y, halfWidth, 12, tailTravelAt);
+    if (renderEndCap) addCircle(tail.x, tail.y, halfWidth, 12, tailTravelAt);
     addCircle(tail.x, tail.y, reverseTailCircleRadius, 18, tailTravelAt);
   }
 
   if (arrowLength > 0 && endHalfWidth > 0 && lastSegmentIndex >= 0) {
     const tail = safePoints[safePoints.length - 1];
-    const ux = segmentUx[lastSegmentIndex];
-    const uy = segmentUy[lastSegmentIndex];
+    let ux = segmentUx[lastSegmentIndex];
+    let uy = segmentUy[lastSegmentIndex];
+    if (hasEndArrowOverride) {
+      const overrideLen = Math.hypot(endArrowDirX, endArrowDirY);
+      ux = endArrowDirX / overrideLen;
+      uy = endArrowDirY / overrideLen;
+    }
     const perpX = -uy;
     const perpY = ux;
     const baseCenterShift = arrowLength / 3;
@@ -1086,14 +1119,29 @@ export function createPathWebglRenderer(canvas) {
   let cachedPointCount = 0;
   let cachedWidth = 0;
   let cachedStartRadius = 0;
+  let cachedStartFlowDirX = NaN;
+  let cachedStartFlowDirY = NaN;
   let cachedArrowLength = 0;
   let cachedEndHalfWidth = 0;
+  let cachedEndArrowDirX = NaN;
+  let cachedEndArrowDirY = NaN;
   let cachedReverseHeadArrowLength = 0;
   let cachedReverseHeadArrowHalfWidth = 0;
   let cachedReverseTailCircleRadius = 0;
   let cachedMaxPathPoints = DEFAULT_MAX_PATH_POINTS;
   let cachedGeometryToken = NaN;
   let cachedPoints = new Float32Array(0);
+  const reusableRetainedStartArcMesh = createMutableMeshStorage();
+  const reusableRetainedEndArcMesh = createMutableMeshStorage();
+  let retainedStartArcGeometryCached = false;
+  let retainedEndArcGeometryCached = false;
+  let cachedRetainedStartArcGeometryToken = NaN;
+  let cachedRetainedEndArcGeometryToken = NaN;
+  let cachedRetainedStartArcWidth = NaN;
+  let cachedRetainedEndArcWidth = NaN;
+  let retainedStartArcUsedStartFlowOverride = false;
+  let retainedEndArcUsedEndFlowOverride = false;
+  let uploadedPathMeshTag = '';
   const reusableBracketMesh = createMutableBracketStorage();
   let bracketGeometryCached = false;
   let cachedBracketPointCount = 0;
@@ -1198,8 +1246,12 @@ export function createPathWebglRenderer(canvas) {
     points,
     width,
     startRadius,
+    startFlowDirX,
+    startFlowDirY,
     arrowLength,
     endHalfWidth,
+    endArrowDirX,
+    endArrowDirY,
     reverseHeadArrowLength,
     reverseHeadArrowHalfWidth,
     reverseTailCircleRadius,
@@ -1210,8 +1262,12 @@ export function createPathWebglRenderer(canvas) {
     if (cachedPointCount !== pointCount) return true;
     if (cachedWidth !== width) return true;
     if (cachedStartRadius !== startRadius) return true;
+    if (!Object.is(cachedStartFlowDirX, startFlowDirX)) return true;
+    if (!Object.is(cachedStartFlowDirY, startFlowDirY)) return true;
     if (cachedArrowLength !== arrowLength) return true;
     if (cachedEndHalfWidth !== endHalfWidth) return true;
+    if (!Object.is(cachedEndArrowDirX, endArrowDirX)) return true;
+    if (!Object.is(cachedEndArrowDirY, endArrowDirY)) return true;
     if (cachedReverseHeadArrowLength !== reverseHeadArrowLength) return true;
     if (cachedReverseHeadArrowHalfWidth !== reverseHeadArrowHalfWidth) return true;
     if (cachedReverseTailCircleRadius !== reverseTailCircleRadius) return true;
@@ -1234,8 +1290,12 @@ export function createPathWebglRenderer(canvas) {
     points,
     width,
     startRadius,
+    startFlowDirX,
+    startFlowDirY,
     arrowLength,
     endHalfWidth,
+    endArrowDirX,
+    endArrowDirY,
     reverseHeadArrowLength,
     reverseHeadArrowHalfWidth,
     reverseTailCircleRadius,
@@ -1258,8 +1318,12 @@ export function createPathWebglRenderer(canvas) {
     cachedPointCount = pointCount;
     cachedWidth = width;
     cachedStartRadius = startRadius;
+    cachedStartFlowDirX = startFlowDirX;
+    cachedStartFlowDirY = startFlowDirY;
     cachedArrowLength = arrowLength;
     cachedEndHalfWidth = endHalfWidth;
+    cachedEndArrowDirX = endArrowDirX;
+    cachedEndArrowDirY = endArrowDirY;
     cachedReverseHeadArrowLength = reverseHeadArrowLength;
     cachedReverseHeadArrowHalfWidth = reverseHeadArrowHalfWidth;
     cachedReverseTailCircleRadius = reverseTailCircleRadius;
@@ -1432,12 +1496,20 @@ export function createPathWebglRenderer(canvas) {
   const drawPathFrame = (frame = {}) => {
     if (isContextLost()) return 0;
     const points = Array.isArray(frame.points) ? frame.points : [];
+    const retainedStartArcPoints = Array.isArray(frame.retainedStartArcPoints)
+      ? frame.retainedStartArcPoints
+      : [];
+    const retainedEndArcPoints = Array.isArray(frame.retainedEndArcPoints)
+      ? frame.retainedEndArcPoints
+      : [];
     const bracketCenters = Array.isArray(frame.tutorialBracketCenters)
       ? frame.tutorialBracketCenters
       : [];
     const bracketCellSize = Math.max(0, Number(frame.tutorialBracketCellSize) || 0);
     const drawTutorialBracketsInPathLayer = frame.drawTutorialBracketsInPathLayer === true;
     const hasPathPoints = points.length > 0;
+    const hasRetainedStartArc = retainedStartArcPoints.length > 1;
+    const hasRetainedEndArc = retainedEndArcPoints.length > 1;
     const hasTutorialBrackets = drawTutorialBracketsInPathLayer && bracketCellSize > 0 && bracketCenters.length > 0;
 
     const flowCycle = Math.max(1, Number(frame.flowCycle) || 1);
@@ -1464,9 +1536,25 @@ export function createPathWebglRenderer(canvas) {
     }
 
     const width = Math.max(1, Number(frame.width) || 1);
+    const retainedStartArcWidth = Math.max(0.5, Number(frame.retainedStartArcWidth) || width);
+    const retainedEndArcWidth = Math.max(0.5, Number(frame.retainedEndArcWidth) || width);
     const startRadius = Math.max(0, Number(frame.startRadius) || 0);
+    const startFlowDirXRaw = Number(frame.startFlowDirX);
+    const startFlowDirYRaw = Number(frame.startFlowDirY);
+    const hasStartFlowOverride = Number.isFinite(startFlowDirXRaw)
+      && Number.isFinite(startFlowDirYRaw)
+      && Math.hypot(startFlowDirXRaw, startFlowDirYRaw) > FLOW_STOP_EPSILON;
+    const startFlowDirX = hasStartFlowOverride ? startFlowDirXRaw : NaN;
+    const startFlowDirY = hasStartFlowOverride ? startFlowDirYRaw : NaN;
     const arrowLength = Math.max(0, Number(frame.arrowLength) || 0);
     const endHalfWidth = Math.max(0, Number(frame.endHalfWidth) || 0);
+    const endArrowDirXRaw = Number(frame.endArrowDirX);
+    const endArrowDirYRaw = Number(frame.endArrowDirY);
+    const hasEndArrowOverride = Number.isFinite(endArrowDirXRaw)
+      && Number.isFinite(endArrowDirYRaw)
+      && Math.hypot(endArrowDirXRaw, endArrowDirYRaw) > FLOW_STOP_EPSILON;
+    const endArrowDirX = hasEndArrowOverride ? endArrowDirXRaw : NaN;
+    const endArrowDirY = hasEndArrowOverride ? endArrowDirYRaw : NaN;
     const reverseHeadArrowLength = Math.max(0, Number(frame.reverseHeadArrowLength) || 0);
     const reverseHeadArrowHalfWidth = Math.max(0, Number(frame.reverseHeadArrowHalfWidth) || 0);
     const reverseTailCircleRadius = Math.max(0, Number(frame.reverseTailCircleRadius) || 0);
@@ -1483,8 +1571,12 @@ export function createPathWebglRenderer(canvas) {
           points,
           width,
           startRadius,
+          startFlowDirX,
+          startFlowDirY,
           arrowLength,
           endHalfWidth,
+          endArrowDirX,
+          endArrowDirY,
           reverseHeadArrowLength,
           reverseHeadArrowHalfWidth,
           reverseTailCircleRadius,
@@ -1494,8 +1586,12 @@ export function createPathWebglRenderer(canvas) {
         buildUnifiedPathMeshInto(points, {
           width,
           startRadius,
+          startFlowDirX,
+          startFlowDirY,
           arrowLength,
           endHalfWidth,
+          endArrowDirX,
+          endArrowDirY,
           reverseHeadArrowLength,
           reverseHeadArrowHalfWidth,
           reverseTailCircleRadius,
@@ -1505,8 +1601,12 @@ export function createPathWebglRenderer(canvas) {
           points,
           width,
           startRadius,
+          startFlowDirX,
+          startFlowDirY,
           arrowLength,
           endHalfWidth,
+          endArrowDirX,
+          endArrowDirY,
           reverseHeadArrowLength,
           reverseHeadArrowHalfWidth,
           reverseTailCircleRadius,
@@ -1518,6 +1618,100 @@ export function createPathWebglRenderer(canvas) {
           cachedGeometryToken = NaN;
         }
       }
+    }
+
+    let retainedStartArcGeometryChanged = false;
+    if (hasRetainedStartArc) {
+      const nextGeometryToken = Number(frame.retainedStartArcGeometryToken);
+      const hasGeometryToken = Number.isFinite(nextGeometryToken);
+      const widthChanged = !Object.is(cachedRetainedStartArcWidth, retainedStartArcWidth);
+      const refreshByDirection = (
+        hasStartFlowOverride
+        || retainedStartArcUsedStartFlowOverride
+      );
+      retainedStartArcGeometryChanged = !hasGeometryToken
+        || !retainedStartArcGeometryCached
+        || cachedRetainedStartArcGeometryToken !== nextGeometryToken;
+      if (refreshByDirection || widthChanged) retainedStartArcGeometryChanged = true;
+      if (retainedStartArcGeometryChanged) {
+        buildUnifiedPathMeshInto(retainedStartArcPoints, {
+          width: retainedStartArcWidth,
+          startRadius: 0,
+          startFlowDirX,
+          startFlowDirY,
+          arrowLength: 0,
+          endHalfWidth: 0,
+          reverseHeadArrowLength: 0,
+          reverseHeadArrowHalfWidth: 0,
+          reverseTailCircleRadius: 0,
+          renderStartCap: false,
+          renderEndCap: false,
+          maxPathPoints,
+        }, reusableRetainedStartArcMesh);
+        if (hasGeometryToken) {
+          cachedRetainedStartArcGeometryToken = nextGeometryToken;
+        } else {
+          cachedRetainedStartArcGeometryToken = NaN;
+        }
+        cachedRetainedStartArcWidth = retainedStartArcWidth;
+        retainedStartArcGeometryCached = true;
+        retainedStartArcUsedStartFlowOverride = hasStartFlowOverride;
+      }
+    } else {
+      reusableRetainedStartArcMesh.vertexCount = 0;
+      reusableRetainedStartArcMesh.indexCount = 0;
+      reusableRetainedStartArcMesh.mainTravel = 0;
+      retainedStartArcGeometryCached = false;
+      cachedRetainedStartArcGeometryToken = NaN;
+      cachedRetainedStartArcWidth = NaN;
+      retainedStartArcUsedStartFlowOverride = false;
+    }
+
+    let retainedEndArcGeometryChanged = false;
+    if (hasRetainedEndArc) {
+      const nextGeometryToken = Number(frame.retainedEndArcGeometryToken);
+      const hasGeometryToken = Number.isFinite(nextGeometryToken);
+      const widthChanged = !Object.is(cachedRetainedEndArcWidth, retainedEndArcWidth);
+      const refreshByDirection = (
+        hasEndArrowOverride
+        || retainedEndArcUsedEndFlowOverride
+      );
+      retainedEndArcGeometryChanged = !hasGeometryToken
+        || !retainedEndArcGeometryCached
+        || cachedRetainedEndArcGeometryToken !== nextGeometryToken;
+      if (refreshByDirection || widthChanged) retainedEndArcGeometryChanged = true;
+      if (retainedEndArcGeometryChanged) {
+        buildUnifiedPathMeshInto(retainedEndArcPoints, {
+          width: retainedEndArcWidth,
+          startRadius: 0,
+          arrowLength: 0,
+          endHalfWidth: 0,
+          endArrowDirX,
+          endArrowDirY,
+          reverseHeadArrowLength: 0,
+          reverseHeadArrowHalfWidth: 0,
+          reverseTailCircleRadius: 0,
+          renderStartCap: false,
+          renderEndCap: false,
+          maxPathPoints,
+        }, reusableRetainedEndArcMesh);
+        if (hasGeometryToken) {
+          cachedRetainedEndArcGeometryToken = nextGeometryToken;
+        } else {
+          cachedRetainedEndArcGeometryToken = NaN;
+        }
+        cachedRetainedEndArcWidth = retainedEndArcWidth;
+        retainedEndArcGeometryCached = true;
+        retainedEndArcUsedEndFlowOverride = hasEndArrowOverride;
+      }
+    } else {
+      reusableRetainedEndArcMesh.vertexCount = 0;
+      reusableRetainedEndArcMesh.indexCount = 0;
+      reusableRetainedEndArcMesh.mainTravel = 0;
+      retainedEndArcGeometryCached = false;
+      cachedRetainedEndArcGeometryToken = NaN;
+      cachedRetainedEndArcWidth = NaN;
+      retainedEndArcUsedEndFlowOverride = false;
     }
 
     let bracketGeometryChanged = false;
@@ -1543,33 +1737,50 @@ export function createPathWebglRenderer(canvas) {
       cachedBracketGeometryToken = NaN;
     }
 
-    if (!hasPathPoints && !hasTutorialBrackets) {
+    if (!hasPathPoints && !hasRetainedStartArc && !hasRetainedEndArc && !hasTutorialBrackets) {
       clear();
       return 0;
     }
 
     clear();
-    if (hasPathPoints && reusableMesh.indexCount > 0 && reusableMesh.vertexCount > 0) {
-      const completionProgress = clampUnit(Number(frame.completionProgress) || 0);
-      const completionEnabled = frame.isCompletionSolved ? 1 : 0;
+    const completionProgress = clampUnit(Number(frame.completionProgress) || 0);
+    const completionEnabled = frame.isCompletionSolved ? 1 : 0;
+    const completionFeather = Math.max(width * 2.2, 14);
+    const mainColor = toRgb01Into(frame.mainColorRgb || { r: 255, g: 255, b: 255 }, mainColorScratch);
+    const completeColor = toRgb01Into(
+      frame.completeColorRgb || { r: 46, g: 204, b: 113 },
+      completeColorScratch,
+    );
+
+    const drawPathMesh = (
+      mesh,
+      shouldUpload,
+      meshTag,
+      tailExtension = 0,
+      useFrameReverseSpan = false,
+      options = null,
+    ) => {
+      if (mesh.indexCount <= 0 || mesh.vertexCount <= 0) return;
+      const flowEnabledForMesh = options?.disableFlow ? 0 : flowEnabled;
+      const flowMixForMesh = options?.disableFlow ? 0 : flowMix;
+      const flowOffsetForMesh = Number.isFinite(options?.flowOffsetOverride)
+        ? options.flowOffsetOverride
+        : flowOffset;
+      const reverseColorBlendForMesh = options?.disableReverse ? 1 : reverseColorBlend;
+      const reverseFromFlowOffsetForMesh = options?.disableReverse ? 0 : reverseFromFlowOffset;
       const completionBoundary = completionProgress >= COMPLETE_PATH_THRESHOLD
-        ? (reusableMesh.mainTravel + arrowLength)
-        : (reusableMesh.mainTravel * completionProgress);
-      const reverseTravelSpan = reverseTravelSpanFromFrame > 0
-        ? reverseTravelSpanFromFrame
-        : reusableMesh.mainTravel;
-      const completionFeather = Math.max(width * 2.2, 14);
-      const mainColor = toRgb01Into(frame.mainColorRgb || { r: 255, g: 255, b: 255 }, mainColorScratch);
-      const completeColor = toRgb01Into(
-        frame.completeColorRgb || { r: 46, g: 204, b: 113 },
-        completeColorScratch,
-      );
+        ? (mesh.mainTravel + Math.max(0, tailExtension))
+        : (mesh.mainTravel * completionProgress);
+      const reverseTravelSpan = (
+        useFrameReverseSpan && reverseTravelSpanFromFrame > 0
+      ) ? reverseTravelSpanFromFrame : mesh.mainTravel;
 
       gl.useProgram(program);
       gl.bindVertexArray(vao);
 
-      if (geometryChanged) {
-        uploadMeshToGpu(reusableMesh);
+      if (shouldUpload || uploadedPathMeshTag !== meshTag) {
+        uploadMeshToGpu(mesh);
+        uploadedPathMeshTag = meshTag;
       }
 
       setUniform2fCached(uniforms.canvasSizePx, 'canvasWidth', 'canvasHeight', canvas.width, canvas.height);
@@ -1597,23 +1808,48 @@ export function createPathWebglRenderer(canvas) {
       setUniform1fCached(uniforms.completionFeather, 'completionFeather', completionFeather);
       setUniform1fCached(uniforms.completionProgress, 'completionProgress', completionProgress);
       setUniform1fCached(uniforms.completionThreshold, 'completionThreshold', COMPLETE_PATH_THRESHOLD);
-      setUniform1fCached(uniforms.flowEnabled, 'flowEnabled', flowEnabled);
-      setUniform1fCached(uniforms.flowMix, 'flowMix', flowMix);
-      setUniform1fCached(uniforms.flowOffset, 'flowOffset', flowOffset);
+      setUniform1fCached(uniforms.flowEnabled, 'flowEnabled', flowEnabledForMesh);
+      setUniform1fCached(uniforms.flowMix, 'flowMix', flowMixForMesh);
+      setUniform1fCached(uniforms.flowOffset, 'flowOffset', flowOffsetForMesh);
       setUniform1fCached(uniforms.flowCycle, 'flowCycle', flowCycle);
       setUniform1fCached(uniforms.flowPulse, 'flowPulse', flowPulse);
       setUniform1fCached(uniforms.flowRise, 'flowRise', flowRise);
       setUniform1fCached(uniforms.flowDrop, 'flowDrop', flowDrop);
-      setUniform1fCached(uniforms.reverseColorBlend, 'reverseColorBlend', reverseColorBlend);
+      setUniform1fCached(uniforms.reverseColorBlend, 'reverseColorBlend', reverseColorBlendForMesh);
       setUniform1fCached(
         uniforms.reverseFromFlowOffset,
         'reverseFromFlowOffset',
-        reverseFromFlowOffset,
+        reverseFromFlowOffsetForMesh,
       );
       setUniform1fCached(uniforms.reverseTravelSpan, 'reverseTravelSpan', reverseTravelSpan);
 
-      gl.drawElements(gl.TRIANGLES, reusableMesh.indexCount, gl.UNSIGNED_SHORT, 0);
+      gl.drawElements(gl.TRIANGLES, mesh.indexCount, gl.UNSIGNED_SHORT, 0);
       gl.bindVertexArray(null);
+    };
+
+    if (hasRetainedStartArc) {
+      drawPathMesh(
+        reusableRetainedStartArcMesh,
+        retainedStartArcGeometryChanged,
+        'retainedStart',
+        0,
+        false,
+        { disableReverse: true },
+      );
+    }
+    if (hasRetainedEndArc) {
+      const endFlowOffsetOverride = flowOffset + (Number(reusableMesh.mainTravel) || 0);
+      drawPathMesh(
+        reusableRetainedEndArcMesh,
+        retainedEndArcGeometryChanged,
+        'retainedEnd',
+        0,
+        false,
+        { disableReverse: true, flowOffsetOverride: endFlowOffsetOverride },
+      );
+    }
+    if (hasPathPoints) {
+      drawPathMesh(reusableMesh, geometryChanged, 'main', arrowLength, true);
     }
 
     if (hasTutorialBrackets && reusableBracketMesh.indexCount > 0 && reusableBracketMesh.vertexCount > 0) {

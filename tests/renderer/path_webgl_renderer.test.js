@@ -156,6 +156,99 @@ test('buildUnifiedPathMesh handles two-point path and keeps indices in range', (
   assertTravelFinite(mesh);
 });
 
+test('buildUnifiedPathMesh honors end arrow direction override', () => {
+  const points = [
+    { x: 0, y: 0 },
+    { x: 40, y: 0 },
+  ];
+  const shared = {
+    width: 8,
+    startRadius: 0,
+    arrowLength: 12,
+    endHalfWidth: 7,
+  };
+  const defaultMesh = buildUnifiedPathMesh(points, shared);
+  const overrideMesh = buildUnifiedPathMesh(points, {
+    ...shared,
+    endArrowDirX: 0,
+    endArrowDirY: 1,
+  });
+
+  const getApexDir = (mesh) => {
+    let apexIndex = 0;
+    let apexTravel = -Infinity;
+    for (let i = 0; i < mesh.vertexCount; i++) {
+      const travel = mesh.travels[i];
+      if (travel > apexTravel) {
+        apexTravel = travel;
+        apexIndex = i;
+      }
+    }
+    const tail = points[points.length - 1];
+    const x = mesh.positions[apexIndex * 2];
+    const y = mesh.positions[(apexIndex * 2) + 1];
+    const dx = x - tail.x;
+    const dy = y - tail.y;
+    const len = Math.hypot(dx, dy);
+    return len > 0 ? { x: dx / len, y: dy / len } : { x: 0, y: 0 };
+  };
+
+  const defaultDir = getApexDir(defaultMesh);
+  const overrideDir = getApexDir(overrideMesh);
+  assert.equal(defaultDir.x > 0.9, true);
+  assert.equal(Math.abs(defaultDir.y) < 0.2, true);
+  assert.equal(Math.abs(overrideDir.x) < 0.2, true);
+  assert.equal(overrideDir.y > 0.9, true);
+});
+
+test('buildUnifiedPathMesh honors start flow direction override', () => {
+  const points = [
+    { x: 0, y: 0 },
+    { x: 40, y: 0 },
+  ];
+  const base = {
+    width: 8,
+    startRadius: 8,
+    arrowLength: 0,
+    endHalfWidth: 0,
+  };
+  const defaultMesh = buildUnifiedPathMesh(points, base);
+  const overrideMesh = buildUnifiedPathMesh(points, {
+    ...base,
+    startFlowDirX: 0,
+    startFlowDirY: 1,
+  });
+
+  const rightRimIndex = 1;
+  const nearVerticalRimIndex = 5;
+  assert.equal(defaultMesh.travels[rightRimIndex] > 6, true);
+  assert.equal(Math.abs(overrideMesh.travels[rightRimIndex]) < 3, true);
+  assert.equal(Math.abs(defaultMesh.travels[nearVerticalRimIndex]) < 3, true);
+  assert.equal(Math.abs(overrideMesh.travels[nearVerticalRimIndex]) > 6, true);
+});
+
+test('buildUnifiedPathMesh applies end direction override to tail flow orientation', () => {
+  const points = [
+    { x: 0, y: 0 },
+    { x: 40, y: 0 },
+  ];
+  const base = {
+    width: 8,
+    startRadius: 0,
+    arrowLength: 0,
+    endHalfWidth: 0,
+  };
+  const defaultMesh = buildUnifiedPathMesh(points, base);
+  const overrideMesh = buildUnifiedPathMesh(points, {
+    ...base,
+    endArrowDirX: 0,
+    endArrowDirY: 1,
+  });
+
+  const tailRightRimIndex = 5;
+  assert.equal(defaultMesh.travels[tailRightRimIndex] - overrideMesh.travels[tailRightRimIndex] > 2, true);
+});
+
 test('buildTutorialBracketMesh handles empty and finite points', () => {
   const empty = buildTutorialBracketMesh([]);
   assert.equal(empty.vertexCount, 0);
@@ -289,6 +382,62 @@ test('createPathWebglRenderer does not reupload geometry when only flowMix chang
     const uploadCountAfterSecond = fake.counters.bufferSubData;
 
     assert.equal(uploadCountAfterSecond, uploadCountAfterFirst);
+    renderer.destroy();
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+test('createPathWebglRenderer draws and reuses retained arc geometry with stable token', () => {
+  const originalWindow = globalThis.window;
+  globalThis.window = { devicePixelRatio: 1 };
+  try {
+    const fake = createFakeWebgl2();
+    const fakeCanvas = {
+      width: 0,
+      height: 0,
+      clientWidth: 100,
+      clientHeight: 100,
+      style: {},
+      getContext(kind) {
+        if (kind === 'webgl2') return fake.gl;
+        return null;
+      },
+    };
+
+    const renderer = createPathWebglRenderer(fakeCanvas);
+    const frame = {
+      points: [],
+      retainedStartArcPoints: [
+        { x: 20, y: 20 },
+        { x: 30, y: 12 },
+        { x: 40, y: 20 },
+      ],
+      retainedStartArcGeometryToken: 17,
+      width: 10,
+      startRadius: 0,
+      arrowLength: 0,
+      endHalfWidth: 0,
+      mainColorRgb: { r: 255, g: 255, b: 255 },
+      completeColorRgb: { r: 10, g: 220, b: 100 },
+      flowEnabled: true,
+      flowMix: 1,
+      flowOffset: 0,
+      flowCycle: 128,
+      flowPulse: 64,
+    };
+
+    renderer.drawPathFrame(frame);
+    const drawCountAfterFirst = fake.counters.drawElements;
+    const uploadCountAfterFirst = fake.counters.bufferSubData;
+    assert.equal(drawCountAfterFirst > 0, true);
+
+    renderer.drawPathFrame(frame);
+    const drawCountAfterSecond = fake.counters.drawElements;
+    const uploadCountAfterSecond = fake.counters.bufferSubData;
+    assert.equal(drawCountAfterSecond > drawCountAfterFirst, true);
+    assert.equal(uploadCountAfterSecond, uploadCountAfterFirst);
+
     renderer.destroy();
   } finally {
     globalThis.window = originalWindow;
