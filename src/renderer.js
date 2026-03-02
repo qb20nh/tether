@@ -47,6 +47,8 @@ let cachedPathTailC = NaN;
 let cachedPathLayoutVersion = -1;
 let pathStartArrivalState = null;
 let pathEndArrivalState = null;
+let pathReverseTipSwapState = null;
+let pathReverseGradientBlendState = null;
 let tutorialBracketSignature = '';
 let tutorialBracketGeometryToken = 0;
 let reducedMotionQuery = null;
@@ -79,6 +81,15 @@ const pathFramePayload = {
   points: [],
   geometryToken: 0,
   width: 0,
+  baseStartRadius: 0,
+  baseArrowLength: 0,
+  baseEndHalfWidth: 0,
+  reverseHeadArrowLength: 0,
+  reverseHeadArrowHalfWidth: 0,
+  reverseTailCircleRadius: 0,
+  reverseColorBlend: 1,
+  reverseFromFlowOffset: 0,
+  reverseTravelSpan: 0,
   startRadius: 0,
   arrowLength: 0,
   endHalfWidth: 0,
@@ -109,6 +120,8 @@ const PATH_FLOW_RISE = 0.82;
 const PATH_FLOW_DROP = 0.83;
 const PATH_TIP_ARRIVAL_DURATION_MS = 200;
 const PATH_TIP_RETRACT_CUTOFF_MS = 100;
+const PATH_REVERSE_TIP_SWAP_DURATION_MS = 200;
+const PATH_REVERSE_GRADIENT_BLEND_DURATION_MS = 200;
 const PATH_TIP_ARRIVAL_DISTANCE_CELL_FACTOR = 0.5;
 const TUTORIAL_BRACKET_PULSE_CYCLES = 3;
 const TAU = Math.PI * 2;
@@ -123,6 +136,25 @@ const PATH_TIP_ARRIVAL_ADJACENT_MAX = Math.SQRT2 + 1e-3;
 const arrivalOffsetScratchA = { x: 0, y: 0, active: false };
 const arrivalOffsetScratchB = { x: 0, y: 0, active: false };
 let reusableArrivalPathPoints = [];
+const reverseTipScaleScratch = { inScale: 1, outScale: 0, active: false };
+const reverseGradientBlendScratch = {
+  blend: 1,
+  fromFlowOffset: 0,
+  toFlowOffset: 0,
+  fromTravelSpan: 0,
+  active: false,
+};
+
+const isPathReversed = (nextPath, previousPath) => {
+  if (!Array.isArray(nextPath) || !Array.isArray(previousPath)) return false;
+  if (nextPath.length !== previousPath.length || nextPath.length < 2) return false;
+
+  for (let i = 0; i < nextPath.length; i++) {
+    if (!pointsMatch(nextPath[i], previousPath[previousPath.length - 1 - i])) return false;
+  }
+  return true;
+};
+
 const normalizeFlowOffset = (value, cycle = PATH_FLOW_CYCLE) => {
   if (!Number.isFinite(value)) return 0;
   if (!Number.isFinite(cycle) || cycle <= 0) return 0;
@@ -169,6 +201,12 @@ const sampleCubicBezierYAtX = (x, x1, y1, x2, y2) => {
   return cubicBezierAxisAt(t, y1, y2);
 };
 
+const easeOutCubic = (unit) => {
+  const t = clampUnit(unit);
+  const inv = 1 - t;
+  return 1 - (inv * inv * inv);
+};
+
 const getPathTipFromPath = (path, side) => {
   if (!Array.isArray(path) || path.length <= 0) return null;
   if (side === 'start') return path[0] || null;
@@ -179,6 +217,28 @@ const getPathTipFromPath = (path, side) => {
 const clearPathTipArrivalStates = () => {
   pathStartArrivalState = null;
   pathEndArrivalState = null;
+};
+
+const clearSinglePathTipArrivalState = (side) => {
+  if (side === 'start') pathStartArrivalState = null;
+  else if (side === 'end') pathEndArrivalState = null;
+};
+
+const pathsMatch = (aPath, bPath) => {
+  if (!Array.isArray(aPath) || !Array.isArray(bPath)) return false;
+  if (aPath.length !== bPath.length) return false;
+  for (let i = 0; i < aPath.length; i++) {
+    if (!pointsMatch(aPath[i], bPath[i])) return false;
+  }
+  return true;
+};
+
+const clearPathReverseTipSwapState = () => {
+  pathReverseTipSwapState = null;
+};
+
+const clearPathReverseGradientBlendState = () => {
+  pathReverseGradientBlendState = null;
 };
 
 const isEndRetractTransition = (prevPath, nextPath) => {
@@ -203,6 +263,28 @@ const isStartRetractTransition = (prevPath, nextPath) => {
   return true;
 };
 
+const isEndAdvanceTransition = (prevPath, nextPath) => {
+  if (!Array.isArray(prevPath) || !Array.isArray(nextPath)) return false;
+  const prevLen = prevPath.length;
+  const nextLen = nextPath.length;
+  if (nextLen !== prevLen + 1) return false;
+  for (let i = 0; i < prevLen; i++) {
+    if (!pointsMatch(nextPath[i], prevPath[i])) return false;
+  }
+  return true;
+};
+
+const isStartAdvanceTransition = (prevPath, nextPath) => {
+  if (!Array.isArray(prevPath) || !Array.isArray(nextPath)) return false;
+  const prevLen = prevPath.length;
+  const nextLen = nextPath.length;
+  if (nextLen !== prevLen + 1) return false;
+  for (let i = 0; i < prevLen; i++) {
+    if (!pointsMatch(nextPath[i + 1], prevPath[i])) return false;
+  }
+  return true;
+};
+
 const isRetractUnturnTransition = (side, prevTip, nextTip, nextPath) => {
   if (!prevTip || !nextTip || !Array.isArray(nextPath)) return false;
   let neighbor = null;
@@ -218,23 +300,40 @@ const isRetractUnturnTransition = (side, prevTip, nextTip, nextPath) => {
   return ((inR * outC) - (inC * outR)) !== 0;
 };
 
-const updateSinglePathTipArrivalState = (side, prevPath, nextPath, cellSize, cellStep, nowMs) => {
+const updateSinglePathTipArrivalState = (
+  side,
+  prevPath,
+  nextPath,
+  cellSize,
+  cellStep,
+  nowMs,
+  pathChanged = true,
+) => {
   if (side !== 'start' && side !== 'end') return;
+  const clearState = () => clearSinglePathTipArrivalState(side);
   const prevTip = getPathTipFromPath(prevPath, side);
   const nextTip = getPathTipFromPath(nextPath, side);
 
   if (!nextTip) {
-    if (side === 'start') pathStartArrivalState = null;
-    else pathEndArrivalState = null;
+    clearState();
     return;
   }
-  if (!prevTip) return;
-  if (prevTip.r === nextTip.r && prevTip.c === nextTip.c) return;
+  if (!prevTip) {
+    if (pathChanged) clearState();
+    return;
+  }
+  if (prevTip.r === nextTip.r && prevTip.c === nextTip.c) {
+    if (pathChanged) clearState();
+    return;
+  }
 
   const moveDr = prevTip.r - nextTip.r;
   const moveDc = prevTip.c - nextTip.c;
   const moveLength = Math.hypot(moveDc, moveDr);
-  if (!(moveLength > 0) || moveLength > PATH_TIP_ARRIVAL_ADJACENT_MAX) return;
+  if (!(moveLength > 0) || moveLength > PATH_TIP_ARRIVAL_ADJACENT_MAX) {
+    clearState();
+    return;
+  }
 
   const isRetract = side === 'start'
     ? isStartRetractTransition(prevPath, nextPath)
@@ -255,6 +354,14 @@ const updateSinglePathTipArrivalState = (side, prevPath, nextPath, cellSize, cel
     };
     if (side === 'start') pathStartArrivalState = state;
     else pathEndArrivalState = state;
+    return;
+  }
+
+  const isAdvance = side === 'start'
+    ? isStartAdvanceTransition(prevPath, nextPath)
+    : isEndAdvanceTransition(prevPath, nextPath);
+  if (!isAdvance) {
+    clearState();
     return;
   }
 
@@ -283,6 +390,21 @@ const updatePathTipArrivalStates = (
     clearPathTipArrivalStates();
     return;
   }
+  const pathChanged = !pathsMatch(prevPath, nextPath);
+  if (!pathChanged) return;
+  if (isPathReversed(nextPath, prevPath)) {
+    const head = nextPath?.[0] || null;
+    const tail = nextPath?.[nextPath.length - 1] || null;
+    const tipsAdjacent = Boolean(
+      head
+      && tail
+      && cellDistance(head, tail) <= PATH_TIP_ARRIVAL_ADJACENT_MAX,
+    );
+    if (tipsAdjacent) {
+      clearPathTipArrivalStates();
+      return;
+    }
+  }
   updateSinglePathTipArrivalState(
     'start',
     prevPath,
@@ -290,6 +412,7 @@ const updatePathTipArrivalStates = (
     cellSize,
     cellStep,
     nowMs,
+    pathChanged,
   );
   updateSinglePathTipArrivalState(
     'end',
@@ -298,6 +421,7 @@ const updatePathTipArrivalStates = (
     cellSize,
     cellStep,
     nowMs,
+    pathChanged,
   );
 };
 
@@ -372,6 +496,201 @@ const hasActivePathTipArrivals = (nowMs = getNowMs()) => {
     pathEndArrivalState = null;
   }
   return Boolean(pathStartArrivalState || pathEndArrivalState);
+};
+
+const beginPathReverseGradientBlend = (
+  path,
+  fromFlowOffset,
+  fromTravelSpan,
+  toFlowOffset,
+  cycle = PATH_FLOW_CYCLE,
+  nowMs = getNowMs(),
+) => {
+  const pathLength = Array.isArray(path) ? path.length : 0;
+  if (isReducedMotionPreferred() || pathLength < 2) {
+    clearPathReverseGradientBlendState();
+    return;
+  }
+  const head = path[0];
+  const tail = path[pathLength - 1];
+  if (!head || !tail) {
+    clearPathReverseGradientBlendState();
+    return;
+  }
+  pathReverseGradientBlendState = {
+    startTimeMs: nowMs,
+    headR: head.r,
+    headC: head.c,
+    tailR: tail.r,
+    tailC: tail.c,
+    pathLength,
+    fromFlowOffset: normalizeFlowOffset(fromFlowOffset, cycle),
+    toFlowOffset: normalizeFlowOffset(toFlowOffset, cycle),
+    fromTravelSpan: Math.max(0, Number(fromTravelSpan) || 0),
+  };
+};
+
+const resolvePathReverseGradientBlend = (
+  path,
+  cycle = PATH_FLOW_CYCLE,
+  nowMs = getNowMs(),
+  out = reverseGradientBlendScratch,
+) => {
+  out.blend = 1;
+  out.fromFlowOffset = 0;
+  out.toFlowOffset = 0;
+  out.fromTravelSpan = 0;
+  out.active = false;
+
+  if (isReducedMotionPreferred()) {
+    clearPathReverseGradientBlendState();
+    return out;
+  }
+
+  const state = pathReverseGradientBlendState;
+  if (!state) return out;
+  const pathLength = Array.isArray(path) ? path.length : 0;
+  if (pathLength !== state.pathLength || pathLength < 2) {
+    clearPathReverseGradientBlendState();
+    return out;
+  }
+  const head = path[0];
+  const tail = path[pathLength - 1];
+  if (
+    !head
+    || !tail
+    || head.r !== state.headR
+    || head.c !== state.headC
+    || tail.r !== state.tailR
+    || tail.c !== state.tailC
+  ) {
+    clearPathReverseGradientBlendState();
+    return out;
+  }
+
+  const elapsed = nowMs - state.startTimeMs;
+  if (elapsed >= PATH_REVERSE_GRADIENT_BLEND_DURATION_MS) {
+    clearPathReverseGradientBlendState();
+    return out;
+  }
+
+  out.blend = easeOutCubic(clampUnit(elapsed / PATH_REVERSE_GRADIENT_BLEND_DURATION_MS));
+  out.fromFlowOffset = normalizeFlowOffset(state.fromFlowOffset, cycle);
+  out.toFlowOffset = normalizeFlowOffset(state.toFlowOffset, cycle);
+  out.fromTravelSpan = state.fromTravelSpan;
+  out.active = true;
+  return out;
+};
+
+const hasActivePathReverseGradientBlend = (
+  path,
+  cycle = PATH_FLOW_CYCLE,
+  nowMs = getNowMs(),
+) => resolvePathReverseGradientBlend(path, cycle, nowMs, reverseGradientBlendScratch).active;
+
+const applyPathReverseGradientBlendToPayload = (
+  path,
+  cycle = PATH_FLOW_CYCLE,
+  nowMs = getNowMs(),
+) => {
+  const reverseBlend = resolvePathReverseGradientBlend(path, cycle, nowMs, reverseGradientBlendScratch);
+  const currentFlowOffset = normalizeFlowOffset(pathFramePayload.flowOffset, cycle);
+  const reverseFromFlowOffset = reverseBlend.active
+    ? normalizeFlowOffset(
+      reverseBlend.fromFlowOffset + reverseBlend.toFlowOffset - currentFlowOffset,
+      cycle,
+    )
+    : currentFlowOffset;
+  pathFramePayload.reverseColorBlend = reverseBlend.blend;
+  pathFramePayload.reverseFromFlowOffset = reverseFromFlowOffset;
+  pathFramePayload.reverseTravelSpan = reverseBlend.active
+    ? reverseBlend.fromTravelSpan
+    : 0;
+  return reverseBlend.active;
+};
+
+const updatePathReverseTipSwapState = (prevPath, nextPath, nowMs = getNowMs()) => {
+  if (isReducedMotionPreferred()) {
+    clearPathReverseTipSwapState();
+    return;
+  }
+  if (!isPathReversed(nextPath, prevPath)) return;
+  if (!Array.isArray(nextPath) || nextPath.length < 2) return;
+  const head = nextPath[0];
+  const tail = nextPath[nextPath.length - 1];
+  if (!head || !tail) return;
+  pathReverseTipSwapState = {
+    startTimeMs: nowMs,
+    headR: head.r,
+    headC: head.c,
+    tailR: tail.r,
+    tailC: tail.c,
+  };
+};
+
+const resolvePathReverseTipSwapScale = (path, nowMs = getNowMs(), out = reverseTipScaleScratch) => {
+  out.inScale = 1;
+  out.outScale = 0;
+  out.active = false;
+
+  if (isReducedMotionPreferred()) {
+    clearPathReverseTipSwapState();
+    return out;
+  }
+
+  const state = pathReverseTipSwapState;
+  if (!state) return out;
+  if (!Array.isArray(path) || path.length < 2) {
+    clearPathReverseTipSwapState();
+    return out;
+  }
+
+  const head = path[0];
+  const tail = path[path.length - 1];
+  if (
+    !head
+    || !tail
+    || head.r !== state.headR
+    || head.c !== state.headC
+    || tail.r !== state.tailR
+    || tail.c !== state.tailC
+  ) {
+    clearPathReverseTipSwapState();
+    return out;
+  }
+
+  const elapsed = nowMs - state.startTimeMs;
+  if (elapsed >= PATH_REVERSE_TIP_SWAP_DURATION_MS) {
+    clearPathReverseTipSwapState();
+    return out;
+  }
+
+  const unit = clampUnit(elapsed / PATH_REVERSE_TIP_SWAP_DURATION_MS);
+  const inScale = easeOutCubic(unit);
+  out.inScale = Math.max(0, Math.min(1, inScale));
+  out.outScale = 1 - out.inScale;
+  out.active = true;
+  return out;
+};
+
+const hasActivePathReverseTipSwap = (path, nowMs = getNowMs()) => (
+  resolvePathReverseTipSwapScale(path, nowMs, reverseTipScaleScratch).active
+);
+
+const applyPathReverseTipSwapToPayload = (path, nowMs = getNowMs()) => {
+  const reverseTipScale = resolvePathReverseTipSwapScale(path, nowMs, reverseTipScaleScratch);
+  const inScale = reverseTipScale.inScale;
+  const outScale = reverseTipScale.outScale;
+  const baseStartRadius = Number(pathFramePayload.baseStartRadius) || 0;
+  const baseArrowLength = Number(pathFramePayload.baseArrowLength) || 0;
+  const baseEndHalfWidth = Number(pathFramePayload.baseEndHalfWidth) || 0;
+  pathFramePayload.startRadius = baseStartRadius * inScale;
+  pathFramePayload.arrowLength = baseArrowLength * inScale;
+  pathFramePayload.endHalfWidth = baseEndHalfWidth * inScale;
+  pathFramePayload.reverseHeadArrowLength = baseArrowLength * outScale;
+  pathFramePayload.reverseHeadArrowHalfWidth = baseEndHalfWidth * outScale;
+  pathFramePayload.reverseTailCircleRadius = baseStartRadius * outScale;
+  return reverseTipScale.active;
 };
 
 const getPathRenderPointsForFrame = (path, nowMs = getNowMs()) => {
@@ -612,7 +931,13 @@ const animatePathFlow = (timestamp) => {
     latestTutorialFlags,
   );
   const animateTipArrivals = hasActivePathTipArrivals(nowMs);
-  if (!animateFlow && !animateTipArrivals) {
+  const animateReverseTipSwap = hasActivePathReverseTipSwap(latestPathSnapshot.path, nowMs);
+  const animateReverseGradientBlend = hasActivePathReverseGradientBlend(
+    latestPathSnapshot.path,
+    pathFramePayload.flowCycle,
+    nowMs,
+  );
+  if (!animateFlow && !animateTipArrivals && !animateReverseTipSwap && !animateReverseGradientBlend) {
     stopPathAnimation();
     drawAllInternal(latestPathSnapshot, latestPathRefs, latestPathStatuses, 0, latestCompletionModel);
     return;
@@ -865,8 +1190,14 @@ const drawIdleAnimatedPath = (
 
   const renderPoints = getPathRenderPointsForFrame(latestPathSnapshot.path, nowMs);
   pathFramePayload.points = renderPoints.points;
-  pathFramePayload.geometryToken = renderPoints.geometryToken;
+  const reverseTipSwapActive = applyPathReverseTipSwapToPayload(latestPathSnapshot.path, nowMs);
+  pathFramePayload.geometryToken = reverseTipSwapActive ? NaN : renderPoints.geometryToken;
   pathFramePayload.flowOffset = flowOffset + (Number(renderPoints.flowTravelCompensation) || 0);
+  applyPathReverseGradientBlendToPayload(
+    latestPathSnapshot.path,
+    pathFramePayload.flowCycle,
+    nowMs,
+  );
   pathFramePayload.isCompletionSolved = Boolean(completionModel?.isSolved);
   pathFramePayload.completionProgress = getCompletionProgress(completionModel);
   latestPathMainFlowTravel = pathRenderer.drawPathFrame(pathFramePayload);
@@ -1291,9 +1622,20 @@ export function cacheElements() {
   pathLayoutMetrics.ready = false;
   pathLayoutMetrics.version = 0;
   reducedMotionQuery = null;
+  clearPathReverseTipSwapState();
+  clearPathReverseGradientBlendState();
   pathFramePayload.points = [];
   pathFramePayload.geometryToken = 0;
   pathFramePayload.width = 0;
+  pathFramePayload.baseStartRadius = 0;
+  pathFramePayload.baseArrowLength = 0;
+  pathFramePayload.baseEndHalfWidth = 0;
+  pathFramePayload.reverseHeadArrowLength = 0;
+  pathFramePayload.reverseHeadArrowHalfWidth = 0;
+  pathFramePayload.reverseTailCircleRadius = 0;
+  pathFramePayload.reverseColorBlend = 1;
+  pathFramePayload.reverseFromFlowOffset = 0;
+  pathFramePayload.reverseTravelSpan = 0;
   pathFramePayload.startRadius = 0;
   pathFramePayload.arrowLength = 0;
   pathFramePayload.endHalfWidth = 0;
@@ -1792,17 +2134,42 @@ export function drawAll(
     layout.cell + layout.gap,
     nowMs,
   );
-  const shift = getHeadShiftDelta(
-    snapshot.path,
-    previousPath,
-    refs,
-    getGridCanvasOffset(refs, headOffsetScratch),
-  );
-  if (shift !== 0) {
-    pathAnimationOffset = normalizeFlowOffset(
-      pathAnimationOffset + shift,
+  updatePathReverseTipSwapState(previousPath, snapshot.path, nowMs);
+  if (isPathReversed(snapshot.path, previousPath)) {
+    const reverseFromFlowOffset = pathAnimationOffset;
+    const reverseTravel = latestPathMainFlowTravel;
+    if (reverseTravel > 0) {
+      const transitionAnchorUnit = Math.max(
+        0,
+        Math.min(1, (PATH_FLOW_RISE + PATH_FLOW_DROP) * 0.5),
+      );
+      const transitionAnchor = flow.pulse * transitionAnchorUnit;
+      pathAnimationOffset = normalizeFlowOffset(
+        (2 * transitionAnchor) - reverseTravel - pathAnimationOffset,
+        flow.cycle,
+      );
+    }
+    beginPathReverseGradientBlend(
+      snapshot.path,
+      reverseFromFlowOffset,
+      latestPathMainFlowTravel,
+      pathAnimationOffset,
       flow.cycle,
+      nowMs,
     );
+  } else {
+    const shift = getHeadShiftDelta(
+      snapshot.path,
+      previousPath,
+      refs,
+      getGridCanvasOffset(refs, headOffsetScratch),
+    );
+    if (shift !== 0) {
+      pathAnimationOffset = normalizeFlowOffset(
+        pathAnimationOffset + shift,
+        flow.cycle,
+      );
+    }
   }
 
   latestPathSnapshot = snapshot;
@@ -1815,7 +2182,13 @@ export function drawAll(
   drawAllInternal(snapshot, refs, statuses, offset, completionModel, tutorialFlags);
 
   const animateTipArrivals = hasActivePathTipArrivals(nowMs);
-  if (animateFlow || animateTipArrivals) {
+  const animateReverseTipSwap = hasActivePathReverseTipSwap(snapshot.path, nowMs);
+  const animateReverseGradientBlend = hasActivePathReverseGradientBlend(
+    snapshot.path,
+    flow.cycle,
+    nowMs,
+  );
+  if (animateFlow || animateTipArrivals || animateReverseTipSwap || animateReverseGradientBlend) {
     schedulePathAnimation();
   } else {
     stopPathAnimation();
@@ -1997,13 +2370,20 @@ export function drawAnimatedPath(
 
   updateTutorialBracketPayload(snapshot, layout, tutorialFlags);
 
-  const renderPoints = getPathRenderPointsForFrame(path, getNowMs());
+  const nowMs = getNowMs();
+  const renderPoints = getPathRenderPointsForFrame(path, nowMs);
+  pathFramePayload.baseStartRadius = startRadius;
+  pathFramePayload.baseArrowLength = arrowLength;
+  pathFramePayload.baseEndHalfWidth = endHalfWidth;
+  const reverseTipSwapActive = applyPathReverseTipSwapToPayload(path, nowMs);
   pathFramePayload.points = renderPoints.points;
-  pathFramePayload.geometryToken = renderPoints.geometryToken;
+  pathFramePayload.geometryToken = reverseTipSwapActive ? NaN : renderPoints.geometryToken;
   pathFramePayload.width = width;
-  pathFramePayload.startRadius = startRadius;
-  pathFramePayload.arrowLength = arrowLength;
-  pathFramePayload.endHalfWidth = endHalfWidth;
+  if (!reverseTipSwapActive) {
+    pathFramePayload.startRadius = startRadius;
+    pathFramePayload.arrowLength = arrowLength;
+    pathFramePayload.endHalfWidth = endHalfWidth;
+  }
   pathFramePayload.mainColorRgb = pathThemeMainRgb;
   pathFramePayload.completeColorRgb = pathThemeCompleteRgb;
   pathFramePayload.isCompletionSolved = isCompletionSolved;
@@ -2013,6 +2393,7 @@ export function drawAnimatedPath(
   pathFramePayload.flowCycle = flowMetrics.cycle;
   pathFramePayload.flowPulse = flowMetrics.pulse;
   pathFramePayload.flowSpeed = flowMetrics.speed;
+  applyPathReverseGradientBlendToPayload(path, flowMetrics.cycle, nowMs);
   pathFramePayload.flowRise = PATH_FLOW_RISE;
   pathFramePayload.flowDrop = PATH_FLOW_DROP;
   pathFramePayload.drawTutorialBracketsInPathLayer = false;

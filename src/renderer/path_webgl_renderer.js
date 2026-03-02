@@ -171,6 +171,9 @@ export function buildUnifiedPathMesh(points, options = {}) {
   const startRadius = Math.max(0, Number(options.startRadius) || 0);
   const arrowLength = Math.max(0, Number(options.arrowLength) || 0);
   const endHalfWidth = Math.max(0, Number(options.endHalfWidth) || 0);
+  const reverseHeadArrowLength = Math.max(0, Number(options.reverseHeadArrowLength) || 0);
+  const reverseHeadArrowHalfWidth = Math.max(0, Number(options.reverseHeadArrowHalfWidth) || 0);
+  const reverseTailCircleRadius = Math.max(0, Number(options.reverseTailCircleRadius) || 0);
 
   const segmentCount = Math.max(0, safePoints.length - 1);
   const segmentLengths = new Array(segmentCount).fill(0);
@@ -351,6 +354,34 @@ export function buildUnifiedPathMesh(points, options = {}) {
     ))
     : (() => 0);
   addCircle(head.x, head.y, startRadius, 18, headTravelAt);
+  if (reverseHeadArrowLength > 0 && reverseHeadArrowHalfWidth > 0 && firstSegmentIndex >= 0) {
+    const ux = -segmentUx[firstSegmentIndex];
+    const uy = -segmentUy[firstSegmentIndex];
+    const perpX = -uy;
+    const perpY = ux;
+    const baseCenterShift = reverseHeadArrowLength / 3;
+    const baseCenterX = head.x - (ux * baseCenterShift);
+    const baseCenterY = head.y - (uy * baseCenterShift);
+    const baseTravel = -baseCenterShift;
+    const apexTravel = baseTravel + reverseHeadArrowLength;
+
+    const left = addVertex(
+      baseCenterX - perpX * reverseHeadArrowHalfWidth,
+      baseCenterY - perpY * reverseHeadArrowHalfWidth,
+      baseTravel,
+    );
+    const right = addVertex(
+      baseCenterX + perpX * reverseHeadArrowHalfWidth,
+      baseCenterY + perpY * reverseHeadArrowHalfWidth,
+      baseTravel,
+    );
+    const apex = addVertex(
+      baseCenterX + ux * reverseHeadArrowLength,
+      baseCenterY + uy * reverseHeadArrowLength,
+      apexTravel,
+    );
+    addTriangle(apex, left, right);
+  }
 
   for (const primitive of flow.linearPrimitives) {
     const i = primitive.segmentIndex;
@@ -458,6 +489,7 @@ export function buildUnifiedPathMesh(points, options = {}) {
       + ((y - tail.y) * segmentUy[lastSegmentIndex])
     );
     addCircle(tail.x, tail.y, halfWidth, 12, tailTravelAt);
+    addCircle(tail.x, tail.y, reverseTailCircleRadius, 18, tailTravelAt);
   }
 
   if (arrowLength > 0 && endHalfWidth > 0 && lastSegmentIndex >= 0) {
@@ -753,6 +785,9 @@ uniform float uFlowCycle;
 uniform float uFlowPulse;
 uniform float uFlowRise;
 uniform float uFlowDrop;
+uniform float uReverseColorBlend;
+uniform float uReverseFromFlowOffset;
+uniform float uReverseTravelSpan;
 out vec4 outColor;
 
 const float PI = 3.141592653589793;
@@ -818,21 +853,30 @@ float flowAlphaAtPhase(float phase, float pulse) {
   return 0.0;
 }
 
-float flowAlphaAtTravel(float travel) {
-  float phase = normalizeModulo(travel + uFlowOffset, uFlowCycle);
+float flowAlphaAtTravelWithOffset(float travel, float flowOffset) {
+  float phase = normalizeModulo(travel + flowOffset, uFlowCycle);
   return flowAlphaAtPhase(phase, uFlowPulse);
 }
 
-void main() {
-  float travel = resolveTravel(vTravel);
+vec3 colorAtTravel(float travel, float flowOffset) {
   float completionMix = completionMixAtTravel(travel);
   vec3 color = mix(uMainColor, uCompleteColor, completionMix);
 
   if (uFlowEnabled > 0.5) {
-    float glow = clampUnit(flowAlphaAtTravel(travel));
+    float glow = clampUnit(flowAlphaAtTravelWithOffset(travel, flowOffset));
     color = mix(color, vec3(1.0), glow);
   }
+  return color;
+}
 
+void main() {
+  float travel = resolveTravel(vTravel);
+  vec3 color = colorAtTravel(travel, uFlowOffset);
+  if (uReverseColorBlend < 0.9999 && uReverseTravelSpan > 0.0) {
+    float reverseTravel = max(0.0, uReverseTravelSpan - travel);
+    vec3 reverseColor = colorAtTravel(reverseTravel, uReverseFromFlowOffset);
+    color = mix(reverseColor, color, clampUnit(uReverseColorBlend));
+  }
   outColor = vec4(color, 1.0);
 }
 `;
@@ -914,6 +958,9 @@ const getUniforms = (gl, program) => ({
   flowPulse: gl.getUniformLocation(program, 'uFlowPulse'),
   flowRise: gl.getUniformLocation(program, 'uFlowRise'),
   flowDrop: gl.getUniformLocation(program, 'uFlowDrop'),
+  reverseColorBlend: gl.getUniformLocation(program, 'uReverseColorBlend'),
+  reverseFromFlowOffset: gl.getUniformLocation(program, 'uReverseFromFlowOffset'),
+  reverseTravelSpan: gl.getUniformLocation(program, 'uReverseTravelSpan'),
 });
 
 const getBracketUniforms = (gl, program) => ({
@@ -1039,6 +1086,9 @@ export function createPathWebglRenderer(canvas) {
   let cachedStartRadius = 0;
   let cachedArrowLength = 0;
   let cachedEndHalfWidth = 0;
+  let cachedReverseHeadArrowLength = 0;
+  let cachedReverseHeadArrowHalfWidth = 0;
+  let cachedReverseTailCircleRadius = 0;
   let cachedMaxPathPoints = DEFAULT_MAX_PATH_POINTS;
   let cachedGeometryToken = NaN;
   let cachedPoints = new Float32Array(0);
@@ -1080,6 +1130,9 @@ export function createPathWebglRenderer(canvas) {
     flowPulse: NaN,
     flowRise: NaN,
     flowDrop: NaN,
+    reverseColorBlend: NaN,
+    reverseFromFlowOffset: NaN,
+    reverseTravelSpan: NaN,
     bracketHalfSize: NaN,
     bracketCornerAnchor: NaN,
     bracketCornerRadius: NaN,
@@ -1138,7 +1191,17 @@ export function createPathWebglRenderer(canvas) {
     return count;
   };
 
-  const hasGeometryChange = (points, width, startRadius, arrowLength, endHalfWidth, maxPathPoints) => {
+  const hasGeometryChange = (
+    points,
+    width,
+    startRadius,
+    arrowLength,
+    endHalfWidth,
+    reverseHeadArrowLength,
+    reverseHeadArrowHalfWidth,
+    reverseTailCircleRadius,
+    maxPathPoints,
+  ) => {
     const pointCount = computeSafePointCount(points, maxPathPoints);
     if (!geometryCached) return true;
     if (cachedPointCount !== pointCount) return true;
@@ -1146,6 +1209,9 @@ export function createPathWebglRenderer(canvas) {
     if (cachedStartRadius !== startRadius) return true;
     if (cachedArrowLength !== arrowLength) return true;
     if (cachedEndHalfWidth !== endHalfWidth) return true;
+    if (cachedReverseHeadArrowLength !== reverseHeadArrowLength) return true;
+    if (cachedReverseHeadArrowHalfWidth !== reverseHeadArrowHalfWidth) return true;
+    if (cachedReverseTailCircleRadius !== reverseTailCircleRadius) return true;
     if (cachedMaxPathPoints !== maxPathPoints) return true;
 
     let safeIndex = 0;
@@ -1167,6 +1233,9 @@ export function createPathWebglRenderer(canvas) {
     startRadius,
     arrowLength,
     endHalfWidth,
+    reverseHeadArrowLength,
+    reverseHeadArrowHalfWidth,
+    reverseTailCircleRadius,
     maxPathPoints,
   ) => {
     const pointCount = computeSafePointCount(points, maxPathPoints);
@@ -1188,6 +1257,9 @@ export function createPathWebglRenderer(canvas) {
     cachedStartRadius = startRadius;
     cachedArrowLength = arrowLength;
     cachedEndHalfWidth = endHalfWidth;
+    cachedReverseHeadArrowLength = reverseHeadArrowLength;
+    cachedReverseHeadArrowHalfWidth = reverseHeadArrowHalfWidth;
+    cachedReverseTailCircleRadius = reverseTailCircleRadius;
     cachedMaxPathPoints = maxPathPoints;
     geometryCached = true;
   };
@@ -1371,6 +1443,12 @@ export function createPathWebglRenderer(canvas) {
     const flowEnabled = frame.flowEnabled ? 1 : 0;
     const flowRise = Number.isFinite(frame.flowRise) ? frame.flowRise : 0.82;
     const flowDrop = Number.isFinite(frame.flowDrop) ? frame.flowDrop : 0.83;
+    const reverseColorBlendRaw = Number(frame.reverseColorBlend);
+    const reverseColorBlend = clampUnit(
+      Number.isFinite(reverseColorBlendRaw) ? reverseColorBlendRaw : 1,
+    );
+    const reverseFromFlowOffset = Number(frame.reverseFromFlowOffset) || 0;
+    const reverseTravelSpanFromFrame = Math.max(0, Number(frame.reverseTravelSpan) || 0);
 
     if (!hasPathPoints) {
       reusableMesh.vertexCount = 0;
@@ -1384,6 +1462,9 @@ export function createPathWebglRenderer(canvas) {
     const startRadius = Math.max(0, Number(frame.startRadius) || 0);
     const arrowLength = Math.max(0, Number(frame.arrowLength) || 0);
     const endHalfWidth = Math.max(0, Number(frame.endHalfWidth) || 0);
+    const reverseHeadArrowLength = Math.max(0, Number(frame.reverseHeadArrowLength) || 0);
+    const reverseHeadArrowHalfWidth = Math.max(0, Number(frame.reverseHeadArrowHalfWidth) || 0);
+    const reverseTailCircleRadius = Math.max(0, Number(frame.reverseTailCircleRadius) || 0);
     const maxPathPoints = Number.isInteger(frame.maxPathPoints) && frame.maxPathPoints > 0
       ? frame.maxPathPoints
       : DEFAULT_MAX_PATH_POINTS;
@@ -1399,6 +1480,9 @@ export function createPathWebglRenderer(canvas) {
           startRadius,
           arrowLength,
           endHalfWidth,
+          reverseHeadArrowLength,
+          reverseHeadArrowHalfWidth,
+          reverseTailCircleRadius,
           maxPathPoints,
         );
       if (geometryChanged) {
@@ -1407,6 +1491,9 @@ export function createPathWebglRenderer(canvas) {
           startRadius,
           arrowLength,
           endHalfWidth,
+          reverseHeadArrowLength,
+          reverseHeadArrowHalfWidth,
+          reverseTailCircleRadius,
           maxPathPoints,
         }, reusableMesh);
         updateGeometrySignature(
@@ -1415,6 +1502,9 @@ export function createPathWebglRenderer(canvas) {
           startRadius,
           arrowLength,
           endHalfWidth,
+          reverseHeadArrowLength,
+          reverseHeadArrowHalfWidth,
+          reverseTailCircleRadius,
           maxPathPoints,
         );
         if (hasGeometryToken) {
@@ -1460,6 +1550,9 @@ export function createPathWebglRenderer(canvas) {
       const completionBoundary = completionProgress >= COMPLETE_PATH_THRESHOLD
         ? (reusableMesh.mainTravel + arrowLength)
         : (reusableMesh.mainTravel * completionProgress);
+      const reverseTravelSpan = reverseTravelSpanFromFrame > 0
+        ? reverseTravelSpanFromFrame
+        : reusableMesh.mainTravel;
       const completionFeather = Math.max(width * 2.2, 14);
       const mainColor = toRgb01Into(frame.mainColorRgb || { r: 255, g: 255, b: 255 }, mainColorScratch);
       const completeColor = toRgb01Into(
@@ -1505,6 +1598,13 @@ export function createPathWebglRenderer(canvas) {
       setUniform1fCached(uniforms.flowPulse, 'flowPulse', flowPulse);
       setUniform1fCached(uniforms.flowRise, 'flowRise', flowRise);
       setUniform1fCached(uniforms.flowDrop, 'flowDrop', flowDrop);
+      setUniform1fCached(uniforms.reverseColorBlend, 'reverseColorBlend', reverseColorBlend);
+      setUniform1fCached(
+        uniforms.reverseFromFlowOffset,
+        'reverseFromFlowOffset',
+        reverseFromFlowOffset,
+      );
+      setUniform1fCached(uniforms.reverseTravelSpan, 'reverseTravelSpan', reverseTravelSpan);
 
       gl.drawElements(gl.TRIANGLES, reusableMesh.indexCount, gl.UNSIGNED_SHORT, 0);
       gl.bindVertexArray(null);
