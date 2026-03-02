@@ -138,6 +138,15 @@ const writeNotificationEnabledPreference = (enabled) => {
   }
 };
 
+const hasStoredNotificationEnabledPreference = () => {
+  try {
+    return window.localStorage.getItem(NOTIFICATION_ENABLED_KEY) !== null;
+  } catch {
+    // localStorage can be unavailable in restricted browser contexts.
+  }
+  return false;
+};
+
 const notificationPermissionState = () => {
   if (!supportsNotifications()) return 'unsupported';
   return Notification.permission;
@@ -251,7 +260,7 @@ const disableNotificationsNow = async () => {
 
 const maybeAutoPromptForNotifications = async () => {
   if (!supportsNotifications() || !canUseServiceWorker()) return;
-  if (!readNotificationEnabledPreference()) return;
+  if (hasStoredNotificationEnabledPreference() && !readNotificationEnabledPreference()) return;
   if (notificationPermissionState() === 'granted') return;
   if (readAutoPromptDecision() !== NOTIFICATION_AUTO_PROMPT_DECISIONS.UNSET) return;
 
