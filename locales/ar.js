@@ -45,6 +45,8 @@ export default {
     "githubRepoTitle": "عرض المصدر على GitHub",
     "notifications": "الإشعارات",
     "notificationsEnable": "تفعيل الإشعارات",
+    "pathPrediction": "التنبؤ بالمسار",
+    "pathPredictionEnable": "تفعيل التنبؤ",
     "notificationsBlockedToast": "الإشعارات محظورة. يرجى السماح بإذن الإشعارات من إعدادات الموقع في المتصفح.",
     "notificationsAutoPromptConfirm": "هل تريد تفعيل إشعارات التحديث والتحدي اليومي؟",
     "notificationUnsolvedTitle": "مستوى اليوم أوشك على الانتهاء",

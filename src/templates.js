@@ -62,6 +62,13 @@ export const APP_SHELL_TEMPLATE = (t = (k) => k, localeOptions = [], currentLoca
                 <span data-i18n="ui.notificationsEnable">${t('ui.notificationsEnable')}</span>
               </label>
             </div>
+            <div class="settingsField">
+              <span id="${ELEMENT_IDS.PATH_PREDICTION_LABEL}" class="small" data-i18n="ui.pathPrediction">${t('ui.pathPrediction')}</span>
+              <label class="settingsCheckbox">
+                <input id="${ELEMENT_IDS.PATH_PREDICTION_TOGGLE}" type="checkbox" />
+                <span data-i18n="ui.pathPredictionEnable">${t('ui.pathPredictionEnable')}</span>
+              </label>
+            </div>
           </div>
           <dialog id="${ELEMENT_IDS.THEME_SWITCH_DIALOG}">
             <form method="dialog" class="themeSwitchDialog">

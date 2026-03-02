@@ -45,6 +45,8 @@ export default {
     "githubRepoTitle": "在 GitHub 上檢視原始碼",
     "notifications": "通知",
     "notificationsEnable": "啟用通知",
+    "pathPrediction": "路徑預測",
+    "pathPredictionEnable": "啟用預測",
     "notificationsBlockedToast": "通知已被封鎖。請在瀏覽器網站設定中允許通知權限。",
     "notificationsAutoPromptConfirm": "要啟用更新與每日通知嗎？",
     "notificationUnsolvedTitle": "每日關卡即將截止",

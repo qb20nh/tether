@@ -45,6 +45,8 @@ export default {
     "githubRepoTitle": "GitHubでソースを見る",
     "notifications": "通知",
     "notificationsEnable": "通知を有効にする",
+    "pathPrediction": "経路予測",
+    "pathPredictionEnable": "予測を有効にする",
     "notificationsBlockedToast": "通知がブロックされています。ブラウザーのサイト設定で通知権限を許可してください。",
     "notificationsAutoPromptConfirm": "更新通知とデイリー通知を有効にしますか？",
     "notificationUnsolvedTitle": "デイリーレベルの終了が近づいています",

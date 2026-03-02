@@ -9,6 +9,7 @@ import {
 import {
   buildPathDragCandidates,
   choosePathDragCell,
+  predictPathDragPointer,
 } from './pointer_intent_resolver.js';
 import {
   INTENT_TYPES,
@@ -18,6 +19,8 @@ import {
 } from '../runtime/intents.js';
 
 export function createDomInputAdapter() {
+  const PATH_PREDICTION_SAMPLE_WINDOW = 4;
+
   let refs = null;
   let readSnapshot = () => null;
   let emitIntent = () => { };
@@ -212,6 +215,11 @@ export function createDomInputAdapter() {
         moved: false,
         origin: { r: cell.r, c: cell.c },
         lastCursorKey: `${cell.r},${cell.c}`,
+        prediction: {
+          samples: [{ x: e.clientX, y: e.clientY, t: e.timeStamp }],
+          emaErrorPx: 0,
+          lastPredictedClient: null,
+        },
       };
       dragGridMetrics = captureGridMetrics(nextSnapshot);
       activePointerId = e.pointerId;
@@ -236,6 +244,11 @@ export function createDomInputAdapter() {
       moved: false,
       origin: { r: cell.r, c: cell.c },
       lastCursorKey: `${cell.r},${cell.c}`,
+      prediction: {
+        samples: [{ x: e.clientX, y: e.clientY, t: e.timeStamp }],
+        emaErrorPx: 0,
+        lastPredictedClient: null,
+      },
     };
     dragGridMetrics = captureGridMetrics(snapshot);
 
@@ -255,7 +268,44 @@ export function createDomInputAdapter() {
 
     if (dragMode === 'path') {
       if (e.cancelable) e.preventDefault();
-      let cell = cellFromPoint(e.clientX, e.clientY);
+      let pointerClientX = e.clientX;
+      let pointerClientY = e.clientY;
+
+      if (pathDrag) {
+        if (!pathDrag.prediction) {
+          pathDrag.prediction = {
+            samples: [],
+            emaErrorPx: 0,
+            lastPredictedClient: null,
+          };
+        }
+        const predictionState = pathDrag.prediction;
+        predictionState.samples.push({ x: e.clientX, y: e.clientY, t: e.timeStamp });
+        if (predictionState.samples.length > PATH_PREDICTION_SAMPLE_WINDOW) {
+          predictionState.samples.shift();
+        }
+
+        const shouldPredict = refs?.pathPredictionToggle
+          ? refs.pathPredictionToggle.checked
+          : true;
+        if (shouldPredict) {
+          const predicted = predictPathDragPointer({
+            samples: predictionState.samples,
+            cellSize: dragGridMetrics?.size ?? getCellSize(refs.gridEl),
+            prevEmaErrorPx: predictionState.emaErrorPx,
+            prevPredictedClient: predictionState.lastPredictedClient,
+          });
+          pointerClientX = predicted.effectiveClient.x;
+          pointerClientY = predicted.effectiveClient.y;
+          predictionState.emaErrorPx = predicted.nextEmaErrorPx;
+          predictionState.lastPredictedClient = predicted.nextPredictedClient;
+        } else {
+          predictionState.emaErrorPx = 0;
+          predictionState.lastPredictedClient = null;
+        }
+      }
+
+      let cell = cellFromPoint(pointerClientX, pointerClientY);
 
       if (pathDrag) {
         const snapshotForInput = readSnapshot();
@@ -277,8 +327,8 @@ export function createDomInputAdapter() {
             const rect = metrics
               ? null
               : refs.gridEl.getBoundingClientRect();
-            const px = metrics ? (e.clientX - metrics.left) : (e.clientX - rect.left);
-            const py = metrics ? (e.clientY - metrics.top) : (e.clientY - rect.top);
+            const px = metrics ? (pointerClientX - metrics.left) : (pointerClientX - rect.left);
+            const py = metrics ? (pointerClientY - metrics.top) : (pointerClientY - rect.top);
             const size = metrics ? metrics.size : getCellSize(refs.gridEl);
             const holdCell = { r: headNode.r, c: headNode.c };
 

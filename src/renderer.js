@@ -2803,6 +2803,8 @@ export function cacheElements() {
     langSel: get(ELEMENT_IDS.LANG_SEL),
     themeLabel: get(ELEMENT_IDS.THEME_LABEL),
     themeToggle: get(ELEMENT_IDS.THEME_TOGGLE),
+    pathPredictionLabel: get(ELEMENT_IDS.PATH_PREDICTION_LABEL),
+    pathPredictionToggle: get(ELEMENT_IDS.PATH_PREDICTION_TOGGLE),
     settingsToggle: get(ELEMENT_IDS.SETTINGS_TOGGLE),
     settingsPanel: get(ELEMENT_IDS.SETTINGS_PANEL),
     themeSwitchDialog: get(ELEMENT_IDS.THEME_SWITCH_DIALOG),

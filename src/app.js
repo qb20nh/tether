@@ -26,6 +26,7 @@ const APP_TOAST_VISIBLE_MS = 3200;
 
 const NOTIFICATION_AUTO_PROMPT_KEY = 'tetherNotificationAutoPromptDecision';
 const NOTIFICATION_ENABLED_KEY = 'tetherNotificationsEnabled';
+const PATH_PREDICTION_ENABLED_KEY = 'tetherPathPredictionEnabled';
 const NOTIFICATION_AUTO_PROMPT_DECISIONS = Object.freeze({
   UNSET: 'unset',
   ACCEPTED: 'accepted',
@@ -42,6 +43,8 @@ let lastUpdateCheckAtMs = 0;
 let promptedRemoteBuildNumbers = new Set();
 let notificationsToggleEl = null;
 let notificationsToggleBound = false;
+let pathPredictionToggleEl = null;
+let pathPredictionToggleBound = false;
 
 const localBuildNumber = (() => {
   const meta = document.querySelector(`meta[name="${BUILD_NUMBER_META_NAME}"]`);
@@ -194,6 +197,25 @@ const writeNotificationEnabledPreference = (enabled) => {
   }
 };
 
+const readPathPredictionEnabledPreference = () => {
+  try {
+    const raw = window.localStorage.getItem(PATH_PREDICTION_ENABLED_KEY);
+    if (raw === 'false') return false;
+    if (raw === 'true') return true;
+  } catch {
+    // localStorage can be unavailable in restricted browser contexts.
+  }
+  return true;
+};
+
+const writePathPredictionEnabledPreference = (enabled) => {
+  try {
+    window.localStorage.setItem(PATH_PREDICTION_ENABLED_KEY, enabled ? 'true' : 'false');
+  } catch {
+    // localStorage can be unavailable in restricted browser contexts.
+  }
+};
+
 const hasStoredNotificationEnabledPreference = () => {
   try {
     return window.localStorage.getItem(NOTIFICATION_ENABLED_KEY) !== null;
@@ -214,6 +236,11 @@ const refreshNotificationsToggleUi = () => {
   const permission = notificationPermissionState();
   notificationsToggleEl.checked = enabled;
   notificationsToggleEl.disabled = permission === 'unsupported';
+};
+
+const refreshPathPredictionToggleUi = () => {
+  if (!pathPredictionToggleEl) return;
+  pathPredictionToggleEl.checked = readPathPredictionEnabledPreference();
 };
 
 const translateNow = (key, vars = {}) => createTranslator(getLocale())(key, vars);
@@ -356,6 +383,23 @@ const bindNotificationsToggle = () => {
 
   notificationsToggleBound = true;
   refreshNotificationsToggleUi();
+};
+
+const bindPathPredictionToggle = () => {
+  pathPredictionToggleEl = document.getElementById(ELEMENT_IDS.PATH_PREDICTION_TOGGLE);
+
+  if (!pathPredictionToggleEl || pathPredictionToggleBound) {
+    refreshPathPredictionToggleUi();
+    return;
+  }
+
+  pathPredictionToggleEl.addEventListener('change', () => {
+    writePathPredictionEnabledPreference(pathPredictionToggleEl.checked);
+    refreshPathPredictionToggleUi();
+  });
+
+  pathPredictionToggleBound = true;
+  refreshPathPredictionToggleUi();
 };
 
 const utcDateIdFromMs = (ms) => {
@@ -730,6 +774,7 @@ export async function initTetherApp() {
     initialLocale,
   );
 
+  bindPathPredictionToggle();
   bindNotificationsToggle();
   bindServiceWorkerRuntimeEvents();
 

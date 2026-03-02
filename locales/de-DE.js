@@ -45,6 +45,8 @@ export default {
     "githubRepoTitle": "Quellcode auf GitHub ansehen",
     "notifications": "Benachrichtigungen",
     "notificationsEnable": "Benachrichtigungen aktivieren",
+    "pathPrediction": "Pfadvorhersage",
+    "pathPredictionEnable": "Vorhersage aktivieren",
     "notificationsBlockedToast": "Benachrichtigungen sind blockiert. Bitte erlaube die Benachrichtigungsberechtigung in den Website-Einstellungen des Browsers.",
     "notificationsAutoPromptConfirm": "Update- und tägliche Benachrichtigungen aktivieren?",
     "notificationUnsolvedTitle": "Tägliches Level läuft bald ab",

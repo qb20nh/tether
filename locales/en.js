@@ -45,6 +45,8 @@ export default {
     "githubRepoTitle": "View source on GitHub",
     "notifications": "Notifications",
     "notificationsEnable": "Enable notifications",
+    "pathPrediction": "Path prediction",
+    "pathPredictionEnable": "Enable prediction",
     "notificationsBlockedToast": "Notifications are blocked. Please allow notification permission in your browser site settings.",
     "notificationsAutoPromptConfirm": "Enable update and daily notifications?",
     "notificationUnsolvedTitle": "Daily level ending soon",

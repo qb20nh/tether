@@ -1,3 +1,20 @@
+const SAMPLE_WINDOW = 4;
+const EMA_ALPHA = 0.35;
+const BASE_LOOKAHEAD_MS = 16;
+const MIN_LOOKAHEAD_MS = 6;
+const MAX_LOOKAHEAD_MS = 22;
+const ERROR_SCALE_CELLS = 0.75;
+const MAX_PROJECT_DISTANCE_CELLS = 0.75;
+const MIN_SPEED_PX_PER_MS = 0.02;
+const MAX_SEGMENT_DT_MS = 48;
+
+const clamp = (value, lo, hi) => Math.max(lo, Math.min(hi, value));
+
+const safePoint = (point) => ({
+  x: Number.isFinite(point?.x) ? point.x : 0,
+  y: Number.isFinite(point?.y) ? point.y : 0,
+});
+
 export function buildPathDragCandidates({
   snapshot,
   headNode,
@@ -30,6 +47,108 @@ export function buildPathDragCandidates({
   }
 
   return candidates;
+}
+
+export function predictPathDragPointer({
+  samples,
+  cellSize,
+  prevEmaErrorPx,
+  prevPredictedClient,
+}) {
+  const safeSamples = Array.isArray(samples)
+    ? samples.slice(Math.max(0, samples.length - SAMPLE_WINDOW))
+    : [];
+  const current = safePoint(safeSamples[safeSamples.length - 1]);
+
+  let nextEmaErrorPx = Number.isFinite(prevEmaErrorPx) ? Math.max(0, prevEmaErrorPx) : 0;
+  const prevPredicted = Number.isFinite(prevPredictedClient?.x) && Number.isFinite(prevPredictedClient?.y)
+    ? prevPredictedClient
+    : null;
+  if (prevPredicted) {
+    const errorPx = Math.hypot(current.x - prevPredicted.x, current.y - prevPredicted.y);
+    nextEmaErrorPx = (nextEmaErrorPx * (1 - EMA_ALPHA)) + (errorPx * EMA_ALPHA);
+  }
+
+  if (safeSamples.length < 2) {
+    return {
+      effectiveClient: current,
+      nextEmaErrorPx,
+      nextPredictedClient: null,
+    };
+  }
+
+  let weightedVx = 0;
+  let weightedVy = 0;
+  let totalWeight = 0;
+  let segmentWeight = 1;
+
+  for (let i = 1; i < safeSamples.length; i++) {
+    const prev = safeSamples[i - 1];
+    const next = safeSamples[i];
+    const dt = Number(next.t) - Number(prev.t);
+    if (!Number.isFinite(dt) || dt <= 0 || dt > MAX_SEGMENT_DT_MS) continue;
+
+    const vx = (Number(next.x) - Number(prev.x)) / dt;
+    const vy = (Number(next.y) - Number(prev.y)) / dt;
+    weightedVx += vx * segmentWeight;
+    weightedVy += vy * segmentWeight;
+    totalWeight += segmentWeight;
+    segmentWeight += 1;
+  }
+
+  if (!(totalWeight > 0)) {
+    return {
+      effectiveClient: current,
+      nextEmaErrorPx,
+      nextPredictedClient: null,
+    };
+  }
+
+  const vx = weightedVx / totalWeight;
+  const vy = weightedVy / totalWeight;
+  const speed = Math.hypot(vx, vy);
+  if (speed < MIN_SPEED_PX_PER_MS) {
+    return {
+      effectiveClient: current,
+      nextEmaErrorPx,
+      nextPredictedClient: current,
+    };
+  }
+
+  const resolvedCellSize = Number.isFinite(cellSize) && cellSize > 0 ? cellSize : 1;
+  const errorDenominator = resolvedCellSize * ERROR_SCALE_CELLS;
+  const errorRatio = clamp(nextEmaErrorPx / errorDenominator, 0, 1);
+  const lookaheadMs = clamp(
+    BASE_LOOKAHEAD_MS * (1 - (0.65 * errorRatio)),
+    MIN_LOOKAHEAD_MS,
+    MAX_LOOKAHEAD_MS,
+  );
+
+  let projectDx = vx * lookaheadMs;
+  let projectDy = vy * lookaheadMs;
+  const projectionCap = resolvedCellSize * MAX_PROJECT_DISTANCE_CELLS;
+  const projectionDist = Math.hypot(projectDx, projectDy);
+  if (projectionDist > projectionCap && projectionCap > 0) {
+    const scale = projectionCap / projectionDist;
+    projectDx *= scale;
+    projectDy *= scale;
+  }
+
+  const projected = {
+    x: current.x + projectDx,
+    y: current.y + projectDy,
+  };
+  const strength = 1 - errorRatio;
+  const effectiveClient = {
+    x: current.x + ((projected.x - current.x) * strength),
+    y: current.y + ((projected.y - current.y) * strength),
+  };
+
+  return {
+    effectiveClient,
+    nextEmaErrorPx,
+    nextPredictedClient: projected,
+  };
 }
 
 export function choosePathDragCell({

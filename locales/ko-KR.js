@@ -45,6 +45,8 @@ export default {
     "githubRepoTitle": "GitHub에서 소스 보기",
     "notifications": "알림",
     "notificationsEnable": "알림 켜기",
+    "pathPrediction": "경로 예측",
+    "pathPredictionEnable": "예측 켜기",
     "notificationsBlockedToast": "알림이 차단되어 있습니다. 브라우저 사이트 설정에서 알림 권한을 허용해주세요.",
     "notificationsAutoPromptConfirm": "업데이트 및 데일리 알림을 켜시겠습니까?",
     "notificationUnsolvedTitle": "데일리 레벨 마감이 임박했습니다",
