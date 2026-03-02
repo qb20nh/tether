@@ -45,14 +45,13 @@ export default {
     "githubRepoTitle": "GitHubでソースを見る",
     "notifications": "通知",
     "notificationsEnable": "通知を有効にする",
-    "notificationsBlocked": "ブラウザーで通知がブロックされています",
-    "notificationsUnsupported": "通知は利用できません",
+    "notificationsBlockedToast": "通知がブロックされています。ブラウザーのサイト設定で通知権限を許可してください。",
     "notificationsAutoPromptConfirm": "更新通知とデイリー通知を有効にしますか？",
     "notificationUnsolvedTitle": "デイリーレベルの終了が近づいています",
     "notificationUnsolvedBody": "今日のデイリーレベルはまだ未クリアです。残り時間が少なくなっています。",
     "notificationNewLevelTitle": "新しいデイリーレベルが利用可能です",
     "notificationNewLevelBody": "新しいデイリーレベルをプレイできます。",
-    "updateAvailablePrompt": "新しいバージョンがあります。今すぐ更新しますか？"
+    "updateAppliedToast": "最新バージョンに更新されました。"
   },
   "goal": {
     "intro": "<b>ゴール</b>：壁でないすべてのマスを<b>ちょうど1回ずつ</b>訪問する連続した線を描いてください。",

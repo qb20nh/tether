@@ -45,14 +45,13 @@ export default {
     "githubRepoTitle": "Ver código-fonte no GitHub",
     "notifications": "Notificações",
     "notificationsEnable": "Ativar notificações",
-    "notificationsBlocked": "Notificações bloqueadas no navegador",
-    "notificationsUnsupported": "Notificações indisponíveis",
+    "notificationsBlockedToast": "As notificações estão bloqueadas. Permita a permissão de notificações nas configurações de site do navegador.",
     "notificationsAutoPromptConfirm": "Ativar notificações de atualização e diárias?",
     "notificationUnsolvedTitle": "O nível diário está acabando",
     "notificationUnsolvedBody": "Seu nível diário ainda não foi resolvido. O tempo está acabando.",
     "notificationNewLevelTitle": "Novo nível diário disponível",
     "notificationNewLevelBody": "Um novo nível diário está pronto para jogar.",
-    "updateAvailablePrompt": "Uma nova versão está disponível. Atualizar agora?"
+    "updateAppliedToast": "Atualizado para a versão mais recente."
   },
   "goal": {
     "intro": "<b>Objetivo</b>: Desenhe um caminho contínuo que visite cada célula sem parede <b>exatamente uma vez</b>.",

@@ -20,6 +20,9 @@ const DAILY_HARD_INVALIDATE_GRACE_MS = 60 * 1000;
 const UPDATE_CHECK_THROTTLE_MS = 5 * 60 * 1000;
 const DAILY_NOTIFICATION_WARNING_HOURS = 8;
 const DAILY_CHECK_TAG = 'tether-daily-check';
+const LAST_SEEN_BUILD_NUMBER_KEY = 'tetherLastSeenBuildNumber';
+const APP_TOAST_ID = 'appToast';
+const APP_TOAST_VISIBLE_MS = 3200;
 
 const NOTIFICATION_AUTO_PROMPT_KEY = 'tetherNotificationAutoPromptDecision';
 const NOTIFICATION_ENABLED_KEY = 'tetherNotificationsEnabled';
@@ -78,6 +81,59 @@ const teardownRuntime = () => {
   if (!runtimeInstance) return;
   runtimeInstance.destroy();
   runtimeInstance = null;
+};
+
+const readLastSeenBuildNumber = () => {
+  try {
+    const raw = window.localStorage.getItem(LAST_SEEN_BUILD_NUMBER_KEY);
+    const parsed = Number.parseInt(raw || '', 10);
+    return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+  } catch {
+    // localStorage can be unavailable in restricted browser contexts.
+  }
+  return null;
+};
+
+const writeLastSeenBuildNumber = (buildNumber) => {
+  if (!Number.isInteger(buildNumber) || buildNumber <= 0) return;
+  try {
+    window.localStorage.setItem(LAST_SEEN_BUILD_NUMBER_KEY, String(buildNumber));
+  } catch {
+    // localStorage can be unavailable in restricted browser contexts.
+  }
+};
+
+const detectBuildUpgrade = () => {
+  if (!Number.isInteger(localBuildNumber) || localBuildNumber <= 0) return false;
+  const previousBuild = readLastSeenBuildNumber();
+  writeLastSeenBuildNumber(localBuildNumber);
+  return Number.isInteger(previousBuild) && localBuildNumber > previousBuild;
+};
+
+const showInAppToast = (text) => {
+  if (typeof text !== 'string' || text.trim().length === 0) return;
+
+  const existing = document.getElementById(APP_TOAST_ID);
+  if (existing) existing.remove();
+
+  const toastEl = document.createElement('div');
+  toastEl.id = APP_TOAST_ID;
+  toastEl.className = 'appToast';
+  toastEl.setAttribute('role', 'status');
+  toastEl.setAttribute('aria-live', 'polite');
+  toastEl.textContent = text.trim();
+
+  document.body.appendChild(toastEl);
+  window.requestAnimationFrame(() => {
+    toastEl.classList.add('isVisible');
+  });
+
+  window.setTimeout(() => {
+    toastEl.classList.remove('isVisible');
+    window.setTimeout(() => {
+      if (toastEl.parentNode) toastEl.parentNode.removeChild(toastEl);
+    }, 220);
+  }, APP_TOAST_VISIBLE_MS);
 };
 
 const canUseServiceWorker = () =>
@@ -240,6 +296,12 @@ const enableNotificationsNow = async () => {
   const permission = await requestNotificationPermission();
   if (permission !== 'granted') {
     writeNotificationEnabledPreference(false);
+    if (permission === 'denied') {
+      const deniedText = translateNow('ui.notificationsBlockedToast');
+      if (deniedText !== 'ui.notificationsBlockedToast') {
+        showInAppToast(deniedText);
+      }
+    }
     refreshNotificationsToggleUi();
     await syncDailyStateToServiceWorker();
     return false;
@@ -552,7 +614,7 @@ const waitForWaitingWorker = (registration, timeoutMs = 8000) =>
     cleanups.push(() => window.clearTimeout(timer));
   });
 
-const maybePromptForUpdate = async (remoteBuildNumber) => {
+const maybeApplyUpdate = async (remoteBuildNumber) => {
   if (!swRegistration) return;
   if (promptedRemoteBuildNumbers.has(remoteBuildNumber)) return;
 
@@ -566,10 +628,6 @@ const maybePromptForUpdate = async (remoteBuildNumber) => {
   if (!waitingWorker) return;
 
   promptedRemoteBuildNumbers.add(remoteBuildNumber);
-
-  const shouldUpdate = window.confirm(translateNow('ui.updateAvailablePrompt'));
-  if (!shouldUpdate) return;
-
   armControllerChangeReload();
   waitingWorker.postMessage({ type: 'SW_SKIP_WAITING' });
 };
@@ -587,7 +645,7 @@ const checkForNewBuild = async ({ force = false } = {}) => {
   try {
     const remoteBuildNumber = await fetchRemoteBuildNumber();
     if (!Number.isInteger(remoteBuildNumber) || remoteBuildNumber <= localBuildNumber) return;
-    await maybePromptForUpdate(remoteBuildNumber);
+    await maybeApplyUpdate(remoteBuildNumber);
   } finally {
     updateCheckInFlight = false;
   }
@@ -656,6 +714,7 @@ export async function initTetherApp() {
 
   const appEl = document.getElementById(ELEMENT_IDS.APP);
   if (!appEl) return;
+  const didUpgradeBuild = detectBuildUpgrade();
 
   const bootDaily = await resolveDailyBootPayload();
   setupDailyHardInvalidationWatcher(bootDaily);
@@ -719,6 +778,12 @@ export async function initTetherApp() {
 
   runtimeInstance.start();
   refreshNotificationsToggleUi();
+  if (didUpgradeBuild) {
+    const toastText = translateNow('ui.updateAppliedToast');
+    if (toastText !== 'ui.updateAppliedToast') {
+      showInAppToast(toastText);
+    }
+  }
 
   if (!swRegistration) {
     void registerServiceWorker();

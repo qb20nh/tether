@@ -45,14 +45,13 @@ export default {
     "githubRepoTitle": "Voir le code source sur GitHub",
     "notifications": "Notifications",
     "notificationsEnable": "Activer les notifications",
-    "notificationsBlocked": "Notifications bloquées dans le navigateur",
-    "notificationsUnsupported": "Notifications indisponibles",
+    "notificationsBlockedToast": "Les notifications sont bloquées. Veuillez autoriser les notifications dans les paramètres du site du navigateur.",
     "notificationsAutoPromptConfirm": "Activer les notifications de mise à jour et quotidiennes ?",
     "notificationUnsolvedTitle": "Le niveau quotidien expire bientôt",
     "notificationUnsolvedBody": "Votre niveau quotidien n'est pas encore résolu. Le temps est presque écoulé.",
     "notificationNewLevelTitle": "Nouveau niveau quotidien disponible",
     "notificationNewLevelBody": "Un nouveau niveau quotidien est prêt à jouer.",
-    "updateAvailablePrompt": "Une nouvelle version est disponible. Mettre à jour maintenant ?"
+    "updateAppliedToast": "Mis à jour vers la dernière version."
   },
   "goal": {
     "intro": "<b>Objectif</b> : Tracez un chemin continu qui visite chaque cellule non murale <b>exactement une fois</b>.",

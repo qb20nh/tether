@@ -45,14 +45,13 @@ export default {
     "githubRepoTitle": "View source on GitHub",
     "notifications": "Notifications",
     "notificationsEnable": "Enable notifications",
-    "notificationsBlocked": "Notifications blocked in browser",
-    "notificationsUnsupported": "Notifications unavailable",
+    "notificationsBlockedToast": "Notifications are blocked. Please allow notification permission in your browser site settings.",
     "notificationsAutoPromptConfirm": "Enable update and daily notifications?",
     "notificationUnsolvedTitle": "Daily level ending soon",
     "notificationUnsolvedBody": "Your daily level is still unsolved. Time is running out.",
     "notificationNewLevelTitle": "New daily level available",
     "notificationNewLevelBody": "A new daily level is ready to play.",
-    "updateAvailablePrompt": "A new version is available. Update now?"
+    "updateAppliedToast": "Updated to the latest version."
   },
   "goal": {
     "intro": "<b>Goal</b>: Draw a continuous path that visits every non-wall cell <b>exactly once</b>.",

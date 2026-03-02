@@ -45,14 +45,13 @@ export default {
     "githubRepoTitle": "GitHub에서 소스 보기",
     "notifications": "알림",
     "notificationsEnable": "알림 켜기",
-    "notificationsBlocked": "브라우저에서 알림이 차단됨",
-    "notificationsUnsupported": "알림을 사용할 수 없음",
+    "notificationsBlockedToast": "알림이 차단되어 있습니다. 브라우저 사이트 설정에서 알림 권한을 허용해주세요.",
     "notificationsAutoPromptConfirm": "업데이트 및 데일리 알림을 켜시겠습니까?",
     "notificationUnsolvedTitle": "데일리 레벨 마감이 임박했습니다",
     "notificationUnsolvedBody": "오늘의 데일리 레벨이 아직 미해결 상태입니다. 시간이 얼마 남지 않았습니다.",
     "notificationNewLevelTitle": "새 데일리 레벨이 열렸습니다",
     "notificationNewLevelBody": "새 데일리 레벨을 플레이할 수 있습니다.",
-    "updateAvailablePrompt": "새 버전이 있습니다. 지금 업데이트할까요?"
+    "updateAppliedToast": "최신 버전으로 업데이트되었습니다."
   },
   "goal": {
     "intro": "<b>목표</b>: 벽이 아닌 모든 칸을 <b>정확히 1번씩</b> 방문하는 연속 경로를 만드세요.",

@@ -45,14 +45,13 @@ export default {
     "githubRepoTitle": "Ver el código fuente en GitHub",
     "notifications": "Notificaciones",
     "notificationsEnable": "Activar notificaciones",
-    "notificationsBlocked": "Notificaciones bloqueadas en el navegador",
-    "notificationsUnsupported": "Notificaciones no disponibles",
+    "notificationsBlockedToast": "Las notificaciones están bloqueadas. Permite el permiso de notificaciones en la configuración del sitio del navegador.",
     "notificationsAutoPromptConfirm": "¿Activar notificaciones de actualizaciones y diarias?",
     "notificationUnsolvedTitle": "El nivel diario está por terminar",
     "notificationUnsolvedBody": "Tu nivel diario sigue sin resolverse. El tiempo se está acabando.",
     "notificationNewLevelTitle": "Nuevo nivel diario disponible",
     "notificationNewLevelBody": "Hay un nuevo nivel diario listo para jugar.",
-    "updateAvailablePrompt": "Hay una nueva versión disponible. ¿Actualizar ahora?"
+    "updateAppliedToast": "Actualizado a la versión más reciente."
   },
   "goal": {
     "intro": "<b>Objetivo</b>: Dibuja un camino continuo que visite cada celda no pared <b>exactamente una vez</b>.",

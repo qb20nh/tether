@@ -45,14 +45,13 @@ export default {
     "githubRepoTitle": "在 GitHub 上檢視原始碼",
     "notifications": "通知",
     "notificationsEnable": "啟用通知",
-    "notificationsBlocked": "瀏覽器中的通知已被封鎖",
-    "notificationsUnsupported": "通知不可用",
+    "notificationsBlockedToast": "通知已被封鎖。請在瀏覽器網站設定中允許通知權限。",
     "notificationsAutoPromptConfirm": "要啟用更新與每日通知嗎？",
     "notificationUnsolvedTitle": "每日關卡即將截止",
     "notificationUnsolvedBody": "你的每日關卡仍未解出，剩餘時間不多了。",
     "notificationNewLevelTitle": "有新的每日關卡",
     "notificationNewLevelBody": "新的每日關卡已可遊玩。",
-    "updateAvailablePrompt": "有新版本可用，現在更新嗎？"
+    "updateAppliedToast": "已更新到最新版本。"
   },
   "goal": {
     "intro": "<b>目標</b>：繪製一條連續路徑，經過每個非牆格子<b>恰好一次</b>。",

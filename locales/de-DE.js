@@ -45,14 +45,13 @@ export default {
     "githubRepoTitle": "Quellcode auf GitHub ansehen",
     "notifications": "Benachrichtigungen",
     "notificationsEnable": "Benachrichtigungen aktivieren",
-    "notificationsBlocked": "Benachrichtigungen im Browser blockiert",
-    "notificationsUnsupported": "Benachrichtigungen nicht verfügbar",
+    "notificationsBlockedToast": "Benachrichtigungen sind blockiert. Bitte erlaube die Benachrichtigungsberechtigung in den Website-Einstellungen des Browsers.",
     "notificationsAutoPromptConfirm": "Update- und tägliche Benachrichtigungen aktivieren?",
     "notificationUnsolvedTitle": "Tägliches Level läuft bald ab",
     "notificationUnsolvedBody": "Dein tägliches Level ist noch ungelöst. Die Zeit läuft ab.",
     "notificationNewLevelTitle": "Neues tägliches Level verfügbar",
     "notificationNewLevelBody": "Ein neues tägliches Level ist spielbereit.",
-    "updateAvailablePrompt": "Eine neue Version ist verfügbar. Jetzt aktualisieren?"
+    "updateAppliedToast": "Auf die neueste Version aktualisiert."
   },
   "goal": {
     "intro": "<b>Ziel</b>: Zeichne einen durchgehenden Pfad, der jede nichtwandige Zelle <b>genau einmal</b> besucht.",
