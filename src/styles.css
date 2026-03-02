@@ -838,7 +838,7 @@ button:disabled:active {
   transition:
     background 120ms ease,
     border-color 120ms ease,
-    transform 80ms ease,
+    transform 120ms ease-out,
     box-shadow 120ms ease,
     --interactive-corner-color var(--complete-cell-duration-ms) ease-out;
 }
@@ -1064,6 +1064,17 @@ button:disabled:active {
     0 0 0 var(--cell-shadow-3) rgba(120, 190, 255, 0.30) inset,
     0 0 0 var(--cell-shadow-2) rgba(120, 190, 255, 0.28);
   --interactive-corner-color: rgba(120, 190, 255, 1);
+}
+
+.cell.pathTipDragHover {
+  transform: scale(0.95);
+  transform-origin: center;
+  transition: transform 120ms ease-out;
+}
+
+body.isPathDragging .cell.pathTipDragHover.pathStart:active,
+body.isPathDragging .cell.pathTipDragHover.pathEnd:active {
+  transform: scale(0.95);
 }
 
 .cell.pathStart:active,

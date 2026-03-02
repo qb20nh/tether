@@ -14,6 +14,7 @@ import {
 
 let gridCells = [];
 let lastDropTargetKey = null;
+let lastPathTipDragHoverCell = null;
 let wallGhostEl = null;
 let cachedBoardWrap = null;
 let activeBoardSize = { rows: 0, cols: 0 };
@@ -25,6 +26,7 @@ let latestPathRefs = null;
 let latestPathStatuses = null;
 let latestCompletionModel = null;
 let latestTutorialFlags = null;
+let latestInteractionModel = null;
 let latestPathMainFlowTravel = 0;
 let colorParserCtx = null;
 let reusablePathPoints = [];
@@ -155,6 +157,9 @@ const PATH_TIP_ARRIVAL_BEZIER_X2 = 0.1;
 const PATH_TIP_ARRIVAL_BEZIER_Y2 = 1;
 const PATH_TIP_ARRIVAL_ADJACENT_MAX = Math.SQRT2 + 1e-3;
 const PATH_TIP_CENTER_SNAP_EPSILON_PX = 0.5;
+const PATH_TIP_HOVER_SCALE_DURATION_MS = 120;
+const PATH_TIP_HOVER_UP_SCALE = 1.15;
+const PATH_TIP_HOVER_SCALE_EPSILON = 1e-4;
 const FLOW_TRAVEL_ANGLE_TOLERANCE = 1e-4;
 const RETAINED_ARC_COVERAGE_EPSILON_PX = 0.5;
 const arrivalOffsetScratchA = {
@@ -184,6 +189,7 @@ const startPinPresenceScaleScratch = {
   anchorC: NaN,
 };
 const flowVisibilityMixScratch = { mix: 1, active: false };
+const pathTipHoverScaleScratch = { startScale: 1, endScale: 1, active: false };
 const reusableStartPinPresencePoint = { x: 0, y: 0 };
 const reusableStartPinPresencePoints = [reusableStartPinPresencePoint];
 const reverseTipScaleScratch = { inScale: 1, outScale: 0, active: false };
@@ -208,6 +214,8 @@ const retainedArcRenderScratchB = {
 };
 let reusableStartRetainedArcPoints = [];
 let reusableEndRetainedArcPoints = [];
+const pathStartTipHoverScaleState = { fromScale: 1, toScale: 1, startTimeMs: NaN };
+const pathEndTipHoverScaleState = { fromScale: 1, toScale: 1, startTimeMs: NaN };
 
 const isPathReversed = (nextPath, previousPath) => {
   if (!Array.isArray(nextPath) || !Array.isArray(previousPath)) return false;
@@ -337,6 +345,15 @@ const clearPathEndArrowRotateState = () => {
 
 const clearPathStartFlowRotateState = () => {
   pathStartFlowRotateState = null;
+};
+
+const clearPathTipHoverScaleStates = () => {
+  pathStartTipHoverScaleState.fromScale = 1;
+  pathStartTipHoverScaleState.toScale = 1;
+  pathStartTipHoverScaleState.startTimeMs = NaN;
+  pathEndTipHoverScaleState.fromScale = 1;
+  pathEndTipHoverScaleState.toScale = 1;
+  pathEndTipHoverScaleState.startTimeMs = NaN;
 };
 
 const isEndRetractTransition = (prevPath, nextPath) => {
@@ -1314,6 +1331,93 @@ const applyPathStartPinPresenceToPayload = (path, nowMs = getNowMs()) => {
   return presence.active;
 };
 
+const resolvePathTipHoverScaleValue = (state, nowMs = getNowMs()) => {
+  const fromScale = Number.isFinite(state?.fromScale) ? state.fromScale : 1;
+  const toScale = Number.isFinite(state?.toScale) ? state.toScale : 1;
+  const startTimeMs = Number(state?.startTimeMs);
+  if (!Number.isFinite(startTimeMs)) {
+    return {
+      scale: toScale,
+      active: Math.abs(toScale - 1) > PATH_TIP_HOVER_SCALE_EPSILON,
+    };
+  }
+  if (!(PATH_TIP_HOVER_SCALE_DURATION_MS > 0)) {
+    state.fromScale = toScale;
+    state.startTimeMs = NaN;
+    return {
+      scale: toScale,
+      active: Math.abs(toScale - 1) > PATH_TIP_HOVER_SCALE_EPSILON,
+    };
+  }
+  const elapsed = nowMs - startTimeMs;
+  if (elapsed <= 0) return { scale: fromScale, active: true };
+  const linear = clampUnit(elapsed / PATH_TIP_HOVER_SCALE_DURATION_MS);
+  const eased = easeOutCubic(linear);
+  const scale = fromScale + ((toScale - fromScale) * eased);
+  if (linear >= 1) {
+    state.fromScale = toScale;
+    state.startTimeMs = NaN;
+    return {
+      scale: toScale,
+      active: Math.abs(toScale - 1) > PATH_TIP_HOVER_SCALE_EPSILON,
+    };
+  }
+  return { scale, active: true };
+};
+
+const updatePathTipHoverScaleTarget = (state, targetScale, nowMs = getNowMs()) => {
+  const safeTarget = Number.isFinite(targetScale) && targetScale > 0 ? targetScale : 1;
+  if (Math.abs(safeTarget - (Number(state?.toScale) || 1)) <= PATH_TIP_HOVER_SCALE_EPSILON) return;
+  const resolved = resolvePathTipHoverScaleValue(state, nowMs);
+  state.fromScale = resolved.scale;
+  state.toScale = safeTarget;
+  state.startTimeMs = nowMs;
+};
+
+const isCellCurrentlyHovered = (cell) => Boolean(cell?.matches?.(':hover'));
+
+const resolvePathTipHoverScales = (
+  path,
+  interactionModel = latestInteractionModel,
+  nowMs = getNowMs(),
+  out = pathTipHoverScaleScratch,
+) => {
+  out.startScale = 1;
+  out.endScale = 1;
+  out.active = false;
+
+  if (isReducedMotionPreferred()) {
+    clearPathTipHoverScaleStates();
+    return out;
+  }
+
+  let targetStartScale = 1;
+  let targetEndScale = 1;
+  if (!interactionModel?.isPathDragging && Array.isArray(path) && path.length > 0) {
+    const head = path[0] || null;
+    const tail = path.length > 1 ? path[path.length - 1] : null;
+    const startCell = head ? gridCells[head.r]?.[head.c] : null;
+    const endCell = tail ? gridCells[tail.r]?.[tail.c] : null;
+    if (isCellCurrentlyHovered(startCell)) targetStartScale = PATH_TIP_HOVER_UP_SCALE;
+    if (isCellCurrentlyHovered(endCell)) targetEndScale = PATH_TIP_HOVER_UP_SCALE;
+  }
+
+  updatePathTipHoverScaleTarget(pathStartTipHoverScaleState, targetStartScale, nowMs);
+  updatePathTipHoverScaleTarget(pathEndTipHoverScaleState, targetEndScale, nowMs);
+  const resolvedStart = resolvePathTipHoverScaleValue(pathStartTipHoverScaleState, nowMs);
+  const resolvedEnd = resolvePathTipHoverScaleValue(pathEndTipHoverScaleState, nowMs);
+  out.startScale = Math.max(0, Number(resolvedStart.scale) || 0);
+  out.endScale = Math.max(0, Number(resolvedEnd.scale) || 0);
+  out.active = Boolean(resolvedStart.active || resolvedEnd.active);
+  return out;
+};
+
+const hasActivePathTipHoverScale = (
+  path,
+  interactionModel = latestInteractionModel,
+  nowMs = getNowMs(),
+) => resolvePathTipHoverScales(path, interactionModel, nowMs, pathTipHoverScaleScratch).active;
+
 const resolveStartPinDisappearRenderPoints = (
   path,
   nowMs = getNowMs(),
@@ -1970,6 +2074,11 @@ const animatePathFlow = (timestamp) => {
   const animateEndArrowRotate = hasActivePathEndArrowRotate(latestPathSnapshot.path, nowMs);
   const animateStartFlowRotate = hasActivePathStartFlowRotate(latestPathSnapshot.path, nowMs);
   const animateStartPinPresence = hasActivePathStartPinPresence(latestPathSnapshot.path, nowMs);
+  const animateTipHoverScale = hasActivePathTipHoverScale(
+    latestPathSnapshot.path,
+    latestInteractionModel,
+    nowMs,
+  );
   const animateReverseTipSwap = hasActivePathReverseTipSwap(latestPathSnapshot.path, nowMs);
   const animateReverseGradientBlend = hasActivePathReverseGradientBlend(
     latestPathSnapshot.path,
@@ -1984,6 +2093,7 @@ const animatePathFlow = (timestamp) => {
     && !animateEndArrowRotate
     && !animateStartFlowRotate
     && !animateStartPinPresence
+    && !animateTipHoverScale
     && !animateReverseTipSwap
     && !animateReverseGradientBlend
   ) {
@@ -2279,6 +2389,15 @@ const drawIdleAnimatedPath = (
   );
   pathFramePayload.arrowLength *= segmentRetractTipScale;
   pathFramePayload.endHalfWidth *= segmentRetractTipScale;
+  const tipHoverScale = resolvePathTipHoverScales(
+    latestPathSnapshot.path,
+    latestInteractionModel,
+    nowMs,
+    pathTipHoverScaleScratch,
+  );
+  pathFramePayload.startRadius *= tipHoverScale.startScale;
+  pathFramePayload.arrowLength *= tipHoverScale.endScale;
+  pathFramePayload.endHalfWidth *= tipHoverScale.endScale;
   const baseStartRadius = Number(pathFramePayload.baseStartRadius) || 0;
   const baseEndHalfWidth = Number(pathFramePayload.baseEndHalfWidth) || 0;
   const startTipWidthScale = baseStartRadius > 0
@@ -2290,7 +2409,11 @@ const drawIdleAnimatedPath = (
   pathFramePayload.retainedStartArcWidth = Math.max(0.5, pathFramePayload.width * startTipWidthScale);
   pathFramePayload.retainedEndArcWidth = Math.max(0.5, pathFramePayload.width * endTipWidthScale);
   pathFramePayload.geometryToken = (
-    reverseTipSwapActive || startPinPresenceActive || endArrowRotateActive || startFlowRotateActive
+    reverseTipSwapActive
+    || startPinPresenceActive
+    || endArrowRotateActive
+    || startFlowRotateActive
+    || tipHoverScale.active
   ) ? NaN : renderPoints.geometryToken;
   const flowVisibility = resolvePathFlowVisibilityMix(
     latestPathSnapshot.path,
@@ -2753,6 +2876,7 @@ export function cacheElements() {
   clearPathRetainedArcStates();
   clearPathEndArrowRotateState();
   clearPathStartFlowRotateState();
+  clearPathTipHoverScaleStates();
   pathRetainedArcTokenSeed = 0;
   reusableArrivalPathPoints.length = 0;
   reusableStartRetainedArcPoints.length = 0;
@@ -2801,6 +2925,7 @@ export function cacheElements() {
   pathFramePayload.retainedStartArcGeometryToken = NaN;
   pathFramePayload.retainedEndArcGeometryToken = NaN;
   latestTutorialFlags = null;
+  latestInteractionModel = null;
   reusableTutorialBracketPoints = [];
   tutorialBracketSignature = '';
   tutorialBracketGeometryToken = 0;
@@ -2981,6 +3106,8 @@ export function buildGrid(snapshot, refs, icons, iconX) {
   reusableArrivalPathPoints.length = 0;
   reusableStartRetainedArcPoints.length = 0;
   reusableEndRetainedArcPoints.length = 0;
+  clearPathTipDragHoverCell();
+  clearPathTipHoverScaleStates();
 }
 
 const parseGridKey = (value, out = keyParseScratch) => {
@@ -3141,6 +3268,26 @@ const applyCellSnapshotState = (snapshot, r, c, statusSets) => {
   }
 };
 
+const clearPathTipDragHoverCell = () => {
+  if (!lastPathTipDragHoverCell) return;
+  lastPathTipDragHoverCell.classList.remove('pathTipDragHover');
+  lastPathTipDragHoverCell = null;
+};
+
+const applyPathTipDragHoverCell = (snapshot, interactionModel = null) => {
+  clearPathTipDragHoverCell();
+  if (!interactionModel?.isPathDragging) return;
+  const cursor = interactionModel.pathDragCursor;
+  const cursorR = Number(cursor?.r);
+  const cursorC = Number(cursor?.c);
+  if (!Number.isInteger(cursorR) || !Number.isInteger(cursorC)) return;
+
+  const cell = gridCells[cursorR]?.[cursorC];
+  if (!cell) return;
+  cell.classList.add('pathTipDragHover');
+  lastPathTipDragHoverCell = cell;
+};
+
 const tryApplyIncrementalEndDragUpdate = (snapshot, results, interactionModel = null) => {
   if (!interactionModel?.isPathDragging || interactionModel.pathDragSide !== 'end') return false;
   const prevSnapshot = latestPathSnapshot;
@@ -3254,6 +3401,8 @@ export function updateCells(
       }
     }
   }
+  applyPathTipDragHoverCell(snapshot, interactionModel);
+  latestInteractionModel = interactionModel;
 
   drawAll(
     snapshot,
@@ -3342,6 +3491,11 @@ export function drawAll(
   const animateEndArrowRotate = hasActivePathEndArrowRotate(snapshot.path, nowMs);
   const animateStartFlowRotate = hasActivePathStartFlowRotate(snapshot.path, nowMs);
   const animateStartPinPresence = hasActivePathStartPinPresence(snapshot.path, nowMs);
+  const animateTipHoverScale = hasActivePathTipHoverScale(
+    snapshot.path,
+    latestInteractionModel,
+    nowMs,
+  );
   const animateReverseTipSwap = hasActivePathReverseTipSwap(snapshot.path, nowMs);
   const animateReverseGradientBlend = hasActivePathReverseGradientBlend(
     snapshot.path,
@@ -3356,6 +3510,7 @@ export function drawAll(
     || animateEndArrowRotate
     || animateStartFlowRotate
     || animateStartPinPresence
+    || animateTipHoverScale
     || animateReverseTipSwap
     || animateReverseGradientBlend
   ) {
@@ -3574,6 +3729,15 @@ export function drawAnimatedPath(
   );
   pathFramePayload.arrowLength *= segmentRetractTipScale;
   pathFramePayload.endHalfWidth *= segmentRetractTipScale;
+  const tipHoverScale = resolvePathTipHoverScales(
+    path,
+    latestInteractionModel,
+    nowMs,
+    pathTipHoverScaleScratch,
+  );
+  pathFramePayload.startRadius *= tipHoverScale.startScale;
+  pathFramePayload.arrowLength *= tipHoverScale.endScale;
+  pathFramePayload.endHalfWidth *= tipHoverScale.endScale;
   const startTipWidthScale = startRadius > 0
     ? clampUnit((Number(pathFramePayload.startRadius) || 0) / startRadius)
     : 1;
@@ -3583,7 +3747,11 @@ export function drawAnimatedPath(
   pathFramePayload.retainedStartArcWidth = Math.max(0.5, width * startTipWidthScale);
   pathFramePayload.retainedEndArcWidth = Math.max(0.5, width * endTipWidthScale);
   pathFramePayload.geometryToken = (
-    reverseTipSwapActive || startPinPresenceActive || endArrowRotateActive || startFlowRotateActive
+    reverseTipSwapActive
+    || startPinPresenceActive
+    || endArrowRotateActive
+    || startFlowRotateActive
+    || tipHoverScale.active
   ) ? NaN : renderPoints.geometryToken;
   pathFramePayload.mainColorRgb = pathThemeMainRgb;
   pathFramePayload.completeColorRgb = pathThemeCompleteRgb;
