@@ -97,6 +97,7 @@ const pathFramePayload = {
   tutorialBracketCellSize: 0,
   tutorialBracketPulseEnabled: false,
   tutorialBracketColorRgb: null,
+  drawTutorialBracketsInPathLayer: false,
 };
 
 const PATH_FLOW_SPEED = -32;
@@ -105,6 +106,7 @@ const PATH_FLOW_PULSE = 64;
 const PATH_FLOW_BASE_CELL = 56;
 const PATH_FLOW_RISE = 0.82;
 const PATH_FLOW_DROP = 0.83;
+const TUTORIAL_BRACKET_PULSE_CYCLES = 3;
 const TAU = Math.PI * 2;
 const CANVAS_ALIGN_OFFSET_CSS_PX = 0.5;
 const PATH_RENDERER_RECOVERY_COOLDOWN_MS = 250;
@@ -519,6 +521,11 @@ const drawIdleAnimatedPath = (flowOffset = 0, completionModel = latestCompletion
   pathFramePayload.isCompletionSolved = Boolean(completionModel?.isSolved);
   pathFramePayload.completionProgress = getCompletionProgress(completionModel);
   latestPathMainFlowTravel = pathRenderer.drawPathFrame(pathFramePayload);
+
+  if (latestTutorialFlags?.path || latestTutorialFlags?.movable) {
+    drawStaticSymbols(latestPathSnapshot, latestPathRefs, latestPathStatuses);
+    drawTutorialBracketsOnSymbolCanvas(latestPathRefs, latestTutorialFlags, flowOffset);
+  }
 };
 
 const updateTutorialBracketPayload = (snapshot, layout, tutorialFlags = null) => {
@@ -957,6 +964,7 @@ export function cacheElements() {
   pathFramePayload.tutorialBracketCellSize = 0;
   pathFramePayload.tutorialBracketPulseEnabled = false;
   pathFramePayload.tutorialBracketColorRgb = null;
+  pathFramePayload.drawTutorialBracketsInPathLayer = false;
   latestTutorialFlags = null;
   reusableTutorialBracketPoints = [];
   tutorialBracketSignature = '';
@@ -1480,6 +1488,75 @@ export function drawStaticSymbols(snapshot, refs, statuses) {
   drawCrossStitches(snapshot, refs, symbolCtx, statuses?.stitchStatus?.vertexStatus);
 }
 
+function drawTutorialBracketsOnSymbolCanvas(refs, tutorialFlags = null, flowOffset = pathFramePayload.flowOffset) {
+  if (!tutorialFlags?.path && !tutorialFlags?.movable) return;
+  const { symbolCtx } = refs;
+  if (!symbolCtx) return;
+
+  const centers = Array.isArray(pathFramePayload.tutorialBracketCenters)
+    ? pathFramePayload.tutorialBracketCenters
+    : [];
+  const cellSize = Math.max(0, Number(pathFramePayload.tutorialBracketCellSize) || 0);
+  if (cellSize <= 0 || centers.length === 0) return;
+
+  const rawColor = pathFramePayload.tutorialBracketColorRgb || TUTORIAL_BRACKET_COLOR_RGB;
+  const colorR = Math.max(0, Math.min(255, Math.round(Number(rawColor?.r) || TUTORIAL_BRACKET_COLOR_RGB.r)));
+  const colorG = Math.max(0, Math.min(255, Math.round(Number(rawColor?.g) || TUTORIAL_BRACKET_COLOR_RGB.g)));
+  const colorB = Math.max(0, Math.min(255, Math.round(Number(rawColor?.b) || TUTORIAL_BRACKET_COLOR_RGB.b)));
+
+  const halfSize = cellSize * 0.5;
+  const inset = cellSize * 0.05;
+  const cornerRadius = Math.max(1, (cellSize * 0.2142857143) - inset);
+  const cornerThickness = Math.max(1.2, cornerRadius * 0.31);
+  const baseCornerAnchor = Math.max(0, halfSize - inset - cornerRadius);
+  const flowCycle = Math.max(1, Number(pathFramePayload.flowCycle) || PATH_FLOW_CYCLE);
+  const normalizedOffset = ((flowOffset % flowCycle) + flowCycle) % flowCycle;
+  const phaseUnit = normalizedOffset / flowCycle;
+  const pulse = pathFramePayload.tutorialBracketPulseEnabled
+    ? (0.5 - (0.5 * Math.cos(phaseUnit * TAU * TUTORIAL_BRACKET_PULSE_CYCLES)))
+    : 1;
+  const inwardShift = Math.min(baseCornerAnchor, (cornerRadius * 0.16) * pulse);
+  const cornerAnchor = Math.max(0, baseCornerAnchor - inwardShift);
+  const whiteMix = Math.max(0, Math.min(1, 0.14 + (pulse * 0.18)));
+  const alpha = Math.max(0, Math.min(1, 0.88 + (pulse * 0.12)));
+  const drawR = Math.round(colorR + ((255 - colorR) * whiteMix));
+  const drawG = Math.round(colorG + ((255 - colorG) * whiteMix));
+  const drawB = Math.round(colorB + ((255 - colorB) * whiteMix));
+
+  symbolCtx.save();
+  symbolCtx.strokeStyle = `rgba(${drawR}, ${drawG}, ${drawB}, ${alpha})`;
+  symbolCtx.lineWidth = cornerThickness;
+  symbolCtx.lineCap = 'round';
+  symbolCtx.lineJoin = 'round';
+  symbolCtx.shadowColor = `rgba(${drawR}, ${drawG}, ${drawB}, ${0.3 + (pulse * 0.1)})`;
+  symbolCtx.shadowBlur = Math.max(0.5, cornerThickness * 1.25);
+
+  for (let i = 0; i < centers.length; i++) {
+    const center = centers[i];
+    const cx = Number(center?.x);
+    const cy = Number(center?.y);
+    if (!Number.isFinite(cx) || !Number.isFinite(cy)) continue;
+
+    symbolCtx.beginPath();
+    symbolCtx.arc(cx - cornerAnchor, cy - cornerAnchor, cornerRadius, Math.PI, Math.PI * 1.5);
+    symbolCtx.stroke();
+
+    symbolCtx.beginPath();
+    symbolCtx.arc(cx + cornerAnchor, cy - cornerAnchor, cornerRadius, Math.PI * 1.5, TAU);
+    symbolCtx.stroke();
+
+    symbolCtx.beginPath();
+    symbolCtx.arc(cx - cornerAnchor, cy + cornerAnchor, cornerRadius, Math.PI * 0.5, Math.PI);
+    symbolCtx.stroke();
+
+    symbolCtx.beginPath();
+    symbolCtx.arc(cx + cornerAnchor, cy + cornerAnchor, cornerRadius, 0, Math.PI * 0.5);
+    symbolCtx.stroke();
+  }
+
+  symbolCtx.restore();
+}
+
 export function drawAnimatedPath(
   snapshot,
   refs,
@@ -1593,6 +1670,7 @@ export function drawAnimatedPath(
   pathFramePayload.flowSpeed = flowMetrics.speed;
   pathFramePayload.flowRise = PATH_FLOW_RISE;
   pathFramePayload.flowDrop = PATH_FLOW_DROP;
+  pathFramePayload.drawTutorialBracketsInPathLayer = false;
   latestPathMainFlowTravel = pathRenderer.drawPathFrame(pathFramePayload);
 }
 
@@ -1606,6 +1684,7 @@ function drawAllInternal(
 ) {
   drawStaticSymbols(snapshot, refs, statuses);
   drawAnimatedPath(snapshot, refs, statuses, flowOffset, completionModel, tutorialFlags);
+  drawTutorialBracketsOnSymbolCanvas(refs, tutorialFlags, flowOffset);
 }
 
 function drawCrossStitches(snapshot, refs, ctx, vertexStatus = EMPTY_MAP) {

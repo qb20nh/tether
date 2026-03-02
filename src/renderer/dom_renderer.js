@@ -342,8 +342,7 @@ export function createDomRenderer(options = {}) {
         refs.boardWrap.classList.toggle('isComplete', solved);
         refs.boardWrap.classList.toggle('isCompleting', solved && completionCascadeState.isCompleting);
         if (!solved) refs.boardWrap.classList.remove('isCompletePulse');
-        const hasTutorialBrackets = Boolean(uiModel.tutorialFlags?.path || uiModel.tutorialFlags?.movable);
-        refs.boardWrap.classList.toggle('tutorialBracketNormalBlend', hasTutorialBrackets);
+        refs.boardWrap.classList.remove('tutorialBracketNormalBlend');
       }
 
       hasRenderedFrame = true;
@@ -369,7 +368,7 @@ export function createDomRenderer(options = {}) {
       setDraggingBodyClasses({ isWallDragging: false, isPathDragging: false });
       refs?.pathRenderer?.destroy?.();
       if (refs?.boardWrap) {
-        refs.boardWrap.classList.remove('isComplete', 'isCompleting', 'isCompletePulse');
+        refs.boardWrap.classList.remove('isComplete', 'isCompleting', 'isCompletePulse', 'tutorialBracketNormalBlend');
       }
       clearCompleteFinishTimer();
       clearCompletePulse();

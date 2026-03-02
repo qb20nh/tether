@@ -1357,8 +1357,9 @@ export function createPathWebglRenderer(canvas) {
       ? frame.tutorialBracketCenters
       : [];
     const bracketCellSize = Math.max(0, Number(frame.tutorialBracketCellSize) || 0);
+    const drawTutorialBracketsInPathLayer = frame.drawTutorialBracketsInPathLayer === true;
     const hasPathPoints = points.length > 0;
-    const hasTutorialBrackets = bracketCellSize > 0 && bracketCenters.length > 0;
+    const hasTutorialBrackets = drawTutorialBracketsInPathLayer && bracketCellSize > 0 && bracketCenters.length > 0;
 
     const flowCycle = Math.max(1, Number(frame.flowCycle) || 1);
     const flowPulse = Math.max(1, Math.min(Number(frame.flowPulse) || 1, flowCycle));

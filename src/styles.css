@@ -103,10 +103,10 @@ body.isPathDragging * {
   --control-border: rgba(15, 23, 42, 0.2);
   --control-border-hover: rgba(15, 23, 42, 0.3);
   --control-disabled: rgba(71, 85, 105, 0.45);
-  --control-bg-opposite: rgba(255, 255, 255, 0.06);
-  --control-bg-hover-opposite: rgba(255, 255, 255, 0.1);
-  --control-border-opposite: rgba(255, 255, 255, 0.14);
-  --control-border-hover-opposite: rgba(255, 255, 255, 0.18);
+  --control-bg-opposite: #1a2432;
+  --control-bg-hover-opposite: #223044;
+  --control-border-opposite: rgba(231, 238, 247, 0.26);
+  --control-border-hover-opposite: rgba(231, 238, 247, 0.38);
   --control-text-opposite: #e7eef7;
 }
 
@@ -783,7 +783,7 @@ button:disabled:active {
   border-radius: var(--cell-radius);
   position: relative;
   z-index: 0;
-  border: var(--cell-border) solid rgba(0, 0, 0, 0.0);
+  border: var(--cell-border) solid rgba(255, 255, 255, 0.08);
   background-clip: padding-box;
   box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0);
   transition:
@@ -792,6 +792,10 @@ button:disabled:active {
     transform 80ms ease,
     box-shadow 120ms ease,
     --interactive-corner-color var(--complete-cell-duration-ms) ease-out;
+}
+
+.theme-light .cell {
+  border-color: rgba(15, 23, 42, 0.14);
 }
 
 .cell::before {
@@ -856,13 +860,28 @@ button:disabled:active {
 }
 
 .theme-light .cell.wall.movable {
-  background: linear-gradient(180deg, #23354f 0%, #172337 100%);
-  border-color: rgba(147, 197, 253, 0.62);
+  background: linear-gradient(180deg, #2f4f78 0%, #1f3553 100%);
+  border-color: rgba(147, 197, 253, 0.78);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.16) inset,
+    0 0 0 var(--cell-shadow-2) rgba(15, 23, 42, 0.24),
+    0 var(--cell-shadow-elev-y-sm) var(--cell-shadow-elev-blur-sm) rgba(15, 23, 42, 0.24);
 }
 
-.theme-light .cell.wall.movable .mark,
-.theme-light .wallDragGhostMark {
-  color: #eef6ff;
+.theme-light .cell.wall.movable:hover {
+  border-color: rgba(147, 197, 253, 0.94);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.20) inset,
+    0 0 0 var(--cell-shadow-3) rgba(147, 197, 253, 0.20) inset,
+    0 0 0 var(--cell-shadow-2) rgba(15, 23, 42, 0.32),
+    0 var(--cell-shadow-elev-y-md) var(--cell-shadow-elev-blur-md) rgba(15, 23, 42, 0.26);
+}
+
+.theme-light .cell.wall.movable:active {
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.12) inset,
+    0 0 0 var(--cell-shadow-3) rgba(147, 197, 253, 0.24) inset,
+    0 0 0 var(--cell-shadow-2) rgba(15, 23, 42, 0.30);
 }
 
 .cell .mark {
@@ -876,6 +895,10 @@ button:disabled:active {
   mix-blend-mode: normal;
   filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.38));
   pointer-events: none;
+}
+
+.theme-light .cell .mark {
+  filter: drop-shadow(0 1px 3px rgba(255, 255, 255, 0.95));
 }
 
 .cell .mark svg {
@@ -1363,15 +1386,6 @@ button:disabled:active {
   z-index: 3;
   pointer-events: none;
   mix-blend-mode: var(--path-canvas-blend);
-}
-
-.boardWrap.tutorialBracketNormalBlend #pathCanvas {
-  mix-blend-mode: normal;
-  z-index: 5;
-}
-
-.boardWrap.tutorialBracketNormalBlend #symbolCanvas {
-  z-index: 6;
 }
 
 #symbolCanvas {
