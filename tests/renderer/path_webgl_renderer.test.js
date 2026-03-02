@@ -243,6 +243,106 @@ test('createPathWebglRenderer skips geometry uploads when geometry is unchanged'
   }
 });
 
+test('createPathWebglRenderer does not reupload geometry when only flowMix changes', () => {
+  const originalWindow = globalThis.window;
+  globalThis.window = { devicePixelRatio: 1 };
+  try {
+    const fake = createFakeWebgl2();
+    const fakeCanvas = {
+      width: 0,
+      height: 0,
+      clientWidth: 100,
+      clientHeight: 100,
+      style: {},
+      getContext(kind) {
+        if (kind === 'webgl2') return fake.gl;
+        return null;
+      },
+    };
+
+    const renderer = createPathWebglRenderer(fakeCanvas);
+    const frame = {
+      points: [
+        { x: 0, y: 0 },
+        { x: 30, y: 0 },
+        { x: 30, y: 30 },
+      ],
+      width: 10,
+      startRadius: 8,
+      arrowLength: 12,
+      endHalfWidth: 8,
+      mainColorRgb: { r: 255, g: 255, b: 255 },
+      completeColorRgb: { r: 10, g: 220, b: 100 },
+      flowEnabled: true,
+      flowMix: 1,
+      flowOffset: 0,
+      flowCycle: 128,
+      flowPulse: 64,
+    };
+
+    renderer.drawPathFrame(frame);
+    const uploadCountAfterFirst = fake.counters.bufferSubData;
+    renderer.drawPathFrame({
+      ...frame,
+      flowMix: 0.25,
+    });
+    const uploadCountAfterSecond = fake.counters.bufferSubData;
+
+    assert.equal(uploadCountAfterSecond, uploadCountAfterFirst);
+    renderer.destroy();
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+test('createPathWebglRenderer uploads one-point geometry when startRadius changes with NaN token', () => {
+  const originalWindow = globalThis.window;
+  globalThis.window = { devicePixelRatio: 1 };
+  try {
+    const fake = createFakeWebgl2();
+    const fakeCanvas = {
+      width: 0,
+      height: 0,
+      clientWidth: 100,
+      clientHeight: 100,
+      style: {},
+      getContext(kind) {
+        if (kind === 'webgl2') return fake.gl;
+        return null;
+      },
+    };
+
+    const renderer = createPathWebglRenderer(fakeCanvas);
+    const frame = {
+      points: [{ x: 16, y: 16 }],
+      geometryToken: Number.NaN,
+      width: 10,
+      startRadius: 6,
+      arrowLength: 0,
+      endHalfWidth: 0,
+      mainColorRgb: { r: 255, g: 255, b: 255 },
+      completeColorRgb: { r: 10, g: 220, b: 100 },
+      flowEnabled: false,
+      flowOffset: 0,
+      flowCycle: 128,
+      flowPulse: 64,
+    };
+
+    renderer.drawPathFrame(frame);
+    const uploadCountAfterFirst = fake.counters.bufferSubData;
+    renderer.drawPathFrame({
+      ...frame,
+      startRadius: 10,
+    });
+    const uploadCountAfterSecond = fake.counters.bufferSubData;
+
+    assert.equal(uploadCountAfterSecond > uploadCountAfterFirst, true);
+    renderer.destroy();
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
 test('createPathWebglRenderer draws tutorial brackets without a path and reuses bracket geometry', () => {
   const originalWindow = globalThis.window;
   globalThis.window = { devicePixelRatio: 1 };

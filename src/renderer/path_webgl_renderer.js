@@ -780,6 +780,7 @@ uniform float uCompletionFeather;
 uniform float uCompletionProgress;
 uniform float uCompletionThreshold;
 uniform float uFlowEnabled;
+uniform float uFlowMix;
 uniform float uFlowOffset;
 uniform float uFlowCycle;
 uniform float uFlowPulse;
@@ -863,7 +864,7 @@ vec3 colorAtTravel(float travel, float flowOffset) {
   vec3 color = mix(uMainColor, uCompleteColor, completionMix);
 
   if (uFlowEnabled > 0.5) {
-    float glow = clampUnit(flowAlphaAtTravelWithOffset(travel, flowOffset));
+    float glow = clampUnit(flowAlphaAtTravelWithOffset(travel, flowOffset) * clampUnit(uFlowMix));
     color = mix(color, vec3(1.0), glow);
   }
   return color;
@@ -953,6 +954,7 @@ const getUniforms = (gl, program) => ({
   completionProgress: gl.getUniformLocation(program, 'uCompletionProgress'),
   completionThreshold: gl.getUniformLocation(program, 'uCompletionThreshold'),
   flowEnabled: gl.getUniformLocation(program, 'uFlowEnabled'),
+  flowMix: gl.getUniformLocation(program, 'uFlowMix'),
   flowOffset: gl.getUniformLocation(program, 'uFlowOffset'),
   flowCycle: gl.getUniformLocation(program, 'uFlowCycle'),
   flowPulse: gl.getUniformLocation(program, 'uFlowPulse'),
@@ -1125,6 +1127,7 @@ export function createPathWebglRenderer(canvas) {
     completionProgress: NaN,
     completionThreshold: NaN,
     flowEnabled: NaN,
+    flowMix: NaN,
     flowOffset: NaN,
     flowCycle: NaN,
     flowPulse: NaN,
@@ -1441,6 +1444,8 @@ export function createPathWebglRenderer(canvas) {
     const flowPulse = Math.max(1, Math.min(Number(frame.flowPulse) || 1, flowCycle));
     const flowOffset = Number(frame.flowOffset) || 0;
     const flowEnabled = frame.flowEnabled ? 1 : 0;
+    const flowMixRaw = Number(frame.flowMix);
+    const flowMix = clampUnit(Number.isFinite(flowMixRaw) ? flowMixRaw : 1);
     const flowRise = Number.isFinite(frame.flowRise) ? frame.flowRise : 0.82;
     const flowDrop = Number.isFinite(frame.flowDrop) ? frame.flowDrop : 0.83;
     const reverseColorBlendRaw = Number(frame.reverseColorBlend);
@@ -1593,6 +1598,7 @@ export function createPathWebglRenderer(canvas) {
       setUniform1fCached(uniforms.completionProgress, 'completionProgress', completionProgress);
       setUniform1fCached(uniforms.completionThreshold, 'completionThreshold', COMPLETE_PATH_THRESHOLD);
       setUniform1fCached(uniforms.flowEnabled, 'flowEnabled', flowEnabled);
+      setUniform1fCached(uniforms.flowMix, 'flowMix', flowMix);
       setUniform1fCached(uniforms.flowOffset, 'flowOffset', flowOffset);
       setUniform1fCached(uniforms.flowCycle, 'flowCycle', flowCycle);
       setUniform1fCached(uniforms.flowPulse, 'flowPulse', flowPulse);

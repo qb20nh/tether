@@ -47,6 +47,8 @@ let cachedPathTailC = NaN;
 let cachedPathLayoutVersion = -1;
 let pathStartArrivalState = null;
 let pathEndArrivalState = null;
+let pathStartPinPresenceState = null;
+let pathFlowVisibilityState = null;
 let pathReverseTipSwapState = null;
 let pathReverseGradientBlendState = null;
 let tutorialBracketSignature = '';
@@ -99,6 +101,7 @@ const pathFramePayload = {
   isCompletionSolved: false,
   completionProgress: 0,
   flowEnabled: false,
+  flowMix: 1,
   flowOffset: 0,
   flowCycle: 128,
   flowPulse: 64,
@@ -128,8 +131,8 @@ const PATH_TIP_ARRIVAL_DISTANCE_CELL_FACTOR = 0.5;
 const TUTORIAL_BRACKET_PULSE_CYCLES = 3;
 const TAU = Math.PI * 2;
 const CANVAS_ALIGN_OFFSET_CSS_PX = 0.5;
-const PATH_RENDERER_RECOVERY_COOLDOWN_MS = 250;
-const INTERACTIVE_RESIZE_IDLE_MS = 140;
+const PATH_RENDERER_RECOVERY_COOLDOWN_MS = 500;
+const INTERACTIVE_RESIZE_IDLE_MS = 200;
 const PATH_TIP_ARRIVAL_BEZIER_X1 = 0;
 const PATH_TIP_ARRIVAL_BEZIER_Y1 = 0.9;
 const PATH_TIP_ARRIVAL_BEZIER_X2 = 0.1;
@@ -137,9 +140,35 @@ const PATH_TIP_ARRIVAL_BEZIER_Y2 = 1;
 const PATH_TIP_ARRIVAL_ADJACENT_MAX = Math.SQRT2 + 1e-3;
 const PATH_TIP_CENTER_SNAP_EPSILON_PX = 0.5;
 const FLOW_TRAVEL_ANGLE_TOLERANCE = 1e-4;
-const arrivalOffsetScratchA = { x: 0, y: 0, active: false };
-const arrivalOffsetScratchB = { x: 0, y: 0, active: false };
+const arrivalOffsetScratchA = {
+  x: 0,
+  y: 0,
+  active: false,
+  remain: 1,
+  progress: 0,
+  linearRemain: 1,
+  linearProgress: 0,
+};
+const arrivalOffsetScratchB = {
+  x: 0,
+  y: 0,
+  active: false,
+  remain: 1,
+  progress: 0,
+  linearRemain: 1,
+  linearProgress: 0,
+};
 let reusableArrivalPathPoints = [];
+const startPinPresenceScaleScratch = {
+  scale: 1,
+  active: false,
+  mode: 'none',
+  anchorR: NaN,
+  anchorC: NaN,
+};
+const flowVisibilityMixScratch = { mix: 1, active: false };
+const reusableStartPinPresencePoint = { x: 0, y: 0 };
+const reusableStartPinPresencePoints = [reusableStartPinPresencePoint];
 const reverseTipScaleScratch = { inScale: 1, outScale: 0, active: false };
 const reverseGradientBlendScratch = {
   blend: 1,
@@ -214,7 +243,7 @@ const easeOutCubic = (unit) => {
 const getPathTipFromPath = (path, side) => {
   if (!Array.isArray(path) || path.length <= 0) return null;
   if (side === 'start') return path[0] || null;
-  if (path.length <= 1) return null;
+  if (path.length <= 1) return path[0] || null;
   return path[path.length - 1] || null;
 };
 
@@ -226,6 +255,19 @@ const clearPathTipArrivalStates = () => {
 const clearSinglePathTipArrivalState = (side) => {
   if (side === 'start') pathStartArrivalState = null;
   else if (side === 'end') pathEndArrivalState = null;
+};
+
+const clearPathStartPinPresenceState = () => {
+  pathStartPinPresenceState = null;
+};
+
+const clearPathFlowVisibilityState = () => {
+  pathFlowVisibilityState = null;
+};
+
+const getPathSegmentCount = (path) => {
+  const pathLength = Array.isArray(path) ? path.length : 0;
+  return pathLength > 1 ? pathLength - 1 : 0;
 };
 
 const pathsMatch = (aPath, bPath) => {
@@ -435,6 +477,10 @@ const resolvePathTipArrivalOffset = (side, tip, nowMs, out) => {
   out.y = 0;
   out.active = false;
   out.mode = 'none';
+  out.remain = 1;
+  out.progress = 0;
+  out.linearRemain = 1;
+  out.linearProgress = 0;
 
   if (!tip || !state) return out;
   if (state.targetR !== tip.r || state.targetC !== tip.c) {
@@ -453,9 +499,11 @@ const resolvePathTipArrivalOffset = (side, tip, nowMs, out) => {
     return out;
   }
   const unit = elapsed / PATH_TIP_ARRIVAL_DURATION_MS;
+  const linearProgress = clampUnit(unit);
+  const linearRemain = 1 - linearProgress;
 
   const eased = sampleCubicBezierYAtX(
-    clampUnit(unit),
+    linearProgress,
     PATH_TIP_ARRIVAL_BEZIER_X1,
     PATH_TIP_ARRIVAL_BEZIER_Y1,
     PATH_TIP_ARRIVAL_BEZIER_X2,
@@ -468,6 +516,10 @@ const resolvePathTipArrivalOffset = (side, tip, nowMs, out) => {
   if (Math.abs(out.y) <= PATH_TIP_CENTER_SNAP_EPSILON_PX) out.y = 0;
   out.active = (out.x !== 0 || out.y !== 0);
   out.mode = state.mode || 'arrive';
+  out.remain = remain;
+  out.progress = eased;
+  out.linearRemain = linearRemain;
+  out.linearProgress = linearProgress;
   if (!out.active) {
     if (side === 'start') pathStartArrivalState = null;
     else pathEndArrivalState = null;
@@ -502,6 +554,214 @@ const hasActivePathTipArrivals = (nowMs = getNowMs()) => {
     pathEndArrivalState = null;
   }
   return Boolean(pathStartArrivalState || pathEndArrivalState);
+};
+
+const updatePathFlowVisibilityState = (
+  prevPath,
+  nextPath,
+  nowMs = getNowMs(),
+) => {
+  if (isReducedMotionPreferred()) {
+    clearPathFlowVisibilityState();
+    return;
+  }
+
+  const pathChanged = !pathsMatch(prevPath, nextPath);
+  if (!pathChanged) return;
+  const prevSegmentCount = getPathSegmentCount(prevPath);
+  const nextSegmentCount = getPathSegmentCount(nextPath);
+  if (prevSegmentCount === 0 && nextSegmentCount === 1) {
+    pathFlowVisibilityState = {
+      mode: 'appear',
+      startTimeMs: nowMs,
+    };
+    return;
+  }
+  if (prevSegmentCount === 1 && nextSegmentCount === 0) {
+    pathFlowVisibilityState = {
+      mode: 'disappear',
+      startTimeMs: nowMs,
+    };
+    return;
+  }
+  clearPathFlowVisibilityState();
+};
+
+const resolvePathFlowVisibilityMix = (
+  path,
+  nowMs = getNowMs(),
+  out = flowVisibilityMixScratch,
+) => {
+  out.mix = 1;
+  out.active = false;
+
+  if (isReducedMotionPreferred()) {
+    clearPathFlowVisibilityState();
+    return out;
+  }
+
+  const state = pathFlowVisibilityState;
+  if (!state) return out;
+  const mode = state.mode === 'disappear' ? 'disappear' : 'appear';
+  const segmentCount = getPathSegmentCount(path);
+  if (mode === 'appear' && segmentCount !== 1) {
+    clearPathFlowVisibilityState();
+    return out;
+  }
+  if (mode === 'disappear' && segmentCount !== 0) {
+    clearPathFlowVisibilityState();
+    return out;
+  }
+
+  const elapsed = nowMs - state.startTimeMs;
+  if (elapsed >= PATH_TIP_ARRIVAL_DURATION_MS) {
+    clearPathFlowVisibilityState();
+    out.mix = mode === 'appear' ? 1 : 0;
+    return out;
+  }
+  const unit = clampUnit(elapsed / PATH_TIP_ARRIVAL_DURATION_MS);
+  out.mix = mode === 'appear' ? unit : (1 - unit);
+  out.active = true;
+  return out;
+};
+
+const hasActivePathFlowVisibility = (path, nowMs = getNowMs()) => (
+  resolvePathFlowVisibilityMix(path, nowMs, flowVisibilityMixScratch).active
+);
+
+const updatePathStartPinPresenceState = (
+  prevPath,
+  nextPath,
+  nowMs = getNowMs(),
+) => {
+  if (isReducedMotionPreferred()) {
+    clearPathStartPinPresenceState();
+    return;
+  }
+
+  const pathChanged = !pathsMatch(prevPath, nextPath);
+  if (!pathChanged) return;
+  const prevLen = Array.isArray(prevPath) ? prevPath.length : 0;
+  const nextLen = Array.isArray(nextPath) ? nextPath.length : 0;
+
+  if (prevLen === 0 && nextLen === 1) {
+    const anchor = nextPath?.[0] || null;
+    if (!anchor) {
+      clearPathStartPinPresenceState();
+      return;
+    }
+    pathStartPinPresenceState = {
+      mode: 'appear',
+      startTimeMs: nowMs,
+      anchorR: anchor.r,
+      anchorC: anchor.c,
+    };
+    return;
+  }
+
+  if (prevLen === 1 && nextLen === 0) {
+    const anchor = prevPath?.[0] || null;
+    if (!anchor) {
+      clearPathStartPinPresenceState();
+      return;
+    }
+    pathStartPinPresenceState = {
+      mode: 'disappear',
+      startTimeMs: nowMs,
+      anchorR: anchor.r,
+      anchorC: anchor.c,
+    };
+    return;
+  }
+
+  clearPathStartPinPresenceState();
+};
+
+const resolvePathStartPinPresenceScale = (
+  path,
+  nowMs = getNowMs(),
+  out = startPinPresenceScaleScratch,
+) => {
+  out.scale = 1;
+  out.active = false;
+  out.mode = 'none';
+  out.anchorR = NaN;
+  out.anchorC = NaN;
+
+  if (isReducedMotionPreferred()) {
+    clearPathStartPinPresenceState();
+    return out;
+  }
+
+  const state = pathStartPinPresenceState;
+  if (!state) return out;
+  const mode = state.mode === 'disappear' ? 'disappear' : 'appear';
+  const pathLength = Array.isArray(path) ? path.length : 0;
+  if (mode === 'appear') {
+    const anchor = path?.[0] || null;
+    if (
+      pathLength !== 1
+      || !anchor
+      || anchor.r !== state.anchorR
+      || anchor.c !== state.anchorC
+    ) {
+      clearPathStartPinPresenceState();
+      return out;
+    }
+  } else if (pathLength !== 0) {
+    clearPathStartPinPresenceState();
+    return out;
+  }
+
+  const elapsed = nowMs - state.startTimeMs;
+  if (elapsed >= PATH_TIP_ARRIVAL_DURATION_MS) {
+    clearPathStartPinPresenceState();
+    return out;
+  }
+  const unit = clampUnit(elapsed / PATH_TIP_ARRIVAL_DURATION_MS);
+  const eased = easeOutCubic(unit);
+  out.scale = mode === 'appear' ? eased : (1 - eased);
+  out.mode = mode;
+  out.anchorR = state.anchorR;
+  out.anchorC = state.anchorC;
+  out.active = true;
+  return out;
+};
+
+const hasActivePathStartPinPresence = (path, nowMs = getNowMs()) => (
+  resolvePathStartPinPresenceScale(path, nowMs, startPinPresenceScaleScratch).active
+);
+
+const applyPathStartPinPresenceToPayload = (path, nowMs = getNowMs()) => {
+  const presence = resolvePathStartPinPresenceScale(path, nowMs, startPinPresenceScaleScratch);
+  const currentStartRadius = Number(pathFramePayload.startRadius) || 0;
+  pathFramePayload.startRadius = currentStartRadius * Math.max(0, presence.scale);
+  return presence.active;
+};
+
+const resolveStartPinDisappearRenderPoints = (
+  path,
+  nowMs = getNowMs(),
+) => {
+  const presence = resolvePathStartPinPresenceScale(path, nowMs, startPinPresenceScaleScratch);
+  if (!presence.active || presence.mode !== 'disappear') return null;
+  if (!pathLayoutMetrics.ready) return null;
+  if (!Number.isFinite(presence.anchorR) || !Number.isFinite(presence.anchorC)) {
+    clearPathStartPinPresenceState();
+    return null;
+  }
+
+  const step = pathLayoutMetrics.cell + pathLayoutMetrics.gap;
+  const half = pathLayoutMetrics.cell * 0.5;
+  reusableStartPinPresencePoint.x = pathLayoutMetrics.offsetX
+    + pathLayoutMetrics.pad
+    + (presence.anchorC * step)
+    + half;
+  reusableStartPinPresencePoint.y = pathLayoutMetrics.offsetY
+    + pathLayoutMetrics.pad
+    + (presence.anchorR * step)
+    + half;
+  return reusableStartPinPresencePoints;
 };
 
 const beginPathReverseGradientBlend = (
@@ -704,13 +964,36 @@ const getPathRenderPointsForFrame = (
   nowMs = getNowMs(),
   flowWidth = pathFramePayload.width,
 ) => {
-  const pathLength = Array.isArray(path) ? path.length : 0;
-  if (pathLength <= 0 || reusablePathPoints.length !== pathLength || isReducedMotionPreferred()) {
-    if (isReducedMotionPreferred()) clearPathTipArrivalStates();
+  if (isReducedMotionPreferred()) {
+    clearPathTipArrivalStates();
+    clearPathStartPinPresenceState();
+    clearPathFlowVisibilityState();
     return {
       points: reusablePathPoints,
       geometryToken: pathGeometryToken,
       flowTravelCompensation: 0,
+      segmentRetractTipScale: 1,
+    };
+  }
+
+  const pathLength = Array.isArray(path) ? path.length : 0;
+  if (pathLength <= 0 || reusablePathPoints.length !== pathLength) {
+    if (pathLength <= 0) {
+      const syntheticPoints = resolveStartPinDisappearRenderPoints(path, nowMs);
+      if (syntheticPoints) {
+        return {
+          points: syntheticPoints,
+          geometryToken: NaN,
+          flowTravelCompensation: 0,
+          segmentRetractTipScale: 1,
+        };
+      }
+    }
+    return {
+      points: reusablePathPoints,
+      geometryToken: pathGeometryToken,
+      flowTravelCompensation: 0,
+      segmentRetractTipScale: 1,
     };
   }
 
@@ -725,6 +1008,7 @@ const getPathRenderPointsForFrame = (
       points: reusablePathPoints,
       geometryToken: pathGeometryToken,
       flowTravelCompensation: 0,
+      segmentRetractTipScale: 1,
     };
   }
 
@@ -782,10 +1066,26 @@ const getPathRenderPointsForFrame = (
       flowTravelCompensation = baseTravel - renderTravel;
     }
   }
+  let segmentRetractTipScale = 1;
+  if (pathLength === 1) {
+    if (startHasRetract) {
+      segmentRetractTipScale = Math.min(
+        segmentRetractTipScale,
+        clampUnit(Number(startOffset.linearRemain)),
+      );
+    }
+    if (endHasRetract) {
+      segmentRetractTipScale = Math.min(
+        segmentRetractTipScale,
+        clampUnit(Number(endOffset.linearRemain)),
+      );
+    }
+  }
   return {
     points: reusableArrivalPathPoints,
     geometryToken: NaN,
     flowTravelCompensation,
+    segmentRetractTipScale,
   };
 };
 
@@ -1001,20 +1301,29 @@ const animatePathFlow = (timestamp) => {
     latestCompletionModel,
     latestTutorialFlags,
   );
+  const animateFlowVisibility = hasActivePathFlowVisibility(latestPathSnapshot.path, nowMs);
   const animateTipArrivals = hasActivePathTipArrivals(nowMs);
+  const animateStartPinPresence = hasActivePathStartPinPresence(latestPathSnapshot.path, nowMs);
   const animateReverseTipSwap = hasActivePathReverseTipSwap(latestPathSnapshot.path, nowMs);
   const animateReverseGradientBlend = hasActivePathReverseGradientBlend(
     latestPathSnapshot.path,
     pathFramePayload.flowCycle,
     nowMs,
   );
-  if (!animateFlow && !animateTipArrivals && !animateReverseTipSwap && !animateReverseGradientBlend) {
+  if (
+    !animateFlow
+    && !animateFlowVisibility
+    && !animateTipArrivals
+    && !animateStartPinPresence
+    && !animateReverseTipSwap
+    && !animateReverseGradientBlend
+  ) {
     stopPathAnimation();
     drawAllInternal(latestPathSnapshot, latestPathRefs, latestPathStatuses, 0, latestCompletionModel);
     return;
   }
 
-  if (animateFlow && pathAnimationLastTs > 0) {
+  if ((animateFlow || animateFlowVisibility) && pathAnimationLastTs > 0) {
     const dt = Math.max(0, (timestamp - pathAnimationLastTs) / 1000);
     if (Number.isFinite(dt)) {
       const flowSpeed = Number.isFinite(pathFramePayload.flowSpeed)
@@ -1032,7 +1341,7 @@ const animatePathFlow = (timestamp) => {
 
   pathAnimationLastTs = timestamp;
   if (latestPathSnapshot && latestPathRefs) {
-    const flowOffset = animateFlow ? pathAnimationOffset : 0;
+    const flowOffset = (animateFlow || animateFlowVisibility) ? pathAnimationOffset : 0;
     drawIdleAnimatedPath(flowOffset, latestCompletionModel, nowMs);
   }
 
@@ -1283,7 +1592,31 @@ const drawIdleAnimatedPath = (
   );
   pathFramePayload.points = renderPoints.points;
   const reverseTipSwapActive = applyPathReverseTipSwapToPayload(latestPathSnapshot.path, nowMs);
-  pathFramePayload.geometryToken = reverseTipSwapActive ? NaN : renderPoints.geometryToken;
+  const startPinPresenceActive = applyPathStartPinPresenceToPayload(latestPathSnapshot.path, nowMs);
+  const segmentRetractTipScale = clampUnit(
+    Number.isFinite(renderPoints.segmentRetractTipScale)
+      ? renderPoints.segmentRetractTipScale
+      : 1,
+  );
+  pathFramePayload.arrowLength *= segmentRetractTipScale;
+  pathFramePayload.endHalfWidth *= segmentRetractTipScale;
+  pathFramePayload.geometryToken = (
+    reverseTipSwapActive || startPinPresenceActive
+  ) ? NaN : renderPoints.geometryToken;
+  const flowVisibility = resolvePathFlowVisibilityMix(
+    latestPathSnapshot.path,
+    nowMs,
+    flowVisibilityMixScratch,
+  );
+  const flowMix = clampUnit(Number.isFinite(flowVisibility.mix) ? flowVisibility.mix : 1);
+  const hasRenderableFlowPoints = Array.isArray(pathFramePayload.points)
+    && pathFramePayload.points.length > 1;
+  pathFramePayload.flowEnabled = (
+    !isReducedMotionPreferred()
+    && hasRenderableFlowPoints
+    && flowMix > 0
+  );
+  pathFramePayload.flowMix = flowMix;
   pathFramePayload.flowOffset = flowOffset + (Number(renderPoints.flowTravelCompensation) || 0);
   applyPathReverseGradientBlendToPayload(
     latestPathSnapshot.path,
@@ -1716,6 +2049,8 @@ export function cacheElements() {
   reducedMotionQuery = null;
   clearPathReverseTipSwapState();
   clearPathReverseGradientBlendState();
+  clearPathStartPinPresenceState();
+  clearPathFlowVisibilityState();
   pathFramePayload.points = [];
   pathFramePayload.geometryToken = 0;
   pathFramePayload.width = 0;
@@ -1736,6 +2071,7 @@ export function cacheElements() {
   pathFramePayload.isCompletionSolved = false;
   pathFramePayload.completionProgress = 0;
   pathFramePayload.flowEnabled = false;
+  pathFramePayload.flowMix = 1;
   pathFramePayload.flowOffset = 0;
   pathFramePayload.flowCycle = PATH_FLOW_CYCLE;
   pathFramePayload.flowPulse = PATH_FLOW_PULSE;
@@ -2226,6 +2562,8 @@ export function drawAll(
     layout.cell + layout.gap,
     nowMs,
   );
+  updatePathStartPinPresenceState(previousPath, snapshot.path, nowMs);
+  updatePathFlowVisibilityState(previousPath, snapshot.path, nowMs);
   updatePathReverseTipSwapState(previousPath, snapshot.path, nowMs);
   if (isPathReversed(snapshot.path, previousPath)) {
     const reverseFromFlowOffset = pathAnimationOffset;
@@ -2270,17 +2608,26 @@ export function drawAll(
   latestCompletionModel = completionModel;
   latestTutorialFlags = tutorialFlags;
 
-  const offset = animateFlow ? pathAnimationOffset : 0;
+  const animateFlowVisibility = hasActivePathFlowVisibility(snapshot.path, nowMs);
+  const offset = (animateFlow || animateFlowVisibility) ? pathAnimationOffset : 0;
   drawAllInternal(snapshot, refs, statuses, offset, completionModel, tutorialFlags);
 
   const animateTipArrivals = hasActivePathTipArrivals(nowMs);
+  const animateStartPinPresence = hasActivePathStartPinPresence(snapshot.path, nowMs);
   const animateReverseTipSwap = hasActivePathReverseTipSwap(snapshot.path, nowMs);
   const animateReverseGradientBlend = hasActivePathReverseGradientBlend(
     snapshot.path,
     flow.cycle,
     nowMs,
   );
-  if (animateFlow || animateTipArrivals || animateReverseTipSwap || animateReverseGradientBlend) {
+  if (
+    animateFlow
+    || animateFlowVisibility
+    || animateTipArrivals
+    || animateStartPinPresence
+    || animateReverseTipSwap
+    || animateReverseGradientBlend
+  ) {
     schedulePathAnimation();
   } else {
     stopPathAnimation();
@@ -2396,7 +2743,6 @@ export function drawAnimatedPath(
   if (!pathThemeCacheInitialized) updatePathThemeCache(refs);
   const completionProgress = getCompletionProgress(completionModel);
   const isCompletionSolved = Boolean(completionModel?.isSolved);
-  const showFlowRibbon = !isReducedMotionPreferred() && snapshot.path.length > 1;
   const flowMetrics = getCachedPathFlowMetrics(refs, size);
 
   const step = size + layout.gap;
@@ -2469,18 +2815,37 @@ export function drawAnimatedPath(
   pathFramePayload.baseEndHalfWidth = endHalfWidth;
   const reverseTipSwapActive = applyPathReverseTipSwapToPayload(path, nowMs);
   pathFramePayload.points = renderPoints.points;
-  pathFramePayload.geometryToken = reverseTipSwapActive ? NaN : renderPoints.geometryToken;
   pathFramePayload.width = width;
   if (!reverseTipSwapActive) {
     pathFramePayload.startRadius = startRadius;
     pathFramePayload.arrowLength = arrowLength;
     pathFramePayload.endHalfWidth = endHalfWidth;
   }
+  const startPinPresenceActive = applyPathStartPinPresenceToPayload(path, nowMs);
+  const segmentRetractTipScale = clampUnit(
+    Number.isFinite(renderPoints.segmentRetractTipScale)
+      ? Math.sqrt(renderPoints.segmentRetractTipScale)
+      : 1,
+  );
+  pathFramePayload.arrowLength *= segmentRetractTipScale;
+  pathFramePayload.endHalfWidth *= segmentRetractTipScale;
+  pathFramePayload.geometryToken = (
+    reverseTipSwapActive || startPinPresenceActive
+  ) ? NaN : renderPoints.geometryToken;
   pathFramePayload.mainColorRgb = pathThemeMainRgb;
   pathFramePayload.completeColorRgb = pathThemeCompleteRgb;
   pathFramePayload.isCompletionSolved = isCompletionSolved;
   pathFramePayload.completionProgress = completionProgress;
-  pathFramePayload.flowEnabled = showFlowRibbon;
+  const flowVisibility = resolvePathFlowVisibilityMix(path, nowMs, flowVisibilityMixScratch);
+  const flowMix = clampUnit(Number.isFinite(flowVisibility.mix) ? flowVisibility.mix : 1);
+  const hasRenderableFlowPoints = Array.isArray(pathFramePayload.points)
+    && pathFramePayload.points.length > 1;
+  pathFramePayload.flowEnabled = (
+    !isReducedMotionPreferred()
+    && hasRenderableFlowPoints
+    && flowMix > 0
+  );
+  pathFramePayload.flowMix = flowMix;
   pathFramePayload.flowOffset = flowOffset + (Number(renderPoints.flowTravelCompensation) || 0);
   pathFramePayload.flowCycle = flowMetrics.cycle;
   pathFramePayload.flowPulse = flowMetrics.pulse;
