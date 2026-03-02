@@ -13,7 +13,8 @@
     "build:native": "NATIVE_BUILD=1 vite build",
     "preview": "vite preview",
     "tauri": "npm run build:native && env NO_STRIP=1 tauri",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node --test \"tests/contracts/*.test.js\" \"tests/core/*.test.js\" \"tests/input/*.test.js\" \"tests/persistence/*.test.js\" \"tests/renderer/*.test.js\" \"tests/rules/*.test.js\" \"tests/runtime/*.test.js\" \"tests/scripts/*.test.js\" \"tests/state/*.test.js\"",
+    "test:e2e": "node scripts/run_e2e_resize_recovery.js"
   },
   "bugs": {
     "url": "https://github.com/qb20nh/tether/issues"
@@ -23,6 +24,7 @@
     "@capacitor/assets": "^3.0.5",
     "@capacitor/cli": "^8.1.0",
     "@tauri-apps/cli": "^2.10.0",
+    "playwright": "^1.58.2",
     "terser": "^5.46.0",
     "vite": "^7.3.1"
   },

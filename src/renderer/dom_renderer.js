@@ -4,6 +4,7 @@ import {
   updateCells,
   setLegendIcons,
   resizeCanvas,
+  notifyInteractiveResize,
   setMessage,
   clearDropTarget,
   setDropTarget,
@@ -351,6 +352,10 @@ export function createDomRenderer(options = {}) {
     resize() {
       if (!refs) return;
       resizeCanvas(refs);
+    },
+
+    notifyResizeInteraction() {
+      notifyInteractiveResize();
     },
 
     updateInteraction(interactionModel = {}) {

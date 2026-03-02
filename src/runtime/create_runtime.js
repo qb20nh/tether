@@ -1074,6 +1074,7 @@ export function createRuntime(options) {
   const applyThemeState = (nextTheme) => {
     applyTheme(nextTheme);
     refreshThemeButton();
+    queueBoardLayout(false);
   };
 
   const handleSecondaryLevelSelect = (selectedValue) => {
@@ -1436,6 +1437,7 @@ export function createRuntime(options) {
 
     if (typeof ResizeObserver !== 'undefined' && refs.boardWrap) {
       const boardResizeObserver = new ResizeObserver(() => {
+        renderer.notifyResizeInteraction?.();
         queueBoardLayout(false);
       });
       boardResizeObserver.observe(refs.boardWrap);
@@ -1450,6 +1452,7 @@ export function createRuntime(options) {
     });
 
     window.addEventListener('resize', () => {
+      renderer.notifyResizeInteraction?.();
       queueBoardLayout(false);
     });
 

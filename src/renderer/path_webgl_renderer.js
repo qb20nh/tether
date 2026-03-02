@@ -1022,6 +1022,11 @@ export function createPathWebglRenderer(canvas) {
   gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
   gl.clearColor(0, 0, 0, 0);
 
+  const isContextLost = () => (
+    typeof gl.isContextLost === 'function'
+    && gl.isContextLost()
+  );
+
   let deviceScale = 1;
   const reusableMesh = createMutableMeshStorage();
   let geometryCached = false;
@@ -1320,10 +1325,12 @@ export function createPathWebglRenderer(canvas) {
   };
 
   const clear = () => {
+    if (isContextLost()) return;
     gl.clear(gl.COLOR_BUFFER_BIT);
   };
 
   const resize = (cssWidth, cssHeight, dpr = 1) => {
+    if (isContextLost()) return;
     const safeCssWidth = Math.max(1, Number(cssWidth) || 1);
     const safeCssHeight = Math.max(1, Number(cssHeight) || 1);
     const safeDpr = Math.max(1, Number(dpr) || 1);
@@ -1344,6 +1351,7 @@ export function createPathWebglRenderer(canvas) {
   };
 
   const drawPathFrame = (frame = {}) => {
+    if (isContextLost()) return 0;
     const points = Array.isArray(frame.points) ? frame.points : [];
     const bracketCenters = Array.isArray(frame.tutorialBracketCenters)
       ? frame.tutorialBracketCenters
@@ -1572,7 +1580,11 @@ export function createPathWebglRenderer(canvas) {
     const loseContextExt = typeof gl.getExtension === 'function'
       ? gl.getExtension('WEBGL_lose_context')
       : null;
-    if (loseContextExt && typeof loseContextExt.loseContext === 'function') {
+    if (
+      !isContextLost()
+      && loseContextExt
+      && typeof loseContextExt.loseContext === 'function'
+    ) {
       loseContextExt.loseContext();
     }
   };
@@ -1584,5 +1596,6 @@ export function createPathWebglRenderer(canvas) {
     clear,
     drawPathFrame,
     destroy,
+    isContextLost,
   };
 }

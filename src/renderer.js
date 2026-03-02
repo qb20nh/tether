@@ -21,7 +21,6 @@ let activeBoardSize = { rows: 0, cols: 0 };
 let pathAnimationOffset = 0;
 let pathAnimationFrame = 0;
 let pathAnimationLastTs = 0;
-let pathAnimationLastDrawTs = 0;
 let latestPathSnapshot = null;
 let latestPathRefs = null;
 let latestPathStatuses = null;
@@ -52,6 +51,10 @@ let tutorialBracketGeometryToken = 0;
 let reducedMotionQuery = null;
 let wallGhostOffsetLeft = 0;
 let wallGhostOffsetTop = 0;
+let lastPathRendererRecoveryAttemptMs = 0;
+let interactiveResizeActive = false;
+let interactiveResizeTimer = 0;
+let pendingInteractiveResizePayload = null;
 const pathFlowMetricsCache = { cycle: 128, pulse: 64, speed: -32 };
 const gridOffsetScratch = { x: 0, y: 0 };
 const headOffsetScratch = { x: 0, y: 0 };
@@ -104,7 +107,8 @@ const PATH_FLOW_RISE = 0.82;
 const PATH_FLOW_DROP = 0.83;
 const TAU = Math.PI * 2;
 const CANVAS_ALIGN_OFFSET_CSS_PX = 0.5;
-const PATH_FLOW_DRAW_INTERVAL_MS = 1000 / 45;
+const PATH_RENDERER_RECOVERY_COOLDOWN_MS = 250;
+const INTERACTIVE_RESIZE_IDLE_MS = 140;
 
 
 
@@ -257,7 +261,6 @@ const stopPathAnimation = () => {
   if (pathAnimationFrame) cancelAnimationFrame(pathAnimationFrame);
   pathAnimationFrame = 0;
   pathAnimationLastTs = 0;
-  pathAnimationLastDrawTs = 0;
 };
 
 const animatePathFlow = (timestamp) => {
@@ -291,14 +294,7 @@ const animatePathFlow = (timestamp) => {
   }
 
   pathAnimationLastTs = timestamp;
-  const shouldDraw = (
-    pathAnimationLastDrawTs <= 0
-    || (timestamp - pathAnimationLastDrawTs) >= PATH_FLOW_DRAW_INTERVAL_MS
-  );
-  if (shouldDraw && latestPathSnapshot && latestPathRefs) {
-    drawIdleAnimatedPath(pathAnimationOffset, latestCompletionModel);
-    pathAnimationLastDrawTs = timestamp;
-  }
+  if (latestPathSnapshot && latestPathRefs) drawIdleAnimatedPath(pathAnimationOffset, latestCompletionModel);
 
   pathAnimationFrame = requestAnimationFrame(animatePathFlow);
 };
@@ -306,7 +302,6 @@ const animatePathFlow = (timestamp) => {
 const schedulePathAnimation = () => {
   if (pathAnimationFrame) return;
   pathAnimationLastTs = 0;
-  pathAnimationLastDrawTs = 0;
   pathAnimationFrame = requestAnimationFrame(animatePathFlow);
 };
 
@@ -445,7 +440,19 @@ const getCachedPathFlowMetrics = (refs = latestPathRefs, cellSize = null) => {
     ? cellSize
     : getCellSize(refs?.gridEl);
   if (resolvedCell !== lastFlowMetricCell) {
+    const prevCycle = Number(pathFlowMetricsCache.cycle);
     getPathFlowMetrics(refs, pathFlowMetricsCache, resolvedCell);
+    const nextCycle = Number(pathFlowMetricsCache.cycle);
+    if (
+      Number.isFinite(prevCycle)
+      && prevCycle > 0
+      && Number.isFinite(nextCycle)
+      && nextCycle > 0
+      && prevCycle !== nextCycle
+    ) {
+      const phaseUnit = normalizeFlowOffset(pathAnimationOffset, prevCycle) / prevCycle;
+      pathAnimationOffset = normalizeFlowOffset(phaseUnit * nextCycle, nextCycle);
+    }
     lastFlowMetricCell = resolvedCell;
   }
   return pathFlowMetricsCache;
@@ -497,7 +504,10 @@ const ensurePathLayoutMetrics = (refs) => {
 };
 
 const drawIdleAnimatedPath = (flowOffset = 0, completionModel = latestCompletionModel) => {
-  const pathRenderer = latestPathRefs?.pathRenderer;
+  const pathRenderer = ensurePathRenderer({
+    refs: latestPathRefs,
+    allowRecovery: !interactiveResizeActive,
+  });
   if (!pathRenderer) return;
   if (!latestPathSnapshot) {
     latestPathMainFlowTravel = 0;
@@ -700,6 +710,145 @@ const syncBoardCellSize = (refs, rows = activeBoardSize.rows, cols = activeBoard
   }
 };
 
+const nowMs = () => (
+  typeof performance !== 'undefined' && typeof performance.now === 'function'
+    ? performance.now()
+    : Date.now()
+);
+
+const clearInteractiveResizeTimer = () => {
+  if (!interactiveResizeTimer) return;
+  clearTimeout(interactiveResizeTimer);
+  interactiveResizeTimer = 0;
+};
+
+const applyCanvasCssSize = (canvas, cssWidth, cssHeight) => {
+  if (!canvas) return;
+  const safeCssWidth = Math.max(1, Number(cssWidth) || 1);
+  const safeCssHeight = Math.max(1, Number(cssHeight) || 1);
+  const cssWidthPx = `${safeCssWidth}px`;
+  const cssHeightPx = `${safeCssHeight}px`;
+  if (canvas.style.width !== cssWidthPx) canvas.style.width = cssWidthPx;
+  if (canvas.style.height !== cssHeightPx) canvas.style.height = cssHeightPx;
+};
+
+const applyScaledSymbolCanvasTransform = (canvas, ctx, cssWidth, cssHeight) => {
+  if (!canvas || !ctx) return;
+  const safeCssWidth = Math.max(1, Number(cssWidth) || 1);
+  const safeCssHeight = Math.max(1, Number(cssHeight) || 1);
+  const pixelWidth = Math.max(1, canvas.width || 1);
+  const pixelHeight = Math.max(1, canvas.height || 1);
+  const scaleX = pixelWidth / safeCssWidth;
+  const scaleY = pixelHeight / safeCssHeight;
+  ctx.setTransform(
+    scaleX,
+    0,
+    0,
+    scaleY,
+    CANVAS_ALIGN_OFFSET_CSS_PX * scaleX,
+    CANVAS_ALIGN_OFFSET_CSS_PX * scaleY,
+  );
+  ctx.imageSmoothingEnabled = false;
+};
+
+const createReplacementPathCanvas = (canvas) => {
+  const replacement = document.createElement('canvas');
+  replacement.id = canvas.id;
+  replacement.className = canvas.className;
+  replacement.style.cssText = canvas.style.cssText;
+  replacement.width = canvas.width || 1;
+  replacement.height = canvas.height || 1;
+  return replacement;
+};
+
+const ensurePathRenderer = (refs) => {
+  const allowRecovery = refs?.allowRecovery !== false;
+  const targetRefs = refs?.refs || refs;
+  if (!targetRefs) return null;
+  const currentRenderer = targetRefs.pathRenderer || null;
+  const currentCanvas = targetRefs.canvas || null;
+  if (!currentCanvas) return currentRenderer;
+
+  const rendererLost = Boolean(currentRenderer?.isContextLost?.());
+  if (currentRenderer && !rendererLost) return currentRenderer;
+  if (!allowRecovery) return null;
+
+  const currentNow = nowMs();
+  const elapsedMs = currentNow - lastPathRendererRecoveryAttemptMs;
+  if (elapsedMs < PATH_RENDERER_RECOVERY_COOLDOWN_MS) return null;
+  lastPathRendererRecoveryAttemptMs = currentNow;
+
+  if (currentRenderer) {
+    try {
+      currentRenderer.destroy?.();
+    } catch {
+      // Keep recovery best-effort; a failed destroy should not prevent re-init.
+    }
+    targetRefs.pathRenderer = null;
+  }
+
+  let nextCanvas = currentCanvas;
+  if (rendererLost && currentCanvas.isConnected && typeof currentCanvas.replaceWith === 'function') {
+    const replacement = createReplacementPathCanvas(currentCanvas);
+    currentCanvas.replaceWith(replacement);
+    targetRefs.canvas = replacement;
+    nextCanvas = replacement;
+  }
+
+  try {
+    targetRefs.pathRenderer = createPathWebglRenderer(nextCanvas);
+    resizeCanvasSignature = '';
+    return targetRefs.pathRenderer;
+  } catch {
+    return null;
+  }
+};
+
+const flushInteractiveResize = () => {
+  const payload = pendingInteractiveResizePayload;
+  pendingInteractiveResizePayload = null;
+  clearInteractiveResizeTimer();
+  interactiveResizeActive = false;
+  if (!payload) return;
+
+  const {
+    refs,
+    cssWidth,
+    cssHeight,
+    dpr,
+    offset,
+    cell,
+    gap,
+    pad,
+  } = payload;
+  if (!refs?.symbolCanvas || !refs?.symbolCtx) return;
+  updatePathLayoutMetrics(offset, cell, gap, pad);
+  if (wallGhostEl) refreshWallGhostOffset();
+  const pathRenderer = ensurePathRenderer({ refs, allowRecovery: true });
+  if (pathRenderer) pathRenderer.resize(cssWidth, cssHeight, dpr);
+  configureHiDPICanvas(refs.symbolCanvas, refs.symbolCtx, cssWidth, cssHeight);
+
+  if (refs === latestPathRefs && latestPathSnapshot) {
+    drawAllInternal(
+      latestPathSnapshot,
+      refs,
+      latestPathStatuses,
+      pathAnimationOffset,
+      latestCompletionModel,
+      latestTutorialFlags,
+    );
+  }
+};
+
+const scheduleInteractiveResizeFlush = (payload) => {
+  pendingInteractiveResizePayload = payload;
+  clearInteractiveResizeTimer();
+  interactiveResizeTimer = window.setTimeout(() => {
+    interactiveResizeTimer = 0;
+    flushInteractiveResize();
+  }, INTERACTIVE_RESIZE_IDLE_MS);
+};
+
 export function cacheElements() {
   const get = (id) => document.getElementById(id);
 
@@ -755,7 +904,11 @@ export function cacheElements() {
   };
 
   if (result.canvas) {
-    result.pathRenderer = createPathWebglRenderer(result.canvas);
+    try {
+      result.pathRenderer = createPathWebglRenderer(result.canvas);
+    } catch {
+      result.pathRenderer = null;
+    }
   }
   if (result.symbolCanvas) {
     result.symbolCtx = result.symbolCanvas.getContext('2d');
@@ -775,6 +928,10 @@ export function cacheElements() {
   cachedPathLayoutVersion = -1;
   wallGhostOffsetLeft = 0;
   wallGhostOffsetTop = 0;
+  lastPathRendererRecoveryAttemptMs = 0;
+  interactiveResizeActive = false;
+  pendingInteractiveResizePayload = null;
+  clearInteractiveResizeTimer();
   pathLayoutMetrics.ready = false;
   pathLayoutMetrics.version = 0;
   reducedMotionQuery = null;
@@ -1331,7 +1488,10 @@ export function drawAnimatedPath(
   completionModel = null,
   tutorialFlags = null,
 ) {
-  const { pathRenderer } = refs;
+  const pathRenderer = ensurePathRenderer({
+    refs,
+    allowRecovery: !interactiveResizeActive,
+  });
   if (!pathRenderer) return;
 
   if (!snapshot) {
@@ -1552,9 +1712,11 @@ function drawCornerCounts(snapshot, refs, ctx, cornerVertexStatus = EMPTY_MAP) {
   ctx.font = `700 ${cornerFontSize}px Inter, ui-sans-serif, system-ui, sans-serif`;
 
   const styleDeclaration = getComputedStyle(document.documentElement);
+  const isLightTheme = document.documentElement.classList.contains('theme-light');
   const colorGood = forceOpaqueColor(styleDeclaration.getPropertyValue('--good').trim() || '#32bb70');
   const colorBad = forceOpaqueColor(styleDeclaration.getPropertyValue('--bad').trim() || '#e85c5c');
-  const colorPending = '#ffffff';
+  const colorPending = isLightTheme ? '#0f172a' : '#ffffff';
+  const cornerFillColor = isLightTheme ? 'rgb(248, 251, 255)' : 'rgb(11, 15, 20)';
 
   for (const [vr, vc, target] of snapshot.cornerCounts) {
     const vk = keyOf(vr, vc);
@@ -1566,7 +1728,7 @@ function drawCornerCounts(snapshot, refs, ctx, cornerVertexStatus = EMPTY_MAP) {
     const { x, y } = getVertexPoint(vr, vc, refs, offset, headPointScratchC);
 
     ctx.beginPath();
-    ctx.fillStyle = 'rgb(11, 15, 20)';
+    ctx.fillStyle = cornerFillColor;
     ctx.arc(x, y, cornerRadius, 0, Math.PI * 2);
     ctx.fill();
 
@@ -1582,8 +1744,8 @@ function drawCornerCounts(snapshot, refs, ctx, cornerVertexStatus = EMPTY_MAP) {
 }
 
 export function resizeCanvas(refs) {
-  const { boardWrap, canvas, pathRenderer, symbolCanvas, symbolCtx } = refs;
-  if (!boardWrap || !canvas || !pathRenderer || !symbolCanvas || !symbolCtx) return;
+  const { boardWrap, canvas, symbolCanvas, symbolCtx } = refs;
+  if (!boardWrap || !canvas || !symbolCanvas || !symbolCtx || !refs.gridEl) return;
   const dpr = window.devicePixelRatio || 1;
   const viewportWidth = window.visualViewport?.width || window.innerWidth || 0;
   const viewportHeight = window.visualViewport?.height || window.innerHeight || 0;
@@ -1627,9 +1789,33 @@ export function resizeCanvas(refs) {
     || styles.getPropertyValue('--cell'),
   );
   const cell = cellFromStyle > 0 ? cellFromStyle : getCellSize(refs.gridEl);
+
+  if (interactiveResizeActive) {
+    applyCanvasCssSize(canvas, cw, ch);
+    applyCanvasCssSize(symbolCanvas, cw, ch);
+    applyScaledSymbolCanvasTransform(symbolCanvas, symbolCtx, cw, ch);
+    scheduleInteractiveResizeFlush({
+      refs,
+      cssWidth: cw,
+      cssHeight: ch,
+      dpr,
+      offset,
+      cell,
+      gap,
+      pad,
+    });
+    return;
+  }
+
+  pendingInteractiveResizePayload = null;
+  clearInteractiveResizeTimer();
   updatePathLayoutMetrics(offset, cell, gap, pad);
   if (wallGhostEl) refreshWallGhostOffset();
-
-  pathRenderer.resize(cw, ch, dpr);
+  const pathRenderer = ensurePathRenderer(refs);
+  if (pathRenderer) pathRenderer.resize(cw, ch, dpr);
   configureHiDPICanvas(symbolCanvas, symbolCtx, cw, ch);
+}
+
+export function notifyInteractiveResize() {
+  interactiveResizeActive = true;
 }
