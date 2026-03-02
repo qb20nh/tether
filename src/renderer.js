@@ -1816,7 +1816,7 @@ function drawCornerCounts(snapshot, refs, ctx, cornerVertexStatus = EMPTY_MAP) {
     ctx.stroke();
 
     ctx.fillStyle = accentColor;
-    ctx.fillText(String(target), x, y + 0.5);
+    ctx.fillText(String(target), x, y);
   }
 
   ctx.restore();
