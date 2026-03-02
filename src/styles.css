@@ -1198,10 +1198,12 @@ body.isPathDragging .cell.pathTipDragHover.pathEnd:active {
   0%,
   100% {
     filter: brightness(1) saturate(1);
+    transform: scale(1);
   }
 
   45% {
     filter: brightness(1.14) saturate(1.24);
+    transform: scale(1.05);
   }
 }
 
