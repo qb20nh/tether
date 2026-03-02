@@ -1,12 +1,87 @@
+import path from 'node:path';
+import { readFile, writeFile } from 'node:fs/promises';
 import { defineConfig, loadEnv } from 'vite';
+
+const BUILD_NUMBER_META_NAME = 'tether-build-number';
+const BUILD_LABEL_META_NAME = 'tether-build-label';
+const SW_BUILD_NUMBER_PLACEHOLDER = '__TETHER_BUILD_NUMBER__';
+const SW_BUILD_LABEL_PLACEHOLDER = '__TETHER_BUILD_LABEL__';
+
+const resolveBuildNumber = (env) => {
+    const configuredRaw = (process.env.VITE_BUILD_NUMBER ?? env.VITE_BUILD_NUMBER ?? '').trim();
+    if (configuredRaw.length > 0) {
+        const parsed = Number.parseInt(configuredRaw, 10);
+        if (!Number.isInteger(parsed) || parsed <= 0) {
+            throw new Error(`Invalid VITE_BUILD_NUMBER: ${configuredRaw}`);
+        }
+        return parsed;
+    }
+
+    return Date.now();
+};
+
+const buildVersionPlugin = ({ buildNumber, buildLabel }) => ({
+    name: 'tether-build-version',
+    transformIndexHtml: () => ({
+        tags: [
+            {
+                tag: 'meta',
+                attrs: {
+                    name: BUILD_NUMBER_META_NAME,
+                    content: String(buildNumber),
+                },
+                injectTo: 'head',
+            },
+            {
+                tag: 'meta',
+                attrs: {
+                    name: BUILD_LABEL_META_NAME,
+                    content: buildLabel,
+                },
+                injectTo: 'head',
+            },
+        ],
+    }),
+    generateBundle() {
+        this.emitFile({
+            type: 'asset',
+            fileName: 'version.json',
+            source: `${JSON.stringify({ buildNumber, buildLabel }, null, 2)}\n`,
+        });
+    },
+    async writeBundle(outputOptions) {
+        const outDir = outputOptions?.dir
+            ? path.resolve(outputOptions.dir)
+            : path.resolve(process.cwd(), 'dist');
+        const serviceWorkerFile = path.join(outDir, 'sw.js');
+
+        let source = null;
+        try {
+            source = await readFile(serviceWorkerFile, 'utf8');
+        } catch (error) {
+            if (error && typeof error === 'object' && error.code === 'ENOENT') return;
+            throw error;
+        }
+
+        const replaced = source
+            .replaceAll(SW_BUILD_NUMBER_PLACEHOLDER, String(buildNumber))
+            .replaceAll(SW_BUILD_LABEL_PLACEHOLDER, buildLabel);
+        await writeFile(serviceWorkerFile, replaced, 'utf8');
+    },
+});
 
 export default defineConfig(({ mode }) => {
     const env = loadEnv(mode, process.cwd(), '');
+    const buildNumber = resolveBuildNumber(env);
+    const buildLabel = new Date(buildNumber).toISOString();
     const isNativeBuild = (process.env.NATIVE_BUILD ?? env.NATIVE_BUILD) === '1';
     const configuredDailyUrl = (process.env.VITE_DAILY_URL ?? env.VITE_DAILY_URL ?? '').trim();
     const shouldExternalizeDaily = isNativeBuild && configuredDailyUrl.length > 0;
 
     return {
+        plugins: [
+            buildVersionPlugin({ buildNumber, buildLabel }),
+        ],
         base: './', // Use relative paths for assets so they work in Capacitor/Tauri
         build: {
             minify: 'terser',

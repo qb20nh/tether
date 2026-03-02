@@ -246,6 +246,20 @@ header h1.brandTitle {
   min-width: 0;
 }
 
+.settingsCheckbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+}
+
+.settingsCheckbox input[type='checkbox'] {
+  inline-size: 16px;
+  block-size: 16px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
 [id='themeToggle'] {
   padding: 7px 10px;
   font-size: 15px;

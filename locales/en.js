@@ -42,7 +42,17 @@ export default {
     "hide": "Hide",
     "puzzleGridAria": "Puzzle grid",
     "githubRepoAria": "View Tether on GitHub",
-    "githubRepoTitle": "View source on GitHub"
+    "githubRepoTitle": "View source on GitHub",
+    "notifications": "Notifications",
+    "notificationsEnable": "Enable notifications",
+    "notificationsBlocked": "Notifications blocked in browser",
+    "notificationsUnsupported": "Notifications unavailable",
+    "notificationsAutoPromptConfirm": "Enable update and daily notifications?",
+    "notificationUnsolvedTitle": "Daily level ending soon",
+    "notificationUnsolvedBody": "Your daily level is still unsolved. Time is running out.",
+    "notificationNewLevelTitle": "New daily level available",
+    "notificationNewLevelBody": "A new daily level is ready to play.",
+    "updateAvailablePrompt": "A new version is available. Update now?"
   },
   "goal": {
     "intro": "<b>Goal</b>: Draw a continuous path that visits every non-wall cell <b>exactly once</b>.",

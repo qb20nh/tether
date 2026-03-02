@@ -55,6 +55,13 @@ export const APP_SHELL_TEMPLATE = (t = (k) => k, localeOptions = [], currentLoca
               <span id="${ELEMENT_IDS.THEME_LABEL}" class="small" data-i18n="ui.theme">${t('ui.theme')}</span>
               <button id="${ELEMENT_IDS.THEME_TOGGLE}" type="button">${t('ui.themeDark')}</button>
             </div>
+            <div class="settingsField">
+              <span id="${ELEMENT_IDS.NOTIFICATIONS_LABEL}" class="small" data-i18n="ui.notifications">${t('ui.notifications')}</span>
+              <label class="settingsCheckbox">
+                <input id="${ELEMENT_IDS.NOTIFICATIONS_TOGGLE}" type="checkbox" />
+                <span data-i18n="ui.notificationsEnable">${t('ui.notificationsEnable')}</span>
+              </label>
+            </div>
           </div>
           <dialog id="${ELEMENT_IDS.THEME_SWITCH_DIALOG}">
             <form method="dialog" class="themeSwitchDialog">

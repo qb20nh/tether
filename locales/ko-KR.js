@@ -42,7 +42,17 @@ export default {
     "hide": "숨기기",
     "puzzleGridAria": "퍼즐 그리드",
     "githubRepoAria": "GitHub에서 Tether 보기",
-    "githubRepoTitle": "GitHub에서 소스 보기"
+    "githubRepoTitle": "GitHub에서 소스 보기",
+    "notifications": "알림",
+    "notificationsEnable": "알림 켜기",
+    "notificationsBlocked": "브라우저에서 알림이 차단됨",
+    "notificationsUnsupported": "알림을 사용할 수 없음",
+    "notificationsAutoPromptConfirm": "업데이트 및 데일리 알림을 켜시겠습니까?",
+    "notificationUnsolvedTitle": "데일리 레벨 마감이 임박했습니다",
+    "notificationUnsolvedBody": "오늘의 데일리 레벨이 아직 미해결 상태입니다. 시간이 얼마 남지 않았습니다.",
+    "notificationNewLevelTitle": "새 데일리 레벨이 열렸습니다",
+    "notificationNewLevelBody": "새 데일리 레벨을 플레이할 수 있습니다.",
+    "updateAvailablePrompt": "새 버전이 있습니다. 지금 업데이트할까요?"
   },
   "goal": {
     "intro": "<b>목표</b>: 벽이 아닌 모든 칸을 <b>정확히 1번씩</b> 방문하는 연속 경로를 만드세요.",

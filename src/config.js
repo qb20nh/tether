@@ -54,6 +54,8 @@ export const ELEMENT_IDS = Object.freeze({
   LANG_SEL: 'langSel',
   THEME_LABEL: 'themeLabel',
   THEME_TOGGLE: 'themeToggle',
+  NOTIFICATIONS_LABEL: 'notificationsLabel',
+  NOTIFICATIONS_TOGGLE: 'notificationsToggle',
   SETTINGS_TOGGLE: 'settingsToggle',
   SETTINGS_PANEL: 'settingsPanel',
   THEME_SWITCH_DIALOG: 'themeSwitchDialog',

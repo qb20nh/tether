@@ -42,7 +42,17 @@ export default {
     "hide": "Nascondi",
     "puzzleGridAria": "Griglia del puzzle",
     "githubRepoAria": "Visualizza Tether su GitHub",
-    "githubRepoTitle": "Visualizza il codice sorgente su GitHub"
+    "githubRepoTitle": "Visualizza il codice sorgente su GitHub",
+    "notifications": "Notifiche",
+    "notificationsEnable": "Attiva notifiche",
+    "notificationsBlocked": "Notifiche bloccate nel browser",
+    "notificationsUnsupported": "Notifiche non disponibili",
+    "notificationsAutoPromptConfirm": "Attivare notifiche di aggiornamento e giornaliere?",
+    "notificationUnsolvedTitle": "Il livello giornaliero sta per scadere",
+    "notificationUnsolvedBody": "Il tuo livello giornaliero non è ancora risolto. Il tempo sta per scadere.",
+    "notificationNewLevelTitle": "Nuovo livello giornaliero disponibile",
+    "notificationNewLevelBody": "Un nuovo livello giornaliero è pronto da giocare.",
+    "updateAvailablePrompt": "È disponibile una nuova versione. Aggiornare ora?"
   },
   "goal": {
     "intro": "<b>Obiettivo</b>: disegna un percorso continuo che visita ogni cella senza muri <b>esattamente una volta</b>.",

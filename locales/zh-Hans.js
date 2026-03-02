@@ -42,7 +42,17 @@ export default {
     "hide": "隐藏",
     "puzzleGridAria": "谜题网格",
     "githubRepoAria": "在 GitHub 上查看 Tether",
-    "githubRepoTitle": "在 GitHub 上查看源代码"
+    "githubRepoTitle": "在 GitHub 上查看源代码",
+    "notifications": "通知",
+    "notificationsEnable": "启用通知",
+    "notificationsBlocked": "浏览器中通知已被阻止",
+    "notificationsUnsupported": "通知不可用",
+    "notificationsAutoPromptConfirm": "要启用更新和每日通知吗？",
+    "notificationUnsolvedTitle": "每日关卡即将截止",
+    "notificationUnsolvedBody": "你的每日关卡仍未解出，剩余时间不多了。",
+    "notificationNewLevelTitle": "有新的每日关卡",
+    "notificationNewLevelBody": "新的每日关卡已可游玩。",
+    "updateAvailablePrompt": "发现新版本，是否立即更新？"
   },
   "goal": {
     "intro": "<b>目标</b>：绘制一条连续路径，经过每个非墙格子<b>恰好一次</b>。",

@@ -42,7 +42,17 @@ export default {
     "hide": "Ausblenden",
     "puzzleGridAria": "Puzzle-Raster",
     "githubRepoAria": "Tether auf GitHub ansehen",
-    "githubRepoTitle": "Quellcode auf GitHub ansehen"
+    "githubRepoTitle": "Quellcode auf GitHub ansehen",
+    "notifications": "Benachrichtigungen",
+    "notificationsEnable": "Benachrichtigungen aktivieren",
+    "notificationsBlocked": "Benachrichtigungen im Browser blockiert",
+    "notificationsUnsupported": "Benachrichtigungen nicht verfügbar",
+    "notificationsAutoPromptConfirm": "Update- und tägliche Benachrichtigungen aktivieren?",
+    "notificationUnsolvedTitle": "Tägliches Level läuft bald ab",
+    "notificationUnsolvedBody": "Dein tägliches Level ist noch ungelöst. Die Zeit läuft ab.",
+    "notificationNewLevelTitle": "Neues tägliches Level verfügbar",
+    "notificationNewLevelBody": "Ein neues tägliches Level ist spielbereit.",
+    "updateAvailablePrompt": "Eine neue Version ist verfügbar. Jetzt aktualisieren?"
   },
   "goal": {
     "intro": "<b>Ziel</b>: Zeichne einen durchgehenden Pfad, der jede nichtwandige Zelle <b>genau einmal</b> besucht.",

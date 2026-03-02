@@ -42,7 +42,17 @@ export default {
     "hide": "Esconder",
     "puzzleGridAria": "Grade do quebra-cabeça",
     "githubRepoAria": "Ver Tether no GitHub",
-    "githubRepoTitle": "Ver código-fonte no GitHub"
+    "githubRepoTitle": "Ver código-fonte no GitHub",
+    "notifications": "Notificações",
+    "notificationsEnable": "Ativar notificações",
+    "notificationsBlocked": "Notificações bloqueadas no navegador",
+    "notificationsUnsupported": "Notificações indisponíveis",
+    "notificationsAutoPromptConfirm": "Ativar notificações de atualização e diárias?",
+    "notificationUnsolvedTitle": "O nível diário está acabando",
+    "notificationUnsolvedBody": "Seu nível diário ainda não foi resolvido. O tempo está acabando.",
+    "notificationNewLevelTitle": "Novo nível diário disponível",
+    "notificationNewLevelBody": "Um novo nível diário está pronto para jogar.",
+    "updateAvailablePrompt": "Uma nova versão está disponível. Atualizar agora?"
   },
   "goal": {
     "intro": "<b>Objetivo</b>: Desenhe um caminho contínuo que visite cada célula sem parede <b>exatamente uma vez</b>.",

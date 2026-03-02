@@ -263,6 +263,7 @@ test('createPathWebglRenderer draws tutorial brackets without a path and reuses 
     const renderer = createPathWebglRenderer(fakeCanvas);
     const frame = {
       points: [],
+      drawTutorialBracketsInPathLayer: true,
       tutorialBracketCenters: [
         { x: 20, y: 20 },
         { x: 80, y: 20 },

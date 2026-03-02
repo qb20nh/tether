@@ -42,7 +42,17 @@ export default {
     "hide": "Ocultar",
     "puzzleGridAria": "Cuadrícula del rompecabezas",
     "githubRepoAria": "Ver Tether en GitHub",
-    "githubRepoTitle": "Ver el código fuente en GitHub"
+    "githubRepoTitle": "Ver el código fuente en GitHub",
+    "notifications": "Notificaciones",
+    "notificationsEnable": "Activar notificaciones",
+    "notificationsBlocked": "Notificaciones bloqueadas en el navegador",
+    "notificationsUnsupported": "Notificaciones no disponibles",
+    "notificationsAutoPromptConfirm": "¿Activar notificaciones de actualizaciones y diarias?",
+    "notificationUnsolvedTitle": "El nivel diario está por terminar",
+    "notificationUnsolvedBody": "Tu nivel diario sigue sin resolverse. El tiempo se está acabando.",
+    "notificationNewLevelTitle": "Nuevo nivel diario disponible",
+    "notificationNewLevelBody": "Hay un nuevo nivel diario listo para jugar.",
+    "updateAvailablePrompt": "Hay una nueva versión disponible. ¿Actualizar ahora?"
   },
   "goal": {
     "intro": "<b>Objetivo</b>: Dibuja un camino continuo que visite cada celda no pared <b>exactamente una vez</b>.",

@@ -42,7 +42,17 @@ export default {
     "hide": "إخفاء",
     "puzzleGridAria": "شبكة اللغز",
     "githubRepoAria": "عرض Tether على GitHub",
-    "githubRepoTitle": "عرض المصدر على GitHub"
+    "githubRepoTitle": "عرض المصدر على GitHub",
+    "notifications": "الإشعارات",
+    "notificationsEnable": "تفعيل الإشعارات",
+    "notificationsBlocked": "الإشعارات محظورة في المتصفح",
+    "notificationsUnsupported": "الإشعارات غير متاحة",
+    "notificationsAutoPromptConfirm": "هل تريد تفعيل إشعارات التحديث والتحدي اليومي؟",
+    "notificationUnsolvedTitle": "مستوى اليوم أوشك على الانتهاء",
+    "notificationUnsolvedBody": "ما زال مستوى اليوم غير محلول. الوقت يوشك على النفاد.",
+    "notificationNewLevelTitle": "مستوى يومي جديد متاح",
+    "notificationNewLevelBody": "هناك مستوى يومي جديد جاهز للعب.",
+    "updateAvailablePrompt": "يتوفر إصدار جديد. هل تريد التحديث الآن؟"
   },
   "goal": {
     "intro": "<b>الهدف</b>: ارسم مسارًا متصلاً يزور كل خانة غير جدار <b>مرة واحدة بالضبط</b>.",
