@@ -117,6 +117,7 @@ const PATH_FLOW_SPEED = -32;
 const PATH_FLOW_CYCLE = 128;
 const PATH_FLOW_PULSE = 64;
 const PATH_FLOW_BASE_CELL = 56;
+const PATH_FLOW_ANCHOR_RATIO = 1;
 const PATH_FLOW_RISE = 0.82;
 const PATH_FLOW_DROP = 0.83;
 const PATH_TIP_ARRIVAL_DURATION_MS = 200;
@@ -134,6 +135,8 @@ const PATH_TIP_ARRIVAL_BEZIER_Y1 = 0.9;
 const PATH_TIP_ARRIVAL_BEZIER_X2 = 0.1;
 const PATH_TIP_ARRIVAL_BEZIER_Y2 = 1;
 const PATH_TIP_ARRIVAL_ADJACENT_MAX = Math.SQRT2 + 1e-3;
+const PATH_TIP_CENTER_SNAP_EPSILON_PX = 0.5;
+const FLOW_TRAVEL_ANGLE_TOLERANCE = 1e-4;
 const arrivalOffsetScratchA = { x: 0, y: 0, active: false };
 const arrivalOffsetScratchB = { x: 0, y: 0, active: false };
 let reusableArrivalPathPoints = [];
@@ -461,6 +464,8 @@ const resolvePathTipArrivalOffset = (side, tip, nowMs, out) => {
   const remain = 1 - eased;
   out.x = state.offsetX * remain;
   out.y = state.offsetY * remain;
+  if (Math.abs(out.x) <= PATH_TIP_CENTER_SNAP_EPSILON_PX) out.x = 0;
+  if (Math.abs(out.y) <= PATH_TIP_CENTER_SNAP_EPSILON_PX) out.y = 0;
   out.active = (out.x !== 0 || out.y !== 0);
   out.mode = state.mode || 'arrive';
   if (!out.active) {
@@ -694,7 +699,11 @@ const applyPathReverseTipSwapToPayload = (path, nowMs = getNowMs()) => {
   return reverseTipScale.active;
 };
 
-const getPathRenderPointsForFrame = (path, nowMs = getNowMs()) => {
+const getPathRenderPointsForFrame = (
+  path,
+  nowMs = getNowMs(),
+  flowWidth = pathFramePayload.width,
+) => {
   const pathLength = Array.isArray(path) ? path.length : 0;
   if (pathLength <= 0 || reusablePathPoints.length !== pathLength || isReducedMotionPreferred()) {
     if (isReducedMotionPreferred()) clearPathTipArrivalStates();
@@ -760,22 +769,19 @@ const getPathRenderPointsForFrame = (path, nowMs = getNowMs()) => {
   }
 
   let flowTravelCompensation = 0;
-  if (pathLength > 1) {
-    if (startHasRetract) {
-      const ghost = reusableArrivalPathPoints[0];
-      const first = reusableArrivalPathPoints[1];
-      flowTravelCompensation = -Math.hypot(first.x - ghost.x, first.y - ghost.y);
-    } else if (startOffset.active && startOffset.mode === 'arrive') {
-      const baseFirst = reusablePathPoints[0];
-      const baseSecond = reusablePathPoints[1];
-      const renderFirst = reusableArrivalPathPoints[0];
-      const renderSecond = reusableArrivalPathPoints[1];
-      const baseLen = Math.hypot(baseSecond.x - baseFirst.x, baseSecond.y - baseFirst.y);
-      const renderLen = Math.hypot(renderSecond.x - renderFirst.x, renderSecond.y - renderFirst.y);
-      flowTravelCompensation = baseLen - renderLen;
+  if (pathLength > 1 && startOffset.active) {
+    const resolvedFlowWidth = Number.isFinite(flowWidth) && flowWidth > 0
+      ? flowWidth
+      : Math.max(1, Number(pathFramePayload.width) || 1);
+    const baseTravel = getPathMainTravelFromPoints(reusablePathPoints, resolvedFlowWidth);
+    const renderTravel = getPathMainTravelFromPoints(
+      reusableArrivalPathPoints,
+      resolvedFlowWidth,
+    );
+    if (Number.isFinite(baseTravel) && Number.isFinite(renderTravel)) {
+      flowTravelCompensation = baseTravel - renderTravel;
     }
   }
-
   return {
     points: reusableArrivalPathPoints,
     geometryToken: NaN,
@@ -824,79 +830,143 @@ const getPathFlowMetrics = (refs = latestPathRefs, out = null, cellSize = null) 
   return { cycle, pulse, speed };
 };
 
-const getHeadLeadTravel = (path, refs = {}, offset = { x: 0, y: 0 }) => {
+const getPathMainTravelFromPoints = (points, flowWidth) => {
+  const pointCount = Array.isArray(points) ? points.length : 0;
+  if (pointCount < 2) return 0;
+
+  const width = Number.isFinite(flowWidth) && flowWidth > 0 ? flowWidth : 1;
+  const cornerRadius = width * 0.5;
+  const segmentCount = pointCount - 1;
+  const segmentLengths = new Array(segmentCount).fill(0);
+  const segmentUx = new Array(segmentCount).fill(0);
+  const segmentUy = new Array(segmentCount).fill(0);
+
+  for (let i = 0; i < segmentCount; i++) {
+    const start = points[i];
+    const end = points[i + 1];
+    const startX = Number(start?.x);
+    const startY = Number(start?.y);
+    const endX = Number(end?.x);
+    const endY = Number(end?.y);
+    if (
+      !Number.isFinite(startX)
+      || !Number.isFinite(startY)
+      || !Number.isFinite(endX)
+      || !Number.isFinite(endY)
+    ) {
+      continue;
+    }
+    const dx = endX - startX;
+    const dy = endY - startY;
+    const len = Math.hypot(dx, dy);
+    if (!(len > 0)) continue;
+    segmentLengths[i] = len;
+    segmentUx[i] = dx / len;
+    segmentUy[i] = dy / len;
+  }
+
+  const cornerTangents = new Array(pointCount).fill(0);
+  const cornerArcs = new Array(pointCount).fill(0);
+  for (let i = 1; i < pointCount - 1; i++) {
+    const inLen = segmentLengths[i - 1];
+    const outLen = segmentLengths[i];
+    if (!(inLen > 0) || !(outLen > 0)) continue;
+
+    const inAngle = Math.atan2(segmentUy[i - 1], segmentUx[i - 1]);
+    const outAngle = Math.atan2(segmentUy[i], segmentUx[i]);
+    const absTurn = Math.abs(angleDeltaSigned(inAngle, outAngle));
+    if (
+      absTurn <= FLOW_TRAVEL_ANGLE_TOLERANCE
+      || absTurn >= Math.PI - FLOW_TRAVEL_ANGLE_TOLERANCE
+    ) {
+      continue;
+    }
+
+    const tangentOffset = cornerRadius * Math.tan(absTurn * 0.5);
+    if (!(tangentOffset > 0) || !Number.isFinite(tangentOffset)) continue;
+    cornerTangents[i] = tangentOffset;
+    cornerArcs[i] = cornerRadius * absTurn;
+  }
+
+  let flowTravel = 0;
+  for (let i = 0; i < segmentCount; i++) {
+    const len = segmentLengths[i];
+    if (!(len > 0)) continue;
+
+    const trimStart = cornerTangents[i] > 0 ? Math.min(len, cornerTangents[i]) : 0;
+    const trimEnd = cornerTangents[i + 1] > 0 ? Math.min(len, cornerTangents[i + 1]) : 0;
+    const drawableStart = trimStart;
+    const drawableEnd = Math.max(drawableStart, len - trimEnd);
+    flowTravel += Math.max(0, drawableEnd - drawableStart);
+    flowTravel += Math.max(0, cornerArcs[i + 1] || 0);
+  }
+
+  return flowTravel;
+};
+
+const getPathMainTravelFromCells = (
+  path,
+  refs = {},
+  offset = { x: 0, y: 0 },
+  flowWidth = null,
+) => {
+  if (!Array.isArray(path) || path.length < 2) return 0;
   const { gridEl } = refs;
-  if (!path || path.length < 2) return 0;
+  if (!gridEl) return 0;
 
-  const first = getCellPoint(path[0].r, path[0].c, { gridEl }, offset, headPointScratchA);
-  const second = getCellPoint(path[1].r, path[1].c, { gridEl }, offset, headPointScratchB);
-  const firstSegmentLength = Math.hypot(second.x - first.x, second.y - first.y);
-  if (!(firstSegmentLength > 0)) return 0;
+  const resolvedWidth = Number.isFinite(flowWidth) && flowWidth > 0
+    ? flowWidth
+    : Math.max(7, Math.floor(getCellSize(gridEl) * 0.15));
 
-  if (path.length < 3) return firstSegmentLength;
-
-  const third = getCellPoint(path[2].r, path[2].c, { gridEl }, offset, headPointScratchC);
-  const inDx = second.x - first.x;
-  const inDy = second.y - first.y;
-  const outDx = third.x - second.x;
-  const outDy = third.y - second.y;
-  const inLen = Math.hypot(inDx, inDy);
-  const outLen = Math.hypot(outDx, outDy);
-  if (inLen <= 0 || outLen <= 0) return firstSegmentLength;
-
-  const inAngle = Math.atan2(inDy, inDx);
-  const outAngle = Math.atan2(outDy, outDx);
-  const headingTurn = angleDeltaSigned(inAngle, outAngle);
-  const absTurn = Math.abs(headingTurn);
-  const angleTolerance = 1e-4;
-  if (absTurn <= angleTolerance || absTurn >= Math.PI - angleTolerance) return firstSegmentLength;
-
-  const flowWidth = Math.max(7, Math.floor(getCellSize(gridEl) * 0.15));
-  const cornerRadius = Math.max(1.2, flowWidth * 0.5);
-  const tangentOffset = cornerRadius * Math.tan(absTurn * 0.5);
-  if (!(tangentOffset > 0) || !Number.isFinite(tangentOffset)) return firstSegmentLength;
-  const leadLinear = Math.max(0, firstSegmentLength - tangentOffset);
-  const cornerArcLength = cornerRadius * absTurn;
-  return leadLinear + cornerArcLength - tangentOffset;
+  const points = new Array(path.length);
+  for (let i = 0; i < path.length; i++) {
+    const p = getCellPoint(path[i].r, path[i].c, { gridEl }, offset);
+    points[i] = { x: p.x, y: p.y };
+  }
+  return getPathMainTravelFromPoints(points, resolvedWidth);
 };
 
 const getHeadShiftDelta = (nextPath, previousPath, refs = {}, offset = { x: 0, y: 0 }) => {
   const { gridEl } = refs;
-  if (!nextPath || !previousPath) return 0;
+  if (!Array.isArray(nextPath) || !Array.isArray(previousPath)) return 0;
+
   const nextLen = nextPath.length;
   const prevLen = previousPath.length;
-  const fallbackStep = (path) =>
-    Math.max(1, cellDistance(path?.[0], path?.[1]) * getCellSize(gridEl));
+  if (nextLen < 2 || prevLen < 2 || Math.abs(nextLen - prevLen) !== 1) return 0;
 
-  if (nextLen === prevLen + 1 && nextLen >= 2) {
-    let shared = true;
+  let shared = true;
+  if (nextLen > prevLen) {
     for (let i = 0; i < prevLen; i++) {
       if (!pointsMatch(nextPath[i + 1], previousPath[i])) {
         shared = false;
         break;
       }
     }
-    if (shared) {
-      const shifted = getHeadLeadTravel(nextPath, refs, offset);
-      return -(shifted > 0 ? shifted : fallbackStep(nextPath));
-    }
-  }
-
-  if (nextLen === prevLen - 1 && prevLen >= 2) {
-    let shared = true;
+  } else {
     for (let i = 0; i < nextLen; i++) {
       if (!pointsMatch(previousPath[i + 1], nextPath[i])) {
         shared = false;
         break;
       }
     }
-    if (shared) {
-      const shifted = getHeadLeadTravel(previousPath, refs, offset);
-      return shifted > 0 ? shifted : fallbackStep(previousPath);
-    }
   }
+  if (!shared) return 0;
 
-  return 0;
+  const resolvedCell = getCellSize(gridEl);
+  const safeCell = Number.isFinite(resolvedCell) && resolvedCell > 0
+    ? resolvedCell
+    : PATH_FLOW_BASE_CELL;
+  const flowWidth = Math.max(7, Math.floor(safeCell * 0.15));
+  const previousTravel = getPathMainTravelFromCells(previousPath, refs, offset, flowWidth);
+  const nextTravel = getPathMainTravelFromCells(nextPath, refs, offset, flowWidth);
+  const shift = previousTravel - nextTravel;
+  if (Number.isFinite(shift) && shift !== 0) return shift;
+
+  const fallbackStep = (path) =>
+    Math.max(1, cellDistance(path?.[0], path?.[1]) * safeCell);
+  return nextLen > prevLen
+    ? -fallbackStep(nextPath)
+    : fallbackStep(previousPath);
 };
 
 
@@ -1206,7 +1276,11 @@ const drawIdleAnimatedPath = (
     return;
   }
 
-  const renderPoints = getPathRenderPointsForFrame(latestPathSnapshot.path, nowMs);
+  const renderPoints = getPathRenderPointsForFrame(
+    latestPathSnapshot.path,
+    nowMs,
+    pathFramePayload.width,
+  );
   pathFramePayload.points = renderPoints.points;
   const reverseTipSwapActive = applyPathReverseTipSwapToPayload(latestPathSnapshot.path, nowMs);
   pathFramePayload.geometryToken = reverseTipSwapActive ? NaN : renderPoints.geometryToken;
@@ -2184,7 +2258,7 @@ export function drawAll(
     );
     if (shift !== 0) {
       pathAnimationOffset = normalizeFlowOffset(
-        pathAnimationOffset + shift,
+        pathAnimationOffset + (shift * PATH_FLOW_ANCHOR_RATIO),
         flow.cycle,
       );
     }
@@ -2389,7 +2463,7 @@ export function drawAnimatedPath(
   updateTutorialBracketPayload(snapshot, layout, tutorialFlags);
 
   const nowMs = getNowMs();
-  const renderPoints = getPathRenderPointsForFrame(path, nowMs);
+  const renderPoints = getPathRenderPointsForFrame(path, nowMs, width);
   pathFramePayload.baseStartRadius = startRadius;
   pathFramePayload.baseArrowLength = arrowLength;
   pathFramePayload.baseEndHalfWidth = endHalfWidth;
