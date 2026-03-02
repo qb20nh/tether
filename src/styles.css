@@ -11,7 +11,8 @@
   --muted: #a9b7c6;
   --cellbg: #18222f;
   --cellbg2: #1b293a;
-  --good: #2ecc71;
+  --good-rgb: 46, 204, 113;
+  --good: rgb(var(--good-rgb));
   --bad: #ff5c5c;
   --warn: #ffb14a;
   --accent: #6aa6ff;
@@ -20,6 +21,9 @@
   --path-canvas-blend: overlay;
   --stitchIdle: #8f9cac;
   --stitchShadow: #080f1a;
+  --complete-rgb: var(--good-rgb);
+  --complete-rgb-dark: 21, 128, 61;
+  --complete-rgb-flash: 134, 239, 172;
   --app-pad-inline: 6px;
   --panel-border: 1px;
   --panel-padding: 8px;
@@ -85,7 +89,8 @@ body.isPathDragging * {
   --muted: #475569;
   --cellbg: #e6edf9;
   --cellbg2: #f0f6ff;
-  --good: #2ecc71;
+  --good-rgb: 0, 128, 0;
+  --good: rgb(var(--good-rgb));
   --bad: #ff5c5c;
   --warn: #ffb14a;
   --accent: #2563eb;
@@ -94,6 +99,9 @@ body.isPathDragging * {
   --path-canvas-blend: overlay;
   --stitchIdle: #8f9cac;
   --stitchShadow: #080f1a;
+  --complete-rgb: 22, 163, 74;
+  --complete-rgb-dark: 21, 128, 61;
+  --complete-rgb-flash: 74, 222, 128;
   --color-scheme: light;
   --bg-sheen: #e2ecfb;
   --panel-outline: rgba(15, 23, 42, 0.08);
@@ -845,7 +853,7 @@ button:disabled:active {
   inset: 0;
   border-radius: 0;
   pointer-events: none;
-  background: linear-gradient(180deg, rgba(34, 197, 94, 0.24) 0%, rgba(21, 128, 61, 0.34) 100%);
+  background: linear-gradient(180deg, rgba(var(--complete-rgb), 0.24) 0%, rgba(var(--complete-rgb-dark), 0.34) 100%);
   opacity: 0;
   transition: opacity var(--complete-cell-duration-ms) ease-out;
 }
@@ -1128,53 +1136,49 @@ button:disabled:active {
 }
 
 .theme-light .boardWrap.isComplete .cell::before {
-  background: linear-gradient(180deg, rgba(134, 239, 172, 0.48) 0%, rgba(34, 197, 94, 0.64) 100%);
-}
-
-.theme-light .boardWrap.isComplete {
-  --good: #14532d;
+  background: linear-gradient(180deg, rgba(var(--complete-rgb-flash), 0.38) 0%, rgba(var(--complete-rgb), 0.54) 100%);
 }
 
 .boardWrap.isComplete:not(.isCompleting) .cell:not(.wall) {
-  border-color: rgba(34, 197, 94, 0.44);
+  border-color: rgba(var(--complete-rgb), 0.44);
 }
 
 .boardWrap.isComplete:not(.isCompleting) .cell.visited:not(.pathStart):not(.pathEnd) {
-  border-color: rgba(34, 197, 94, 0.62);
+  border-color: rgba(var(--complete-rgb), 0.62);
   box-shadow:
-    0 0 0 var(--cell-shadow-3) rgba(34, 197, 94, 0.2) inset,
-    0 0 0 var(--cell-shadow-2) rgba(34, 197, 94, 0.16);
+    0 0 0 var(--cell-shadow-3) rgba(var(--complete-rgb), 0.2) inset,
+    0 0 0 var(--cell-shadow-2) rgba(var(--complete-rgb), 0.16);
 }
 
 .boardWrap.isComplete:not(.isCompleting) .cell.pathStart,
 .boardWrap.isComplete:not(.isCompleting) .cell.pathEnd {
-  border-color: rgba(34, 197, 94, 0.95);
+  border-color: rgba(var(--complete-rgb), 0.95);
   box-shadow:
-    0 0 0 var(--cell-shadow-3) rgba(34, 197, 94, 0.34) inset,
-    0 0 0 var(--cell-shadow-2) rgba(34, 197, 94, 0.32);
-  --interactive-corner-color: rgba(34, 197, 94, 1);
+    0 0 0 var(--cell-shadow-3) rgba(var(--complete-rgb), 0.34) inset,
+    0 0 0 var(--cell-shadow-2) rgba(var(--complete-rgb), 0.32);
+  --interactive-corner-color: rgba(var(--complete-rgb), 1);
 }
 
 .boardWrap.isComplete:not(.isCompleting) .cell.wall.movable {
-  --interactive-corner-color: rgba(34, 197, 94, 1);
+  --interactive-corner-color: rgba(var(--complete-rgb), 1);
 }
 
 @keyframes completeCellCascade {
   to {
-    border-color: rgba(34, 197, 94, 0.62);
+    border-color: rgba(var(--complete-rgb), 0.62);
     box-shadow:
-      0 0 0 var(--cell-shadow-3) rgba(34, 197, 94, 0.2) inset,
-      0 0 0 var(--cell-shadow-2) rgba(34, 197, 94, 0.16);
+      0 0 0 var(--cell-shadow-3) rgba(var(--complete-rgb), 0.2) inset,
+      0 0 0 var(--cell-shadow-2) rgba(var(--complete-rgb), 0.16);
   }
 }
 
 @keyframes completeCellCascadeEndpoint {
   to {
-    border-color: rgba(34, 197, 94, 0.95);
+    border-color: rgba(var(--complete-rgb), 0.95);
     box-shadow:
-      0 0 0 var(--cell-shadow-3) rgba(34, 197, 94, 0.34) inset,
-      0 0 0 var(--cell-shadow-2) rgba(34, 197, 94, 0.32);
-    --interactive-corner-color: rgba(34, 197, 94, 1);
+      0 0 0 var(--cell-shadow-3) rgba(var(--complete-rgb), 0.34) inset,
+      0 0 0 var(--cell-shadow-2) rgba(var(--complete-rgb), 0.32);
+    --interactive-corner-color: rgba(var(--complete-rgb), 1);
   }
 }
 
@@ -1194,11 +1198,11 @@ button:disabled:active {
 
   0%,
   100% {
-    --interactive-corner-color: rgba(34, 197, 94, 1);
+    --interactive-corner-color: rgba(var(--complete-rgb), 1);
   }
 
   45% {
-    --interactive-corner-color: rgba(134, 239, 172, 1);
+    --interactive-corner-color: rgba(var(--complete-rgb-flash), 1);
   }
 }
 

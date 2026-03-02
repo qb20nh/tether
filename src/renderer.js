@@ -68,6 +68,7 @@ const keyParseScratch = { r: 0, c: 0 };
 const EMPTY_MAP = new Map();
 const TUTORIAL_BRACKET_COLOR_RGB = { r: 120, g: 190, b: 255 };
 const tutorialBracketColorScratch = { r: 120, g: 190, b: 255 };
+const themeColorScratch = { r: 0, g: 0, b: 0 };
 const pathLayoutMetrics = {
   ready: false,
   version: 0,
@@ -1082,14 +1083,31 @@ const parseColorToRgb = (color, out = null) => {
   return null;
 };
 
+const resolveThemeGoodColor = (styles, fallback = '#16a34a') => {
+  if (!styles) return fallback;
+
+  const goodRgbRaw = styles.getPropertyValue('--good-rgb').trim();
+  if (goodRgbRaw) {
+    const goodFromRgb = `rgb(${goodRgbRaw})`;
+    if (parseColorToRgb(goodFromRgb, themeColorScratch)) {
+      return goodFromRgb;
+    }
+  }
+
+  const goodRaw = forceOpaqueColor(styles.getPropertyValue('--good').trim());
+  if (goodRaw && parseColorToRgb(goodRaw, themeColorScratch)) {
+    return goodRaw;
+  }
+
+  return fallback;
+};
+
 const updatePathThemeCache = (refs = latestPathRefs) => {
   const styleTarget = refs?.boardWrap || document.documentElement;
   if (!styleTarget || typeof getComputedStyle !== 'function') return;
   const styles = getComputedStyle(styleTarget);
   const nextLineRaw = forceOpaqueColor(styles.getPropertyValue('--line').trim());
-  const nextGoodRaw = forceOpaqueColor(
-    styles.getPropertyValue('--good').trim() || '#22c55e',
-  );
+  const nextGoodRaw = resolveThemeGoodColor(styles, '#16a34a');
 
   if (!pathThemeCacheInitialized || pathThemeLineRaw !== nextLineRaw) {
     const parsed = parseColorToRgb(nextLineRaw, pathThemeMainRgb);
@@ -2422,7 +2440,7 @@ function drawCrossStitches(snapshot, refs, ctx, vertexStatus = EMPTY_MAP) {
   const stitchLineHalf = Math.max(2, cell * 0.18);
   const stitchWidth = Math.max(1, cell * 0.06);
   const styleDeclaration = getComputedStyle(document.documentElement);
-  const colorGood = forceOpaqueColor(styleDeclaration.getPropertyValue('--good').trim() || '#32bb70');
+  const colorGood = resolveThemeGoodColor(styleDeclaration, '#16a34a');
   const colorBad = forceOpaqueColor(styleDeclaration.getPropertyValue('--bad').trim() || '#e85c5c');
   const colorPending = '#ffffff';
 
@@ -2518,7 +2536,7 @@ function drawCornerCounts(snapshot, refs, ctx, cornerVertexStatus = EMPTY_MAP) {
 
   const styleDeclaration = getComputedStyle(document.documentElement);
   const isLightTheme = document.documentElement.classList.contains('theme-light');
-  const colorGood = forceOpaqueColor(styleDeclaration.getPropertyValue('--good').trim() || '#32bb70');
+  const colorGood = resolveThemeGoodColor(styleDeclaration, '#16a34a');
   const colorBad = forceOpaqueColor(styleDeclaration.getPropertyValue('--bad').trim() || '#e85c5c');
   const colorPending = isLightTheme ? '#0f172a' : '#ffffff';
   const cornerFillColor = isLightTheme ? 'rgb(248, 251, 255)' : 'rgb(11, 15, 20)';
