@@ -8,7 +8,6 @@ import {
   pointsMatch,
   cellDistance,
   clampUnit,
-  normalizeAngle,
   angleDeltaSigned,
   clampNumber,
 } from './math.js';
@@ -46,6 +45,8 @@ let cachedPathHeadC = NaN;
 let cachedPathTailR = NaN;
 let cachedPathTailC = NaN;
 let cachedPathLayoutVersion = -1;
+let pathStartArrivalState = null;
+let pathEndArrivalState = null;
 let tutorialBracketSignature = '';
 let tutorialBracketGeometryToken = 0;
 let reducedMotionQuery = null;
@@ -106,29 +107,360 @@ const PATH_FLOW_PULSE = 64;
 const PATH_FLOW_BASE_CELL = 56;
 const PATH_FLOW_RISE = 0.82;
 const PATH_FLOW_DROP = 0.83;
+const PATH_TIP_ARRIVAL_DURATION_MS = 200;
+const PATH_TIP_RETRACT_CUTOFF_MS = 100;
+const PATH_TIP_ARRIVAL_DISTANCE_CELL_FACTOR = 0.5;
 const TUTORIAL_BRACKET_PULSE_CYCLES = 3;
 const TAU = Math.PI * 2;
 const CANVAS_ALIGN_OFFSET_CSS_PX = 0.5;
 const PATH_RENDERER_RECOVERY_COOLDOWN_MS = 250;
 const INTERACTIVE_RESIZE_IDLE_MS = 140;
-
-
-
-const isPathReversed = (nextPath, previousPath) => {
-  if (!Array.isArray(nextPath) || !Array.isArray(previousPath)) return false;
-  if (nextPath.length !== previousPath.length || nextPath.length < 2) return false;
-
-  for (let i = 0; i < nextPath.length; i++) {
-    if (!pointsMatch(nextPath[i], previousPath[previousPath.length - 1 - i])) return false;
-  }
-  return true;
-};
-
+const PATH_TIP_ARRIVAL_BEZIER_X1 = 0;
+const PATH_TIP_ARRIVAL_BEZIER_Y1 = 0.9;
+const PATH_TIP_ARRIVAL_BEZIER_X2 = 0.1;
+const PATH_TIP_ARRIVAL_BEZIER_Y2 = 1;
+const PATH_TIP_ARRIVAL_ADJACENT_MAX = Math.SQRT2 + 1e-3;
+const arrivalOffsetScratchA = { x: 0, y: 0, active: false };
+const arrivalOffsetScratchB = { x: 0, y: 0, active: false };
+let reusableArrivalPathPoints = [];
 const normalizeFlowOffset = (value, cycle = PATH_FLOW_CYCLE) => {
   if (!Number.isFinite(value)) return 0;
   if (!Number.isFinite(cycle) || cycle <= 0) return 0;
   const mod = value % cycle;
   return mod >= 0 ? mod : mod + cycle;
+};
+
+const cubicBezierAxisAt = (t, p1, p2) => {
+  const omt = 1 - t;
+  return (3 * p1 * omt * omt * t) + (3 * p2 * omt * t * t) + (t * t * t);
+};
+
+const cubicBezierAxisSlopeAt = (t, p1, p2) => {
+  const omt = 1 - t;
+  return (3 * p1 * omt * omt) + (6 * (p2 - p1) * omt * t) + (3 * (1 - p2) * t * t);
+};
+
+const sampleCubicBezierYAtX = (x, x1, y1, x2, y2) => {
+  const safeX = clampUnit(x);
+  if (safeX <= 0) return 0;
+  if (safeX >= 1) return 1;
+
+  let t = safeX;
+  for (let i = 0; i < 6; i++) {
+    const xAtT = cubicBezierAxisAt(t, x1, x2);
+    const slope = cubicBezierAxisSlopeAt(t, x1, x2);
+    const delta = xAtT - safeX;
+    if (Math.abs(delta) <= 1e-5 || Math.abs(slope) <= 1e-5) break;
+    const next = t - (delta / slope);
+    if (next <= 0 || next >= 1) break;
+    t = next;
+  }
+
+  let low = 0;
+  let high = 1;
+  for (let i = 0; i < 12; i++) {
+    const xAtT = cubicBezierAxisAt(t, x1, x2);
+    if (Math.abs(xAtT - safeX) <= 1e-6) break;
+    if (xAtT > safeX) high = t;
+    else low = t;
+    t = (low + high) * 0.5;
+  }
+
+  return cubicBezierAxisAt(t, y1, y2);
+};
+
+const getPathTipFromPath = (path, side) => {
+  if (!Array.isArray(path) || path.length <= 0) return null;
+  if (side === 'start') return path[0] || null;
+  if (path.length <= 1) return null;
+  return path[path.length - 1] || null;
+};
+
+const clearPathTipArrivalStates = () => {
+  pathStartArrivalState = null;
+  pathEndArrivalState = null;
+};
+
+const isEndRetractTransition = (prevPath, nextPath) => {
+  if (!Array.isArray(prevPath) || !Array.isArray(nextPath)) return false;
+  const prevLen = prevPath.length;
+  const nextLen = nextPath.length;
+  if (nextLen !== prevLen - 1) return false;
+  for (let i = 0; i < nextLen; i++) {
+    if (!pointsMatch(nextPath[i], prevPath[i])) return false;
+  }
+  return true;
+};
+
+const isStartRetractTransition = (prevPath, nextPath) => {
+  if (!Array.isArray(prevPath) || !Array.isArray(nextPath)) return false;
+  const prevLen = prevPath.length;
+  const nextLen = nextPath.length;
+  if (nextLen !== prevLen - 1) return false;
+  for (let i = 0; i < nextLen; i++) {
+    if (!pointsMatch(nextPath[i], prevPath[i + 1])) return false;
+  }
+  return true;
+};
+
+const isRetractUnturnTransition = (side, prevTip, nextTip, nextPath) => {
+  if (!prevTip || !nextTip || !Array.isArray(nextPath)) return false;
+  let neighbor = null;
+  if (side === 'start') neighbor = nextPath[1] || null;
+  else if (side === 'end') neighbor = nextPath[nextPath.length - 2] || null;
+  if (!neighbor) return false;
+
+  const inR = neighbor.r - nextTip.r;
+  const inC = neighbor.c - nextTip.c;
+  const outR = prevTip.r - nextTip.r;
+  const outC = prevTip.c - nextTip.c;
+  if ((inR === 0 && inC === 0) || (outR === 0 && outC === 0)) return false;
+  return ((inR * outC) - (inC * outR)) !== 0;
+};
+
+const updateSinglePathTipArrivalState = (side, prevPath, nextPath, cellSize, cellStep, nowMs) => {
+  if (side !== 'start' && side !== 'end') return;
+  const prevTip = getPathTipFromPath(prevPath, side);
+  const nextTip = getPathTipFromPath(nextPath, side);
+
+  if (!nextTip) {
+    if (side === 'start') pathStartArrivalState = null;
+    else pathEndArrivalState = null;
+    return;
+  }
+  if (!prevTip) return;
+  if (prevTip.r === nextTip.r && prevTip.c === nextTip.c) return;
+
+  const moveDr = prevTip.r - nextTip.r;
+  const moveDc = prevTip.c - nextTip.c;
+  const moveLength = Math.hypot(moveDc, moveDr);
+  if (!(moveLength > 0) || moveLength > PATH_TIP_ARRIVAL_ADJACENT_MAX) return;
+
+  const isRetract = side === 'start'
+    ? isStartRetractTransition(prevPath, nextPath)
+    : isEndRetractTransition(prevPath, nextPath);
+  if (isRetract) {
+    const step = Number.isFinite(cellStep) && cellStep > 0 ? cellStep : Number(cellSize) || 0;
+    const cutoffMs = isRetractUnturnTransition(side, prevTip, nextTip, nextPath)
+      ? PATH_TIP_RETRACT_CUTOFF_MS
+      : PATH_TIP_ARRIVAL_DURATION_MS;
+    const state = {
+      mode: 'retract',
+      startTimeMs: nowMs,
+      offsetX: moveDc * step,
+      offsetY: moveDr * step,
+      targetR: nextTip.r,
+      targetC: nextTip.c,
+      cutoffMs,
+    };
+    if (side === 'start') pathStartArrivalState = state;
+    else pathEndArrivalState = state;
+    return;
+  }
+
+  const distancePx = Math.max(0, (Number(cellSize) || 0) * PATH_TIP_ARRIVAL_DISTANCE_CELL_FACTOR);
+  const state = {
+    mode: 'arrive',
+    startTimeMs: nowMs,
+    offsetX: (moveDc / moveLength) * distancePx,
+    offsetY: (moveDr / moveLength) * distancePx,
+    targetR: nextTip.r,
+    targetC: nextTip.c,
+    cutoffMs: PATH_TIP_ARRIVAL_DURATION_MS,
+  };
+  if (side === 'start') pathStartArrivalState = state;
+  else pathEndArrivalState = state;
+};
+
+const updatePathTipArrivalStates = (
+  prevPath,
+  nextPath,
+  cellSize,
+  cellStep,
+  nowMs = getNowMs(),
+) => {
+  if (isReducedMotionPreferred()) {
+    clearPathTipArrivalStates();
+    return;
+  }
+  updateSinglePathTipArrivalState(
+    'start',
+    prevPath,
+    nextPath,
+    cellSize,
+    cellStep,
+    nowMs,
+  );
+  updateSinglePathTipArrivalState(
+    'end',
+    prevPath,
+    nextPath,
+    cellSize,
+    cellStep,
+    nowMs,
+  );
+};
+
+const resolvePathTipArrivalOffset = (side, tip, nowMs, out) => {
+  const state = side === 'start' ? pathStartArrivalState : pathEndArrivalState;
+  out.x = 0;
+  out.y = 0;
+  out.active = false;
+  out.mode = 'none';
+
+  if (!tip || !state) return out;
+  if (state.targetR !== tip.r || state.targetC !== tip.c) {
+    if (side === 'start') pathStartArrivalState = null;
+    else pathEndArrivalState = null;
+    return out;
+  }
+
+  const elapsed = nowMs - state.startTimeMs;
+  const visibleDuration = Number.isFinite(state.cutoffMs) && state.cutoffMs > 0
+    ? state.cutoffMs
+    : PATH_TIP_ARRIVAL_DURATION_MS;
+  if (elapsed >= visibleDuration) {
+    if (side === 'start') pathStartArrivalState = null;
+    else pathEndArrivalState = null;
+    return out;
+  }
+  const unit = elapsed / PATH_TIP_ARRIVAL_DURATION_MS;
+
+  const eased = sampleCubicBezierYAtX(
+    clampUnit(unit),
+    PATH_TIP_ARRIVAL_BEZIER_X1,
+    PATH_TIP_ARRIVAL_BEZIER_Y1,
+    PATH_TIP_ARRIVAL_BEZIER_X2,
+    PATH_TIP_ARRIVAL_BEZIER_Y2,
+  );
+  const remain = 1 - eased;
+  out.x = state.offsetX * remain;
+  out.y = state.offsetY * remain;
+  out.active = (out.x !== 0 || out.y !== 0);
+  out.mode = state.mode || 'arrive';
+  if (!out.active) {
+    if (side === 'start') pathStartArrivalState = null;
+    else pathEndArrivalState = null;
+  }
+  return out;
+};
+
+const hasActivePathTipArrivals = (nowMs = getNowMs()) => {
+  if (isReducedMotionPreferred()) {
+    clearPathTipArrivalStates();
+    return false;
+  }
+
+  if (
+    pathStartArrivalState
+    && nowMs - pathStartArrivalState.startTimeMs >= (
+      Number.isFinite(pathStartArrivalState.cutoffMs) && pathStartArrivalState.cutoffMs > 0
+        ? pathStartArrivalState.cutoffMs
+        : PATH_TIP_ARRIVAL_DURATION_MS
+    )
+  ) {
+    pathStartArrivalState = null;
+  }
+  if (
+    pathEndArrivalState
+    && nowMs - pathEndArrivalState.startTimeMs >= (
+      Number.isFinite(pathEndArrivalState.cutoffMs) && pathEndArrivalState.cutoffMs > 0
+        ? pathEndArrivalState.cutoffMs
+        : PATH_TIP_ARRIVAL_DURATION_MS
+    )
+  ) {
+    pathEndArrivalState = null;
+  }
+  return Boolean(pathStartArrivalState || pathEndArrivalState);
+};
+
+const getPathRenderPointsForFrame = (path, nowMs = getNowMs()) => {
+  const pathLength = Array.isArray(path) ? path.length : 0;
+  if (pathLength <= 0 || reusablePathPoints.length !== pathLength || isReducedMotionPreferred()) {
+    if (isReducedMotionPreferred()) clearPathTipArrivalStates();
+    return {
+      points: reusablePathPoints,
+      geometryToken: pathGeometryToken,
+      flowTravelCompensation: 0,
+    };
+  }
+
+  const startTip = getPathTipFromPath(path, 'start');
+  const endTip = getPathTipFromPath(path, 'end');
+  const startOffset = resolvePathTipArrivalOffset('start', startTip, nowMs, arrivalOffsetScratchA);
+  const endOffset = resolvePathTipArrivalOffset('end', endTip, nowMs, arrivalOffsetScratchB);
+  const startHasRetract = startOffset.active && startOffset.mode === 'retract';
+  const endHasRetract = endOffset.active && endOffset.mode === 'retract';
+  if (!startOffset.active && !endOffset.active) {
+    return {
+      points: reusablePathPoints,
+      geometryToken: pathGeometryToken,
+      flowTravelCompensation: 0,
+    };
+  }
+
+  const renderLength = pathLength + (startHasRetract ? 1 : 0) + (endHasRetract ? 1 : 0);
+  if (reusableArrivalPathPoints.length < renderLength) {
+    for (let i = reusableArrivalPathPoints.length; i < renderLength; i++) {
+      reusableArrivalPathPoints.push({ x: 0, y: 0 });
+    }
+  }
+  reusableArrivalPathPoints.length = renderLength;
+  let writeIndex = 0;
+
+  if (startHasRetract) {
+    const target = reusablePathPoints[0];
+    const ghost = reusableArrivalPathPoints[writeIndex];
+    ghost.x = target.x + startOffset.x;
+    ghost.y = target.y + startOffset.y;
+    writeIndex += 1;
+  }
+
+  for (let i = 0; i < pathLength; i++) {
+    const src = reusablePathPoints[i];
+    const dst = reusableArrivalPathPoints[writeIndex];
+    dst.x = src.x;
+    dst.y = src.y;
+    if (i === 0 && startOffset.active && startOffset.mode === 'arrive') {
+      dst.x += startOffset.x;
+      dst.y += startOffset.y;
+    }
+    if (i === pathLength - 1 && endOffset.active && endOffset.mode === 'arrive') {
+      dst.x += endOffset.x;
+      dst.y += endOffset.y;
+    }
+    writeIndex += 1;
+  }
+
+  if (endHasRetract && pathLength > 0) {
+    const target = reusablePathPoints[pathLength - 1];
+    const ghost = reusableArrivalPathPoints[writeIndex];
+    ghost.x = target.x + endOffset.x;
+    ghost.y = target.y + endOffset.y;
+  }
+
+  let flowTravelCompensation = 0;
+  if (pathLength > 1) {
+    if (startHasRetract) {
+      const ghost = reusableArrivalPathPoints[0];
+      const first = reusableArrivalPathPoints[1];
+      flowTravelCompensation = -Math.hypot(first.x - ghost.x, first.y - ghost.y);
+    } else if (startOffset.active && startOffset.mode === 'arrive') {
+      const baseFirst = reusablePathPoints[0];
+      const baseSecond = reusablePathPoints[1];
+      const renderFirst = reusableArrivalPathPoints[0];
+      const renderSecond = reusableArrivalPathPoints[1];
+      const baseLen = Math.hypot(baseSecond.x - baseFirst.x, baseSecond.y - baseFirst.y);
+      const renderLen = Math.hypot(renderSecond.x - renderFirst.x, renderSecond.y - renderFirst.y);
+      flowTravelCompensation = baseLen - renderLen;
+    }
+  }
+
+  return {
+    points: reusableArrivalPathPoints,
+    geometryToken: NaN,
+    flowTravelCompensation,
+  };
 };
 
 
@@ -171,8 +503,6 @@ const getPathFlowMetrics = (refs = latestPathRefs, out = null, cellSize = null) 
   }
   return { cycle, pulse, speed };
 };
-
-
 
 const getHeadLeadTravel = (path, refs = {}, offset = { x: 0, y: 0 }) => {
   const { gridEl } = refs;
@@ -249,6 +579,8 @@ const getHeadShiftDelta = (nextPath, previousPath, refs = {}, offset = { x: 0, y
   return 0;
 };
 
+
+
 const shouldAnimatePathFlow = (
   snapshot,
   completionModel = latestCompletionModel,
@@ -267,19 +599,26 @@ const stopPathAnimation = () => {
 
 const animatePathFlow = (timestamp) => {
   pathAnimationFrame = 0;
+  const nowMs = getNowMs();
 
   if (!latestPathSnapshot || !latestPathRefs) {
     stopPathAnimation();
     return;
   }
 
-  if (!shouldAnimatePathFlow(latestPathSnapshot, latestCompletionModel)) {
+  const animateFlow = shouldAnimatePathFlow(
+    latestPathSnapshot,
+    latestCompletionModel,
+    latestTutorialFlags,
+  );
+  const animateTipArrivals = hasActivePathTipArrivals(nowMs);
+  if (!animateFlow && !animateTipArrivals) {
     stopPathAnimation();
     drawAllInternal(latestPathSnapshot, latestPathRefs, latestPathStatuses, 0, latestCompletionModel);
     return;
   }
 
-  if (pathAnimationLastTs > 0) {
+  if (animateFlow && pathAnimationLastTs > 0) {
     const dt = Math.max(0, (timestamp - pathAnimationLastTs) / 1000);
     if (Number.isFinite(dt)) {
       const flowSpeed = Number.isFinite(pathFramePayload.flowSpeed)
@@ -296,7 +635,10 @@ const animatePathFlow = (timestamp) => {
   }
 
   pathAnimationLastTs = timestamp;
-  if (latestPathSnapshot && latestPathRefs) drawIdleAnimatedPath(pathAnimationOffset, latestCompletionModel);
+  if (latestPathSnapshot && latestPathRefs) {
+    const flowOffset = animateFlow ? pathAnimationOffset : 0;
+    drawIdleAnimatedPath(flowOffset, latestCompletionModel, nowMs);
+  }
 
   pathAnimationFrame = requestAnimationFrame(animatePathFlow);
 };
@@ -505,7 +847,11 @@ const ensurePathLayoutMetrics = (refs) => {
   return updatePathLayoutMetrics(offset, cell, gap, pad);
 };
 
-const drawIdleAnimatedPath = (flowOffset = 0, completionModel = latestCompletionModel) => {
+const drawIdleAnimatedPath = (
+  flowOffset = 0,
+  completionModel = latestCompletionModel,
+  nowMs = getNowMs(),
+) => {
   const pathRenderer = ensurePathRenderer({
     refs: latestPathRefs,
     allowRecovery: !interactiveResizeActive,
@@ -517,7 +863,10 @@ const drawIdleAnimatedPath = (flowOffset = 0, completionModel = latestCompletion
     return;
   }
 
-  pathFramePayload.flowOffset = flowOffset;
+  const renderPoints = getPathRenderPointsForFrame(latestPathSnapshot.path, nowMs);
+  pathFramePayload.points = renderPoints.points;
+  pathFramePayload.geometryToken = renderPoints.geometryToken;
+  pathFramePayload.flowOffset = flowOffset + (Number(renderPoints.flowTravelCompensation) || 0);
   pathFramePayload.isCompletionSolved = Boolean(completionModel?.isSolved);
   pathFramePayload.completionProgress = getCompletionProgress(completionModel);
   latestPathMainFlowTravel = pathRenderer.drawPathFrame(pathFramePayload);
@@ -1138,6 +1487,8 @@ export function buildGrid(snapshot, refs, icons, iconX) {
   cachedPathRef = null;
   cachedPathLength = -1;
   cachedPathLayoutVersion = -1;
+  clearPathTipArrivalStates();
+  reusableArrivalPathPoints.length = 0;
 }
 
 const parseGridKey = (value, out = keyParseScratch) => {
@@ -1433,33 +1784,25 @@ export function drawAll(
   const flow = getCachedPathFlowMetrics(refs, layout.cell);
   updatePathThemeCache(refs);
   const animateFlow = shouldAnimatePathFlow(snapshot, completionModel, tutorialFlags);
-
-  if (isPathReversed(snapshot.path, previousPath)) {
-    const reverseTravel = latestPathMainFlowTravel;
-    if (reverseTravel > 0) {
-      const transitionAnchorUnit = Math.max(
-        0,
-        Math.min(1, (PATH_FLOW_RISE + PATH_FLOW_DROP) * 0.5),
-      );
-      const transitionAnchor = flow.pulse * transitionAnchorUnit;
-      pathAnimationOffset = normalizeFlowOffset(
-        (2 * transitionAnchor) - reverseTravel - pathAnimationOffset,
-        flow.cycle,
-      );
-    }
-  } else {
-    const shift = getHeadShiftDelta(
-      snapshot.path,
-      previousPath,
-      refs,
-      getGridCanvasOffset(refs, headOffsetScratch),
+  const nowMs = getNowMs();
+  updatePathTipArrivalStates(
+    previousPath,
+    snapshot.path,
+    layout.cell,
+    layout.cell + layout.gap,
+    nowMs,
+  );
+  const shift = getHeadShiftDelta(
+    snapshot.path,
+    previousPath,
+    refs,
+    getGridCanvasOffset(refs, headOffsetScratch),
+  );
+  if (shift !== 0) {
+    pathAnimationOffset = normalizeFlowOffset(
+      pathAnimationOffset + shift,
+      flow.cycle,
     );
-    if (shift !== 0) {
-      pathAnimationOffset = normalizeFlowOffset(
-        pathAnimationOffset + shift,
-        flow.cycle,
-      );
-    }
   }
 
   latestPathSnapshot = snapshot;
@@ -1471,7 +1814,8 @@ export function drawAll(
   const offset = animateFlow ? pathAnimationOffset : 0;
   drawAllInternal(snapshot, refs, statuses, offset, completionModel, tutorialFlags);
 
-  if (animateFlow) {
+  const animateTipArrivals = hasActivePathTipArrivals(nowMs);
+  if (animateFlow || animateTipArrivals) {
     schedulePathAnimation();
   } else {
     stopPathAnimation();
@@ -1653,8 +1997,9 @@ export function drawAnimatedPath(
 
   updateTutorialBracketPayload(snapshot, layout, tutorialFlags);
 
-  pathFramePayload.points = reusablePathPoints;
-  pathFramePayload.geometryToken = pathGeometryToken;
+  const renderPoints = getPathRenderPointsForFrame(path, getNowMs());
+  pathFramePayload.points = renderPoints.points;
+  pathFramePayload.geometryToken = renderPoints.geometryToken;
   pathFramePayload.width = width;
   pathFramePayload.startRadius = startRadius;
   pathFramePayload.arrowLength = arrowLength;
@@ -1664,7 +2009,7 @@ export function drawAnimatedPath(
   pathFramePayload.isCompletionSolved = isCompletionSolved;
   pathFramePayload.completionProgress = completionProgress;
   pathFramePayload.flowEnabled = showFlowRibbon;
-  pathFramePayload.flowOffset = flowOffset;
+  pathFramePayload.flowOffset = flowOffset + (Number(renderPoints.flowTravelCompensation) || 0);
   pathFramePayload.flowCycle = flowMetrics.cycle;
   pathFramePayload.flowPulse = flowMetrics.pulse;
   pathFramePayload.flowSpeed = flowMetrics.speed;

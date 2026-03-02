@@ -466,21 +466,25 @@ export function buildUnifiedPathMesh(points, options = {}) {
     const uy = segmentUy[lastSegmentIndex];
     const perpX = -uy;
     const perpY = ux;
-    const apexTravel = flow.mainTravel + arrowLength;
+    const baseCenterShift = arrowLength / 3;
+    const baseCenterX = tail.x - (ux * baseCenterShift);
+    const baseCenterY = tail.y - (uy * baseCenterShift);
+    const baseTravel = flow.mainTravel - baseCenterShift;
+    const apexTravel = baseTravel + arrowLength;
 
     const left = addVertex(
-      tail.x - perpX * endHalfWidth,
-      tail.y - perpY * endHalfWidth,
-      flow.mainTravel,
+      baseCenterX - perpX * endHalfWidth,
+      baseCenterY - perpY * endHalfWidth,
+      baseTravel,
     );
     const right = addVertex(
-      tail.x + perpX * endHalfWidth,
-      tail.y + perpY * endHalfWidth,
-      flow.mainTravel,
+      baseCenterX + perpX * endHalfWidth,
+      baseCenterY + perpY * endHalfWidth,
+      baseTravel,
     );
     const apex = addVertex(
-      tail.x + ux * arrowLength,
-      tail.y + uy * arrowLength,
+      baseCenterX + ux * arrowLength,
+      baseCenterY + uy * arrowLength,
       apexTravel,
     );
     addTriangle(apex, left, right);
