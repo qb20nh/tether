@@ -54,6 +54,15 @@ export default {
     "notificationNewLevelTitle": "Nouveau niveau quotidien disponible",
     "notificationNewLevelBody": "Un nouveau niveau quotidien est prêt à jouer.",
     "notificationHistoryEmpty": "Aucune notification pour le moment.",
+    "autoUpdate": "Mise à jour automatique",
+    "autoUpdateEnable": "Activer la mise à jour automatique",
+    "newVersionAvailableTitle": "Nouvelle version disponible",
+    "newVersionAvailableBody": "Touchez pour mettre à jour vers la dernière version.",
+    "newVersionAvailableToast": "Une nouvelle version est disponible.",
+    "updateApplyDialogTitle": "Mise à jour disponible",
+    "updateApplyDialogPrompt": "Installer maintenant la dernière version ?",
+    "updateApplyDialogConfirm": "Mettre à jour",
+    "updateApplyFailedToast": "Impossible d'appliquer la mise à jour pour le moment. Réessayez bientôt.",
     "updateAppliedToast": "Mis à jour vers la dernière version."
   },
   "goal": {

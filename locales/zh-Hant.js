@@ -54,6 +54,15 @@ export default {
     "notificationNewLevelTitle": "有新的每日關卡",
     "notificationNewLevelBody": "新的每日關卡已可遊玩。",
     "notificationHistoryEmpty": "尚無通知。",
+    "autoUpdate": "自動更新",
+    "autoUpdateEnable": "啟用自動更新",
+    "newVersionAvailableTitle": "有新版本可用",
+    "newVersionAvailableBody": "點一下即可更新到最新版本。",
+    "newVersionAvailableToast": "有新版本可用。",
+    "updateApplyDialogTitle": "可用更新",
+    "updateApplyDialogPrompt": "現在要安裝最新版本嗎？",
+    "updateApplyDialogConfirm": "立即更新",
+    "updateApplyFailedToast": "目前無法套用更新，請稍後再試。",
     "updateAppliedToast": "已更新到最新版本。"
   },
   "goal": {

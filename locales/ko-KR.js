@@ -54,6 +54,15 @@ export default {
     "notificationNewLevelTitle": "새 데일리 레벨이 열렸습니다",
     "notificationNewLevelBody": "새 데일리 레벨을 플레이할 수 있습니다.",
     "notificationHistoryEmpty": "알림이 아직 없습니다.",
+    "autoUpdate": "자동 업데이트",
+    "autoUpdateEnable": "자동 업데이트 켜기",
+    "newVersionAvailableTitle": "새 버전이 있습니다",
+    "newVersionAvailableBody": "탭하면 최신 버전으로 업데이트할 수 있습니다.",
+    "newVersionAvailableToast": "새 버전이 있습니다.",
+    "updateApplyDialogTitle": "업데이트 가능",
+    "updateApplyDialogPrompt": "지금 최신 버전을 설치하시겠습니까?",
+    "updateApplyDialogConfirm": "지금 업데이트",
+    "updateApplyFailedToast": "아직 업데이트를 적용할 수 없습니다. 잠시 후 다시 시도해주세요.",
     "updateAppliedToast": "최신 버전으로 업데이트되었습니다."
   },
   "goal": {

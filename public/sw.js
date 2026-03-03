@@ -308,6 +308,17 @@ const normalizeHistoryMarker = (value) => {
   return HISTORY_MARKERS.OLDER;
 };
 
+const normalizeHistoryAction = (action = null) => {
+  if (!action || typeof action !== 'object') return null;
+  if (action.type !== 'apply-update') return null;
+  const buildNumber = normalizeInt(action.buildNumber, null);
+  if (!Number.isInteger(buildNumber) || buildNumber <= 0) return null;
+  return {
+    type: 'apply-update',
+    buildNumber,
+  };
+};
+
 const normalizeHistoryEntry = (entry = {}) => {
   const source = entry.source === 'system' ? 'system' : 'toast';
   return {
@@ -318,6 +329,7 @@ const normalizeHistoryEntry = (entry = {}) => {
     body: normalizeString(entry.body),
     createdAtUtcMs: normalizeInt(entry.createdAtUtcMs, Date.now()),
     marker: normalizeHistoryMarker(entry.marker),
+    action: normalizeHistoryAction(entry.action),
   };
 };
 
@@ -421,7 +433,7 @@ const appendHistoryEntry = async (entryInput) => {
   });
 };
 
-const appendSystemHistoryEntry = async (kind, title, body, dailyId) => {
+const appendSystemHistoryEntry = async (kind, title, body, dailyId, action = null) => {
   return appendHistoryEntry({
     source: 'system',
     kind,
@@ -430,6 +442,7 @@ const appendSystemHistoryEntry = async (kind, title, body, dailyId) => {
     createdAtUtcMs: Date.now(),
     marker: HISTORY_MARKERS.UNREAD,
     dailyId,
+    action: normalizeHistoryAction(action),
   });
 };
 
@@ -755,6 +768,22 @@ self.addEventListener('message', (event) => {
     const body = normalizeString(payload.body);
     if (!title && !body) return;
     event.waitUntil(appendToastHistoryEntry(title, body));
+    return;
+  }
+
+  if (data.type === 'SW_APPEND_SYSTEM_HISTORY') {
+    const payload = data.payload && typeof data.payload === 'object' ? data.payload : {};
+    const kind = normalizeString(payload.kind, 'system');
+    const title = normalizeString(payload.title);
+    const body = normalizeString(payload.body);
+    if (!title && !body) return;
+    event.waitUntil(appendSystemHistoryEntry(
+      kind,
+      title,
+      body,
+      normalizeString(payload.dailyId),
+      normalizeHistoryAction(payload.action),
+    ));
     return;
   }
 

@@ -54,6 +54,15 @@ export default {
     "notificationNewLevelTitle": "Neues tägliches Level verfügbar",
     "notificationNewLevelBody": "Ein neues tägliches Level ist spielbereit.",
     "notificationHistoryEmpty": "Noch keine Benachrichtigungen.",
+    "autoUpdate": "Automatisches Update",
+    "autoUpdateEnable": "Automatisches Update aktivieren",
+    "newVersionAvailableTitle": "Neue Version verfügbar",
+    "newVersionAvailableBody": "Tippe, um auf die neueste Version zu aktualisieren.",
+    "newVersionAvailableToast": "Eine neue Version ist verfügbar.",
+    "updateApplyDialogTitle": "Update verfügbar",
+    "updateApplyDialogPrompt": "Jetzt die neueste Version installieren?",
+    "updateApplyDialogConfirm": "Jetzt aktualisieren",
+    "updateApplyFailedToast": "Das Update konnte noch nicht angewendet werden. Bitte gleich noch einmal versuchen.",
     "updateAppliedToast": "Auf die neueste Version aktualisiert."
   },
   "goal": {

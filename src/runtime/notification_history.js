@@ -20,6 +20,17 @@ const asFiniteInt = (value, fallback = null) => {
   return parsed;
 };
 
+export const normalizeHistoryAction = (action) => {
+  if (!action || typeof action !== 'object') return null;
+  if (action.type !== 'apply-update') return null;
+  const buildNumber = asFiniteInt(action.buildNumber, null);
+  if (!Number.isInteger(buildNumber) || buildNumber <= 0) return null;
+  return {
+    type: 'apply-update',
+    buildNumber,
+  };
+};
+
 export const hasUnreadSystemHistory = (entries = []) =>
   Array.isArray(entries)
   && entries.some((entry) => entry && entry.source === 'system' && entry.marker === 'unread');

@@ -6,6 +6,7 @@ import {
   getHistoryDeathFadeRank,
   hasUnreadSystemHistory,
   historyEntryDotColor,
+  normalizeHistoryAction,
 } from '../../src/runtime/notification_history.js';
 
 test('hasUnreadSystemHistory only reflects unread system entries', () => {
@@ -28,6 +29,21 @@ test('historyEntryDotColor applies source rules for all marker states', () => {
   assert.equal(historyEntryDotColor({ source: 'toast', marker: 'just-read' }), HISTORY_DOT_COLORS.BLUE);
   assert.equal(historyEntryDotColor({ source: 'toast', marker: 'older' }), HISTORY_DOT_COLORS.BLUE);
   assert.equal(historyEntryDotColor({ source: 'unknown', marker: 'older' }), HISTORY_DOT_COLORS.NONE);
+});
+
+test('normalizeHistoryAction accepts apply-update action with valid build number', () => {
+  assert.deepEqual(
+    normalizeHistoryAction({ type: 'apply-update', buildNumber: 123 }),
+    { type: 'apply-update', buildNumber: 123 },
+  );
+});
+
+test('normalizeHistoryAction rejects invalid action payloads', () => {
+  assert.equal(normalizeHistoryAction(null), null);
+  assert.equal(normalizeHistoryAction({}), null);
+  assert.equal(normalizeHistoryAction({ type: 'apply-update' }), null);
+  assert.equal(normalizeHistoryAction({ type: 'other', buildNumber: 123 }), null);
+  assert.equal(normalizeHistoryAction({ type: 'apply-update', buildNumber: 0 }), null);
 });
 
 test('getHistoryDeathFadeRank only marks oldest 10 when list is longer than 10', () => {

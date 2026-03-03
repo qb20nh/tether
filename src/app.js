@@ -19,6 +19,7 @@ import {
   getHistoryDeathFadeRank,
   hasUnreadSystemHistory,
   historyEntryDotColor,
+  normalizeHistoryAction,
 } from './runtime/notification_history.js';
 
 const BUILD_NUMBER_META_NAME = 'tether-build-number';
@@ -41,6 +42,7 @@ const SW_MESSAGE_TYPES = Object.freeze({
   RUN_DAILY_CHECK: 'SW_RUN_DAILY_CHECK',
   GET_HISTORY: 'SW_GET_NOTIFICATION_HISTORY',
   APPEND_TOAST_HISTORY: 'SW_APPEND_TOAST_HISTORY',
+  APPEND_SYSTEM_HISTORY: 'SW_APPEND_SYSTEM_HISTORY',
   MARK_HISTORY_READ: 'SW_MARK_NOTIFICATION_HISTORY_READ',
   HISTORY_UPDATE: 'SW_NOTIFICATION_HISTORY',
 });
@@ -48,6 +50,8 @@ const SW_MESSAGE_TYPES = Object.freeze({
 const NOTIFICATION_AUTO_PROMPT_KEY = 'tetherNotificationAutoPromptDecision';
 const NOTIFICATION_ENABLED_KEY = 'tetherNotificationsEnabled';
 const PATH_PREDICTION_ENABLED_KEY = 'tetherPathPredictionEnabled';
+const AUTO_UPDATE_ENABLED_KEY = 'tetherAutoUpdateEnabled';
+const LAST_NOTIFIED_REMOTE_BUILD_KEY = 'tetherLastNotifiedRemoteBuildNumber';
 const NOTIFICATION_AUTO_PROMPT_DECISIONS = Object.freeze({
   UNSET: 'unset',
   ACCEPTED: 'accepted',
@@ -64,6 +68,8 @@ let lastUpdateCheckAtMs = 0;
 let promptedRemoteBuildNumbers = new Set();
 let notificationsToggleEl = null;
 let notificationsToggleBound = false;
+let autoUpdateToggleEl = null;
+let autoUpdateToggleBound = false;
 let pathPredictionToggleEl = null;
 let pathPredictionToggleBound = false;
 let notificationHistoryToggleEl = null;
@@ -76,6 +82,10 @@ let notificationHistoryRefreshTimer = 0;
 let notificationHistoryReadAckInFlight = false;
 let notificationHistoryReadAckVersion = null;
 let notificationHistoryValidationFrame = 0;
+let updateApplyDialogEl = null;
+let updateApplyMessageEl = null;
+let updateApplyDialogBound = false;
+const notifiedRemoteBuildNumbers = new Set();
 let swMessageListenerBound = false;
 const pendingSwMessages = [];
 const notificationHistoryState = {
@@ -271,6 +281,42 @@ const writePathPredictionEnabledPreference = (enabled) => {
   }
 };
 
+const readAutoUpdateEnabledPreference = () => {
+  try {
+    return window.localStorage.getItem(AUTO_UPDATE_ENABLED_KEY) === 'true';
+  } catch {
+    // localStorage can be unavailable in restricted browser contexts.
+  }
+  return false;
+};
+
+const writeAutoUpdateEnabledPreference = (enabled) => {
+  try {
+    window.localStorage.setItem(AUTO_UPDATE_ENABLED_KEY, enabled ? 'true' : 'false');
+  } catch {
+    // localStorage can be unavailable in restricted browser contexts.
+  }
+};
+
+const readLastNotifiedRemoteBuildNumber = () => {
+  try {
+    const parsed = Number.parseInt(window.localStorage.getItem(LAST_NOTIFIED_REMOTE_BUILD_KEY) || '', 10);
+    return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+  } catch {
+    // localStorage can be unavailable in restricted browser contexts.
+  }
+  return null;
+};
+
+const writeLastNotifiedRemoteBuildNumber = (buildNumber) => {
+  if (!Number.isInteger(buildNumber) || buildNumber <= 0) return;
+  try {
+    window.localStorage.setItem(LAST_NOTIFIED_REMOTE_BUILD_KEY, String(buildNumber));
+  } catch {
+    // localStorage can be unavailable in restricted browser contexts.
+  }
+};
+
 const hasStoredNotificationEnabledPreference = () => {
   try {
     return window.localStorage.getItem(NOTIFICATION_ENABLED_KEY) !== null;
@@ -296,6 +342,11 @@ const refreshNotificationsToggleUi = () => {
 const refreshPathPredictionToggleUi = () => {
   if (!pathPredictionToggleEl) return;
   pathPredictionToggleEl.checked = readPathPredictionEnabledPreference();
+};
+
+const refreshAutoUpdateToggleUi = () => {
+  if (!autoUpdateToggleEl) return;
+  autoUpdateToggleEl.checked = readAutoUpdateEnabledPreference();
 };
 
 const translateNow = (key, vars = {}) => createTranslator(getLocale())(key, vars);
@@ -462,6 +513,23 @@ const bindNotificationsToggle = () => {
   refreshNotificationsToggleUi();
 };
 
+const bindAutoUpdateToggle = () => {
+  autoUpdateToggleEl = document.getElementById(ELEMENT_IDS.AUTO_UPDATE_TOGGLE);
+
+  if (!autoUpdateToggleEl || autoUpdateToggleBound) {
+    refreshAutoUpdateToggleUi();
+    return;
+  }
+
+  autoUpdateToggleEl.addEventListener('change', () => {
+    writeAutoUpdateEnabledPreference(autoUpdateToggleEl.checked);
+    refreshAutoUpdateToggleUi();
+  });
+
+  autoUpdateToggleBound = true;
+  refreshAutoUpdateToggleUi();
+};
+
 const bindPathPredictionToggle = () => {
   pathPredictionToggleEl = document.getElementById(ELEMENT_IDS.PATH_PREDICTION_TOGGLE);
 
@@ -491,6 +559,7 @@ const normalizeHistoryEntry = (entry) => {
   const marker = entry.marker === 'unread' || entry.marker === 'just-read' || entry.marker === 'older'
     ? entry.marker
     : 'older';
+  const action = normalizeHistoryAction(entry.action);
   return {
     id,
     source,
@@ -499,6 +568,7 @@ const normalizeHistoryEntry = (entry) => {
     body,
     createdAtUtcMs: Number.isInteger(createdAtUtcMs) ? createdAtUtcMs : Date.now(),
     marker,
+    action,
   };
 };
 
@@ -559,6 +629,14 @@ const renderNotificationHistoryList = () => {
     row.className = 'notificationHistoryItem';
     row.setAttribute('data-entry-id', entry.id);
     row.setAttribute('data-created-at', String(entry.createdAtUtcMs));
+    row.removeAttribute('data-action-type');
+    row.removeAttribute('data-action-build-number');
+
+    if (entry.action) {
+      row.classList.add('isActionable');
+      row.setAttribute('data-action-type', entry.action.type);
+      row.setAttribute('data-action-build-number', String(entry.action.buildNumber));
+    }
 
     const deathRank = getHistoryDeathFadeRank(i, entries.length, HISTORY_DYING_TAIL_SIZE);
     if (deathRank >= 0) {
@@ -714,6 +792,47 @@ const refreshNotificationHistoryUi = () => {
   }
 };
 
+const resolveUpdateApplyDialogPromptText = (buildNumber = null) => {
+  const prompt = translateNow('ui.updateApplyDialogPrompt');
+  if (prompt !== 'ui.updateApplyDialogPrompt') return prompt;
+  if (Number.isInteger(buildNumber) && buildNumber > 0) {
+    return `Install build ${buildNumber}?`;
+  }
+  return 'Install the latest version now?';
+};
+
+const openUpdateApplyDialog = (buildNumber) => {
+  if (!Number.isInteger(buildNumber) || buildNumber <= 0) return;
+  if (!updateApplyDialogEl || typeof updateApplyDialogEl.showModal !== 'function') {
+    if (window.confirm(resolveUpdateApplyDialogPromptText(buildNumber))) {
+      void applyUpdateForBuild(buildNumber, { force: true, toastOnFailure: true });
+    }
+    return;
+  }
+  if (updateApplyDialogEl.open) return;
+  updateApplyDialogEl.dataset.pendingBuildNumber = String(buildNumber);
+  if (updateApplyMessageEl) {
+    updateApplyMessageEl.textContent = resolveUpdateApplyDialogPromptText(buildNumber);
+  }
+  try {
+    updateApplyDialogEl.showModal();
+  } catch {
+    delete updateApplyDialogEl.dataset.pendingBuildNumber;
+  }
+};
+
+const handleNotificationHistoryItemAction = (event) => {
+  const target = event.target;
+  if (!(target instanceof Element)) return;
+  const row = target.closest('.notificationHistoryItem');
+  if (!row || !notificationHistoryListEl?.contains(row)) return;
+  const actionType = row.getAttribute('data-action-type') || '';
+  if (actionType !== 'apply-update') return;
+  const buildNumber = Number.parseInt(row.getAttribute('data-action-build-number') || '', 10);
+  if (!Number.isInteger(buildNumber) || buildNumber <= 0) return;
+  openUpdateApplyDialog(buildNumber);
+};
+
 const bindNotificationHistoryPanel = () => {
   notificationHistoryToggleEl = document.getElementById(ELEMENT_IDS.NOTIFICATION_HISTORY_TOGGLE);
   notificationHistoryBadgeEl = document.getElementById(ELEMENT_IDS.NOTIFICATION_HISTORY_BADGE);
@@ -728,6 +847,7 @@ const bindNotificationHistoryPanel = () => {
   notificationHistoryToggleEl.addEventListener('click', () => {
     toggleNotificationHistoryPanel();
   });
+  notificationHistoryListEl.addEventListener('click', handleNotificationHistoryItemAction);
 
   const settingsToggle = document.getElementById(ELEMENT_IDS.SETTINGS_TOGGLE);
   if (settingsToggle) {
@@ -740,6 +860,7 @@ const bindNotificationHistoryPanel = () => {
     if (!notificationHistoryOpen) return;
     const target = event.target;
     if (!(target instanceof Node)) return;
+    if (updateApplyDialogEl?.open && updateApplyDialogEl.contains(target)) return;
     if (notificationHistoryToggleEl.contains(target) || notificationHistoryPanelEl.contains(target)) return;
     closeNotificationHistoryPanel();
   });
@@ -753,6 +874,25 @@ const bindNotificationHistoryPanel = () => {
 
   notificationHistoryToggleBound = true;
   refreshNotificationHistoryUi();
+};
+
+const bindUpdateApplyDialog = () => {
+  updateApplyDialogEl = document.getElementById(ELEMENT_IDS.UPDATE_APPLY_DIALOG);
+  updateApplyMessageEl = document.getElementById(ELEMENT_IDS.UPDATE_APPLY_MESSAGE);
+
+  if (!updateApplyDialogEl || updateApplyDialogBound) return;
+
+  updateApplyDialogEl.addEventListener('close', () => {
+    const buildNumber = Number.parseInt(updateApplyDialogEl?.dataset?.pendingBuildNumber || '', 10);
+    const shouldApply = updateApplyDialogEl?.returnValue === 'confirm';
+    delete updateApplyDialogEl.dataset.pendingBuildNumber;
+    updateApplyDialogEl.returnValue = '';
+    if (!shouldApply) return;
+    if (!Number.isInteger(buildNumber) || buildNumber <= 0) return;
+    void applyUpdateForBuild(buildNumber, { force: true, toastOnFailure: true });
+  });
+
+  updateApplyDialogBound = true;
 };
 
 const bindServiceWorkerHistoryMessages = () => {
@@ -1023,22 +1163,91 @@ const waitForWaitingWorker = (registration, timeoutMs = 8000) =>
     cleanups.push(() => window.clearTimeout(timer));
   });
 
-const maybeApplyUpdate = async (remoteBuildNumber) => {
-  if (!swRegistration) return;
-  if (promptedRemoteBuildNumbers.has(remoteBuildNumber)) return;
+const resolveNewVersionToastText = () => {
+  const localized = translateNow('ui.newVersionAvailableToast');
+  if (localized !== 'ui.newVersionAvailableToast') return localized;
+  return 'A new version is available.';
+};
+
+const resolveNewVersionTitleText = () => {
+  const localized = translateNow('ui.newVersionAvailableTitle');
+  if (localized !== 'ui.newVersionAvailableTitle') return localized;
+  return 'New version available';
+};
+
+const resolveNewVersionBodyText = () => {
+  const localized = translateNow('ui.newVersionAvailableBody');
+  if (localized !== 'ui.newVersionAvailableBody') return localized;
+  return 'Tap to update to the latest version.';
+};
+
+const resolveUpdateApplyFailureToastText = () => {
+  const localized = translateNow('ui.updateApplyFailedToast');
+  if (localized !== 'ui.updateApplyFailedToast') return localized;
+  return 'Could not apply update yet. Try again shortly.';
+};
+
+const hasNotifiedRemoteBuild = (remoteBuildNumber) => {
+  if (!Number.isInteger(remoteBuildNumber) || remoteBuildNumber <= 0) return true;
+  if (notifiedRemoteBuildNumbers.has(remoteBuildNumber)) return true;
+  const stored = readLastNotifiedRemoteBuildNumber();
+  return Number.isInteger(stored) && stored >= remoteBuildNumber;
+};
+
+const markRemoteBuildNotified = (remoteBuildNumber) => {
+  if (!Number.isInteger(remoteBuildNumber) || remoteBuildNumber <= 0) return;
+  notifiedRemoteBuildNumbers.add(remoteBuildNumber);
+  writeLastNotifiedRemoteBuildNumber(remoteBuildNumber);
+};
+
+const notifyUpdateAvailable = async (remoteBuildNumber) => {
+  if (!Number.isInteger(remoteBuildNumber) || remoteBuildNumber <= localBuildNumber) return;
+  if (hasNotifiedRemoteBuild(remoteBuildNumber)) return;
+
+  markRemoteBuildNotified(remoteBuildNumber);
+  showInAppToast(resolveNewVersionToastText(), { recordInHistory: false });
+  await postMessageToServiceWorker({
+    type: SW_MESSAGE_TYPES.APPEND_SYSTEM_HISTORY,
+    payload: {
+      kind: 'new-version-available',
+      title: resolveNewVersionTitleText(),
+      body: resolveNewVersionBodyText(),
+      action: {
+        type: 'apply-update',
+        buildNumber: remoteBuildNumber,
+      },
+    },
+  }, { queueWhenUnavailable: true });
+};
+
+const maybeApplyUpdate = async (remoteBuildNumber, options = {}) => {
+  const { force = false } = options;
+  if (!swRegistration) return false;
+  if (!force && promptedRemoteBuildNumbers.has(remoteBuildNumber)) return false;
 
   try {
     await swRegistration.update();
   } catch {
-    return;
+    return false;
   }
 
   const waitingWorker = await waitForWaitingWorker(swRegistration);
-  if (!waitingWorker) return;
+  if (!waitingWorker) return false;
 
   promptedRemoteBuildNumbers.add(remoteBuildNumber);
   armControllerChangeReload();
   waitingWorker.postMessage({ type: 'SW_SKIP_WAITING' });
+  return true;
+};
+
+const applyUpdateForBuild = async (remoteBuildNumber, options = {}) => {
+  const { force = false, toastOnFailure = false } = options;
+  if (!Number.isInteger(remoteBuildNumber) || remoteBuildNumber <= localBuildNumber) return false;
+  const applied = await maybeApplyUpdate(remoteBuildNumber, { force });
+  if (!applied && toastOnFailure) {
+    showInAppToast(resolveUpdateApplyFailureToastText(), { recordInHistory: false });
+  }
+  return applied;
 };
 
 const checkForNewBuild = async ({ force = false } = {}) => {
@@ -1054,7 +1263,11 @@ const checkForNewBuild = async ({ force = false } = {}) => {
   try {
     const remoteBuildNumber = await fetchRemoteBuildNumber();
     if (!Number.isInteger(remoteBuildNumber) || remoteBuildNumber <= localBuildNumber) return;
-    await maybeApplyUpdate(remoteBuildNumber);
+    if (readAutoUpdateEnabledPreference()) {
+      await applyUpdateForBuild(remoteBuildNumber);
+      return;
+    }
+    await notifyUpdateAvailable(remoteBuildNumber);
   } finally {
     updateCheckInFlight = false;
   }
@@ -1145,9 +1358,11 @@ export async function initTetherApp() {
     initialLocale,
   );
 
-  bindPathPredictionToggle();
   bindNotificationsToggle();
+  bindAutoUpdateToggle();
+  bindPathPredictionToggle();
   bindNotificationHistoryPanel();
+  bindUpdateApplyDialog();
   bindServiceWorkerHistoryMessages();
   bindServiceWorkerRuntimeEvents();
 
@@ -1167,7 +1382,13 @@ export async function initTetherApp() {
   const setLocaleWithEffects = (locale) => {
     const resolved = setLocaleCore(locale);
     refreshNotificationsToggleUi();
+    refreshAutoUpdateToggleUi();
     refreshNotificationHistoryUi();
+    if (updateApplyMessageEl) {
+      updateApplyMessageEl.textContent = resolveUpdateApplyDialogPromptText(
+        Number.parseInt(updateApplyDialogEl?.dataset?.pendingBuildNumber || '', 10),
+      );
+    }
     void syncDailyStateToServiceWorker();
     return resolved;
   };
@@ -1197,6 +1418,7 @@ export async function initTetherApp() {
 
   runtimeInstance.start();
   refreshNotificationsToggleUi();
+  refreshAutoUpdateToggleUi();
   refreshNotificationHistoryUi();
   void mountRuntimePlugins({
     isLocalhostHostname,

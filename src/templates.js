@@ -82,6 +82,13 @@ export const APP_SHELL_TEMPLATE = (t = (k) => k, localeOptions = [], currentLoca
               </label>
             </div>
             <div class="settingsField">
+              <span id="${ELEMENT_IDS.AUTO_UPDATE_LABEL}" class="small" data-i18n="ui.autoUpdate">${t('ui.autoUpdate')}</span>
+              <label class="settingsCheckbox">
+                <input id="${ELEMENT_IDS.AUTO_UPDATE_TOGGLE}" type="checkbox" />
+                <span data-i18n="ui.autoUpdateEnable">${t('ui.autoUpdateEnable')}</span>
+              </label>
+            </div>
+            <div class="settingsField">
               <span id="${ELEMENT_IDS.PATH_PREDICTION_LABEL}" class="small" data-i18n="ui.pathPrediction">${t('ui.pathPrediction')}</span>
               <label class="settingsCheckbox">
                 <input id="${ELEMENT_IDS.PATH_PREDICTION_TOGGLE}" type="checkbox" />
@@ -121,6 +128,40 @@ export const APP_SHELL_TEMPLATE = (t = (k) => k, localeOptions = [], currentLoca
                   <span class="themeSwitchDialog__actionIcon uiIconMaterial" aria-hidden="true">check</span>
                   <span class="themeSwitchDialog__actionText" data-i18n="ui.themeSwitchConfirm">${t(
   'ui.themeSwitchConfirm',
+)}</span>
+                </button>
+              </div>
+            </form>
+          </dialog>
+          <dialog id="${ELEMENT_IDS.UPDATE_APPLY_DIALOG}">
+            <form method="dialog" class="themeSwitchDialog">
+              <div class="themeSwitchDialog__header">
+                <span class="themeSwitchDialog__icon uiIconMaterial" aria-hidden="true">system_update</span>
+                <h3 class="themeSwitchDialog__title" data-i18n="ui.updateApplyDialogTitle">
+                  ${t('ui.updateApplyDialogTitle')}
+                </h3>
+              </div>
+              <p id="${ELEMENT_IDS.UPDATE_APPLY_MESSAGE}" data-i18n="ui.updateApplyDialogPrompt">${t('ui.updateApplyDialogPrompt')}</p>
+              <div class="themeSwitchDialog__actions">
+                <button
+                  id="${ELEMENT_IDS.UPDATE_APPLY_CANCEL_BTN}"
+                  value="cancel"
+                  formmethod="dialog"
+                  type="submit"
+                  class="themeSwitchDialog__actionBtn themeSwitchDialog__actionBtn--no"
+                >
+                  <span class="themeSwitchDialog__actionIcon uiIconMaterial" aria-hidden="true">close</span>
+                  <span class="themeSwitchDialog__actionText" data-i18n="ui.cancel">${t('ui.cancel')}</span>
+                </button>
+                <button
+                  id="${ELEMENT_IDS.UPDATE_APPLY_CONFIRM_BTN}"
+                  value="confirm"
+                  type="submit"
+                  class="themeSwitchDialog__actionBtn themeSwitchDialog__actionBtn--yes"
+                >
+                  <span class="themeSwitchDialog__actionIcon uiIconMaterial" aria-hidden="true">check</span>
+                  <span class="themeSwitchDialog__actionText" data-i18n="ui.updateApplyDialogConfirm">${t(
+  'ui.updateApplyDialogConfirm',
 )}</span>
                 </button>
               </div>

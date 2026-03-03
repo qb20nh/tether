@@ -54,6 +54,15 @@ export default {
     "notificationNewLevelTitle": "مستوى يومي جديد متاح",
     "notificationNewLevelBody": "هناك مستوى يومي جديد جاهز للعب.",
     "notificationHistoryEmpty": "لا توجد إشعارات بعد.",
+    "autoUpdate": "التحديث التلقائي",
+    "autoUpdateEnable": "تفعيل التحديث التلقائي",
+    "newVersionAvailableTitle": "يتوفر إصدار جديد",
+    "newVersionAvailableBody": "اضغط للتحديث إلى أحدث إصدار.",
+    "newVersionAvailableToast": "يتوفر إصدار جديد.",
+    "updateApplyDialogTitle": "يتوفر تحديث",
+    "updateApplyDialogPrompt": "هل تريد تثبيت أحدث إصدار الآن؟",
+    "updateApplyDialogConfirm": "حدّث الآن",
+    "updateApplyFailedToast": "تعذر تطبيق التحديث الآن. حاول مرة أخرى بعد قليل.",
     "updateAppliedToast": "تم التحديث إلى أحدث إصدار."
   },
   "goal": {

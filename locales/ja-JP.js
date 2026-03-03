@@ -54,6 +54,15 @@ export default {
     "notificationNewLevelTitle": "新しいデイリーレベルが利用可能です",
     "notificationNewLevelBody": "新しいデイリーレベルをプレイできます。",
     "notificationHistoryEmpty": "まだ通知はありません。",
+    "autoUpdate": "自動更新",
+    "autoUpdateEnable": "自動更新を有効にする",
+    "newVersionAvailableTitle": "新しいバージョンがあります",
+    "newVersionAvailableBody": "タップして最新バージョンに更新できます。",
+    "newVersionAvailableToast": "新しいバージョンがあります。",
+    "updateApplyDialogTitle": "更新の案内",
+    "updateApplyDialogPrompt": "今すぐ最新バージョンをインストールしますか？",
+    "updateApplyDialogConfirm": "今すぐ更新",
+    "updateApplyFailedToast": "更新をまだ適用できません。しばらくしてから再試行してください。",
     "updateAppliedToast": "最新バージョンに更新されました。"
   },
   "goal": {

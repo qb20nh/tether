@@ -329,6 +329,10 @@ header h1.brandTitle {
   background: color-mix(in srgb, var(--panel2), transparent 10%);
 }
 
+.notificationHistoryItem.isActionable {
+  cursor: pointer;
+}
+
 .notificationHistoryItem__dot {
   inline-size: 8px;
   block-size: 8px;
@@ -453,7 +457,8 @@ header h1.brandTitle {
   transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
 }
 
-[id='themeSwitchDialog'] {
+[id='themeSwitchDialog'],
+[id='updateApplyDialog'] {
   position: fixed;
   inset: 0;
   margin: auto;
@@ -466,7 +471,8 @@ header h1.brandTitle {
   box-shadow: 0 12px 40px var(--panel-shadow);
 }
 
-[id='themeSwitchDialog']::backdrop {
+[id='themeSwitchDialog']::backdrop,
+[id='updateApplyDialog']::backdrop {
   background: rgba(0, 0, 0, 0.45);
 }
 
