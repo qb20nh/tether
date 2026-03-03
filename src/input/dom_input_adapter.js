@@ -212,9 +212,11 @@ export function createDomInputAdapter() {
       dragMode = 'path';
       pathDrag = {
         side: 'end',
+        applyPathCommands: true,
         moved: false,
         origin: { r: cell.r, c: cell.c },
         lastCursorKey: `${cell.r},${cell.c}`,
+        lastHoverKey: `${cell.r},${cell.c}`,
         prediction: {
           samples: [{ x: e.clientX, y: e.clientY, t: e.timeStamp }],
           emaErrorPx: 0,
@@ -237,13 +239,40 @@ export function createDomInputAdapter() {
     const head = snapshot.path[0];
     const isTail = tail.r === cell.r && tail.c === cell.c;
     const isHead = head.r === cell.r && head.c === cell.c;
-    if (!isTail && !isHead) return;
+    if (!isTail && !isHead) {
+      pathDrag = {
+        side: null,
+        applyPathCommands: false,
+        moved: false,
+        origin: { r: cell.r, c: cell.c },
+        lastCursorKey: `${cell.r},${cell.c}`,
+        lastHoverKey: `${cell.r},${cell.c}`,
+        prediction: {
+          samples: [{ x: e.clientX, y: e.clientY, t: e.timeStamp }],
+          emaErrorPx: 0,
+          lastPredictedClient: null,
+        },
+      };
+      dragGridMetrics = captureGridMetrics(snapshot);
+      dragMode = 'path';
+      activePointerId = e.pointerId;
+      refs.gridEl.setPointerCapture(e.pointerId);
+      sendInteractionUpdate(INTERACTION_UPDATES.PATH_DRAG, {
+        isPathDragging: true,
+        pathDragSide: null,
+        pathDragCursor: { r: cell.r, c: cell.c },
+      });
+      e.preventDefault();
+      return;
+    }
 
     pathDrag = {
       side: isHead ? 'start' : 'end',
+      applyPathCommands: true,
       moved: false,
       origin: { r: cell.r, c: cell.c },
       lastCursorKey: `${cell.r},${cell.c}`,
+      lastHoverKey: `${cell.r},${cell.c}`,
       prediction: {
         samples: [{ x: e.clientX, y: e.clientY, t: e.timeStamp }],
         emaErrorPx: 0,
@@ -270,6 +299,7 @@ export function createDomInputAdapter() {
       if (e.cancelable) e.preventDefault();
       let pointerClientX = e.clientX;
       let pointerClientY = e.clientY;
+      const snapshotForInput = pathDrag ? readSnapshot() : null;
 
       if (pathDrag) {
         if (!pathDrag.prediction) {
@@ -303,12 +333,26 @@ export function createDomInputAdapter() {
           predictionState.emaErrorPx = 0;
           predictionState.lastPredictedClient = null;
         }
+
+        const hoverMetrics = dragGridMetrics || captureGridMetrics(snapshotForInput);
+        if (hoverMetrics) dragGridMetrics = hoverMetrics;
+        const hoverCell = snapWallCellFromPoint(e.clientX, e.clientY, snapshotForInput, hoverMetrics);
+        const hoverKey = hoverCell ? `${hoverCell.r},${hoverCell.c}` : '';
+        if (pathDrag.lastHoverKey !== hoverKey) {
+          pathDrag.lastHoverKey = hoverKey;
+          sendInteractionUpdate(INTERACTION_UPDATES.PATH_DRAG, {
+            isPathDragging: true,
+            pathDragSide: pathDrag.side,
+            pathDragCursor: hoverCell ? { r: hoverCell.r, c: hoverCell.c } : null,
+          });
+        }
       }
+
+      if (pathDrag && !pathDrag.applyPathCommands) return;
 
       let cell = cellFromPoint(pointerClientX, pointerClientY);
 
-      if (pathDrag) {
-        const snapshotForInput = readSnapshot();
+      if (pathDrag && snapshotForInput) {
         const headNode = pathDrag.side === 'start'
           ? snapshotForInput.path[0]
           : snapshotForInput.path[snapshotForInput.path.length - 1];
@@ -375,11 +419,6 @@ export function createDomInputAdapter() {
       }
 
       if (pathDrag) pathDrag.lastCursorKey = cursorKey;
-      sendInteractionUpdate(INTERACTION_UPDATES.PATH_DRAG, {
-        isPathDragging: true,
-        pathDragSide: pathDrag?.side || null,
-        pathDragCursor: { r: cell.r, c: cell.c },
-      });
       return;
     }
 
@@ -418,6 +457,7 @@ export function createDomInputAdapter() {
   const onPointerUp = (e) => {
     if (activePointerId === null || e.pointerId !== activePointerId) return;
     const finalMode = dragMode;
+    const shouldFinalizePath = finalMode === 'path' && Boolean(pathDrag?.applyPathCommands);
     const wallMoveFrom = wallDrag?.from || null;
     const wallMoveTo = wallDrag?.hover || null;
 
@@ -446,7 +486,7 @@ export function createDomInputAdapter() {
       });
     }
 
-    if (finalMode === 'path') {
+    if (shouldFinalizePath) {
       sendGameCommand(GAME_COMMANDS.FINALIZE_PATH, {});
     }
 

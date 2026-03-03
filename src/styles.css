@@ -1041,7 +1041,7 @@ button:disabled:active {
   box-shadow: 0 0 0 var(--cell-shadow-2) rgba(255, 255, 255, 0.10) inset;
 }
 
-.cell:active {
+body:not(.isPathDragging) .cell:active {
   box-shadow: 0 0 0 var(--cell-shadow-2) rgba(255, 255, 255, 0.14) inset;
 }
 
@@ -1248,6 +1248,7 @@ button:disabled:active {
   transform: scale(0.95);
   transform-origin: center;
   transition: transform 120ms ease-out;
+  box-shadow: 0 0 0 var(--cell-shadow-2) rgba(255, 255, 255, 0.14) inset;
 }
 
 body.isPathDragging .cell.pathTipDragHover.pathStart:active,
@@ -1255,21 +1256,21 @@ body.isPathDragging .cell.pathTipDragHover.pathEnd:active {
   transform: scale(0.95);
 }
 
-.cell.pathStart:active,
-.cell.pathEnd:active {
+body:not(.isPathDragging) .cell.pathStart:active,
+body:not(.isPathDragging) .cell.pathEnd:active {
   z-index: 3;
   cursor: grabbing;
   transform: translateY(1px);
   --interactive-corner-color: rgba(120, 190, 255, 1);
 }
 
-.cell.pathStart:active {
+body:not(.isPathDragging) .cell.pathStart:active {
   box-shadow:
     0 0 0 var(--cell-shadow-3) rgba(120, 190, 255, 0.34) inset,
     0 0 0 var(--cell-shadow-2) rgba(120, 190, 255, 0.30);
 }
 
-.cell.pathEnd:active {
+body:not(.isPathDragging) .cell.pathEnd:active {
   box-shadow:
     0 0 0 var(--cell-shadow-3) rgba(120, 190, 255, 0.34) inset,
     0 0 0 var(--cell-shadow-2) rgba(120, 190, 255, 0.30);
@@ -1316,8 +1317,8 @@ body.isPathDragging .cell.pathTipDragHover.pathEnd:active {
   --interactive-corner-color: rgba(29, 78, 216, 1);
 }
 
-.theme-light .cell.pathStart:active,
-.theme-light .cell.pathEnd:active {
+.theme-light body:not(.isPathDragging) .cell.pathStart:active,
+.theme-light body:not(.isPathDragging) .cell.pathEnd:active {
   box-shadow:
     0 0 0 var(--cell-shadow-3) rgba(29, 78, 216, 0.4) inset,
     0 0 0 var(--cell-shadow-2) rgba(29, 78, 216, 0.38);

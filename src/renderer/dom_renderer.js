@@ -2,6 +2,7 @@ import {
   cacheElements,
   buildGrid,
   updateCells,
+  syncPathTipDragHoverCell,
   setLegendIcons,
   resizeCanvas,
   notifyInteractiveResize,
@@ -193,6 +194,7 @@ export function createDomRenderer(options = {}) {
       hideWallDragGhost();
     }
 
+    syncPathTipDragHoverCell(interactionModel);
     setDraggingBodyClasses(interactionModel);
   };
 

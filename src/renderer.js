@@ -3276,7 +3276,7 @@ const clearPathTipDragHoverCell = () => {
   lastPathTipDragHoverCell = null;
 };
 
-const applyPathTipDragHoverCell = (snapshot, interactionModel = null) => {
+export const syncPathTipDragHoverCell = (interactionModel = null, cells = gridCells) => {
   clearPathTipDragHoverCell();
   if (!interactionModel?.isPathDragging) return;
   const cursor = interactionModel.pathDragCursor;
@@ -3284,8 +3284,9 @@ const applyPathTipDragHoverCell = (snapshot, interactionModel = null) => {
   const cursorC = Number(cursor?.c);
   if (!Number.isInteger(cursorR) || !Number.isInteger(cursorC)) return;
 
-  const cell = gridCells[cursorR]?.[cursorC];
+  const cell = cells[cursorR]?.[cursorC];
   if (!cell) return;
+  if (cell.classList.contains('wall')) return;
   cell.classList.add('pathTipDragHover');
   lastPathTipDragHoverCell = cell;
 };
@@ -3403,7 +3404,7 @@ export function updateCells(
       }
     }
   }
-  applyPathTipDragHoverCell(snapshot, interactionModel);
+  syncPathTipDragHoverCell(interactionModel);
   latestInteractionModel = interactionModel;
 
   drawAll(
