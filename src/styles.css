@@ -1244,7 +1244,8 @@ body:not(.isPathDragging) .cell:active {
   --interactive-corner-color: rgba(120, 190, 255, 1);
 }
 
-.cell.pathTipDragHover {
+body.isPathDragging .cell.pathTipDragHover,
+body.isPathDragging .cell:not(.wall):hover {
   transform: scale(0.95);
   transform-origin: center;
   transition: transform 120ms ease-out;

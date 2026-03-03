@@ -38,6 +38,9 @@ jobs:
         
       - name: Build
         run: npm run build
+
+      - name: Verify PWA build artifact
+        run: node scripts/verify_pages_pwa_build.js
         
       - name: Setup Pages
         uses: actions/configure-pages@v4
