@@ -593,6 +593,41 @@ const refreshNotificationHistoryBadgeUi = () => {
   notificationHistoryToggleEl.classList.toggle('hasUnread', hasUnreadSystem);
 };
 
+const resolveNotificationHistoryEntryText = (entry) => {
+  let title = entry?.title || '-';
+  let body = entry?.body || '';
+
+  if (!entry || entry.source !== 'system') {
+    return { title, body };
+  }
+
+  if (entry.kind === 'unsolved-warning') {
+    const localizedTitle = translateNow('ui.notificationUnsolvedTitle');
+    const localizedBody = translateNow('ui.notificationUnsolvedBody');
+    if (localizedTitle !== 'ui.notificationUnsolvedTitle') title = localizedTitle;
+    if (localizedBody !== 'ui.notificationUnsolvedBody') body = localizedBody;
+    return { title, body };
+  }
+
+  if (entry.kind === 'new-level') {
+    const localizedTitle = translateNow('ui.notificationNewLevelTitle');
+    const localizedBody = translateNow('ui.notificationNewLevelBody');
+    if (localizedTitle !== 'ui.notificationNewLevelTitle') title = localizedTitle;
+    if (localizedBody !== 'ui.notificationNewLevelBody') body = localizedBody;
+    return { title, body };
+  }
+
+  if (entry.kind === 'new-version-available') {
+    const localizedTitle = translateNow('ui.newVersionAvailableTitle');
+    const localizedBody = translateNow('ui.newVersionAvailableBody');
+    if (localizedTitle !== 'ui.newVersionAvailableTitle') title = localizedTitle;
+    if (localizedBody !== 'ui.newVersionAvailableBody') body = localizedBody;
+    return { title, body };
+  }
+
+  return { title, body };
+};
+
 const renderNotificationHistoryRelativeTimes = () => {
   if (!notificationHistoryListEl) return;
   const locale = getLocale();
@@ -659,13 +694,15 @@ const renderNotificationHistoryList = () => {
     const content = document.createElement('div');
     content.className = 'notificationHistoryItem__content';
 
+    const localizedEntry = resolveNotificationHistoryEntryText(entry);
+
     const title = document.createElement('div');
     title.className = 'notificationHistoryItem__title';
-    title.textContent = entry.title || '-';
+    title.textContent = localizedEntry.title;
 
     const body = document.createElement('div');
     body.className = 'notificationHistoryItem__body';
-    body.textContent = entry.body || '';
+    body.textContent = localizedEntry.body;
 
     const time = document.createElement('div');
     time.className = 'notificationHistoryItem__time';
@@ -745,8 +782,9 @@ const validateAndMarkNotificationHistoryRead = async () => {
     const bodyEl = row.querySelector('.notificationHistoryItem__body');
     const timeEl = row.querySelector('.notificationHistoryItem__time');
     if (!titleEl || !bodyEl || !timeEl) return;
-    if (titleEl.textContent !== (entry.title || '-')) return;
-    if (bodyEl.textContent !== (entry.body || '')) return;
+    const localizedEntry = resolveNotificationHistoryEntryText(entry);
+    if (titleEl.textContent !== localizedEntry.title) return;
+    if (bodyEl.textContent !== localizedEntry.body) return;
     if (!timeEl.textContent || !timeEl.textContent.trim()) return;
 
     const style = window.getComputedStyle(row);
