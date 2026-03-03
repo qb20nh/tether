@@ -53,6 +53,7 @@ export default {
     "notificationUnsolvedBody": "Il tuo livello giornaliero non è ancora risolto. Il tempo sta per scadere.",
     "notificationNewLevelTitle": "Nuovo livello giornaliero disponibile",
     "notificationNewLevelBody": "Un nuovo livello giornaliero è pronto da giocare.",
+    "notificationHistoryEmpty": "Nessuna notifica per ora.",
     "updateAppliedToast": "Aggiornato all'ultima versione."
   },
   "goal": {

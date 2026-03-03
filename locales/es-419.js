@@ -53,6 +53,7 @@ export default {
     "notificationUnsolvedBody": "Tu nivel diario sigue sin resolverse. El tiempo se está acabando.",
     "notificationNewLevelTitle": "Nuevo nivel diario disponible",
     "notificationNewLevelBody": "Hay un nuevo nivel diario listo para jugar.",
+    "notificationHistoryEmpty": "Aún no hay notificaciones.",
     "updateAppliedToast": "Actualizado a la versión más reciente."
   },
   "goal": {

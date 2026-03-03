@@ -53,6 +53,7 @@ export default {
     "notificationUnsolvedBody": "今日のデイリーレベルはまだ未クリアです。残り時間が少なくなっています。",
     "notificationNewLevelTitle": "新しいデイリーレベルが利用可能です",
     "notificationNewLevelBody": "新しいデイリーレベルをプレイできます。",
+    "notificationHistoryEmpty": "まだ通知はありません。",
     "updateAppliedToast": "最新バージョンに更新されました。"
   },
   "goal": {

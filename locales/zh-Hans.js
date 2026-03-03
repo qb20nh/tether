@@ -53,6 +53,7 @@ export default {
     "notificationUnsolvedBody": "你的每日关卡仍未解出，剩余时间不多了。",
     "notificationNewLevelTitle": "有新的每日关卡",
     "notificationNewLevelBody": "新的每日关卡已可游玩。",
+    "notificationHistoryEmpty": "暂无通知。",
     "updateAppliedToast": "已更新到最新版本。"
   },
   "goal": {

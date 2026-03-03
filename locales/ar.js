@@ -53,6 +53,7 @@ export default {
     "notificationUnsolvedBody": "ما زال مستوى اليوم غير محلول. الوقت يوشك على النفاد.",
     "notificationNewLevelTitle": "مستوى يومي جديد متاح",
     "notificationNewLevelBody": "هناك مستوى يومي جديد جاهز للعب.",
+    "notificationHistoryEmpty": "لا توجد إشعارات بعد.",
     "updateAppliedToast": "تم التحديث إلى أحدث إصدار."
   },
   "goal": {

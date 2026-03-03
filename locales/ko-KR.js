@@ -53,6 +53,7 @@ export default {
     "notificationUnsolvedBody": "오늘의 데일리 레벨이 아직 미해결 상태입니다. 시간이 얼마 남지 않았습니다.",
     "notificationNewLevelTitle": "새 데일리 레벨이 열렸습니다",
     "notificationNewLevelBody": "새 데일리 레벨을 플레이할 수 있습니다.",
+    "notificationHistoryEmpty": "알림이 아직 없습니다.",
     "updateAppliedToast": "최신 버전으로 업데이트되었습니다."
   },
   "goal": {

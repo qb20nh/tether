@@ -11,6 +11,15 @@ import {
 } from './i18n.js';
 import { createDefaultAdapters } from './runtime/default_adapters.js';
 import { createRuntime } from './runtime/create_runtime.js';
+import { mountRuntimePlugins, resolveServiceWorkerRegistrationUrl } from './plugins/runtime_plugins.js';
+import {
+  HISTORY_DOT_COLORS,
+  formatHistoryAbsoluteTime,
+  formatHistoryRelativeTime,
+  getHistoryDeathFadeRank,
+  hasUnreadSystemHistory,
+  historyEntryDotColor,
+} from './runtime/notification_history.js';
 
 const BUILD_NUMBER_META_NAME = 'tether-build-number';
 const DAILY_PAYLOAD_FILE = 'daily/today.json';
@@ -23,6 +32,18 @@ const DAILY_CHECK_TAG = 'tether-daily-check';
 const LAST_SEEN_BUILD_NUMBER_KEY = 'tetherLastSeenBuildNumber';
 const APP_TOAST_ID = 'appToast';
 const APP_TOAST_VISIBLE_MS = 3200;
+const HISTORY_RELATIVE_TIME_REFRESH_MS = 60 * 1000;
+const HISTORY_DYING_TAIL_SIZE = 10;
+const HISTORY_EMPTY_PLACEHOLDER_TEXT = 'No notifications yet.';
+
+const SW_MESSAGE_TYPES = Object.freeze({
+  SYNC_DAILY_STATE: 'SW_SYNC_DAILY_STATE',
+  RUN_DAILY_CHECK: 'SW_RUN_DAILY_CHECK',
+  GET_HISTORY: 'SW_GET_NOTIFICATION_HISTORY',
+  APPEND_TOAST_HISTORY: 'SW_APPEND_TOAST_HISTORY',
+  MARK_HISTORY_READ: 'SW_MARK_NOTIFICATION_HISTORY_READ',
+  HISTORY_UPDATE: 'SW_NOTIFICATION_HISTORY',
+});
 
 const NOTIFICATION_AUTO_PROMPT_KEY = 'tetherNotificationAutoPromptDecision';
 const NOTIFICATION_ENABLED_KEY = 'tetherNotificationsEnabled';
@@ -45,6 +66,22 @@ let notificationsToggleEl = null;
 let notificationsToggleBound = false;
 let pathPredictionToggleEl = null;
 let pathPredictionToggleBound = false;
+let notificationHistoryToggleEl = null;
+let notificationHistoryBadgeEl = null;
+let notificationHistoryPanelEl = null;
+let notificationHistoryListEl = null;
+let notificationHistoryToggleBound = false;
+let notificationHistoryOpen = false;
+let notificationHistoryRefreshTimer = 0;
+let notificationHistoryReadAckInFlight = false;
+let notificationHistoryReadAckVersion = null;
+let notificationHistoryValidationFrame = 0;
+let swMessageListenerBound = false;
+const pendingSwMessages = [];
+const notificationHistoryState = {
+  historyVersion: 1,
+  entries: [],
+};
 
 const localBuildNumber = (() => {
   const meta = document.querySelector(`meta[name="${BUILD_NUMBER_META_NAME}"]`);
@@ -80,6 +117,13 @@ const latestDailyState = {
   dailySolvedDate: null,
 };
 
+const isLocalhostHostname = (hostname = '') =>
+  hostname === 'localhost'
+  || hostname === '127.0.0.1'
+  || hostname === '[::1]'
+  || hostname === '::1'
+  || hostname.endsWith('.localhost');
+
 const teardownRuntime = () => {
   if (!runtimeInstance) return;
   runtimeInstance.destroy();
@@ -113,8 +157,9 @@ const detectBuildUpgrade = () => {
   return Number.isInteger(previousBuild) && localBuildNumber > previousBuild;
 };
 
-const showInAppToast = (text) => {
+const showInAppToast = (text, options = {}) => {
   if (typeof text !== 'string' || text.trim().length === 0) return;
+  const { recordInHistory = true } = options;
 
   const existing = document.getElementById(APP_TOAST_ID);
   if (existing) existing.remove();
@@ -137,6 +182,16 @@ const showInAppToast = (text) => {
       if (toastEl.parentNode) toastEl.parentNode.removeChild(toastEl);
     }, 220);
   }, APP_TOAST_VISIBLE_MS);
+
+  if (recordInHistory) {
+    void postMessageToServiceWorker({
+      type: SW_MESSAGE_TYPES.APPEND_TOAST_HISTORY,
+      payload: {
+        title: text.trim(),
+        body: '',
+      },
+    }, { queueWhenUnavailable: true });
+  }
 };
 
 const canUseServiceWorker = () =>
@@ -255,21 +310,43 @@ const buildNotificationTextPayload = (locale = getLocale()) => {
   };
 };
 
-const postMessageToServiceWorker = async (message) => {
-  if (!canUseServiceWorker()) return;
+const flushPendingSwMessages = async () => {
+  if (!canUseServiceWorker() || pendingSwMessages.length === 0) return;
+  while (pendingSwMessages.length > 0) {
+    const next = pendingSwMessages.shift();
+    const posted = await postMessageToServiceWorker(next, { queueWhenUnavailable: false });
+    if (posted) continue;
+    pendingSwMessages.unshift(next);
+    break;
+  }
+};
+
+const postMessageToServiceWorker = async (message, options = {}) => {
+  const { queueWhenUnavailable = false } = options;
+  if (!canUseServiceWorker()) return false;
   if (navigator.serviceWorker.controller) {
     navigator.serviceWorker.controller.postMessage(message);
-    return;
+    return true;
   }
-  if (!swRegistration) return;
+  if (!swRegistration) {
+    if (queueWhenUnavailable) pendingSwMessages.push(message);
+    return false;
+  }
   const fallbackWorker = swRegistration.active || swRegistration.waiting || swRegistration.installing;
-  if (fallbackWorker) fallbackWorker.postMessage(message);
+  if (fallbackWorker) {
+    fallbackWorker.postMessage(message);
+    return true;
+  }
+  if (queueWhenUnavailable) {
+    pendingSwMessages.push(message);
+  }
+  return false;
 };
 
 const syncDailyStateToServiceWorker = async () => {
   if (!canUseServiceWorker()) return;
   await postMessageToServiceWorker({
-    type: 'SW_SYNC_DAILY_STATE',
+    type: SW_MESSAGE_TYPES.SYNC_DAILY_STATE,
     payload: {
       dailyId: latestDailyState.dailyId,
       hardInvalidateAtUtcMs: latestDailyState.hardInvalidateAtUtcMs,
@@ -283,7 +360,7 @@ const syncDailyStateToServiceWorker = async () => {
 
 const requestServiceWorkerDailyCheck = async () => {
   if (!canUseServiceWorker()) return;
-  await postMessageToServiceWorker({ type: 'SW_RUN_DAILY_CHECK' });
+  await postMessageToServiceWorker({ type: SW_MESSAGE_TYPES.RUN_DAILY_CHECK });
 };
 
 const registerBackgroundDailyCheck = async () => {
@@ -326,7 +403,7 @@ const enableNotificationsNow = async () => {
     if (permission === 'denied') {
       const deniedText = translateNow('ui.notificationsBlockedToast');
       if (deniedText !== 'ui.notificationsBlockedToast') {
-        showInAppToast(deniedText);
+        showInAppToast(deniedText, { recordInHistory: false });
       }
     }
     refreshNotificationsToggleUi();
@@ -400,6 +477,294 @@ const bindPathPredictionToggle = () => {
 
   pathPredictionToggleBound = true;
   refreshPathPredictionToggleUi();
+};
+
+const normalizeHistoryEntry = (entry) => {
+  if (!entry || typeof entry !== 'object') return null;
+  const id = typeof entry.id === 'string' ? entry.id.trim() : '';
+  if (!id) return null;
+  const source = entry.source === 'system' ? 'system' : 'toast';
+  const kind = typeof entry.kind === 'string' ? entry.kind.trim() : (source === 'system' ? 'unsolved-warning' : 'toast');
+  const title = typeof entry.title === 'string' ? entry.title.trim() : '';
+  const body = typeof entry.body === 'string' ? entry.body.trim() : '';
+  const createdAtUtcMs = Number.parseInt(entry.createdAtUtcMs, 10);
+  const marker = entry.marker === 'unread' || entry.marker === 'just-read' || entry.marker === 'older'
+    ? entry.marker
+    : 'older';
+  return {
+    id,
+    source,
+    kind,
+    title,
+    body,
+    createdAtUtcMs: Number.isInteger(createdAtUtcMs) ? createdAtUtcMs : Date.now(),
+    marker,
+  };
+};
+
+const applyNotificationHistoryPayload = (payload) => {
+  const prevVersion = notificationHistoryState.historyVersion;
+  const historyVersion = Number.parseInt(payload?.historyVersion, 10);
+  const entries = Array.isArray(payload?.entries)
+    ? payload.entries.map((entry) => normalizeHistoryEntry(entry)).filter(Boolean)
+    : [];
+  notificationHistoryState.historyVersion = Number.isInteger(historyVersion) ? historyVersion : 1;
+  notificationHistoryState.entries = entries;
+
+  if (notificationHistoryState.historyVersion !== prevVersion) {
+    notificationHistoryReadAckVersion = null;
+  }
+};
+
+const refreshNotificationHistoryBadgeUi = () => {
+  if (!notificationHistoryToggleEl || !notificationHistoryBadgeEl) return;
+  const hasUnreadSystem = hasUnreadSystemHistory(notificationHistoryState.entries);
+  notificationHistoryBadgeEl.hidden = !hasUnreadSystem;
+  notificationHistoryToggleEl.classList.toggle('hasUnread', hasUnreadSystem);
+};
+
+const renderNotificationHistoryRelativeTimes = () => {
+  if (!notificationHistoryListEl) return;
+  const locale = getLocale();
+  const rows = notificationHistoryListEl.querySelectorAll('.notificationHistoryItem');
+  for (const row of rows) {
+    const tsRaw = row.getAttribute('data-created-at');
+    const createdAtUtcMs = Number.parseInt(tsRaw || '', 10);
+    const timeEl = row.querySelector('.notificationHistoryItem__time');
+    if (!timeEl || !Number.isInteger(createdAtUtcMs)) continue;
+    timeEl.textContent = formatHistoryRelativeTime(createdAtUtcMs, locale);
+    timeEl.setAttribute('title', formatHistoryAbsoluteTime(createdAtUtcMs, locale));
+  }
+};
+
+const renderNotificationHistoryList = () => {
+  if (!notificationHistoryListEl) return;
+  const entries = notificationHistoryState.entries;
+  notificationHistoryListEl.textContent = '';
+
+  if (entries.length === 0) {
+    const placeholder = document.createElement('div');
+    placeholder.className = 'notificationHistoryEmpty';
+    const localized = translateNow('ui.notificationHistoryEmpty');
+    placeholder.textContent = localized === 'ui.notificationHistoryEmpty'
+      ? HISTORY_EMPTY_PLACEHOLDER_TEXT
+      : localized;
+    notificationHistoryListEl.appendChild(placeholder);
+    return;
+  }
+
+  for (let i = 0; i < entries.length; i += 1) {
+    const entry = entries[i];
+    const row = document.createElement('div');
+    row.className = 'notificationHistoryItem';
+    row.setAttribute('data-entry-id', entry.id);
+    row.setAttribute('data-created-at', String(entry.createdAtUtcMs));
+
+    const deathRank = getHistoryDeathFadeRank(i, entries.length, HISTORY_DYING_TAIL_SIZE);
+    if (deathRank >= 0) {
+      row.classList.add('isDying');
+      row.style.setProperty('--death-rank', String(deathRank));
+    }
+
+    const dot = document.createElement('span');
+    dot.className = 'notificationHistoryItem__dot';
+    const dotColor = historyEntryDotColor(entry);
+    if (dotColor === HISTORY_DOT_COLORS.RED) {
+      dot.classList.add('isRed');
+    } else if (dotColor === HISTORY_DOT_COLORS.BLUE) {
+      dot.classList.add('isBlue');
+    }
+    if (entry.marker === 'older') {
+      dot.classList.add('isOlder');
+    }
+
+    const content = document.createElement('div');
+    content.className = 'notificationHistoryItem__content';
+
+    const title = document.createElement('div');
+    title.className = 'notificationHistoryItem__title';
+    title.textContent = entry.title || '-';
+
+    const body = document.createElement('div');
+    body.className = 'notificationHistoryItem__body';
+    body.textContent = entry.body || '';
+
+    const time = document.createElement('div');
+    time.className = 'notificationHistoryItem__time';
+    time.textContent = formatHistoryRelativeTime(entry.createdAtUtcMs, getLocale());
+    time.setAttribute('title', formatHistoryAbsoluteTime(entry.createdAtUtcMs, getLocale()));
+
+    content.appendChild(title);
+    content.appendChild(body);
+    content.appendChild(time);
+    row.appendChild(dot);
+    row.appendChild(content);
+    notificationHistoryListEl.appendChild(row);
+  }
+};
+
+const stopNotificationHistoryRefreshTimer = () => {
+  if (!notificationHistoryRefreshTimer) return;
+  window.clearInterval(notificationHistoryRefreshTimer);
+  notificationHistoryRefreshTimer = 0;
+};
+
+const startNotificationHistoryRefreshTimer = () => {
+  stopNotificationHistoryRefreshTimer();
+  notificationHistoryRefreshTimer = window.setInterval(() => {
+    if (!notificationHistoryOpen) return;
+    renderNotificationHistoryRelativeTimes();
+    void validateAndMarkNotificationHistoryRead();
+  }, HISTORY_RELATIVE_TIME_REFRESH_MS);
+};
+
+const closeNotificationHistoryPanel = () => {
+  notificationHistoryOpen = false;
+  stopNotificationHistoryRefreshTimer();
+  if (!notificationHistoryPanelEl || !notificationHistoryToggleEl) return;
+  notificationHistoryPanelEl.hidden = true;
+  notificationHistoryToggleEl.classList.remove('isOpen');
+  notificationHistoryToggleEl.setAttribute('aria-expanded', 'false');
+};
+
+const openNotificationHistoryPanel = async () => {
+  notificationHistoryOpen = true;
+  if (notificationHistoryPanelEl && notificationHistoryToggleEl) {
+    notificationHistoryPanelEl.hidden = false;
+    notificationHistoryToggleEl.classList.add('isOpen');
+    notificationHistoryToggleEl.setAttribute('aria-expanded', 'true');
+  }
+  startNotificationHistoryRefreshTimer();
+  await postMessageToServiceWorker({ type: SW_MESSAGE_TYPES.GET_HISTORY }, { queueWhenUnavailable: true });
+  renderNotificationHistoryList();
+  refreshNotificationHistoryBadgeUi();
+  void validateAndMarkNotificationHistoryRead();
+};
+
+const toggleNotificationHistoryPanel = () => {
+  if (notificationHistoryOpen) {
+    closeNotificationHistoryPanel();
+    return;
+  }
+  void openNotificationHistoryPanel();
+};
+
+const validateAndMarkNotificationHistoryRead = async () => {
+  if (!notificationHistoryOpen || !notificationHistoryListEl) return;
+  if (notificationHistoryReadAckInFlight) return;
+  if (notificationHistoryReadAckVersion === notificationHistoryState.historyVersion) return;
+
+  const unreadEntries = notificationHistoryState.entries.filter((entry) => entry.marker === 'unread');
+  if (unreadEntries.length === 0) return;
+
+  const entryIds = [];
+  for (const entry of unreadEntries) {
+    const row = Array.from(notificationHistoryListEl.querySelectorAll('.notificationHistoryItem'))
+      .find((candidate) => candidate.getAttribute('data-entry-id') === entry.id);
+    if (!row || !row.isConnected) return;
+
+    const titleEl = row.querySelector('.notificationHistoryItem__title');
+    const bodyEl = row.querySelector('.notificationHistoryItem__body');
+    const timeEl = row.querySelector('.notificationHistoryItem__time');
+    if (!titleEl || !bodyEl || !timeEl) return;
+    if (titleEl.textContent !== (entry.title || '-')) return;
+    if (bodyEl.textContent !== (entry.body || '')) return;
+    if (!timeEl.textContent || !timeEl.textContent.trim()) return;
+
+    const style = window.getComputedStyle(row);
+    if (style.display === 'none' || style.visibility === 'hidden' || Number.parseFloat(style.opacity || '1') === 0) {
+      return;
+    }
+
+    entryIds.push(entry.id);
+  }
+
+  notificationHistoryReadAckInFlight = true;
+  notificationHistoryReadAckVersion = notificationHistoryState.historyVersion;
+  const posted = await postMessageToServiceWorker({
+    type: SW_MESSAGE_TYPES.MARK_HISTORY_READ,
+    payload: {
+      historyVersion: notificationHistoryState.historyVersion,
+      entryIds,
+    },
+  }, { queueWhenUnavailable: true });
+  notificationHistoryReadAckInFlight = false;
+  if (!posted) {
+    notificationHistoryReadAckVersion = null;
+  }
+};
+
+const scheduleNotificationHistoryReadValidation = () => {
+  if (notificationHistoryValidationFrame) {
+    window.cancelAnimationFrame(notificationHistoryValidationFrame);
+    notificationHistoryValidationFrame = 0;
+  }
+  notificationHistoryValidationFrame = window.requestAnimationFrame(() => {
+    notificationHistoryValidationFrame = 0;
+    void validateAndMarkNotificationHistoryRead();
+  });
+};
+
+const refreshNotificationHistoryUi = () => {
+  renderNotificationHistoryList();
+  refreshNotificationHistoryBadgeUi();
+  if (notificationHistoryOpen) {
+    renderNotificationHistoryRelativeTimes();
+    scheduleNotificationHistoryReadValidation();
+  }
+};
+
+const bindNotificationHistoryPanel = () => {
+  notificationHistoryToggleEl = document.getElementById(ELEMENT_IDS.NOTIFICATION_HISTORY_TOGGLE);
+  notificationHistoryBadgeEl = document.getElementById(ELEMENT_IDS.NOTIFICATION_HISTORY_BADGE);
+  notificationHistoryPanelEl = document.getElementById(ELEMENT_IDS.NOTIFICATION_HISTORY_PANEL);
+  notificationHistoryListEl = document.getElementById(ELEMENT_IDS.NOTIFICATION_HISTORY_LIST);
+
+  if (!notificationHistoryToggleEl || !notificationHistoryPanelEl || !notificationHistoryListEl || notificationHistoryToggleBound) {
+    refreshNotificationHistoryUi();
+    return;
+  }
+
+  notificationHistoryToggleEl.addEventListener('click', () => {
+    toggleNotificationHistoryPanel();
+  });
+
+  const settingsToggle = document.getElementById(ELEMENT_IDS.SETTINGS_TOGGLE);
+  if (settingsToggle) {
+    settingsToggle.addEventListener('click', () => {
+      closeNotificationHistoryPanel();
+    });
+  }
+
+  document.addEventListener('click', (event) => {
+    if (!notificationHistoryOpen) return;
+    const target = event.target;
+    if (!(target instanceof Node)) return;
+    if (notificationHistoryToggleEl.contains(target) || notificationHistoryPanelEl.contains(target)) return;
+    closeNotificationHistoryPanel();
+  });
+
+  document.addEventListener('keydown', (event) => {
+    if (!notificationHistoryOpen) return;
+    if (event.key === 'Escape') {
+      closeNotificationHistoryPanel();
+    }
+  });
+
+  notificationHistoryToggleBound = true;
+  refreshNotificationHistoryUi();
+};
+
+const bindServiceWorkerHistoryMessages = () => {
+  if (!canUseServiceWorker() || swMessageListenerBound) return;
+  navigator.serviceWorker.addEventListener('message', (event) => {
+    const data = event.data;
+    if (!data || typeof data !== 'object') return;
+    if (data.type !== SW_MESSAGE_TYPES.HISTORY_UPDATE) return;
+    applyNotificationHistoryPayload(data.payload);
+    refreshNotificationHistoryUi();
+  });
+  swMessageListenerBound = true;
 };
 
 const utcDateIdFromMs = (ms) => {
@@ -698,11 +1063,15 @@ const checkForNewBuild = async ({ force = false } = {}) => {
 const registerServiceWorker = async () => {
   if (!canUseServiceWorker()) return null;
   try {
-    swRegistration = await navigator.serviceWorker.register(new URL('sw.js', window.location.href));
+    swRegistration = await navigator.serviceWorker.register(
+      resolveServiceWorkerRegistrationUrl(isLocalhostHostname),
+    );
     await navigator.serviceWorker.ready;
+    await flushPendingSwMessages();
     await syncDailyStateToServiceWorker();
     await registerBackgroundDailyCheck();
     await requestServiceWorkerDailyCheck();
+    await postMessageToServiceWorker({ type: SW_MESSAGE_TYPES.GET_HISTORY }, { queueWhenUnavailable: true });
     void checkForNewBuild({ force: true });
     return swRegistration;
   } catch {
@@ -717,12 +1086,14 @@ const bindServiceWorkerRuntimeEvents = () => {
   window.addEventListener('online', () => {
     void checkForNewBuild();
     void requestServiceWorkerDailyCheck();
+    void postMessageToServiceWorker({ type: SW_MESSAGE_TYPES.GET_HISTORY }, { queueWhenUnavailable: true });
   });
 
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState !== 'visible') return;
     void checkForNewBuild();
     void requestServiceWorkerDailyCheck();
+    void postMessageToServiceWorker({ type: SW_MESSAGE_TYPES.GET_HISTORY }, { queueWhenUnavailable: true });
   });
 };
 
@@ -776,6 +1147,8 @@ export async function initTetherApp() {
 
   bindPathPredictionToggle();
   bindNotificationsToggle();
+  bindNotificationHistoryPanel();
+  bindServiceWorkerHistoryMessages();
   bindServiceWorkerRuntimeEvents();
 
   const adapters = createDefaultAdapters({
@@ -794,6 +1167,7 @@ export async function initTetherApp() {
   const setLocaleWithEffects = (locale) => {
     const resolved = setLocaleCore(locale);
     refreshNotificationsToggleUi();
+    refreshNotificationHistoryUi();
     void syncDailyStateToServiceWorker();
     return resolved;
   };
@@ -823,6 +1197,14 @@ export async function initTetherApp() {
 
   runtimeInstance.start();
   refreshNotificationsToggleUi();
+  refreshNotificationHistoryUi();
+  void mountRuntimePlugins({
+    isLocalhostHostname,
+    canUseServiceWorker,
+    requestNotificationPermission,
+    postMessageToServiceWorker,
+    showToast: (text, options = {}) => showInAppToast(text, options),
+  });
   if (didUpgradeBuild) {
     const toastText = translateNow('ui.updateAppliedToast');
     if (toastText !== 'ui.updateAppliedToast') {
@@ -832,6 +1214,8 @@ export async function initTetherApp() {
 
   if (!swRegistration) {
     void registerServiceWorker();
+  } else {
+    void postMessageToServiceWorker({ type: SW_MESSAGE_TYPES.GET_HISTORY }, { queueWhenUnavailable: true });
   }
 }
 

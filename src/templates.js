@@ -31,6 +31,21 @@ export const APP_SHELL_TEMPLATE = (t = (k) => k, localeOptions = [], currentLoca
             </span>
           </div>
           <button
+            id="${ELEMENT_IDS.NOTIFICATION_HISTORY_TOGGLE}"
+            class="settingsToggle notificationHistoryToggle"
+            type="button"
+            aria-haspopup="true"
+            aria-expanded="false"
+            aria-controls="${ELEMENT_IDS.NOTIFICATION_HISTORY_PANEL}"
+            aria-label="${t('ui.notifications')}"
+            title="${t('ui.notifications')}"
+            data-i18n-aria-label="ui.notifications"
+            data-i18n-title="ui.notifications"
+          >
+            <span aria-hidden="true">🔔</span>
+            <span id="${ELEMENT_IDS.NOTIFICATION_HISTORY_BADGE}" class="notificationHistoryBadge" hidden></span>
+          </button>
+          <button
             id="${ELEMENT_IDS.SETTINGS_TOGGLE}"
             class="settingsToggle"
             type="button"
@@ -69,6 +84,9 @@ export const APP_SHELL_TEMPLATE = (t = (k) => k, localeOptions = [], currentLoca
                 <span data-i18n="ui.pathPredictionEnable">${t('ui.pathPredictionEnable')}</span>
               </label>
             </div>
+          </div>
+          <div id="${ELEMENT_IDS.NOTIFICATION_HISTORY_PANEL}" class="notificationHistoryPanel" hidden>
+            <div id="${ELEMENT_IDS.NOTIFICATION_HISTORY_LIST}" class="notificationHistoryList"></div>
           </div>
           <dialog id="${ELEMENT_IDS.THEME_SWITCH_DIALOG}">
             <form method="dialog" class="themeSwitchDialog">
