@@ -1,3 +1,11 @@
+@font-face {
+  font-family: "Material Symbols Rounded Local";
+  font-style: normal;
+  font-weight: 300;
+  font-display: swap;
+  src: url("/fonts/material-symbols-rounded-w300-grad200-opsz20.woff2") format("woff2");
+}
+
 :root {
   --cell: 56px;
   --gap: 2px;
@@ -208,6 +216,26 @@ header h1.brandTitle {
   color: var(--text);
 }
 
+.uiIconMaterial {
+  font-family: "Material Symbols Rounded", "Material Symbols Rounded Local";
+  font-style: normal;
+  font-weight: 300;
+  font-size: 20px;
+  line-height: 1;
+  letter-spacing: normal;
+  text-transform: none;
+  white-space: nowrap;
+  direction: ltr;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-feature-settings: 'liga';
+  -webkit-font-feature-settings: 'liga';
+  font-variation-settings: 'FILL' 0, 'wght' 300, 'GRAD' 200, 'opsz' 20;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
 .settingsToggle:hover {
   border-color: var(--control-border-hover);
   background: var(--control-bg-hover);
@@ -375,10 +403,34 @@ header h1.brandTitle {
   font-size: 12px;
 }
 
+.settingsLabelWithIcon {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.settingsLabelIcon {
+  font-size: 14px;
+  inline-size: 14px;
+  block-size: 14px;
+}
+
 .settingsField select,
 .settingsField button {
   width: 100%;
   min-width: 0;
+}
+
+.controlActionBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.controlActionIcon {
+  font-size: 18px;
+  inline-size: 18px;
+  block-size: 18px;
 }
 
 .settingsCheckbox {
@@ -437,8 +489,7 @@ header h1.brandTitle {
   place-items: center;
   background: color-mix(in srgb, var(--warn), transparent 82%);
   color: var(--warn);
-  font-size: 18px;
-  font-weight: 800;
+  font-size: 20px;
   line-height: 1;
 }
 
@@ -473,10 +524,10 @@ header h1.brandTitle {
 
 .themeSwitchDialog__actionIcon {
   line-height: 1;
-  font-size: 14px;
-  font-weight: 700;
+  font-size: 20px;
   display: inline-flex;
-  inline-size: 16px;
+  inline-size: 20px;
+  block-size: 20px;
   justify-content: center;
   align-items: center;
 }

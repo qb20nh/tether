@@ -42,7 +42,7 @@ export const APP_SHELL_TEMPLATE = (t = (k) => k, localeOptions = [], currentLoca
             data-i18n-aria-label="ui.notifications"
             data-i18n-title="ui.notifications"
           >
-            <span aria-hidden="true">🔔</span>
+            <span class="uiIconMaterial" aria-hidden="true">notifications</span>
             <span id="${ELEMENT_IDS.NOTIFICATION_HISTORY_BADGE}" class="notificationHistoryBadge" hidden></span>
           </button>
           <button
@@ -55,19 +55,23 @@ export const APP_SHELL_TEMPLATE = (t = (k) => k, localeOptions = [], currentLoca
             aria-label="${t('ui.language')} / ${t('ui.theme')}"
             title="${t('ui.language')} / ${t('ui.theme')}"
           >
-            <span aria-hidden="true">⚙</span>
+            <span class="uiIconMaterial" aria-hidden="true">settings</span>
           </button>
           <div id="${ELEMENT_IDS.SETTINGS_PANEL}" class="settingsPanel" hidden>
             <div class="settingsField">
-              <label id="${ELEMENT_IDS.LANG_LABEL}" class="small" for="${ELEMENT_IDS.LANG_SEL}" data-i18n="ui.language">${t(
-  'ui.language',
-)}</label>
+              <label id="${ELEMENT_IDS.LANG_LABEL}" class="small settingsLabelWithIcon" for="${ELEMENT_IDS.LANG_SEL}">
+                <span class="uiIconMaterial settingsLabelIcon" aria-hidden="true">language</span>
+                <span data-i18n="ui.language">${t('ui.language')}</span>
+              </label>
               <select id="${ELEMENT_IDS.LANG_SEL}">
                 ${buildOptionList(localeOptions, currentLocale)}
               </select>
             </div>
             <div class="settingsField">
-              <span id="${ELEMENT_IDS.THEME_LABEL}" class="small" data-i18n="ui.theme">${t('ui.theme')}</span>
+              <span id="${ELEMENT_IDS.THEME_LABEL}" class="small settingsLabelWithIcon">
+                <span class="uiIconMaterial settingsLabelIcon" aria-hidden="true">palette</span>
+                <span data-i18n="ui.theme">${t('ui.theme')}</span>
+              </span>
               <button id="${ELEMENT_IDS.THEME_TOGGLE}" type="button">${t('ui.themeDark')}</button>
             </div>
             <div class="settingsField">
@@ -91,7 +95,7 @@ export const APP_SHELL_TEMPLATE = (t = (k) => k, localeOptions = [], currentLoca
           <dialog id="${ELEMENT_IDS.THEME_SWITCH_DIALOG}">
             <form method="dialog" class="themeSwitchDialog">
               <div class="themeSwitchDialog__header">
-                <span class="themeSwitchDialog__icon" aria-hidden="true">⚠</span>
+                <span class="themeSwitchDialog__icon uiIconMaterial" aria-hidden="true">warning</span>
                 <h3 class="themeSwitchDialog__title" data-i18n="ui.themeSwitchTitle">
                   ${t('ui.themeSwitchTitle')}
                 </h3>
@@ -105,7 +109,7 @@ export const APP_SHELL_TEMPLATE = (t = (k) => k, localeOptions = [], currentLoca
                   type="submit"
                   class="themeSwitchDialog__actionBtn themeSwitchDialog__actionBtn--no"
                 >
-                  <span class="themeSwitchDialog__actionIcon" aria-hidden="true">✕</span>
+                  <span class="themeSwitchDialog__actionIcon uiIconMaterial" aria-hidden="true">close</span>
                   <span class="themeSwitchDialog__actionText" data-i18n="ui.cancel">${t('ui.cancel')}</span>
                 </button>
                 <button
@@ -114,7 +118,7 @@ export const APP_SHELL_TEMPLATE = (t = (k) => k, localeOptions = [], currentLoca
                   type="submit"
                   class="themeSwitchDialog__actionBtn themeSwitchDialog__actionBtn--yes"
                 >
-                  <span class="themeSwitchDialog__actionIcon" aria-hidden="true">✓</span>
+                  <span class="themeSwitchDialog__actionIcon uiIconMaterial" aria-hidden="true">check</span>
                   <span class="themeSwitchDialog__actionText" data-i18n="ui.themeSwitchConfirm">${t(
   'ui.themeSwitchConfirm',
 )}</span>
@@ -153,12 +157,14 @@ export const APP_SHELL_TEMPLATE = (t = (k) => k, localeOptions = [], currentLoca
               </span>
             </div>
           </div>
-          <button id="${ELEMENT_IDS.RESET_BTN}" title="${t('ui.resetTitle')}" data-i18n="ui.reset" data-i18n-title="ui.resetTitle">${t(
-  'ui.reset',
-)}</button>
-          <button id="${ELEMENT_IDS.REVERSE_BTN}" title="${t('ui.reverseTitle')}" data-i18n="ui.reverse" data-i18n-title="ui.reverseTitle">${t(
-  'ui.reverse',
-)}</button>
+          <button id="${ELEMENT_IDS.RESET_BTN}" class="controlActionBtn" title="${t('ui.resetTitle')}" data-i18n-title="ui.resetTitle">
+            <span class="uiIconMaterial controlActionIcon" aria-hidden="true">restart_alt</span>
+            <span data-i18n="ui.reset">${t('ui.reset')}</span>
+          </button>
+          <button id="${ELEMENT_IDS.REVERSE_BTN}" class="controlActionBtn" title="${t('ui.reverseTitle')}" data-i18n-title="ui.reverseTitle">
+            <span class="uiIconMaterial controlActionIcon" aria-hidden="true">swap_horiz</span>
+            <span data-i18n="ui.reverse">${t('ui.reverse')}</span>
+          </button>
         </div>
       </div>
       <div class="progressNav">
