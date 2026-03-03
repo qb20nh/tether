@@ -10,6 +10,63 @@ const buildOptionList = (localeOptions, currentLocale) =>
     )
     .join('');
 
+const DIALOG_ICON_HTML = Object.freeze({
+  WARNING: '<span class="themeSwitchDialog__icon uiIconMaterial" aria-hidden="true">warning</span>',
+  SYSTEM_UPDATE: '<span class="themeSwitchDialog__icon uiIconMaterial" aria-hidden="true">system_update</span>',
+  EVENT: '<span class="themeSwitchDialog__icon uiIconMaterial" aria-hidden="true">event</span>',
+});
+
+const buildConfirmDialogTemplate = (t, options = {}) => {
+  const {
+    dialogId,
+    iconHtml,
+    titleKey,
+    messageId,
+    messageKey = '',
+    messageText = '',
+    cancelBtnId,
+    confirmBtnId,
+    confirmKey,
+  } = options;
+
+  const messageI18nAttr = messageKey ? ` data-i18n="${messageKey}"` : '';
+  const resolvedMessage = messageKey ? t(messageKey) : messageText;
+
+  return `
+          <dialog id="${dialogId}" class="appConfirmDialog">
+            <form method="dialog" class="themeSwitchDialog">
+              <div class="themeSwitchDialog__header">
+                ${iconHtml}
+                <h3 class="themeSwitchDialog__title" data-i18n="${titleKey}">
+                  ${t(titleKey)}
+                </h3>
+              </div>
+              <p id="${messageId}"${messageI18nAttr}>${resolvedMessage}</p>
+              <div class="themeSwitchDialog__actions">
+                <button
+                  id="${cancelBtnId}"
+                  value="cancel"
+                  formmethod="dialog"
+                  type="submit"
+                  class="themeSwitchDialog__actionBtn themeSwitchDialog__actionBtn--no"
+                >
+                  <span class="themeSwitchDialog__actionIcon uiIconMaterial" aria-hidden="true">close</span>
+                  <span class="themeSwitchDialog__actionText" data-i18n="ui.cancel">${t('ui.cancel')}</span>
+                </button>
+                <button
+                  id="${confirmBtnId}"
+                  value="confirm"
+                  type="submit"
+                  class="themeSwitchDialog__actionBtn themeSwitchDialog__actionBtn--yes"
+                >
+                  <span class="themeSwitchDialog__actionIcon uiIconMaterial" aria-hidden="true">check</span>
+                  <span class="themeSwitchDialog__actionText" data-i18n="${confirmKey}">${t(confirmKey)}</span>
+                </button>
+              </div>
+            </form>
+          </dialog>`;
+};
+
 export const APP_SHELL_TEMPLATE = (t = (k) => k, localeOptions = [], currentLocale = 'ko') => `
   <div class="app">
   <header>
@@ -99,74 +156,36 @@ export const APP_SHELL_TEMPLATE = (t = (k) => k, localeOptions = [], currentLoca
           <div id="${ELEMENT_IDS.NOTIFICATION_HISTORY_PANEL}" class="notificationHistoryPanel" hidden>
             <div id="${ELEMENT_IDS.NOTIFICATION_HISTORY_LIST}" class="notificationHistoryList"></div>
           </div>
-          <dialog id="${ELEMENT_IDS.THEME_SWITCH_DIALOG}">
-            <form method="dialog" class="themeSwitchDialog">
-              <div class="themeSwitchDialog__header">
-                <span class="themeSwitchDialog__icon uiIconMaterial" aria-hidden="true">warning</span>
-                <h3 class="themeSwitchDialog__title" data-i18n="ui.themeSwitchTitle">
-                  ${t('ui.themeSwitchTitle')}
-                </h3>
-              </div>
-              <p id="${ELEMENT_IDS.THEME_SWITCH_MESSAGE}"></p>
-              <div class="themeSwitchDialog__actions">
-                <button
-                  id="${ELEMENT_IDS.THEME_SWITCH_CANCEL_BTN}"
-                  value="cancel"
-                  formmethod="dialog"
-                  type="submit"
-                  class="themeSwitchDialog__actionBtn themeSwitchDialog__actionBtn--no"
-                >
-                  <span class="themeSwitchDialog__actionIcon uiIconMaterial" aria-hidden="true">close</span>
-                  <span class="themeSwitchDialog__actionText" data-i18n="ui.cancel">${t('ui.cancel')}</span>
-                </button>
-                <button
-                  id="${ELEMENT_IDS.THEME_SWITCH_CONFIRM_BTN}"
-                  value="confirm"
-                  type="submit"
-                  class="themeSwitchDialog__actionBtn themeSwitchDialog__actionBtn--yes"
-                >
-                  <span class="themeSwitchDialog__actionIcon uiIconMaterial" aria-hidden="true">check</span>
-                  <span class="themeSwitchDialog__actionText" data-i18n="ui.themeSwitchConfirm">${t(
-  'ui.themeSwitchConfirm',
-)}</span>
-                </button>
-              </div>
-            </form>
-          </dialog>
-          <dialog id="${ELEMENT_IDS.UPDATE_APPLY_DIALOG}">
-            <form method="dialog" class="themeSwitchDialog">
-              <div class="themeSwitchDialog__header">
-                <span class="themeSwitchDialog__icon uiIconMaterial" aria-hidden="true">system_update</span>
-                <h3 class="themeSwitchDialog__title" data-i18n="ui.updateApplyDialogTitle">
-                  ${t('ui.updateApplyDialogTitle')}
-                </h3>
-              </div>
-              <p id="${ELEMENT_IDS.UPDATE_APPLY_MESSAGE}" data-i18n="ui.updateApplyDialogPrompt">${t('ui.updateApplyDialogPrompt')}</p>
-              <div class="themeSwitchDialog__actions">
-                <button
-                  id="${ELEMENT_IDS.UPDATE_APPLY_CANCEL_BTN}"
-                  value="cancel"
-                  formmethod="dialog"
-                  type="submit"
-                  class="themeSwitchDialog__actionBtn themeSwitchDialog__actionBtn--no"
-                >
-                  <span class="themeSwitchDialog__actionIcon uiIconMaterial" aria-hidden="true">close</span>
-                  <span class="themeSwitchDialog__actionText" data-i18n="ui.cancel">${t('ui.cancel')}</span>
-                </button>
-                <button
-                  id="${ELEMENT_IDS.UPDATE_APPLY_CONFIRM_BTN}"
-                  value="confirm"
-                  type="submit"
-                  class="themeSwitchDialog__actionBtn themeSwitchDialog__actionBtn--yes"
-                >
-                  <span class="themeSwitchDialog__actionIcon uiIconMaterial" aria-hidden="true">check</span>
-                  <span class="themeSwitchDialog__actionText" data-i18n="ui.updateApplyDialogConfirm">${t(
-  'ui.updateApplyDialogConfirm',
-)}</span>
-                </button>
-              </div>
-            </form>
-          </dialog>
+          ${buildConfirmDialogTemplate(t, {
+    dialogId: ELEMENT_IDS.THEME_SWITCH_DIALOG,
+    iconHtml: DIALOG_ICON_HTML.WARNING,
+    titleKey: 'ui.themeSwitchTitle',
+    messageId: ELEMENT_IDS.THEME_SWITCH_MESSAGE,
+    messageText: '',
+    cancelBtnId: ELEMENT_IDS.THEME_SWITCH_CANCEL_BTN,
+    confirmBtnId: ELEMENT_IDS.THEME_SWITCH_CONFIRM_BTN,
+    confirmKey: 'ui.themeSwitchConfirm',
+  })}
+          ${buildConfirmDialogTemplate(t, {
+    dialogId: ELEMENT_IDS.UPDATE_APPLY_DIALOG,
+    iconHtml: DIALOG_ICON_HTML.SYSTEM_UPDATE,
+    titleKey: 'ui.updateApplyDialogTitle',
+    messageId: ELEMENT_IDS.UPDATE_APPLY_MESSAGE,
+    messageKey: 'ui.updateApplyDialogPrompt',
+    cancelBtnId: ELEMENT_IDS.UPDATE_APPLY_CANCEL_BTN,
+    confirmBtnId: ELEMENT_IDS.UPDATE_APPLY_CONFIRM_BTN,
+    confirmKey: 'ui.updateApplyDialogConfirm',
+  })}
+          ${buildConfirmDialogTemplate(t, {
+    dialogId: ELEMENT_IDS.MOVE_DAILY_DIALOG,
+    iconHtml: DIALOG_ICON_HTML.EVENT,
+    titleKey: 'ui.moveDailyDialogTitle',
+    messageId: ELEMENT_IDS.MOVE_DAILY_MESSAGE,
+    messageKey: 'ui.moveDailyDialogPrompt',
+    cancelBtnId: ELEMENT_IDS.MOVE_DAILY_CANCEL_BTN,
+    confirmBtnId: ELEMENT_IDS.MOVE_DAILY_CONFIRM_BTN,
+    confirmKey: 'ui.moveDailyDialogConfirm',
+  })}
         </div>
       </div>
     </header>

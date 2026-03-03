@@ -310,13 +310,23 @@ const normalizeHistoryMarker = (value) => {
 
 const normalizeHistoryAction = (action = null) => {
   if (!action || typeof action !== 'object') return null;
-  if (action.type !== 'apply-update') return null;
-  const buildNumber = normalizeInt(action.buildNumber, null);
-  if (!Number.isInteger(buildNumber) || buildNumber <= 0) return null;
-  return {
-    type: 'apply-update',
-    buildNumber,
-  };
+  if (action.type === 'apply-update') {
+    const buildNumber = normalizeInt(action.buildNumber, null);
+    if (!Number.isInteger(buildNumber) || buildNumber <= 0) return null;
+    return {
+      type: 'apply-update',
+      buildNumber,
+    };
+  }
+  if (action.type === 'open-daily') {
+    const dailyId = normalizeString(action.dailyId);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dailyId)) return null;
+    return {
+      type: 'open-daily',
+      dailyId,
+    };
+  }
+  return null;
 };
 
 const normalizeHistoryEntry = (entry = {}) => {
@@ -585,7 +595,10 @@ const emitSystemNotification = async (state, kind) => {
       buildNumber: BUILD_NUMBER,
     },
   });
-  await appendSystemHistoryEntry(normalizedKind, title, body, dailyId);
+  await appendSystemHistoryEntry(normalizedKind, title, body, dailyId, {
+    type: 'open-daily',
+    dailyId,
+  });
   return true;
 };
 

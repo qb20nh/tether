@@ -333,6 +333,11 @@ header h1.brandTitle {
   cursor: pointer;
 }
 
+.notificationHistoryItem.isActionable:hover {
+  border-color: color-mix(in srgb, var(--accent), var(--panel-outline) 35%);
+  background: color-mix(in srgb, var(--accent), var(--panel2) 88%);
+}
+
 .notificationHistoryItem__dot {
   inline-size: 8px;
   block-size: 8px;
@@ -457,8 +462,7 @@ header h1.brandTitle {
   transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
 }
 
-[id='themeSwitchDialog'],
-[id='updateApplyDialog'] {
+.appConfirmDialog {
   position: fixed;
   inset: 0;
   margin: auto;
@@ -471,8 +475,7 @@ header h1.brandTitle {
   box-shadow: 0 12px 40px var(--panel-shadow);
 }
 
-[id='themeSwitchDialog']::backdrop,
-[id='updateApplyDialog']::backdrop {
+.appConfirmDialog::backdrop {
   background: rgba(0, 0, 0, 0.45);
 }
 

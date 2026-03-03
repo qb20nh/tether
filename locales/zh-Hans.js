@@ -63,6 +63,9 @@ export default {
     "updateApplyDialogPrompt": "现在安装最新版本吗？",
     "updateApplyDialogConfirm": "立即更新",
     "updateApplyFailedToast": "暂时无法应用更新，请稍后重试。",
+    "moveDailyDialogTitle": "前往每日关卡",
+    "moveDailyDialogPrompt": "你有未完成的关卡。仍要前往每日关卡吗？",
+    "moveDailyDialogConfirm": "前往每日",
     "updateAppliedToast": "已更新到最新版本。"
   },
   "goal": {

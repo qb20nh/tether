@@ -7,6 +7,7 @@ const RELATIVE_TIME_UNITS = Object.freeze([
   { unit: 'minute', ms: 60 * 1000 },
   { unit: 'second', ms: 1000 },
 ]);
+const DAILY_ID_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 export const HISTORY_DOT_COLORS = Object.freeze({
   NONE: 'none',
@@ -22,13 +23,23 @@ const asFiniteInt = (value, fallback = null) => {
 
 export const normalizeHistoryAction = (action) => {
   if (!action || typeof action !== 'object') return null;
-  if (action.type !== 'apply-update') return null;
-  const buildNumber = asFiniteInt(action.buildNumber, null);
-  if (!Number.isInteger(buildNumber) || buildNumber <= 0) return null;
-  return {
-    type: 'apply-update',
-    buildNumber,
-  };
+  if (action.type === 'apply-update') {
+    const buildNumber = asFiniteInt(action.buildNumber, null);
+    if (!Number.isInteger(buildNumber) || buildNumber <= 0) return null;
+    return {
+      type: 'apply-update',
+      buildNumber,
+    };
+  }
+  if (action.type === 'open-daily') {
+    const dailyId = typeof action.dailyId === 'string' ? action.dailyId.trim() : '';
+    if (!DAILY_ID_RE.test(dailyId)) return null;
+    return {
+      type: 'open-daily',
+      dailyId,
+    };
+  }
+  return null;
 };
 
 export const hasUnreadSystemHistory = (entries = []) =>

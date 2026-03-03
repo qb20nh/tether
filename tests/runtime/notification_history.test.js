@@ -38,12 +38,21 @@ test('normalizeHistoryAction accepts apply-update action with valid build number
   );
 });
 
+test('normalizeHistoryAction accepts open-daily action with valid daily id', () => {
+  assert.deepEqual(
+    normalizeHistoryAction({ type: 'open-daily', dailyId: '2026-03-04' }),
+    { type: 'open-daily', dailyId: '2026-03-04' },
+  );
+});
+
 test('normalizeHistoryAction rejects invalid action payloads', () => {
   assert.equal(normalizeHistoryAction(null), null);
   assert.equal(normalizeHistoryAction({}), null);
   assert.equal(normalizeHistoryAction({ type: 'apply-update' }), null);
   assert.equal(normalizeHistoryAction({ type: 'other', buildNumber: 123 }), null);
   assert.equal(normalizeHistoryAction({ type: 'apply-update', buildNumber: 0 }), null);
+  assert.equal(normalizeHistoryAction({ type: 'open-daily' }), null);
+  assert.equal(normalizeHistoryAction({ type: 'open-daily', dailyId: '20260304' }), null);
 });
 
 test('getHistoryDeathFadeRank only marks oldest 10 when list is longer than 10', () => {

@@ -11,6 +11,7 @@ import {
 } from './i18n.js';
 import { createDefaultAdapters } from './runtime/default_adapters.js';
 import { createRuntime } from './runtime/create_runtime.js';
+import { uiActionIntent, UI_ACTIONS } from './runtime/intents.js';
 import { mountRuntimePlugins, resolveServiceWorkerRegistrationUrl } from './plugins/runtime_plugins.js';
 import {
   HISTORY_DOT_COLORS,
@@ -59,6 +60,8 @@ const NOTIFICATION_AUTO_PROMPT_DECISIONS = Object.freeze({
 });
 
 let runtimeInstance = null;
+let runtimeStateAdapter = null;
+let runtimeCoreAdapter = null;
 let runtimeTeardownBound = false;
 let swRegistration = null;
 let swReloadOnControllerChangeArmed = false;
@@ -85,6 +88,10 @@ let notificationHistoryValidationFrame = 0;
 let updateApplyDialogEl = null;
 let updateApplyMessageEl = null;
 let updateApplyDialogBound = false;
+let moveDailyDialogEl = null;
+let moveDailyMessageEl = null;
+let moveDailyDialogBound = false;
+let moveDailyDialogResolver = null;
 const notifiedRemoteBuildNumbers = new Set();
 let swMessageListenerBound = false;
 const pendingSwMessages = [];
@@ -138,6 +145,9 @@ const teardownRuntime = () => {
   if (!runtimeInstance) return;
   runtimeInstance.destroy();
   runtimeInstance = null;
+  runtimeStateAdapter = null;
+  runtimeCoreAdapter = null;
+  moveDailyDialogResolver = null;
 };
 
 const readLastSeenBuildNumber = () => {
@@ -663,14 +673,20 @@ const renderNotificationHistoryList = () => {
     const row = document.createElement('div');
     row.className = 'notificationHistoryItem';
     row.setAttribute('data-entry-id', entry.id);
+    row.setAttribute('data-entry-kind', entry.kind);
     row.setAttribute('data-created-at', String(entry.createdAtUtcMs));
     row.removeAttribute('data-action-type');
     row.removeAttribute('data-action-build-number');
+    row.removeAttribute('data-action-daily-id');
 
     if (entry.action) {
       row.classList.add('isActionable');
       row.setAttribute('data-action-type', entry.action.type);
-      row.setAttribute('data-action-build-number', String(entry.action.buildNumber));
+      if (entry.action.type === 'apply-update') {
+        row.setAttribute('data-action-build-number', String(entry.action.buildNumber));
+      } else if (entry.action.type === 'open-daily') {
+        row.setAttribute('data-action-daily-id', entry.action.dailyId);
+      }
     }
 
     const deathRank = getHistoryDeathFadeRank(i, entries.length, HISTORY_DYING_TAIL_SIZE);
@@ -859,16 +875,92 @@ const openUpdateApplyDialog = (buildNumber) => {
   }
 };
 
+const resolveMoveDailyDialogPromptText = () => {
+  const localized = translateNow('ui.moveDailyDialogPrompt');
+  if (localized !== 'ui.moveDailyDialogPrompt') return localized;
+  return 'You have an unfinished level. Move to Daily level anyway?';
+};
+
+const requestMoveDailyConfirmation = async () => {
+  const promptText = resolveMoveDailyDialogPromptText();
+  if (!moveDailyDialogEl || typeof moveDailyDialogEl.showModal !== 'function') {
+    return window.confirm(promptText);
+  }
+  if (moveDailyDialogEl.open || moveDailyDialogResolver) return false;
+
+  if (moveDailyMessageEl) {
+    moveDailyMessageEl.textContent = promptText;
+  }
+
+  return new Promise((resolve) => {
+    moveDailyDialogResolver = resolve;
+    try {
+      moveDailyDialogEl.showModal();
+    } catch {
+      moveDailyDialogResolver = null;
+      resolve(window.confirm(promptText));
+    }
+  });
+};
+
+const hasUnsolvedPath = (snapshot) => {
+  if (!snapshot || !Array.isArray(snapshot.path)) return false;
+  const pathLength = snapshot.path.length;
+  if (pathLength <= 0) return false;
+  const totalUsable = Number.parseInt(snapshot.totalUsable, 10);
+  if (Number.isInteger(totalUsable) && totalUsable > 0 && pathLength >= totalUsable) return false;
+  return true;
+};
+
+const openDailyFromHistoryAction = async (dailyId = '', kind = '') => {
+  if (!runtimeInstance || !runtimeCoreAdapter || !runtimeStateAdapter) return;
+  if (!latestDailyState.dailyId) return;
+
+  const snapshot = runtimeStateAdapter.getSnapshot();
+  if (!snapshot || !Number.isInteger(snapshot.levelIndex)) return;
+
+  if (kind === 'new-level' && dailyId && dailyId === latestDailyState.dailyId) {
+    const latestPayload = await fetchDailyPayload({ bypassCache: true });
+    if (latestPayload?.dailyId && latestPayload.dailyId > latestDailyState.dailyId) {
+      window.location.reload();
+      return;
+    }
+  }
+
+  const isDailyLevel = typeof runtimeCoreAdapter.isDailyAbsIndex === 'function'
+    && runtimeCoreAdapter.isDailyAbsIndex(snapshot.levelIndex);
+  if (isDailyLevel) return;
+
+  const isInfiniteLevel = typeof runtimeCoreAdapter.isInfiniteAbsIndex === 'function'
+    && runtimeCoreAdapter.isInfiniteAbsIndex(snapshot.levelIndex);
+  const shouldConfirm = hasUnsolvedPath(snapshot) && (isInfiniteLevel || !isDailyLevel);
+  if (shouldConfirm && !(await requestMoveDailyConfirmation())) return;
+
+  const dailyAbsIndex = typeof runtimeCoreAdapter.getDailyAbsIndex === 'function'
+    ? runtimeCoreAdapter.getDailyAbsIndex()
+    : null;
+  if (!Number.isInteger(dailyAbsIndex)) return;
+
+  runtimeInstance.emitIntent(uiActionIntent(UI_ACTIONS.LEVEL_SELECT, { value: dailyAbsIndex }));
+};
+
 const handleNotificationHistoryItemAction = (event) => {
   const target = event.target;
   if (!(target instanceof Element)) return;
   const row = target.closest('.notificationHistoryItem');
   if (!row || !notificationHistoryListEl?.contains(row)) return;
   const actionType = row.getAttribute('data-action-type') || '';
-  if (actionType !== 'apply-update') return;
-  const buildNumber = Number.parseInt(row.getAttribute('data-action-build-number') || '', 10);
-  if (!Number.isInteger(buildNumber) || buildNumber <= 0) return;
-  openUpdateApplyDialog(buildNumber);
+  if (actionType === 'apply-update') {
+    const buildNumber = Number.parseInt(row.getAttribute('data-action-build-number') || '', 10);
+    if (!Number.isInteger(buildNumber) || buildNumber <= 0) return;
+    openUpdateApplyDialog(buildNumber);
+    return;
+  }
+  if (actionType === 'open-daily') {
+    const dailyId = row.getAttribute('data-action-daily-id') || '';
+    const kind = row.getAttribute('data-entry-kind') || '';
+    void openDailyFromHistoryAction(dailyId, kind);
+  }
 };
 
 const bindNotificationHistoryPanel = () => {
@@ -899,6 +991,7 @@ const bindNotificationHistoryPanel = () => {
     const target = event.target;
     if (!(target instanceof Node)) return;
     if (updateApplyDialogEl?.open && updateApplyDialogEl.contains(target)) return;
+    if (moveDailyDialogEl?.open && moveDailyDialogEl.contains(target)) return;
     if (notificationHistoryToggleEl.contains(target) || notificationHistoryPanelEl.contains(target)) return;
     closeNotificationHistoryPanel();
   });
@@ -931,6 +1024,25 @@ const bindUpdateApplyDialog = () => {
   });
 
   updateApplyDialogBound = true;
+};
+
+const bindMoveDailyDialog = () => {
+  moveDailyDialogEl = document.getElementById(ELEMENT_IDS.MOVE_DAILY_DIALOG);
+  moveDailyMessageEl = document.getElementById(ELEMENT_IDS.MOVE_DAILY_MESSAGE);
+
+  if (!moveDailyDialogEl || moveDailyDialogBound) return;
+
+  moveDailyDialogEl.addEventListener('close', () => {
+    const confirmed = moveDailyDialogEl?.returnValue === 'confirm';
+    moveDailyDialogEl.returnValue = '';
+    const resolve = moveDailyDialogResolver;
+    moveDailyDialogResolver = null;
+    if (typeof resolve === 'function') {
+      resolve(confirmed);
+    }
+  });
+
+  moveDailyDialogBound = true;
 };
 
 const bindServiceWorkerHistoryMessages = () => {
@@ -1401,6 +1513,7 @@ export async function initTetherApp() {
   bindPathPredictionToggle();
   bindNotificationHistoryPanel();
   bindUpdateApplyDialog();
+  bindMoveDailyDialog();
   bindServiceWorkerHistoryMessages();
   bindServiceWorkerRuntimeEvents();
 
@@ -1410,6 +1523,8 @@ export async function initTetherApp() {
     dailyLevel: bootDaily.dailyLevel,
     dailyId: bootDaily.dailyId,
   });
+  runtimeStateAdapter = adapters.state;
+  runtimeCoreAdapter = adapters.core;
 
   const bootState = adapters.persistence.readBootState();
   latestDailyState.dailySolvedDate = typeof bootState.dailySolvedDate === 'string'
@@ -1426,6 +1541,9 @@ export async function initTetherApp() {
       updateApplyMessageEl.textContent = resolveUpdateApplyDialogPromptText(
         Number.parseInt(updateApplyDialogEl?.dataset?.pendingBuildNumber || '', 10),
       );
+    }
+    if (moveDailyMessageEl) {
+      moveDailyMessageEl.textContent = resolveMoveDailyDialogPromptText();
     }
     void syncDailyStateToServiceWorker();
     return resolved;

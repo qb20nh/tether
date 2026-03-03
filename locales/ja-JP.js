@@ -63,6 +63,9 @@ export default {
     "updateApplyDialogPrompt": "今すぐ最新バージョンをインストールしますか？",
     "updateApplyDialogConfirm": "今すぐ更新",
     "updateApplyFailedToast": "更新をまだ適用できません。しばらくしてから再試行してください。",
+    "moveDailyDialogTitle": "デイリーレベルへ移動",
+    "moveDailyDialogPrompt": "未完了のレベルがあります。デイリーレベルへ移動しますか？",
+    "moveDailyDialogConfirm": "デイリーへ移動",
     "updateAppliedToast": "最新バージョンに更新されました。"
   },
   "goal": {

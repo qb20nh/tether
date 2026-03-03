@@ -63,6 +63,9 @@ export default {
     "updateApplyDialogPrompt": "Instalar agora a versão mais recente?",
     "updateApplyDialogConfirm": "Atualizar agora",
     "updateApplyFailedToast": "Ainda não foi possível aplicar a atualização. Tente novamente em instantes.",
+    "moveDailyDialogTitle": "Ir para o nível diário",
+    "moveDailyDialogPrompt": "Você tem um nível não concluído. Ir mesmo assim para o nível diário?",
+    "moveDailyDialogConfirm": "Ir para o diário",
     "updateAppliedToast": "Atualizado para a versão mais recente."
   },
   "goal": {

@@ -63,6 +63,9 @@ export default {
     "updateApplyDialogPrompt": "지금 최신 버전을 설치하시겠습니까?",
     "updateApplyDialogConfirm": "지금 업데이트",
     "updateApplyFailedToast": "아직 업데이트를 적용할 수 없습니다. 잠시 후 다시 시도해주세요.",
+    "moveDailyDialogTitle": "데일리 레벨로 이동",
+    "moveDailyDialogPrompt": "아직 끝내지 않은 레벨이 있습니다. 데일리 레벨로 이동하시겠습니까?",
+    "moveDailyDialogConfirm": "데일리로 이동",
     "updateAppliedToast": "최신 버전으로 업데이트되었습니다."
   },
   "goal": {
