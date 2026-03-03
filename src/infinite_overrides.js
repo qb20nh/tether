@@ -6,12 +6,14 @@ const FORMAT_VERSION = 1;
 const IS_NODE = typeof process !== 'undefined' && Boolean(process?.versions?.node);
 const GZIP_MAGIC_0 = 0x1f;
 const GZIP_MAGIC_1 = 0x8b;
+const NODE_FS_PROMISES_SPECIFIER = 'node:fs/promises';
+const NODE_ZLIB_SPECIFIER = 'node:zlib';
 
 const readCompressedOverrideBytes = async () => {
   const url = new URL('./infinite_overrides.bin.gz', import.meta.url);
 
   if (IS_NODE) {
-    const { readFile } = await import('node:fs/promises');
+    const { readFile } = await import(/* @vite-ignore */ NODE_FS_PROMISES_SPECIFIER);
     try {
       return new Uint8Array(await readFile(url));
     } catch (error) {
@@ -39,7 +41,7 @@ const gunzipBytes = async (compressedBytes) => {
   }
 
   if (IS_NODE) {
-    const { gunzipSync } = await import('node:zlib');
+    const { gunzipSync } = await import(/* @vite-ignore */ NODE_ZLIB_SPECIFIER);
     return new Uint8Array(gunzipSync(compressedBytes));
   }
 
