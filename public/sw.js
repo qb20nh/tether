@@ -546,6 +546,35 @@ const markHistoryRead = async ({ historyVersion, entryIds }) => {
   });
 };
 
+const clearUpdateHistoryActions = async ({ buildNumber }) => {
+  return enqueueHistoryTask(async () => {
+    const targetBuildNumber = normalizeInt(buildNumber, null);
+    if (!Number.isInteger(targetBuildNumber) || targetBuildNumber <= 0) return readHistoryState();
+
+    const current = await readHistoryState();
+    let changed = false;
+    const nextEntries = current.entries.map((entry) => {
+      if (!entry || entry.kind !== 'new-version-available') return entry;
+      if (!entry.action || entry.action.type !== 'apply-update') return entry;
+      if (!Number.isInteger(entry.action.buildNumber) || entry.action.buildNumber > targetBuildNumber) return entry;
+      changed = true;
+      return {
+        ...entry,
+        action: null,
+      };
+    });
+
+    if (!changed) return current;
+
+    const nextState = await writeHistoryState({
+      historyVersion: current.historyVersion + 1,
+      entries: nextEntries,
+    });
+    await broadcastHistoryPayload(nextState);
+    return nextState;
+  });
+};
+
 const sendHistoryToSourceOrBroadcast = async (sourceClient = null) => {
   const state = await readHistoryState();
   if (sourceClient && typeof sourceClient.postMessage === 'function') {
@@ -797,6 +826,14 @@ self.addEventListener('message', (event) => {
       normalizeString(payload.dailyId),
       normalizeHistoryAction(payload.action),
     ));
+    return;
+  }
+
+  if (data.type === 'SW_CLEAR_UPDATE_HISTORY_ACTIONS') {
+    const payload = data.payload && typeof data.payload === 'object' ? data.payload : {};
+    event.waitUntil(clearUpdateHistoryActions({
+      buildNumber: normalizeInt(payload.buildNumber, null),
+    }));
     return;
   }
 

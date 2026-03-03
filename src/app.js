@@ -44,6 +44,7 @@ const SW_MESSAGE_TYPES = Object.freeze({
   GET_HISTORY: 'SW_GET_NOTIFICATION_HISTORY',
   APPEND_TOAST_HISTORY: 'SW_APPEND_TOAST_HISTORY',
   APPEND_SYSTEM_HISTORY: 'SW_APPEND_SYSTEM_HISTORY',
+  CLEAR_UPDATE_HISTORY_ACTIONS: 'SW_CLEAR_UPDATE_HISTORY_ACTIONS',
   MARK_HISTORY_READ: 'SW_MARK_NOTIFICATION_HISTORY_READ',
   HISTORY_UPDATE: 'SW_NOTIFICATION_HISTORY',
 });
@@ -596,6 +597,16 @@ const applyNotificationHistoryPayload = (payload) => {
   }
 };
 
+const clearAppliedUpdateHistoryActions = async (appliedBuildNumber = localBuildNumber) => {
+  if (!Number.isInteger(appliedBuildNumber) || appliedBuildNumber <= 0) return;
+  await postMessageToServiceWorker({
+    type: SW_MESSAGE_TYPES.CLEAR_UPDATE_HISTORY_ACTIONS,
+    payload: {
+      buildNumber: appliedBuildNumber,
+    },
+  }, { queueWhenUnavailable: true });
+};
+
 const refreshNotificationHistoryBadgeUi = () => {
   if (!notificationHistoryToggleEl || !notificationHistoryBadgeEl) return;
   const hasUnreadSystem = hasUnreadSystemHistory(notificationHistoryState.entries);
@@ -859,7 +870,7 @@ const openUpdateApplyDialog = (buildNumber) => {
   if (!Number.isInteger(buildNumber) || buildNumber <= 0) return;
   if (!updateApplyDialogEl || typeof updateApplyDialogEl.showModal !== 'function') {
     if (window.confirm(resolveUpdateApplyDialogPromptText(buildNumber))) {
-      void applyUpdateForBuild(buildNumber, { force: true, toastOnFailure: true });
+      void applyLatestUpdateForAction(buildNumber);
     }
     return;
   }
@@ -873,6 +884,32 @@ const openUpdateApplyDialog = (buildNumber) => {
   } catch {
     delete updateApplyDialogEl.dataset.pendingBuildNumber;
   }
+};
+
+const resolveLatestUpdateBuildNumber = async (hintBuildNumber = null) => {
+  let latest = Number.isInteger(hintBuildNumber) ? hintBuildNumber : 0;
+
+  const storedNotifiedBuild = readLastNotifiedRemoteBuildNumber();
+  if (Number.isInteger(storedNotifiedBuild) && storedNotifiedBuild > latest) {
+    latest = storedNotifiedBuild;
+  }
+
+  for (const entry of notificationHistoryState.entries) {
+    if (!entry || entry.kind !== 'new-version-available') continue;
+    const action = entry.action;
+    if (!action || action.type !== 'apply-update') continue;
+    if (Number.isInteger(action.buildNumber) && action.buildNumber > latest) {
+      latest = action.buildNumber;
+    }
+  }
+
+  const remoteBuildNumber = await fetchRemoteBuildNumber();
+  if (Number.isInteger(remoteBuildNumber) && remoteBuildNumber > latest) {
+    latest = remoteBuildNumber;
+  }
+
+  if (!Number.isInteger(latest) || latest <= localBuildNumber) return null;
+  return latest;
 };
 
 const resolveMoveDailyDialogPromptText = () => {
@@ -953,7 +990,14 @@ const handleNotificationHistoryItemAction = (event) => {
   if (actionType === 'apply-update') {
     const buildNumber = Number.parseInt(row.getAttribute('data-action-build-number') || '', 10);
     if (!Number.isInteger(buildNumber) || buildNumber <= 0) return;
-    openUpdateApplyDialog(buildNumber);
+    void (async () => {
+      const latestBuildNumber = await resolveLatestUpdateBuildNumber(buildNumber);
+      if (!Number.isInteger(latestBuildNumber) || latestBuildNumber <= localBuildNumber) {
+        await clearAppliedUpdateHistoryActions(localBuildNumber);
+        return;
+      }
+      openUpdateApplyDialog(latestBuildNumber);
+    })();
     return;
   }
   if (actionType === 'open-daily') {
@@ -1020,7 +1064,7 @@ const bindUpdateApplyDialog = () => {
     updateApplyDialogEl.returnValue = '';
     if (!shouldApply) return;
     if (!Number.isInteger(buildNumber) || buildNumber <= 0) return;
-    void applyUpdateForBuild(buildNumber, { force: true, toastOnFailure: true });
+    void applyLatestUpdateForAction(buildNumber);
   });
 
   updateApplyDialogBound = true;
@@ -1400,6 +1444,15 @@ const applyUpdateForBuild = async (remoteBuildNumber, options = {}) => {
   return applied;
 };
 
+const applyLatestUpdateForAction = async (hintBuildNumber = null) => {
+  const latestBuildNumber = await resolveLatestUpdateBuildNumber(hintBuildNumber);
+  if (!Number.isInteger(latestBuildNumber) || latestBuildNumber <= localBuildNumber) {
+    await clearAppliedUpdateHistoryActions(localBuildNumber);
+    return false;
+  }
+  return applyUpdateForBuild(latestBuildNumber, { force: false, toastOnFailure: true });
+};
+
 const checkForNewBuild = async ({ force = false } = {}) => {
   if (!canUseServiceWorker() || !swRegistration) return;
   if (!navigator.onLine) return;
@@ -1516,6 +1569,7 @@ export async function initTetherApp() {
   bindMoveDailyDialog();
   bindServiceWorkerHistoryMessages();
   bindServiceWorkerRuntimeEvents();
+  void clearAppliedUpdateHistoryActions(localBuildNumber);
 
   const adapters = createDefaultAdapters({
     icons: ICONS,
