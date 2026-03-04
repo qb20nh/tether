@@ -214,3 +214,37 @@ test('infinite session save restores even before campaign completion', () => {
     dailyId: null,
   });
 });
+
+test('session save round-trips with empty path to preserve current level', () => {
+  const storage = createFakeStorage();
+  const fakeWindow = {
+    localStorage: storage,
+    matchMedia: () => ({ matches: false }),
+    crypto: {
+      getRandomValues(bytes) {
+        for (let i = 0; i < bytes.length; i++) bytes[i] = i + 1;
+      },
+    },
+  };
+
+  const persistence = createLocalStoragePersistence({
+    windowObj: fakeWindow,
+    campaignLevelCount: 10,
+    maxInfiniteIndex: 20,
+  });
+
+  persistence.writeCampaignProgress(3);
+  persistence.writeSessionBoard({
+    levelIndex: 3,
+    path: [],
+    movableWalls: [],
+  });
+
+  const boot = persistence.readBootState();
+  assert.deepEqual(boot.sessionBoard, {
+    levelIndex: 3,
+    path: [],
+    movableWalls: [],
+    dailyId: null,
+  });
+});

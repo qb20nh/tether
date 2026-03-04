@@ -516,7 +516,6 @@ export function createRuntime(options) {
     if (!level || !Array.isArray(level.grid)) return null;
 
     const path = snapshot.path.map((point) => [point.r, point.c]);
-    if (path.length === 0) return null;
 
     const collectMovableWalls = (gridRows) => {
       const walls = [];
