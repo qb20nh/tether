@@ -63,6 +63,7 @@ export default {
     "updateApplyDialogPrompt": "هل تريد تثبيت أحدث إصدار الآن؟",
     "updateApplyDialogConfirm": "حدّث الآن",
     "updateApplyFailedToast": "تعذر تطبيق التحديث الآن. حاول مرة أخرى بعد قليل.",
+    "updateApplyingOverlay": "جارٍ التحديث إلى أحدث إصدار...",
     "moveDailyDialogTitle": "الانتقال إلى المستوى اليومي",
     "moveDailyDialogPrompt": "لديك مستوى غير مكتمل. هل تريد الانتقال إلى المستوى اليومي رغم ذلك؟",
     "moveDailyDialogConfirm": "الانتقال إلى اليومي",

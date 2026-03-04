@@ -63,6 +63,7 @@ export default {
     "updateApplyDialogPrompt": "¿Instalar ahora la versión más reciente?",
     "updateApplyDialogConfirm": "Actualizar ahora",
     "updateApplyFailedToast": "No se pudo aplicar la actualización todavía. Inténtalo de nuevo en un momento.",
+    "updateApplyingOverlay": "Actualizando a la versión más reciente...",
     "moveDailyDialogTitle": "Ir al nivel diario",
     "moveDailyDialogPrompt": "Tienes un nivel sin terminar. ¿Ir de todos modos al nivel diario?",
     "moveDailyDialogConfirm": "Ir al diario",

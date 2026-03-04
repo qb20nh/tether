@@ -63,6 +63,7 @@ export default {
     "updateApplyDialogPrompt": "現在要安裝最新版本嗎？",
     "updateApplyDialogConfirm": "立即更新",
     "updateApplyFailedToast": "目前無法套用更新，請稍後再試。",
+    "updateApplyingOverlay": "正在更新到最新版本...",
     "moveDailyDialogTitle": "前往每日關卡",
     "moveDailyDialogPrompt": "你有尚未完成的關卡。仍要前往每日關卡嗎？",
     "moveDailyDialogConfirm": "前往每日",
