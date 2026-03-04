@@ -1,10 +1,12 @@
 import path from 'node:path';
+import { execSync } from 'node:child_process';
 import { readFile, writeFile } from 'node:fs/promises';
 import { defineConfig, loadEnv } from 'vite';
 import { DAILY_PAYLOAD_FILE } from './src/shared/paths.js';
 
 const BUILD_NUMBER_META_NAME = 'tether-build-number';
 const BUILD_LABEL_META_NAME = 'tether-build-label';
+const BUILD_DATETIME_META_NAME = 'tether-build-datetime';
 const SW_BUILD_NUMBER_PLACEHOLDER = '__TETHER_BUILD_NUMBER__';
 const SW_BUILD_LABEL_PLACEHOLDER = '__TETHER_BUILD_LABEL__';
 const SW_DAILY_PAYLOAD_PATH_PLACEHOLDER = '__TETHER_DAILY_PAYLOAD_PATH__';
@@ -34,7 +36,32 @@ const resolveDailyPayloadPathname = (env) => {
     }
 };
 
-const buildVersionPlugin = ({ buildNumber, buildLabel, dailyPayloadPathname }) => ({
+const resolveBuildDateTime = (env) => {
+    const configuredRaw = (process.env.VITE_BUILD_DATETIME ?? env.VITE_BUILD_DATETIME ?? '').trim();
+    if (configuredRaw.length > 0 && !Number.isNaN(Date.parse(configuredRaw))) {
+        return new Date(configuredRaw).toISOString();
+    }
+    return new Date().toISOString();
+};
+
+const resolveBuildLabel = (env, buildNumber) => {
+    const configuredRaw = (process.env.VITE_BUILD_LABEL ?? env.VITE_BUILD_LABEL ?? '').trim();
+    if (configuredRaw.length > 0) return configuredRaw;
+
+    try {
+        const gitHash = execSync('git rev-parse --short=7 HEAD', {
+            stdio: ['ignore', 'pipe', 'ignore'],
+            encoding: 'utf8',
+        }).trim();
+        if (/^[0-9a-f]{7,40}$/i.test(gitHash)) return gitHash;
+    } catch {
+        // Git metadata can be unavailable in some build environments.
+    }
+
+    return new Date(buildNumber).toISOString();
+};
+
+const buildVersionPlugin = ({ buildNumber, buildLabel, buildDateTime, dailyPayloadPathname }) => ({
     name: 'tether-build-version',
     transformIndexHtml: () => ({
         tags: [
@@ -54,13 +81,21 @@ const buildVersionPlugin = ({ buildNumber, buildLabel, dailyPayloadPathname }) =
                 },
                 injectTo: 'head',
             },
+            {
+                tag: 'meta',
+                attrs: {
+                    name: BUILD_DATETIME_META_NAME,
+                    content: buildDateTime,
+                },
+                injectTo: 'head',
+            },
         ],
     }),
     generateBundle() {
         this.emitFile({
             type: 'asset',
             fileName: 'version.json',
-            source: `${JSON.stringify({ buildNumber, buildLabel }, null, 2)}\n`,
+            source: `${JSON.stringify({ buildNumber, buildLabel, buildDateTime }, null, 2)}\n`,
         });
     },
     async writeBundle(outputOptions) {
@@ -88,8 +123,8 @@ const buildVersionPlugin = ({ buildNumber, buildLabel, dailyPayloadPathname }) =
 export default defineConfig(({ mode }) => {
     const env = loadEnv(mode, process.cwd(), '');
     const buildNumber = resolveBuildNumber(env);
-    const buildLabel = (process.env.VITE_BUILD_LABEL ?? env.VITE_BUILD_LABEL ?? '').trim()
-        || new Date(buildNumber).toISOString();
+    const buildLabel = resolveBuildLabel(env, buildNumber);
+    const buildDateTime = resolveBuildDateTime(env);
     const dailyPayloadPathname = resolveDailyPayloadPathname(env);
     const isNativeBuild = (process.env.NATIVE_BUILD ?? env.NATIVE_BUILD) === '1';
     const configuredDailyUrl = (process.env.VITE_DAILY_URL ?? env.VITE_DAILY_URL ?? '').trim();
@@ -97,7 +132,7 @@ export default defineConfig(({ mode }) => {
 
     return {
         plugins: [
-            buildVersionPlugin({ buildNumber, buildLabel, dailyPayloadPathname }),
+            buildVersionPlugin({ buildNumber, buildLabel, buildDateTime, dailyPayloadPathname }),
         ],
         base: './', // Use relative paths for assets so they work in Capacitor/Tauri
         build: {

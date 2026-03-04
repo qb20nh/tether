@@ -464,6 +464,17 @@ header h1.brandTitle {
   accent-color: var(--accent);
 }
 
+.settingsVersion {
+  margin-block-start: 2px;
+  padding-block-start: 6px;
+  border-top: 1px solid color-mix(in srgb, var(--panel-outline), transparent 45%);
+  font-size: 10px;
+  line-height: 1.2;
+  letter-spacing: 0.02em;
+  color: color-mix(in srgb, var(--muted), transparent 35%);
+  text-align: end;
+}
+
 [id='themeToggle'] {
   padding: 7px 10px;
   font-size: 15px;

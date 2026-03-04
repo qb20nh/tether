@@ -152,6 +152,7 @@ export const APP_SHELL_TEMPLATE = (t = (k) => k, localeOptions = [], currentLoca
                 <span data-i18n="ui.pathPredictionEnable">${t('ui.pathPredictionEnable')}</span>
               </label>
             </div>
+            <div id="${ELEMENT_IDS.SETTINGS_VERSION}" class="settingsVersion" hidden></div>
           </div>
           <div id="${ELEMENT_IDS.NOTIFICATION_HISTORY_PANEL}" class="notificationHistoryPanel" hidden>
             <div id="${ELEMENT_IDS.NOTIFICATION_HISTORY_LIST}" class="notificationHistoryList"></div>

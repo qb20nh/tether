@@ -24,6 +24,8 @@ import {
 } from './runtime/notification_history.js';
 
 const BUILD_NUMBER_META_NAME = 'tether-build-number';
+const BUILD_LABEL_META_NAME = 'tether-build-label';
+const BUILD_DATETIME_META_NAME = 'tether-build-datetime';
 const VERSION_FILE = 'version.json';
 
 const DAILY_HARD_INVALIDATE_GRACE_MS = 60 * 1000;
@@ -38,6 +40,7 @@ const HISTORY_RELATIVE_TIME_REFRESH_MS = 60 * 1000;
 const HISTORY_MAX_ENTRIES = 10;
 const HISTORY_DYING_START_INDEX = 5;
 const HISTORY_EMPTY_PLACEHOLDER_TEXT = 'No notifications yet.';
+const BUILD_LABEL_HASH_RE = /\b[0-9a-f]{7,40}\b/i;
 
 const SW_MESSAGE_TYPES = Object.freeze({
   SYNC_DAILY_STATE: 'SW_SYNC_DAILY_STATE',
@@ -102,11 +105,40 @@ const notificationHistoryState = {
   entries: [],
 };
 
+const readMetaContent = (metaName) => {
+  const meta = document.querySelector(`meta[name="${metaName}"]`);
+  const content = typeof meta?.content === 'string' ? meta.content.trim() : '';
+  return content;
+};
+
 const localBuildNumber = (() => {
-  const meta = document.querySelector(`meta[name="${BUILD_NUMBER_META_NAME}"]`);
-  const parsed = Number.parseInt(meta?.content || '', 10);
+  const parsed = Number.parseInt(readMetaContent(BUILD_NUMBER_META_NAME), 10);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : 0;
 })();
+
+const localBuildLabel = readMetaContent(BUILD_LABEL_META_NAME);
+
+const localBuildDateTime = (() => {
+  const explicitDateTime = readMetaContent(BUILD_DATETIME_META_NAME);
+  if (explicitDateTime) return explicitDateTime;
+  if (localBuildLabel && !Number.isNaN(Date.parse(localBuildLabel))) return localBuildLabel;
+  return '';
+})();
+
+const resolveShortBuildHash = (buildLabel) => {
+  if (typeof buildLabel !== 'string' || buildLabel.length === 0) return '';
+  const match = buildLabel.match(BUILD_LABEL_HASH_RE);
+  if (!match) return '';
+  return match[0].slice(0, 7).toLowerCase();
+};
+
+const formatBuildDateTimeUtc = (rawValue) => {
+  if (typeof rawValue !== 'string' || rawValue.length === 0) return '';
+  const parsed = new Date(rawValue);
+  if (Number.isNaN(parsed.getTime())) return '';
+  const iso = parsed.toISOString();
+  return `${iso.slice(0, 16).replace('T', ' ')} UTC`;
+};
 
 const resolveBaseUrl = () => {
   const baseUrl = typeof import.meta.env.BASE_URL === 'string' && import.meta.env.BASE_URL.length > 0
@@ -359,6 +391,24 @@ const refreshPathPredictionToggleUi = () => {
 const refreshAutoUpdateToggleUi = () => {
   if (!autoUpdateToggleEl) return;
   autoUpdateToggleEl.checked = readAutoUpdateEnabledPreference();
+};
+
+const refreshSettingsVersionUi = () => {
+  const versionEl = document.getElementById(ELEMENT_IDS.SETTINGS_VERSION);
+  if (!versionEl) return;
+
+  const shortHash = resolveShortBuildHash(localBuildLabel);
+  const versionText = shortHash || (Number.isInteger(localBuildNumber) && localBuildNumber > 0
+    ? String(localBuildNumber)
+    : '');
+  const buildTimeText = formatBuildDateTimeUtc(localBuildDateTime);
+  const text = [
+    versionText,
+    buildTimeText,
+  ].filter((entry) => entry.length > 0).join(' · ');
+
+  versionEl.hidden = text.length === 0;
+  versionEl.textContent = text;
 };
 
 const translateNow = (key, vars = {}) => createTranslator(getLocale())(key, vars);
@@ -1640,6 +1690,7 @@ export async function initTetherApp() {
     getLocaleOptions(initialLocale),
     initialLocale,
   );
+  refreshSettingsVersionUi();
 
   bindNotificationsToggle();
   bindAutoUpdateToggle();

@@ -66,6 +66,7 @@ export const ELEMENT_IDS = Object.freeze({
   NOTIFICATION_HISTORY_LIST: 'notificationHistoryList',
   SETTINGS_TOGGLE: 'settingsToggle',
   SETTINGS_PANEL: 'settingsPanel',
+  SETTINGS_VERSION: 'settingsVersion',
   THEME_SWITCH_DIALOG: 'themeSwitchDialog',
   THEME_SWITCH_MESSAGE: 'themeSwitchMessage',
   THEME_SWITCH_CANCEL_BTN: 'themeSwitchCancelBtn',
