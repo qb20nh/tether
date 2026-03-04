@@ -4,12 +4,15 @@ const BUILD_LABEL = '__TETHER_BUILD_LABEL__';
 const APP_CACHE = `tether-app-${BUILD_NUMBER}`;
 const DAILY_CACHE = `tether-daily-${BUILD_NUMBER}`;
 const META_CACHE = 'tether-meta-v1';
+const APP_CACHE_MAX_ENTRIES = 180;
+const DAILY_CACHE_MAX_ENTRIES = 2;
 
 const DAILY_CHECK_TAG = 'tether-daily-check';
 const DEFAULT_WARNING_HOURS = 8;
 const HISTORY_MAX_ENTRIES = 10;
 const HISTORY_VERSION_START = 1;
 const SW_PLUGIN_QUERY_PARAM = 'plugin';
+const DAILY_PAYLOAD_PATH_SUFFIX = '__TETHER_DAILY_PAYLOAD_PATH__';
 
 const notificationDefaults = Object.freeze({
   unsolvedTitle: 'Daily level ending soon',
@@ -40,7 +43,7 @@ const isNavigationRequest = (request) =>
   request.mode === 'navigate' || request.destination === 'document';
 
 const isVersionRequest = (url) => url.pathname.endsWith('/version.json');
-const isDailyPayloadRequest = (url) => url.pathname.endsWith('/daily/today.json');
+const isDailyPayloadRequest = (url) => url.pathname.endsWith(DAILY_PAYLOAD_PATH_SUFFIX);
 
 const isStaticAssetRequest = (request, url) => {
   if (url.origin !== self.location.origin) return false;
@@ -61,6 +64,57 @@ const resolveNotificationIconUrl = () => new URL('icons/icon-192.webp', self.reg
 const resolveNotificationBadgeUrl = () => new URL('icons/icon-96.webp', self.registration.scope).toString();
 
 const openCache = (name) => caches.open(name);
+const toRequestUrl = (requestOrUrl) => {
+  try {
+    if (requestOrUrl instanceof Request) return new URL(requestOrUrl.url);
+    return new URL(String(requestOrUrl), self.location.href);
+  } catch {
+    return null;
+  }
+};
+
+const resolveDailyCacheKey = (request) => {
+  const url = toRequestUrl(request);
+  if (!url) return request;
+  url.search = '';
+  url.hash = '';
+  return url.toString();
+};
+
+const isDailyCacheRequest = (request) => {
+  const url = toRequestUrl(request);
+  return Boolean(url && isDailyPayloadRequest(url));
+};
+
+const trimCacheEntries = async (cacheName, maxEntries, { matcher = null } = {}) => {
+  if (!Number.isInteger(maxEntries) || maxEntries < 0) return;
+  const cache = await openCache(cacheName);
+  const keys = await cache.keys();
+  const matched = typeof matcher === 'function' ? keys.filter((request) => matcher(request)) : keys;
+  if (matched.length <= maxEntries) return;
+  const deleteCount = matched.length - maxEntries;
+  for (let i = 0; i < deleteCount; i += 1) {
+    await cache.delete(matched[i]);
+  }
+};
+
+const cleanupCurrentBuildCaches = async () => {
+  if (isLocalhostHostname(self.location.hostname)) {
+    await Promise.all([
+      caches.delete(APP_CACHE),
+      caches.delete(DAILY_CACHE),
+    ]);
+    return;
+  }
+
+  await Promise.all([
+    trimCacheEntries(APP_CACHE, APP_CACHE_MAX_ENTRIES),
+    trimCacheEntries(DAILY_CACHE, DAILY_CACHE_MAX_ENTRIES, {
+      matcher: (request) => isDailyCacheRequest(request),
+    }),
+  ]);
+};
+
 const fetchFresh = (request, options = {}) => {
   const { bypassCache = false } = options;
   const headers = new Headers(request.headers || undefined);
@@ -78,6 +132,7 @@ self.addEventListener('activate', (event) => {
         .filter((key) => key.startsWith('tether-') && !buildCaches.includes(key))
         .map((key) => caches.delete(key)),
     );
+    await cleanupCurrentBuildCaches();
     await self.clients.claim();
   })());
 });
@@ -88,14 +143,18 @@ const networkOnlyVersion = async (request) => {
 
 const networkFirstDaily = async (request) => {
   const cache = await openCache(DAILY_CACHE);
+  const cacheKey = resolveDailyCacheKey(request);
   try {
     const response = await fetchFresh(request, { bypassCache: true });
     if (isCacheableResponse(response)) {
-      await cache.put(request, response.clone());
+      await cache.put(cacheKey, response.clone());
+      await trimCacheEntries(DAILY_CACHE, DAILY_CACHE_MAX_ENTRIES, {
+        matcher: (cacheRequest) => isDailyCacheRequest(cacheRequest),
+      });
     }
     return response;
   } catch {
-    const cached = await cache.match(request, { ignoreSearch: true });
+    const cached = await cache.match(cacheKey, { ignoreSearch: true });
     if (cached) return cached;
     return new Response('', { status: 503, statusText: 'Offline' });
   }
@@ -132,6 +191,7 @@ const cacheFirstRevalidateNavigation = async (event, request) => {
       if (isCacheableResponse(response)) {
         await cache.put(request, response.clone());
         await cache.put(shellUrl, response.clone());
+        await trimCacheEntries(APP_CACHE, APP_CACHE_MAX_ENTRIES);
       }
       return response;
     })
@@ -153,6 +213,18 @@ self.addEventListener('fetch', (event) => {
 
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
+
+  if (isLocalhostHostname(self.location.hostname)) {
+    if (isVersionRequest(url)) {
+      event.respondWith(networkOnlyVersion(request));
+      return;
+    }
+    if (isDailyPayloadRequest(url)) {
+      event.respondWith(fetchFresh(request, { bypassCache: true }));
+      return;
+    }
+    return;
+  }
 
   if (isVersionRequest(url)) {
     event.respondWith(networkOnlyVersion(request));

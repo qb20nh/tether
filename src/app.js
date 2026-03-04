@@ -13,6 +13,7 @@ import { createDefaultAdapters } from './runtime/default_adapters.js';
 import { createRuntime } from './runtime/create_runtime.js';
 import { uiActionIntent, UI_ACTIONS } from './runtime/intents.js';
 import { mountRuntimePlugins, resolveServiceWorkerRegistrationUrl } from './plugins/runtime_plugins.js';
+import { DAILY_PAYLOAD_FILE } from './shared/paths.js';
 import {
   HISTORY_DOT_COLORS,
   formatHistoryAbsoluteTime,
@@ -23,7 +24,6 @@ import {
 } from './runtime/notification_history.js';
 
 const BUILD_NUMBER_META_NAME = 'tether-build-number';
-const DAILY_PAYLOAD_FILE = 'daily/today.json';
 const VERSION_FILE = 'version.json';
 
 const DAILY_HARD_INVALIDATE_GRACE_MS = 60 * 1000;

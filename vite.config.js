@@ -1,11 +1,13 @@
 import path from 'node:path';
 import { readFile, writeFile } from 'node:fs/promises';
 import { defineConfig, loadEnv } from 'vite';
+import { DAILY_PAYLOAD_FILE } from './src/shared/paths.js';
 
 const BUILD_NUMBER_META_NAME = 'tether-build-number';
 const BUILD_LABEL_META_NAME = 'tether-build-label';
 const SW_BUILD_NUMBER_PLACEHOLDER = '__TETHER_BUILD_NUMBER__';
 const SW_BUILD_LABEL_PLACEHOLDER = '__TETHER_BUILD_LABEL__';
+const SW_DAILY_PAYLOAD_PATH_PLACEHOLDER = '__TETHER_DAILY_PAYLOAD_PATH__';
 
 const resolveBuildNumber = (env) => {
     const configuredRaw = (process.env.VITE_BUILD_NUMBER ?? env.VITE_BUILD_NUMBER ?? '').trim();
@@ -20,7 +22,19 @@ const resolveBuildNumber = (env) => {
     return Date.now();
 };
 
-const buildVersionPlugin = ({ buildNumber, buildLabel }) => ({
+const resolveDailyPayloadPathname = (env) => {
+    const fallback = `/${DAILY_PAYLOAD_FILE}`.replace(/\/{2,}/g, '/');
+    const configuredRaw = (process.env.VITE_DAILY_URL ?? env.VITE_DAILY_URL ?? '').trim();
+    if (configuredRaw.length === 0) return fallback;
+    try {
+        const parsed = new URL(configuredRaw, 'http://localhost/');
+        return parsed.pathname || fallback;
+    } catch {
+        return fallback;
+    }
+};
+
+const buildVersionPlugin = ({ buildNumber, buildLabel, dailyPayloadPathname }) => ({
     name: 'tether-build-version',
     transformIndexHtml: () => ({
         tags: [
@@ -65,7 +79,8 @@ const buildVersionPlugin = ({ buildNumber, buildLabel }) => ({
 
         const replaced = source
             .replaceAll(SW_BUILD_NUMBER_PLACEHOLDER, String(buildNumber))
-            .replaceAll(SW_BUILD_LABEL_PLACEHOLDER, buildLabel);
+            .replaceAll(SW_BUILD_LABEL_PLACEHOLDER, buildLabel)
+            .replaceAll(SW_DAILY_PAYLOAD_PATH_PLACEHOLDER, dailyPayloadPathname);
         await writeFile(serviceWorkerFile, replaced, 'utf8');
     },
 });
@@ -74,13 +89,14 @@ export default defineConfig(({ mode }) => {
     const env = loadEnv(mode, process.cwd(), '');
     const buildNumber = resolveBuildNumber(env);
     const buildLabel = new Date(buildNumber).toISOString();
+    const dailyPayloadPathname = resolveDailyPayloadPathname(env);
     const isNativeBuild = (process.env.NATIVE_BUILD ?? env.NATIVE_BUILD) === '1';
     const configuredDailyUrl = (process.env.VITE_DAILY_URL ?? env.VITE_DAILY_URL ?? '').trim();
     const shouldExternalizeDaily = isNativeBuild && configuredDailyUrl.length > 0;
 
     return {
         plugins: [
-            buildVersionPlugin({ buildNumber, buildLabel }),
+            buildVersionPlugin({ buildNumber, buildLabel, dailyPayloadPathname }),
         ],
         base: './', // Use relative paths for assets so they work in Capacitor/Tauri
         build: {
