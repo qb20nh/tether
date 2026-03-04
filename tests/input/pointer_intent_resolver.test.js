@@ -354,6 +354,66 @@ test('chooseSlipperyPathDragStep keeps predicted-best step when raw pointer agre
   assert.deepEqual(picked, { r: 1, c: 2 });
 });
 
+test('chooseSlipperyPathDragStep gives visible lead over raw-only drag', () => {
+  const snapshot = {
+    rows: 3,
+    cols: 3,
+    visited: new Set(),
+    gridData: [
+      ['.', '.', '.'],
+      ['.', '.', '.'],
+      ['.', '.', '.'],
+    ],
+    stitchSet: new Set(),
+  };
+  const cellSize = 56;
+  const centerY = (cellSize * 1) + (cellSize * 0.5);
+  const basePayload = {
+    snapshot,
+    headNode: { r: 1, c: 1 },
+    backtrackNode: null,
+    pointerCell: { r: 1, c: 1 },
+    isUsableCell: () => true,
+    isAdjacentMove: (_snapshot, a, b) => Math.abs(a.r - b.r) + Math.abs(a.c - b.c) === 1,
+    cellCenter: (r, c) => ({
+      x: (c * cellSize) + (cellSize * 0.5),
+      y: (r * cellSize) + (cellSize * 0.5),
+    }),
+    cellSize,
+  };
+
+  let predThreshold = null;
+  let rawThreshold = null;
+  for (let rawX = 84; rawX <= 160; rawX += 1) {
+    const rawPointer = { x: rawX, y: centerY };
+    const predictedPointer = { x: rawX + 20, y: centerY };
+    const predictedStep = chooseSlipperyPathDragStep({
+      ...basePayload,
+      pointer: predictedPointer,
+      rawPointer,
+    });
+    const rawOnlyStep = chooseSlipperyPathDragStep({
+      ...basePayload,
+      pointer: rawPointer,
+      rawPointer,
+    });
+
+    if (predThreshold === null && predictedStep?.r === 1 && predictedStep?.c === 2) {
+      predThreshold = rawX;
+    }
+    if (rawThreshold === null && rawOnlyStep?.r === 1 && rawOnlyStep?.c === 2) {
+      rawThreshold = rawX;
+    }
+  }
+
+  assert.notEqual(predThreshold, null);
+  assert.notEqual(rawThreshold, null);
+  assert.ok(
+    predThreshold <= rawThreshold - 8,
+    `expected >=8px prediction lead, got predThreshold=${predThreshold}, rawThreshold=${rawThreshold}`,
+  );
+});
+
 test('chooseSlipperyPathDragStep returns null when pointer is already on head cell', () => {
   const picked = chooseSlipperyPathDragStep({
     snapshot: {

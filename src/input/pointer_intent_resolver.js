@@ -20,6 +20,10 @@ const STITCH_HOLD_MIN_HALF_WIDTH_PX = 1;
 const STITCH_HOLD_HALF_WIDTH_CELL_RATIO = 0.06;
 const RAW_POINTER_GUARD_MIN_EPSILON_PX = 1;
 const RAW_POINTER_GUARD_CELL_EPSILON_RATIO = 0.03;
+const RAW_POINTER_LEAD_SCALE = 1.25;
+const RAW_POINTER_LEAD_MAX_CELL_RATIO = 0.55;
+const RAW_POINTER_DIRECTION_MIN_COS = 0.10;
+const RAW_POINTER_DIRECTION_MIN_DISTANCE_CELL_RATIO = 0.08;
 const DEFAULT_CELL_SIZE_PX = 56;
 
 const clamp = (value, lo, hi) => Math.max(lo, Math.min(hi, value));
@@ -372,9 +376,24 @@ export function chooseSlipperyPathDragStep({
     RAW_POINTER_GUARD_MIN_EPSILON_PX,
     resolvedCellSize * RAW_POINTER_GUARD_CELL_EPSILON_RATIO,
   );
+  const predictedLeadDistance = Math.hypot(
+    pointer.x - resolvedRawPointer.x,
+    pointer.y - resolvedRawPointer.y,
+  );
+  const rawLeadAllowance = clamp(
+    predictedLeadDistance * RAW_POINTER_LEAD_SCALE,
+    0,
+    resolvedCellSize * RAW_POINTER_LEAD_MAX_CELL_RATIO,
+  );
   const rawHoldDistance = Math.hypot(
     resolvedRawPointer.x - headCenter.x,
     resolvedRawPointer.y - headCenter.y,
+  );
+  const rawIntentX = resolvedRawPointer.x - headCenter.x;
+  const rawIntentY = resolvedRawPointer.y - headCenter.y;
+  const rawIntentLength = Math.hypot(rawIntentX, rawIntentY);
+  const shouldCheckRawDirection = rawIntentLength > (
+    resolvedCellSize * RAW_POINTER_DIRECTION_MIN_DISTANCE_CELL_RATIO
   );
 
   const holdDistance = Math.hypot(pointer.x - headCenter.x, pointer.y - headCenter.y);
@@ -387,11 +406,22 @@ export function chooseSlipperyPathDragStep({
     const predictedDistance = Math.hypot(pointer.x - center.x, pointer.y - center.y);
     const rawDistance = Math.hypot(resolvedRawPointer.x - center.x, resolvedRawPointer.y - center.y);
     const isPointerCell = sameCell(pointerCell, candidate);
+    const candidateVecX = center.x - headCenter.x;
+    const candidateVecY = center.y - headCenter.y;
+    const candidateVecLength = Math.hypot(candidateVecX, candidateVecY);
+    const rawDirectionCos = (
+      shouldCheckRawDirection
+      && candidateVecLength > 0
+    )
+      ? ((candidateVecX * rawIntentX) + (candidateVecY * rawIntentY))
+        / (candidateVecLength * rawIntentLength)
+      : 1;
     rankedCandidates.push({
       candidate,
       predictedDistance,
       rawDistance,
       isPointerCell,
+      rawDirectionCos,
     });
   }
 
@@ -411,7 +441,8 @@ export function chooseSlipperyPathDragStep({
     const predictedImproves = ranked.predictedDistance < holdDistance - 1e-6
       || (predictedEqualToHold && ranked.isPointerCell && !holdIsPointerCell);
     if (!predictedImproves) continue;
-    if (ranked.rawDistance > rawHoldDistance + rawGuardEpsilon) continue;
+    if (ranked.rawDirectionCos < RAW_POINTER_DIRECTION_MIN_COS) continue;
+    if (ranked.rawDistance > rawHoldDistance + rawGuardEpsilon + rawLeadAllowance) continue;
     return { r: ranked.candidate.r, c: ranked.candidate.c };
   }
 
