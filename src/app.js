@@ -41,6 +41,7 @@ const DAILY_CHECK_TAG = 'tether-daily-check';
 const SW_BUILD_NUMBER_RE = /BUILD_NUMBER\s*=\s*Number\.parseInt\(\s*['"](\d+)['"]\s*,\s*10\)/;
 const LAST_SEEN_BUILD_NUMBER_KEY = 'tetherLastSeenBuildNumber';
 const APP_TOAST_ID = 'appToast';
+const UPDATE_PROGRESS_OVERLAY_ID = 'updateProgressOverlay';
 const APP_TOAST_VISIBLE_MS = 3200;
 const HISTORY_RELATIVE_TIME_REFRESH_MS = 60 * 1000;
 const HISTORY_MAX_ENTRIES = 10;
@@ -101,6 +102,9 @@ let notificationHistoryValidationFrame = 0;
 let updateApplyDialogEl = null;
 let updateApplyMessageEl = null;
 let updateApplyDialogBound = false;
+let updateProgressOverlayEl = null;
+let updateProgressOverlayLabelEl = null;
+let updateProgressOverlayActive = false;
 let moveDailyDialogEl = null;
 let moveDailyMessageEl = null;
 let moveDailyDialogBound = false;
@@ -217,6 +221,63 @@ const detectBuildUpgrade = () => {
   const previousBuild = readLastSeenBuildNumber();
   writeLastSeenBuildNumber(localBuildNumber);
   return Number.isInteger(previousBuild) && localBuildNumber > previousBuild;
+};
+
+const resolveUpdateApplyingOverlayText = () => {
+  const localized = translateNow('ui.updateApplyingOverlay');
+  if (localized !== 'ui.updateApplyingOverlay') return localized;
+  return 'Updating to the latest version...';
+};
+
+const ensureUpdateProgressOverlay = () => {
+  if (updateProgressOverlayEl?.isConnected) return updateProgressOverlayEl;
+  if (!document.body) return null;
+
+  const overlay = document.createElement('div');
+  overlay.id = UPDATE_PROGRESS_OVERLAY_ID;
+  overlay.className = 'updateProgressOverlay';
+  overlay.hidden = true;
+  overlay.setAttribute('role', 'status');
+  overlay.setAttribute('aria-live', 'polite');
+  overlay.setAttribute('aria-atomic', 'true');
+
+  const content = document.createElement('div');
+  content.className = 'updateProgressOverlay__content';
+
+  const spinner = document.createElement('span');
+  spinner.className = 'updateProgressOverlay__spinner';
+  spinner.setAttribute('aria-hidden', 'true');
+
+  const label = document.createElement('span');
+  label.className = 'updateProgressOverlay__label';
+  label.textContent = resolveUpdateApplyingOverlayText();
+
+  content.appendChild(spinner);
+  content.appendChild(label);
+  overlay.appendChild(content);
+  document.body.appendChild(overlay);
+
+  updateProgressOverlayEl = overlay;
+  updateProgressOverlayLabelEl = label;
+  return updateProgressOverlayEl;
+};
+
+const setUpdateProgressOverlayActive = (active) => {
+  const nextActive = active === true;
+  const overlay = ensureUpdateProgressOverlay();
+  if (!overlay) return;
+
+  updateProgressOverlayActive = nextActive;
+  overlay.hidden = !nextActive;
+  if (updateProgressOverlayLabelEl) {
+    updateProgressOverlayLabelEl.textContent = resolveUpdateApplyingOverlayText();
+  }
+  document.body.classList.toggle('isUpdateApplying', nextActive);
+  if (nextActive) {
+    document.body.setAttribute('aria-busy', 'true');
+  } else {
+    document.body.removeAttribute('aria-busy');
+  }
 };
 
 const showInAppToast = (text, options = {}) => {
@@ -1616,6 +1677,10 @@ const waitForWaitingWorker = (registration, timeoutMs = 8000) =>
 
     const bindInstallingWorker = (worker) => {
       if (!worker) return;
+      if (worker.state === 'installed') {
+        finish(registration.waiting || worker);
+        return;
+      }
       const onStateChange = () => {
         if (worker.state === 'installed') {
           finish(registration.waiting || worker);
@@ -1708,26 +1773,41 @@ const maybeApplyUpdate = async (remoteBuildNumber, options = {}) => {
     return { applied: false, status: UPDATE_APPLY_STATUS.ALREADY_PROMPTED };
   }
 
+  setUpdateProgressOverlayActive(true);
+  let applied = false;
   try {
-    await swRegistration.update();
-  } catch {
-    return { applied: false, status: UPDATE_APPLY_STATUS.UPDATE_FAILED };
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const waitingWorkerPromise = waitForWaitingWorker(
+        swRegistration,
+        attempt === 0 ? 8000 : 4000,
+      );
+      try {
+        await swRegistration.update();
+      } catch {
+        return { applied: false, status: UPDATE_APPLY_STATUS.UPDATE_FAILED };
+      }
+
+      const waitingWorker = await waitingWorkerPromise;
+      if (!waitingWorker) continue;
+
+      promptedRemoteBuildNumbers.add(remoteBuildNumber);
+      armControllerChangeReload();
+      waitingWorker.postMessage({
+        type: 'SW_SKIP_WAITING',
+        payload: Number.isInteger(approvedBuildNumber) && approvedBuildNumber > 0
+          ? { approvedBuildNumber }
+          : {},
+      });
+      applied = true;
+      return { applied: true, status: UPDATE_APPLY_STATUS.APPLIED };
+    }
+  } finally {
+    if (!applied) {
+      setUpdateProgressOverlayActive(false);
+    }
   }
 
-  const waitingWorker = await waitForWaitingWorker(swRegistration);
-  if (!waitingWorker) {
-    return { applied: false, status: UPDATE_APPLY_STATUS.NO_WAITING };
-  }
-
-  promptedRemoteBuildNumbers.add(remoteBuildNumber);
-  armControllerChangeReload();
-  waitingWorker.postMessage({
-    type: 'SW_SKIP_WAITING',
-    payload: Number.isInteger(approvedBuildNumber) && approvedBuildNumber > 0
-      ? { approvedBuildNumber }
-      : {},
-  });
-  return { applied: true, status: UPDATE_APPLY_STATUS.APPLIED };
+  return { applied: false, status: UPDATE_APPLY_STATUS.NO_WAITING };
 };
 
 const applyUpdateForBuild = async (remoteBuildNumber, options = {}) => {
@@ -1940,6 +2020,9 @@ export async function initTetherApp() {
     }
     if (moveDailyMessageEl) {
       moveDailyMessageEl.textContent = resolveMoveDailyDialogPromptText();
+    }
+    if (updateProgressOverlayActive && updateProgressOverlayLabelEl) {
+      updateProgressOverlayLabelEl.textContent = resolveUpdateApplyingOverlayText();
     }
     void syncDailyStateToServiceWorker();
     return resolved;

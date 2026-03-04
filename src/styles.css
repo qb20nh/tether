@@ -947,6 +947,63 @@ button:disabled:active {
   transform: translate(-50%, 0);
 }
 
+body.isUpdateApplying {
+  cursor: progress;
+}
+
+body.isUpdateApplying .app {
+  pointer-events: none;
+}
+
+.updateProgressOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 140;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: color-mix(in srgb, var(--bg), #000 45%);
+  backdrop-filter: blur(2px);
+}
+
+.updateProgressOverlay[hidden] {
+  display: none;
+}
+
+.updateProgressOverlay__content {
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+  min-inline-size: min(280px, 92vw);
+  padding: 18px 20px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--accent), transparent 52%);
+  background: color-mix(in srgb, var(--panel), #000 22%);
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.34);
+}
+
+.updateProgressOverlay__spinner {
+  inline-size: 30px;
+  block-size: 30px;
+  border-radius: 999px;
+  border: 3px solid color-mix(in srgb, var(--text), transparent 72%);
+  border-top-color: var(--accent);
+  animation: updateOverlaySpin 0.8s linear infinite;
+}
+
+.updateProgressOverlay__label {
+  font-size: 14px;
+  line-height: 1.3;
+  color: var(--text);
+  text-align: center;
+}
+
+@keyframes updateOverlaySpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .layout {
   display: grid;
   gap: 6px;
