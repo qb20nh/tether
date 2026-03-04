@@ -294,6 +294,29 @@ const hasCompleteCachedShellAssets = async (cacheName) => {
   return true;
 };
 
+const collectCachedCriticalShellAssetUrls = async (cacheName) => {
+  const cache = await openCache(cacheName);
+  const shellUrl = resolveShellUrl();
+  const cachedShell = await cache.match(shellUrl, { ignoreSearch: true });
+  if (!cachedShell) return [];
+  try {
+    const shellHtml = await cachedShell.clone().text();
+    return collectCriticalShellAssetUrls(shellHtml, shellUrl);
+  } catch {
+    return [];
+  }
+};
+
+const isPinnedCriticalAssetRequest = async (cacheName, request) => {
+  const requestUrl = toRequestUrl(request);
+  if (!requestUrl) return false;
+  requestUrl.hash = '';
+  const requestHref = requestUrl.toString();
+  const criticalAssetUrls = await collectCachedCriticalShellAssetUrls(cacheName);
+  if (criticalAssetUrls.length === 0) return false;
+  return criticalAssetUrls.includes(requestHref);
+};
+
 self.addEventListener('install', (event) => {
   event.waitUntil((async () => {
     if (isLocalhostHostname(self.location.hostname)) return;
@@ -349,11 +372,23 @@ const cacheFirstRevalidateStatic = async (event, request, options = {}) => {
   if (pinned && cached) return cached;
 
   if (pinned && !cached) {
-    await failOpenPinnedBuildToLatest();
-    return cacheFirstRevalidateStatic(event, request, {
-      cacheName: APP_CACHE,
-      pinned: false,
-    });
+    const critical = await isPinnedCriticalAssetRequest(cacheName, request);
+    if (critical) {
+      await failOpenPinnedBuildToLatest();
+      return cacheFirstRevalidateStatic(event, request, {
+        cacheName: APP_CACHE,
+        pinned: false,
+      });
+    }
+    try {
+      const response = await fetchFresh(request);
+      if (isCacheableResponse(response)) {
+        await cache.put(request, response.clone());
+      }
+      return response;
+    } catch {
+      return new Response('', { status: 503, statusText: 'Offline' });
+    }
   }
 
   const networkPromise = fetchFresh(request)
