@@ -1027,24 +1027,30 @@ const resolveUpdateApplyDialogPromptText = (buildNumber = null) => {
   return 'Install the latest version now?';
 };
 
-const openUpdateApplyDialog = (buildNumber) => {
-  if (!Number.isInteger(buildNumber) || buildNumber <= 0) return;
+let updateApplyDialogResolver = null;
+
+const requestUpdateApplyConfirmation = async (buildNumber) => {
+  if (!Number.isInteger(buildNumber) || buildNumber <= 0) return false;
   if (!updateApplyDialogEl || typeof updateApplyDialogEl.showModal !== 'function') {
-    if (window.confirm(resolveUpdateApplyDialogPromptText(buildNumber))) {
-      void applyLatestUpdateForAction(buildNumber);
-    }
-    return;
+    return window.confirm(resolveUpdateApplyDialogPromptText(buildNumber));
   }
-  if (updateApplyDialogEl.open) return;
+  if (updateApplyDialogEl.open || updateApplyDialogResolver) return false;
+
   updateApplyDialogEl.dataset.pendingBuildNumber = String(buildNumber);
   if (updateApplyMessageEl) {
     updateApplyMessageEl.textContent = resolveUpdateApplyDialogPromptText(buildNumber);
   }
-  try {
-    updateApplyDialogEl.showModal();
-  } catch {
-    delete updateApplyDialogEl.dataset.pendingBuildNumber;
-  }
+
+  return new Promise((resolve) => {
+    updateApplyDialogResolver = resolve;
+    try {
+      updateApplyDialogEl.showModal();
+    } catch {
+      updateApplyDialogResolver = null;
+      delete updateApplyDialogEl.dataset.pendingBuildNumber;
+      resolve(window.confirm(resolveUpdateApplyDialogPromptText(buildNumber)));
+    }
+  });
 };
 
 const resolveLatestUpdateBuildNumber = async (hintBuildNumber = null) => {
@@ -1112,11 +1118,11 @@ const hasUnsolvedPath = (snapshot) => {
 };
 
 const openDailyFromHistoryAction = async (dailyId = '', kind = '') => {
-  if (!runtimeInstance || !runtimeCoreAdapter || !runtimeStateAdapter) return;
-  if (!latestDailyState.dailyId) return;
+  if (!runtimeInstance || !runtimeCoreAdapter || !runtimeStateAdapter) return false;
+  if (!latestDailyState.dailyId) return false;
 
   const snapshot = runtimeStateAdapter.getSnapshot();
-  if (!snapshot || !Number.isInteger(snapshot.levelIndex)) return;
+  if (!snapshot || !Number.isInteger(snapshot.levelIndex)) return false;
 
   if (kind === 'new-level') {
     const latestPayload = await fetchDailyPayload({ bypassCache: true });
@@ -1128,28 +1134,31 @@ const openDailyFromHistoryAction = async (dailyId = '', kind = '') => {
       )
     ) {
       window.location.reload();
-      return;
+      return true;
     }
   }
 
   const isDailyLevel = typeof runtimeCoreAdapter.isDailyAbsIndex === 'function'
     && runtimeCoreAdapter.isDailyAbsIndex(snapshot.levelIndex);
-  if (isDailyLevel) return;
+  if (isDailyLevel) {
+    return true;
+  }
 
   const isInfiniteLevel = typeof runtimeCoreAdapter.isInfiniteAbsIndex === 'function'
     && runtimeCoreAdapter.isInfiniteAbsIndex(snapshot.levelIndex);
   const shouldConfirm = hasUnsolvedPath(snapshot) && (isInfiniteLevel || !isDailyLevel);
-  if (shouldConfirm && !(await requestMoveDailyConfirmation())) return;
+  if (shouldConfirm && !(await requestMoveDailyConfirmation())) return false;
 
   const dailyAbsIndex = typeof runtimeCoreAdapter.getDailyAbsIndex === 'function'
     ? runtimeCoreAdapter.getDailyAbsIndex()
     : null;
-  if (!Number.isInteger(dailyAbsIndex)) return;
+  if (!Number.isInteger(dailyAbsIndex)) return false;
 
   runtimeInstance.emitIntent(uiActionIntent(UI_ACTIONS.LEVEL_SELECT, {
     value: dailyAbsIndex,
     suppressFrozenTransition: kind === 'new-level',
   }));
+  return true;
 };
 
 const handleNotificationHistoryItemAction = (event) => {
@@ -1167,7 +1176,11 @@ const handleNotificationHistoryItemAction = (event) => {
         await clearAppliedUpdateHistoryActions(localBuildNumber);
         return;
       }
-      openUpdateApplyDialog(latestBuildNumber);
+      const confirmed = await requestUpdateApplyConfirmation(latestBuildNumber);
+      if (confirmed) {
+        closeNotificationHistoryPanel();
+        void applyLatestUpdateForAction(latestBuildNumber);
+      }
     })();
     return;
   }
@@ -1180,7 +1193,12 @@ const handleNotificationHistoryItemAction = (event) => {
     })) {
       return;
     }
-    void openDailyFromHistoryAction(dailyId, kind);
+    void (async () => {
+      const executed = await openDailyFromHistoryAction(dailyId, kind);
+      if (executed) {
+        closeNotificationHistoryPanel();
+      }
+    })();
   }
 };
 
@@ -1239,9 +1257,11 @@ const bindUpdateApplyDialog = () => {
     const shouldApply = updateApplyDialogEl?.returnValue === 'confirm';
     delete updateApplyDialogEl.dataset.pendingBuildNumber;
     updateApplyDialogEl.returnValue = '';
-    if (!shouldApply) return;
-    if (!Number.isInteger(buildNumber) || buildNumber <= 0) return;
-    void applyLatestUpdateForAction(buildNumber);
+    const resolve = updateApplyDialogResolver;
+    updateApplyDialogResolver = null;
+    if (typeof resolve === 'function') {
+      resolve(shouldApply);
+    }
   });
 
   updateApplyDialogBound = true;
