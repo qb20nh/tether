@@ -811,17 +811,15 @@ export function createRuntime(options) {
   const resolveDraggedHintSuppressionKey = (snapshot) => {
     if (!interactionState.isPathDragging) return null;
     const side = interactionState.pathDragSide;
-    const cursor = interactionState.pathDragCursor;
     if (side !== 'start' && side !== 'end') return null;
-    if (!cursor || !Number.isInteger(cursor.r) || !Number.isInteger(cursor.c)) return null;
     if (snapshot.path.length === 0) return null;
 
     const endpoint = side === 'start'
       ? snapshot.path[0]
       : snapshot.path[snapshot.path.length - 1];
-    if (!endpoint || endpoint.r !== cursor.r || endpoint.c !== cursor.c) return null;
+    if (!endpoint) return null;
 
-    return `${cursor.r},${cursor.c}`;
+    return `${endpoint.r},${endpoint.c}`;
   };
 
   const isPathDragCursorOnActiveEndpoint = (
@@ -832,19 +830,13 @@ export function createRuntime(options) {
   ) => {
     if (!isPathDragging) return false;
     const side = pathDragSide;
-    const cursor = pathDragCursor;
     if (side !== 'start' && side !== 'end') return false;
-    if (!cursor || !Number.isInteger(cursor.r) || !Number.isInteger(cursor.c)) return false;
     if (!snapshot || snapshot.path.length === 0) return false;
 
     const endpoint = side === 'start'
       ? snapshot.path[0]
       : snapshot.path[snapshot.path.length - 1];
-    return Boolean(
-      endpoint
-      && endpoint.r === cursor.r
-      && endpoint.c === cursor.c
-    );
+    return Boolean(endpoint);
   };
 
   const buildPathTipArrivalHint = (commandType, prevSnapshot, nextSnapshot) => {
