@@ -691,29 +691,40 @@ const emitSystemNotification = async (state, kind) => {
     ? `tether-new-level-${dailyId}`
     : `tether-unsolved-${dailyId}`;
 
-  await showNotification(title, {
-    body,
-    icon: resolveNotificationIconUrl(),
-    badge: resolveNotificationBadgeUrl(),
-    tag,
-    renotify: false,
-    data: {
-      type: normalizedKind,
+  try {
+    await appendSystemHistoryEntry(normalizedKind, title, body, dailyId, {
+      type: 'open-daily',
       dailyId,
-      buildNumber: BUILD_NUMBER,
-    },
-  });
-  await appendSystemHistoryEntry(normalizedKind, title, body, dailyId, {
-    type: 'open-daily',
-    dailyId,
-  });
+    });
+  } catch {
+    return false;
+  }
+
+  try {
+    await showNotification(title, {
+      body,
+      icon: resolveNotificationIconUrl(),
+      badge: resolveNotificationBadgeUrl(),
+      tag,
+      renotify: false,
+      data: {
+        type: normalizedKind,
+        dailyId,
+        buildNumber: BUILD_NUMBER,
+      },
+    });
+  } catch {
+    // Notification API errors are best effort after history append.
+  }
+
   return true;
 };
 
 const showNotification = async (title, options) => {
-  if (!self.registration || typeof self.registration.showNotification !== 'function') return;
-  if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
+  if (!self.registration || typeof self.registration.showNotification !== 'function') return false;
+  if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return false;
   await self.registration.showNotification(title, options);
+  return true;
 };
 
 const runDailyCheck = async () => {
