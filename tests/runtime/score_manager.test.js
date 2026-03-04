@@ -1,7 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createGameStateStore } from '../../src/state/game_state_store.js';
-import { buildCanonicalSolutionSignature, __TEST__ } from '../../src/runtime/score_manager.js';
+import {
+  buildCanonicalSolutionSignature,
+  createScoreManager,
+  SCORE_MODES,
+  __TEST__,
+} from '../../src/runtime/score_manager.js';
 
 const LEVEL_STRAIGHT = {
   name: 'Straight',
@@ -85,4 +90,21 @@ test('constraint behavior differences produce distinct signatures', () => {
 test('topology word helpers reduce and normalize generator labels deterministically', () => {
   assert.deepEqual(__TEST__.reduceTopologyTokens(['+1', '-1', '+2', '+2', '-2']), ['+2']);
   assert.equal(__TEST__.normalizeTokenLabelsByAppearance(['+7', '-3', '+7']), '+1,-2,+1');
+});
+
+test('unique solution bonus follows rounded sqrt(2n) progression', () => {
+  const scoreManager = createScoreManager({}, null);
+  const awarded = [];
+
+  for (let i = 1; i <= 6; i += 1) {
+    const result = scoreManager.registerSolved({
+      mode: SCORE_MODES.INFINITE,
+      levelKey: '0',
+      signature: `sig-${i}`,
+    });
+    awarded.push(result.awarded);
+  }
+
+  assert.deepEqual(awarded, [1, 2, 2, 3, 3, 3]);
+  assert.equal(scoreManager.readTotals().infiniteTotal, 14);
 });

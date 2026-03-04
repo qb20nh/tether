@@ -62,6 +62,11 @@ const normalizeByLevelRecord = (value) => {
   return out;
 };
 
+const scoreAwardForDistinctCount = (distinctCount) => {
+  if (!Number.isInteger(distinctCount) || distinctCount <= 0) return 0;
+  return Math.max(0, Math.round(Math.sqrt(2 * distinctCount)));
+};
+
 export const normalizeScoreState = (value) => {
   const source = value && typeof value === 'object' ? value : EMPTY_SCORE_STATE;
   return {
@@ -556,7 +561,8 @@ export const createScoreManager = (bootScoreState, persistence) => {
     }
 
     signatures.add(normalizedSignature);
-    const awarded = signatures.size;
+    const levelDistinctCount = signatures.size;
+    const awarded = scoreAwardForDistinctCount(levelDistinctCount);
 
     if (mode === SCORE_MODES.INFINITE) {
       infiniteTotal += awarded;
@@ -571,7 +577,7 @@ export const createScoreManager = (bootScoreState, persistence) => {
       levelKey: normalizedLevelKey,
       awarded,
       isNew: true,
-      levelDistinctCount: signatures.size,
+      levelDistinctCount,
       modeTotal: getModeTotal(mode),
       totals: readTotals(),
     };
@@ -601,4 +607,5 @@ export const __TEST__ = {
   reduceTopologyTokens,
   normalizeTokenLabelsByAppearance,
   enumerateCanonicalCandidates,
+  scoreAwardForDistinctCount,
 };
