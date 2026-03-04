@@ -56,7 +56,5 @@ export const shouldResyncManualUpdatePolicy = ({
   if (!Number.isInteger(servingBuildNumber) || servingBuildNumber !== localBuildNumber) {
     return true;
   }
-
-  if (swPolicy.pinnedCacheUsable === false) return true;
   return false;
 };

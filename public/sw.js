@@ -205,7 +205,7 @@ const collectCriticalShellAssetUrls = (shellHtml, shellUrl = resolveShellUrl()) 
           .toLowerCase()
           .split(/\s+/)
           .filter((token) => token.length > 0);
-        if (relTokens.includes('stylesheet') || relTokens.includes('modulepreload')) {
+        if (relTokens.includes('stylesheet')) {
           pushUnique(href);
         }
       }
@@ -736,20 +736,11 @@ const resolveServingBuildPlan = async () => {
   }
 
   const pinnedUsable = await isPinnedBuildCacheUsable(servingBuildNumber);
-  if (pinnedUsable) {
-    return {
-      servingBuildNumber,
-      appCacheName: appCacheNameForBuild(servingBuildNumber),
-      pinned: true,
-    };
-  }
-
-  await failOpenPinnedBuildToLatest();
   return {
-    servingBuildNumber: BUILD_NUMBER,
-    appCacheName: APP_CACHE,
-    pinned: false,
-    failedOpen: true,
+    servingBuildNumber,
+    appCacheName: appCacheNameForBuild(servingBuildNumber),
+    pinned: true,
+    pinnedCacheUsable: pinnedUsable,
   };
 };
 

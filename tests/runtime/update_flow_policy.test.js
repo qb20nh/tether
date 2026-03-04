@@ -103,5 +103,5 @@ test('shouldResyncManualUpdatePolicy returns true when service worker policy dri
       servingBuildNumber: 100,
       pinnedCacheUsable: false,
     },
-  }), true);
+  }), false);
 });
