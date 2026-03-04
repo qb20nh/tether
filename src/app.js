@@ -17,7 +17,6 @@ import {
   HISTORY_DOT_COLORS,
   formatHistoryAbsoluteTime,
   formatHistoryRelativeTime,
-  getHistoryDeathFadeRank,
   hasUnreadSystemHistory,
   historyEntryDotColor,
   normalizeHistoryAction,
@@ -36,7 +35,8 @@ const LAST_SEEN_BUILD_NUMBER_KEY = 'tetherLastSeenBuildNumber';
 const APP_TOAST_ID = 'appToast';
 const APP_TOAST_VISIBLE_MS = 3200;
 const HISTORY_RELATIVE_TIME_REFRESH_MS = 60 * 1000;
-const HISTORY_DYING_TAIL_SIZE = 10;
+const HISTORY_MAX_ENTRIES = 10;
+const HISTORY_DYING_START_INDEX = 5;
 const HISTORY_EMPTY_PLACEHOLDER_TEXT = 'No notifications yet.';
 
 const SW_MESSAGE_TYPES = Object.freeze({
@@ -588,7 +588,7 @@ const applyNotificationHistoryPayload = (payload) => {
   const prevVersion = notificationHistoryState.historyVersion;
   const historyVersion = Number.parseInt(payload?.historyVersion, 10);
   const entries = Array.isArray(payload?.entries)
-    ? payload.entries.map((entry) => normalizeHistoryEntry(entry)).filter(Boolean)
+    ? payload.entries.map((entry) => normalizeHistoryEntry(entry)).filter(Boolean).slice(0, HISTORY_MAX_ENTRIES)
     : [];
   notificationHistoryState.historyVersion = Number.isInteger(historyVersion) ? historyVersion : 1;
   notificationHistoryState.entries = entries;
@@ -714,7 +714,11 @@ const renderNotificationHistoryList = () => {
       }
     }
 
-    const deathRank = getHistoryDeathFadeRank(i, entries.length, HISTORY_DYING_TAIL_SIZE);
+    const deathRank = (
+      entries.length > HISTORY_DYING_START_INDEX && i >= HISTORY_DYING_START_INDEX
+        ? (i - HISTORY_DYING_START_INDEX)
+        : -1
+    );
     if (deathRank >= 0) {
       row.classList.add('isDying');
       row.style.setProperty('--death-rank', String(deathRank));

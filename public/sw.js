@@ -7,7 +7,7 @@ const META_CACHE = 'tether-meta-v1';
 
 const DAILY_CHECK_TAG = 'tether-daily-check';
 const DEFAULT_WARNING_HOURS = 8;
-const HISTORY_MAX_ENTRIES = 20;
+const HISTORY_MAX_ENTRIES = 10;
 const HISTORY_VERSION_START = 1;
 const SW_PLUGIN_QUERY_PARAM = 'plugin';
 

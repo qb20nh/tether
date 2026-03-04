@@ -394,12 +394,20 @@ header h1.brandTitle {
 
 .notificationHistoryItem.isDying .notificationHistoryItem__content,
 .notificationHistoryItem.isDying .notificationHistoryItem__dot {
-  opacity: calc(0.92 - (var(--death-rank, 0) * 0.06));
+  opacity: calc(0.86 - (var(--death-rank, 0) * 0.17));
+}
+
+.notificationHistoryItem.isDying {
+  border-color: color-mix(
+    in srgb,
+    var(--panel-outline),
+    transparent calc(18% + ((var(--death-rank, 0) + 1) * 11%))
+  );
 }
 
 .notificationHistoryItem.isDying .notificationHistoryItem__content,
 .notificationHistoryItem.isDying .notificationHistoryItem__dot {
-  filter: blur(calc((var(--death-rank, 0) + 1) * 0.5px)) saturate(calc(1 - (var(--death-rank, 0) * 0.05)));
+  filter: blur(calc((var(--death-rank, 0) + 1) * 1px)) saturate(calc(1 - ((var(--death-rank, 0) + 1) * 0.2)));
 }
 
 .settingsField {
@@ -1918,11 +1926,11 @@ body:not(.isPathDragging) .cell.pathEnd:active {
     flex: 0 0 auto;
   }
 
-.left.isDailyActive #levelLabel,
-.left.isCampaignActive #levelLabel,
-.left.isInfiniteActive #levelLabel {
-  flex: 1 1 100%;
-}
+  .left.isDailyActive #levelLabel,
+  .left.isCampaignActive #levelLabel,
+  .left.isInfiniteActive #levelLabel {
+    flex: 1 1 100%;
+  }
 
   .levelSelectGroup {
     display: contents;
@@ -1934,14 +1942,14 @@ body:not(.isPathDragging) .cell.pathEnd:active {
     order: 2;
   }
 
-.left.isInfiniteActive #levelSel,
-.left.isCampaignActive #levelSel,
-.left.isCampaignActive #infiniteSel,
-.left.isInfiniteActive #infiniteSel {
-  flex: 1 1 calc(50% - 3px);
-  max-width: calc(50% - 3px);
-  order: 2;
-}
+  .left.isInfiniteActive #levelSel,
+  .left.isCampaignActive #levelSel,
+  .left.isCampaignActive #infiniteSel,
+  .left.isInfiniteActive #infiniteSel {
+    flex: 1 1 calc(50% - 3px);
+    max-width: calc(50% - 3px);
+    order: 2;
+  }
 
   #resetBtn {
     flex: 1 1 calc(50% - 3px);
