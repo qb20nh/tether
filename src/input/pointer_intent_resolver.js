@@ -1,12 +1,19 @@
-const SAMPLE_WINDOW = 4;
+const SAMPLE_WINDOW = 8;
 const EMA_ALPHA = 0.35;
-const BASE_LOOKAHEAD_MS = 16;
 const MIN_LOOKAHEAD_MS = 6;
-const MAX_LOOKAHEAD_MS = 22;
+const MAX_LOOKAHEAD_MS = 34;
 const ERROR_SCALE_CELLS = 0.75;
-const MAX_PROJECT_DISTANCE_CELLS = 0.75;
+const DEFAULT_FRAME_INTERVAL_MS = 16.67;
+const MIN_FRAME_INTERVAL_MS = 8;
+const MAX_FRAME_INTERVAL_MS = 50;
+const MIN_PROJECT_DISTANCE_CELLS = 0.5;
+const BASE_PROJECT_DISTANCE_CELLS = 0.75;
+const MAX_PROJECT_DISTANCE_CELLS = 1.15;
 const MIN_SPEED_PX_PER_MS = 0.02;
-const MAX_SEGMENT_DT_MS = 48;
+const MAX_SEGMENT_DT_MS = 120;
+const MIN_INPUT_INTERVAL_MS = 4;
+const MAX_INPUT_INTERVAL_MS = 90;
+const STALE_SAMPLE_MAX_AGE_MS = 96;
 
 const clamp = (value, lo, hi) => Math.max(lo, Math.min(hi, value));
 
@@ -14,6 +21,28 @@ const safePoint = (point) => ({
   x: Number.isFinite(point?.x) ? point.x : 0,
   y: Number.isFinite(point?.y) ? point.y : 0,
 });
+
+const resolveFrameIntervalMs = (frameIntervalMs) => {
+  const value = Number(frameIntervalMs);
+  if (!Number.isFinite(value) || value <= 0) return DEFAULT_FRAME_INTERVAL_MS;
+  return clamp(value, MIN_FRAME_INTERVAL_MS, MAX_FRAME_INTERVAL_MS);
+};
+
+const resolveInputIntervalMs = (samples) => {
+  if (!Array.isArray(samples) || samples.length < 2) return null;
+  const deltas = [];
+  for (let i = 1; i < samples.length; i += 1) {
+    const dt = Number(samples[i].t) - Number(samples[i - 1].t);
+    if (!Number.isFinite(dt) || dt <= 0 || dt > MAX_SEGMENT_DT_MS) continue;
+    deltas.push(dt);
+  }
+  if (deltas.length <= 0) return null;
+
+  const sorted = deltas.slice().sort((a, b) => a - b);
+  const median = sorted[Math.floor(sorted.length / 2)];
+  if (!Number.isFinite(median) || median <= 0) return null;
+  return clamp(median, MIN_INPUT_INTERVAL_MS, MAX_INPUT_INTERVAL_MS);
+};
 
 export function buildPathDragCandidates({
   snapshot,
@@ -54,6 +83,8 @@ export function predictPathDragPointer({
   cellSize,
   prevEmaErrorPx,
   prevPredictedClient,
+  frameIntervalMs,
+  nowMs,
 }) {
   const safeSamples = Array.isArray(samples)
     ? samples.slice(Math.max(0, samples.length - SAMPLE_WINDOW))
@@ -67,6 +98,19 @@ export function predictPathDragPointer({
   if (prevPredicted) {
     const errorPx = Math.hypot(current.x - prevPredicted.x, current.y - prevPredicted.y);
     nextEmaErrorPx = (nextEmaErrorPx * (1 - EMA_ALPHA)) + (errorPx * EMA_ALPHA);
+  }
+
+  const resolvedNowMs = Number(nowMs);
+  const currentSampleTs = Number(safeSamples[safeSamples.length - 1]?.t);
+  if (Number.isFinite(resolvedNowMs) && Number.isFinite(currentSampleTs)) {
+    const ageMs = resolvedNowMs - currentSampleTs;
+    if (Number.isFinite(ageMs) && ageMs > STALE_SAMPLE_MAX_AGE_MS) {
+      return {
+        effectiveClient: current,
+        nextEmaErrorPx,
+        nextPredictedClient: null,
+      };
+    }
   }
 
   if (safeSamples.length < 2) {
@@ -116,17 +160,32 @@ export function predictPathDragPointer({
   }
 
   const resolvedCellSize = Number.isFinite(cellSize) && cellSize > 0 ? cellSize : 1;
+  const resolvedFrameIntervalMs = resolveFrameIntervalMs(frameIntervalMs);
+  const inputIntervalMs = resolveInputIntervalMs(safeSamples);
+  const cadenceIntervalMs = inputIntervalMs === null
+    ? resolvedFrameIntervalMs
+    : clamp(
+      (inputIntervalMs * 0.65) + (resolvedFrameIntervalMs * 0.35),
+      MIN_LOOKAHEAD_MS,
+      MAX_LOOKAHEAD_MS,
+    );
+
   const errorDenominator = resolvedCellSize * ERROR_SCALE_CELLS;
   const errorRatio = clamp(nextEmaErrorPx / errorDenominator, 0, 1);
   const lookaheadMs = clamp(
-    BASE_LOOKAHEAD_MS * (1 - (0.65 * errorRatio)),
+    cadenceIntervalMs * (1 - (0.65 * errorRatio)),
     MIN_LOOKAHEAD_MS,
     MAX_LOOKAHEAD_MS,
   );
 
   let projectDx = vx * lookaheadMs;
   let projectDy = vy * lookaheadMs;
-  const projectionCap = resolvedCellSize * MAX_PROJECT_DISTANCE_CELLS;
+  const projectionCapCells = clamp(
+    BASE_PROJECT_DISTANCE_CELLS * clamp(cadenceIntervalMs / DEFAULT_FRAME_INTERVAL_MS, 0.75, 1.5),
+    MIN_PROJECT_DISTANCE_CELLS,
+    MAX_PROJECT_DISTANCE_CELLS,
+  );
+  const projectionCap = resolvedCellSize * projectionCapCells;
   const projectionDist = Math.hypot(projectDx, projectDy);
   if (projectionDist > projectionCap && projectionCap > 0) {
     const scale = projectionCap / projectionDist;

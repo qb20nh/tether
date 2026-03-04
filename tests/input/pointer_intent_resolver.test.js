@@ -59,6 +59,62 @@ test('predictPathDragPointer projects forward on steady movement', () => {
   assert.ok(out.nextPredictedClient.x > 48);
 });
 
+test('predictPathDragPointer increases forward lead when frame interval is higher', () => {
+  const payload = {
+    samples: [
+      { x: 0, y: 0, t: 0 },
+      { x: 16, y: 0, t: 16 },
+      { x: 32, y: 0, t: 32 },
+      { x: 48, y: 0, t: 48 },
+    ],
+    cellSize: 40,
+    prevEmaErrorPx: 0,
+    prevPredictedClient: null,
+  };
+
+  const lowFrame = predictPathDragPointer({
+    ...payload,
+    frameIntervalMs: 16,
+  });
+  const highFrame = predictPathDragPointer({
+    ...payload,
+    frameIntervalMs: 40,
+  });
+
+  assert.ok(highFrame.effectiveClient.x > lowFrame.effectiveClient.x);
+});
+
+test('predictPathDragPointer increases forward lead when input cadence is sparse', () => {
+  const dense = predictPathDragPointer({
+    samples: [
+      { x: 0, y: 0, t: 0 },
+      { x: 16, y: 0, t: 16 },
+      { x: 32, y: 0, t: 32 },
+      { x: 48, y: 0, t: 48 },
+    ],
+    cellSize: 40,
+    prevEmaErrorPx: 0,
+    prevPredictedClient: null,
+    frameIntervalMs: 16,
+  });
+  const sparse = predictPathDragPointer({
+    samples: [
+      { x: 0, y: 0, t: 0 },
+      { x: 32, y: 0, t: 32 },
+      { x: 64, y: 0, t: 64 },
+      { x: 96, y: 0, t: 96 },
+    ],
+    cellSize: 40,
+    prevEmaErrorPx: 0,
+    prevPredictedClient: null,
+    frameIntervalMs: 16,
+  });
+
+  const denseLead = dense.effectiveClient.x - 48;
+  const sparseLead = sparse.effectiveClient.x - 96;
+  assert.ok(sparseLead > denseLead);
+});
+
 test('predictPathDragPointer adaptively reduces prediction when recent error is high', () => {
   const basePayload = {
     samples: [
@@ -84,21 +140,55 @@ test('predictPathDragPointer adaptively reduces prediction when recent error is 
   assert.equal(highError.effectiveClient.x, 48);
 });
 
-test('predictPathDragPointer caps projection distance to a fraction of cell size', () => {
-  const out = predictPathDragPointer({
+test('predictPathDragPointer uses adaptive projection cap and keeps it bounded', () => {
+  const lowCadence = predictPathDragPointer({
     samples: [
       { x: 0, y: 0, t: 0 },
-      { x: 200, y: 0, t: 16 },
+      { x: 400, y: 0, t: 16 },
     ],
     cellSize: 40,
     prevEmaErrorPx: 0,
     prevPredictedClient: null,
+    frameIntervalMs: 16,
+  });
+  const highCadence = predictPathDragPointer({
+    samples: [
+      { x: 0, y: 0, t: 0 },
+      { x: 400, y: 0, t: 16 },
+    ],
+    cellSize: 40,
+    prevEmaErrorPx: 0,
+    prevPredictedClient: null,
+    frameIntervalMs: 50,
   });
 
-  const current = { x: 200, y: 0 };
-  const projected = out.nextPredictedClient;
-  const projectedDist = Math.hypot(projected.x - current.x, projected.y - current.y);
-  assert.ok(projectedDist <= 30.0001);
+  const lowProjectedDist = Math.hypot(
+    lowCadence.nextPredictedClient.x - 400,
+    lowCadence.nextPredictedClient.y,
+  );
+  const highProjectedDist = Math.hypot(
+    highCadence.nextPredictedClient.x - 400,
+    highCadence.nextPredictedClient.y,
+  );
+
+  assert.ok(highProjectedDist > lowProjectedDist);
+  assert.ok(highProjectedDist <= 46.0001);
+});
+
+test('predictPathDragPointer avoids projection when movement speed is near-stationary', () => {
+  const out = predictPathDragPointer({
+    samples: [
+      { x: 10, y: 20, t: 0 },
+      { x: 10.1, y: 20, t: 16 },
+      { x: 10.2, y: 20, t: 32 },
+    ],
+    cellSize: 40,
+    prevEmaErrorPx: 0,
+    prevPredictedClient: null,
+    frameIntervalMs: 16,
+  });
+
+  assert.deepEqual(out.effectiveClient, { x: 10.2, y: 20 });
 });
 
 test('choosePathDragCell applies nearest + hysteresis selection', () => {
