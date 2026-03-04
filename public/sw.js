@@ -8,6 +8,7 @@ const dailyCacheNameForBuild = (buildNumber) => `${DAILY_CACHE_PREFIX}${buildNum
 const APP_CACHE = appCacheNameForBuild(BUILD_NUMBER);
 const DAILY_CACHE = dailyCacheNameForBuild(BUILD_NUMBER);
 const LEGACY_META_CACHE = 'tether-meta-v1';
+const UPDATE_POLICY_META_CACHE = 'sw-update-policy-meta-v1';
 const META_DB_NAME = 'tether-meta-v1';
 const META_DB_VERSION = 1;
 const META_STORE_NAME = 'meta';
@@ -148,6 +149,158 @@ const fetchFresh = (request, options = {}) => {
   return fetch(new Request(request, { cache: 'no-store', headers }));
 };
 
+const readHtmlTagAttribute = (tagSource, attributeName) => {
+  if (typeof tagSource !== 'string' || typeof attributeName !== 'string') return '';
+  const re = new RegExp(`${attributeName}\\s*=\\s*("[^"]*"|'[^']*'|[^\\s>]+)`, 'i');
+  const match = tagSource.match(re);
+  if (!match) return '';
+  const raw = match[1];
+  if (
+    (raw.startsWith('"') && raw.endsWith('"'))
+    || (raw.startsWith('\'') && raw.endsWith('\''))
+  ) {
+    return raw.slice(1, -1);
+  }
+  return raw;
+};
+
+const resolveLocalShellAssetUrl = (rawValue, baseUrl = resolveShellUrl()) => {
+  const value = normalizeString(rawValue);
+  if (!value) return '';
+  try {
+    const resolved = new URL(value, baseUrl);
+    if (resolved.origin !== self.location.origin) return '';
+    return resolved.toString();
+  } catch {
+    return '';
+  }
+};
+
+const collectCriticalShellAssetUrls = (shellHtml, shellUrl = resolveShellUrl()) => {
+  if (typeof shellHtml !== 'string' || shellHtml.length === 0) return [];
+  const urls = [];
+  const seen = new Set();
+  const pushUnique = (rawValue) => {
+    const resolved = resolveLocalShellAssetUrl(rawValue, shellUrl);
+    if (!resolved || seen.has(resolved)) return;
+    seen.add(resolved);
+    urls.push(resolved);
+  };
+
+  const tagRe = /<(script|link)\b[^>]*>/gi;
+  let tagMatch = tagRe.exec(shellHtml);
+  while (tagMatch) {
+    const tag = tagMatch[0];
+    const tagName = String(tagMatch[1] || '').toLowerCase();
+    if (tagName === 'script') {
+      const scriptType = readHtmlTagAttribute(tag, 'type').toLowerCase();
+      const scriptSrc = readHtmlTagAttribute(tag, 'src');
+      if (scriptType === 'module' && scriptSrc) {
+        pushUnique(scriptSrc);
+      }
+    } else if (tagName === 'link') {
+      const href = readHtmlTagAttribute(tag, 'href');
+      if (href) {
+        const relTokens = readHtmlTagAttribute(tag, 'rel')
+          .toLowerCase()
+          .split(/\s+/)
+          .filter((token) => token.length > 0);
+        if (relTokens.includes('stylesheet') || relTokens.includes('modulepreload')) {
+          pushUnique(href);
+        }
+      }
+    }
+    tagMatch = tagRe.exec(shellHtml);
+  }
+
+  return urls;
+};
+
+const cacheShellAssetDependencies = async (cacheName, options = {}) => {
+  const cache = await openCache(cacheName);
+  const shellUrl = resolveShellUrl();
+  const bypassCache = normalizeBool(options.bypassCache, true);
+  const responseFromNavigation = options.shellResponse;
+
+  let shellHtml = '';
+  let shellCached = false;
+
+  if (isCacheableResponse(responseFromNavigation)) {
+    await cache.put(shellUrl, responseFromNavigation.clone());
+    shellCached = true;
+    try {
+      shellHtml = await responseFromNavigation.clone().text();
+    } catch {
+      shellHtml = '';
+    }
+  }
+
+  if (shellHtml.length === 0) {
+    try {
+      const fetchedShell = await fetchFresh(shellUrl, { bypassCache });
+      if (isCacheableResponse(fetchedShell)) {
+        await cache.put(shellUrl, fetchedShell.clone());
+        shellCached = true;
+        shellHtml = await fetchedShell.clone().text();
+      }
+    } catch {
+      // Best effort warmup.
+    }
+  }
+
+  if (!shellCached || shellHtml.length === 0) return false;
+
+  const criticalAssetUrls = collectCriticalShellAssetUrls(shellHtml, shellUrl);
+  if (criticalAssetUrls.length === 0) return false;
+
+  let allAssetsCached = true;
+  for (const assetUrl of criticalAssetUrls) {
+    try {
+      const response = await fetchFresh(assetUrl, { bypassCache });
+      if (!isCacheableResponse(response)) {
+        allAssetsCached = false;
+        continue;
+      }
+      await cache.put(assetUrl, response.clone());
+    } catch {
+      allAssetsCached = false;
+    }
+  }
+
+  await trimCacheEntries(cacheName, APP_CACHE_MAX_ENTRIES);
+  return allAssetsCached;
+};
+
+const hasCompleteCachedShellAssets = async (cacheName) => {
+  const cache = await openCache(cacheName);
+  const shellUrl = resolveShellUrl();
+  const cachedShell = await cache.match(shellUrl, { ignoreSearch: true });
+  if (!cachedShell) return false;
+
+  let shellHtml = '';
+  try {
+    shellHtml = await cachedShell.clone().text();
+  } catch {
+    return false;
+  }
+
+  const criticalAssetUrls = collectCriticalShellAssetUrls(shellHtml, shellUrl);
+  if (criticalAssetUrls.length === 0) return false;
+
+  for (const assetUrl of criticalAssetUrls) {
+    const cached = await cache.match(assetUrl, { ignoreSearch: true });
+    if (!cached) return false;
+  }
+  return true;
+};
+
+self.addEventListener('install', (event) => {
+  event.waitUntil((async () => {
+    if (isLocalhostHostname(self.location.hostname)) return;
+    await cacheShellAssetDependencies(APP_CACHE, { bypassCache: true });
+  })());
+});
+
 self.addEventListener('activate', (event) => {
   event.waitUntil((async () => {
     const updatePolicy = normalizeUpdatePolicyForActivation(await ensureUpdatePolicyState());
@@ -239,6 +392,10 @@ const cacheFirstRevalidateNavigation = async (event, request) => {
       if (isCacheableResponse(response)) {
         await cache.put(request, response.clone());
         await cache.put(shellUrl, response.clone());
+        await cacheShellAssetDependencies(plan.appCacheName, {
+          shellResponse: response.clone(),
+          bypassCache: true,
+        });
         await trimCacheEntries(plan.appCacheName, APP_CACHE_MAX_ENTRIES);
       }
       return response;
@@ -400,6 +557,34 @@ const writeMetaRecord = async (key, value) => {
   }
 };
 
+const resolveUpdatePolicyMetaRequestUrl = () =>
+  new URL('__tether_update_policy__.json', self.registration.scope).toString();
+
+const readUpdatePolicyMetaFallback = async () => {
+  try {
+    const cache = await openCache(UPDATE_POLICY_META_CACHE);
+    const cached = await cache.match(resolveUpdatePolicyMetaRequestUrl(), { ignoreSearch: true });
+    if (!cached) return null;
+    const parsed = await cached.json();
+    return parsed && typeof parsed === 'object' ? parsed : null;
+  } catch {
+    return null;
+  }
+};
+
+const writeUpdatePolicyMetaFallback = async (value) => {
+  try {
+    const cache = await openCache(UPDATE_POLICY_META_CACHE);
+    const response = new Response(`${JSON.stringify(value)}\n`, {
+      headers: { 'content-type': 'application/json; charset=utf-8' },
+    });
+    await cache.put(resolveUpdatePolicyMetaRequestUrl(), response);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 const normalizeUpdatePolicyPayload = (payload = {}) => {
   const pinnedParsed = normalizeInt(payload.pinnedBuildNumber, BUILD_NUMBER);
   const pinnedBuildNumber = Number.isInteger(pinnedParsed) && pinnedParsed > 0
@@ -416,34 +601,43 @@ const normalizeUpdatePolicyPayload = (payload = {}) => {
 let updatePolicyState = normalizeUpdatePolicyPayload();
 let updatePolicyLoaded = false;
 let updatePolicyLoadPromise = null;
-let pinnedShellCacheStatus = {
+let pinnedBuildCacheStatus = {
   buildNumber: null,
-  hasShell: false,
+  usable: false,
 };
 
-const resetPinnedShellCacheStatus = () => {
-  pinnedShellCacheStatus = {
+const resetPinnedBuildCacheStatus = () => {
+  pinnedBuildCacheStatus = {
     buildNumber: null,
-    hasShell: false,
+    usable: false,
   };
 };
 
 const applyCachedUpdatePolicyState = (state) => {
   updatePolicyState = normalizeUpdatePolicyPayload(state);
   updatePolicyLoaded = true;
-  resetPinnedShellCacheStatus();
+  resetPinnedBuildCacheStatus();
   return updatePolicyState;
 };
 
 const readUpdatePolicyState = async () => {
   const stored = await readMetaRecord(META_RECORD_KEYS.UPDATE_POLICY);
-  const payload = stored && typeof stored === 'object' ? stored : {};
-  return normalizeUpdatePolicyPayload(payload);
+  if (stored && typeof stored === 'object') {
+    return normalizeUpdatePolicyPayload(stored);
+  }
+  const fallback = await readUpdatePolicyMetaFallback();
+  if (fallback && typeof fallback === 'object') {
+    return normalizeUpdatePolicyPayload(fallback);
+  }
+  return normalizeUpdatePolicyPayload();
 };
 
 const writeUpdatePolicyState = async (state) => {
   const normalized = normalizeUpdatePolicyPayload(state);
-  await writeMetaRecord(META_RECORD_KEYS.UPDATE_POLICY, normalized);
+  await Promise.all([
+    writeMetaRecord(META_RECORD_KEYS.UPDATE_POLICY, normalized),
+    writeUpdatePolicyMetaFallback(normalized),
+  ]);
   return applyCachedUpdatePolicyState(normalized);
 };
 
@@ -471,17 +665,16 @@ const resolveServingBuildNumber = (state = updatePolicyState) => {
   return normalized.pinnedBuildNumber;
 };
 
-const hasPinnedShellCache = async (buildNumber) => {
-  if (!Number.isInteger(buildNumber) || buildNumber <= 0 || buildNumber === BUILD_NUMBER) return true;
-  if (pinnedShellCacheStatus.buildNumber === buildNumber) return pinnedShellCacheStatus.hasShell;
-  const cache = await openCache(appCacheNameForBuild(buildNumber));
-  const cachedShell = await cache.match(resolveShellUrl(), { ignoreSearch: true });
-  const hasShell = Boolean(cachedShell);
-  pinnedShellCacheStatus = {
+const isPinnedBuildCacheUsable = async (buildNumber) => {
+  if (!Number.isInteger(buildNumber) || buildNumber <= 0) return false;
+  if (buildNumber === BUILD_NUMBER) return true;
+  if (pinnedBuildCacheStatus.buildNumber === buildNumber) return pinnedBuildCacheStatus.usable;
+  const usable = await hasCompleteCachedShellAssets(appCacheNameForBuild(buildNumber));
+  pinnedBuildCacheStatus = {
     buildNumber,
-    hasShell,
+    usable,
   };
-  return hasShell;
+  return usable;
 };
 
 const failOpenPinnedBuildToLatest = async () => {
@@ -507,7 +700,7 @@ const resolveServingBuildPlan = async () => {
     };
   }
 
-  const pinnedUsable = await hasPinnedShellCache(servingBuildNumber);
+  const pinnedUsable = await isPinnedBuildCacheUsable(servingBuildNumber);
   if (pinnedUsable) {
     return {
       servingBuildNumber,
@@ -832,6 +1025,27 @@ const confirmUpdatePolicyBuild = async (buildNumber) => {
   return enqueueUpdatePolicyTask(async () => {
     return confirmPinnedBuildUpdate(buildNumber);
   });
+};
+
+const readUpdatePolicyReplyPayload = async () => {
+  const state = await ensureUpdatePolicyState();
+  const servingBuildNumber = resolveServingBuildNumber(state);
+  const pinned = !state.autoUpdateEnabled && servingBuildNumber !== BUILD_NUMBER;
+  const pinnedCacheUsable = pinned
+    ? await isPinnedBuildCacheUsable(servingBuildNumber)
+    : true;
+  return {
+    ok: true,
+    autoUpdateEnabled: state.autoUpdateEnabled === true,
+    pinnedBuildNumber: Number.isInteger(state.pinnedBuildNumber)
+      ? state.pinnedBuildNumber
+      : null,
+    swBuildNumber: BUILD_NUMBER,
+    servingBuildNumber: Number.isInteger(servingBuildNumber)
+      ? servingBuildNumber
+      : BUILD_NUMBER,
+    pinnedCacheUsable,
+  };
 };
 
 const appendHistoryEntry = async (entryInput) => {
@@ -1203,6 +1417,25 @@ self.addEventListener('message', (event) => {
   if (data.type === 'SW_SYNC_UPDATE_POLICY') {
     const payload = data.payload && typeof data.payload === 'object' ? data.payload : {};
     event.waitUntil(syncUpdatePolicyFromApp(payload));
+    return;
+  }
+
+  if (data.type === 'SW_GET_UPDATE_POLICY') {
+    event.waitUntil((async () => {
+      try {
+        const payload = await readUpdatePolicyReplyPayload();
+        replyToMessagePort(event, payload);
+      } catch {
+        replyToMessagePort(event, {
+          ok: false,
+          autoUpdateEnabled: false,
+          pinnedBuildNumber: null,
+          swBuildNumber: BUILD_NUMBER,
+          servingBuildNumber: BUILD_NUMBER,
+          pinnedCacheUsable: false,
+        });
+      }
+    })());
     return;
   }
 

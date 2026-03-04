@@ -26,6 +26,7 @@ import {
   UPDATE_APPLY_STATUS,
   UPDATE_CHECK_DECISION,
   resolveUpdateCheckDecision,
+  shouldResyncManualUpdatePolicy,
   shouldReloadAfterManualPinConfirm,
 } from './runtime/update_flow_policy.js';
 
@@ -51,6 +52,7 @@ const BUILD_LABEL_HASH_RE = /\b[0-9a-f]{7,40}\b/i;
 const SW_MESSAGE_TYPES = Object.freeze({
   SYNC_DAILY_STATE: 'SW_SYNC_DAILY_STATE',
   SYNC_UPDATE_POLICY: 'SW_SYNC_UPDATE_POLICY',
+  GET_UPDATE_POLICY: 'SW_GET_UPDATE_POLICY',
   CONFIRM_BUILD_UPDATE: 'SW_CONFIRM_BUILD_UPDATE',
   RUN_DAILY_CHECK: 'SW_RUN_DAILY_CHECK',
   GET_HISTORY: 'SW_GET_NOTIFICATION_HISTORY',
@@ -561,6 +563,47 @@ const syncUpdatePolicyToServiceWorker = async () => {
       currentBuildNumber: localBuildNumber,
     },
   }, { queueWhenUnavailable: true });
+};
+
+const readServiceWorkerUpdatePolicy = async (target = null) => {
+  const reply = await postMessageToServiceWorkerWithReply({
+    type: SW_MESSAGE_TYPES.GET_UPDATE_POLICY,
+  }, { target, timeoutMs: 2000 });
+  if (!reply || reply.ok !== true) return null;
+  return {
+    autoUpdateEnabled: reply.autoUpdateEnabled === true,
+    pinnedBuildNumber: Number.parseInt(reply.pinnedBuildNumber, 10),
+    servingBuildNumber: Number.parseInt(reply.servingBuildNumber, 10),
+    swBuildNumber: Number.parseInt(reply.swBuildNumber, 10),
+    pinnedCacheUsable: reply.pinnedCacheUsable !== false,
+  };
+};
+
+const ensureServiceWorkerUpdatePolicyConsistency = async () => {
+  if (!canUseServiceWorker()) return;
+  if (readAutoUpdateEnabledPreference()) return;
+  if (!Number.isInteger(localBuildNumber) || localBuildNumber <= 0) return;
+
+  const targets = resolveSwUpdatePolicyTargets();
+  if (targets.length === 0) return;
+
+  let swPolicy = null;
+  for (const target of targets) {
+    const policy = await readServiceWorkerUpdatePolicy(target);
+    if (!policy) continue;
+    swPolicy = policy;
+    break;
+  }
+
+  if (!shouldResyncManualUpdatePolicy({
+    localAutoUpdateEnabled: false,
+    localBuildNumber,
+    swPolicy,
+  })) {
+    return;
+  }
+
+  await syncUpdatePolicyToServiceWorker();
 };
 
 const requestServiceWorkerDailyCheck = async () => {
@@ -1803,6 +1846,7 @@ const registerServiceWorker = async () => {
     await flushPendingSwMessages();
     await syncDailyStateToServiceWorker();
     await syncUpdatePolicyToServiceWorker();
+    await ensureServiceWorkerUpdatePolicyConsistency();
     await registerBackgroundDailyCheck();
     await requestServiceWorkerDailyCheck();
     await postMessageToServiceWorker({ type: SW_MESSAGE_TYPES.GET_HISTORY }, { queueWhenUnavailable: true });
@@ -1989,7 +2033,10 @@ export async function initTetherApp() {
   if (!swRegistration) {
     void registerServiceWorker();
   } else {
-    void syncUpdatePolicyToServiceWorker();
+    void (async () => {
+      await syncUpdatePolicyToServiceWorker();
+      await ensureServiceWorkerUpdatePolicyConsistency();
+    })();
     void postMessageToServiceWorker({ type: SW_MESSAGE_TYPES.GET_HISTORY }, { queueWhenUnavailable: true });
   }
 }

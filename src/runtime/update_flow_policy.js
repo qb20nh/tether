@@ -36,3 +36,27 @@ export const shouldReloadAfterManualPinConfirm = ({
   && applyStatus === UPDATE_APPLY_STATUS.NO_WAITING
 );
 
+export const shouldResyncManualUpdatePolicy = ({
+  localAutoUpdateEnabled,
+  localBuildNumber,
+  swPolicy,
+}) => {
+  if (localAutoUpdateEnabled) return false;
+  if (!Number.isInteger(localBuildNumber) || localBuildNumber <= 0) return false;
+  if (!swPolicy || typeof swPolicy !== 'object') return true;
+
+  if (swPolicy.autoUpdateEnabled === true) return true;
+
+  const pinnedBuildNumber = Number.parseInt(swPolicy.pinnedBuildNumber, 10);
+  if (!Number.isInteger(pinnedBuildNumber) || pinnedBuildNumber !== localBuildNumber) {
+    return true;
+  }
+
+  const servingBuildNumber = Number.parseInt(swPolicy.servingBuildNumber, 10);
+  if (!Number.isInteger(servingBuildNumber) || servingBuildNumber !== localBuildNumber) {
+    return true;
+  }
+
+  if (swPolicy.pinnedCacheUsable === false) return true;
+  return false;
+};

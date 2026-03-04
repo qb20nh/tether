@@ -4,6 +4,7 @@ import {
   UPDATE_APPLY_STATUS,
   UPDATE_CHECK_DECISION,
   resolveUpdateCheckDecision,
+  shouldResyncManualUpdatePolicy,
   shouldReloadAfterManualPinConfirm,
 } from '../../src/runtime/update_flow_policy.js';
 
@@ -51,3 +52,56 @@ test('shouldReloadAfterManualPinConfirm requires pin confirmation and no-waiting
   }), false);
 });
 
+test('shouldResyncManualUpdatePolicy returns false when manual mode already matches local build', () => {
+  assert.equal(shouldResyncManualUpdatePolicy({
+    localAutoUpdateEnabled: false,
+    localBuildNumber: 100,
+    swPolicy: {
+      autoUpdateEnabled: false,
+      pinnedBuildNumber: 100,
+      servingBuildNumber: 100,
+      pinnedCacheUsable: true,
+    },
+  }), false);
+});
+
+test('shouldResyncManualUpdatePolicy returns true when service worker policy drifts', () => {
+  assert.equal(shouldResyncManualUpdatePolicy({
+    localAutoUpdateEnabled: false,
+    localBuildNumber: 100,
+    swPolicy: null,
+  }), true);
+
+  assert.equal(shouldResyncManualUpdatePolicy({
+    localAutoUpdateEnabled: false,
+    localBuildNumber: 100,
+    swPolicy: {
+      autoUpdateEnabled: true,
+      pinnedBuildNumber: 100,
+      servingBuildNumber: 100,
+      pinnedCacheUsable: true,
+    },
+  }), true);
+
+  assert.equal(shouldResyncManualUpdatePolicy({
+    localAutoUpdateEnabled: false,
+    localBuildNumber: 100,
+    swPolicy: {
+      autoUpdateEnabled: false,
+      pinnedBuildNumber: 99,
+      servingBuildNumber: 99,
+      pinnedCacheUsable: true,
+    },
+  }), true);
+
+  assert.equal(shouldResyncManualUpdatePolicy({
+    localAutoUpdateEnabled: false,
+    localBuildNumber: 100,
+    swPolicy: {
+      autoUpdateEnabled: false,
+      pinnedBuildNumber: 100,
+      servingBuildNumber: 100,
+      pinnedCacheUsable: false,
+    },
+  }), true);
+});
