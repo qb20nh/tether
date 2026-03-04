@@ -1860,6 +1860,20 @@ const wrapPersistenceForDailySideEffects = (persistence) => {
   };
 };
 
+const bindConfigSync = () => {
+  window.addEventListener('storage', (event) => {
+    if (event.key === NOTIFICATION_ENABLED_KEY) {
+      refreshNotificationsToggleUi();
+      void syncDailyStateToServiceWorker();
+    } else if (event.key === PATH_PREDICTION_ENABLED_KEY) {
+      refreshPathPredictionToggleUi();
+    } else if (event.key === AUTO_UPDATE_ENABLED_KEY) {
+      refreshAutoUpdateToggleUi();
+      void syncUpdatePolicyToServiceWorker();
+    }
+  });
+};
+
 export async function initTetherApp() {
   if (!runtimeTeardownBound) {
     window.addEventListener('pagehide', teardownRuntime);
@@ -1891,6 +1905,7 @@ export async function initTetherApp() {
   bindNotificationsToggle();
   bindAutoUpdateToggle();
   bindPathPredictionToggle();
+  bindConfigSync();
   bindNotificationHistoryPanel();
   bindUpdateApplyDialog();
   bindMoveDailyDialog();
