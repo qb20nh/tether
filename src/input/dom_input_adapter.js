@@ -394,6 +394,14 @@ export function createDomInputAdapter() {
   const onPointerMove = (e) => {
     if (activePointerId === null || e.pointerId !== activePointerId) return;
 
+    if (dragGridMetrics && refs?.gridEl) {
+      const rect = refs.gridEl.getBoundingClientRect();
+      dragGridMetrics.left = rect.left;
+      dragGridMetrics.top = rect.top;
+      dragGridMetrics.right = rect.right;
+      dragGridMetrics.bottom = rect.bottom;
+    }
+
     if (dragMode === 'path') {
       if (e.cancelable) e.preventDefault();
       const rawPointerClientX = e.clientX;
