@@ -1829,7 +1829,13 @@ const checkForNewBuild = async ({ force = false } = {}) => {
       return;
     }
     if (decision === UPDATE_CHECK_DECISION.NOTIFY) {
+      const shouldPrompt = !hasNotifiedRemoteBuild(updatableRemoteBuildNumber);
       await notifyUpdateAvailable(updatableRemoteBuildNumber);
+      if (!shouldPrompt) return;
+      const confirmed = await requestUpdateApplyConfirmation(updatableRemoteBuildNumber);
+      if (confirmed) {
+        await applyLatestUpdateForAction(updatableRemoteBuildNumber);
+      }
     }
   } finally {
     updateCheckInFlight = false;
