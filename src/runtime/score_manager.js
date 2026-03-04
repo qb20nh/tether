@@ -141,6 +141,19 @@ const countCornerOrthConnections = (vr, vc, orthEdges) => {
   return count;
 };
 
+const collectCornerEdgeRefs = (vr, vc) => ([
+  { edgeKey: orthEdgeKey(vr - 1, vc - 1, vr - 1, vc), edgeLabel: 'N' },
+  { edgeKey: orthEdgeKey(vr - 1, vc - 1, vr, vc - 1), edgeLabel: 'W' },
+  { edgeKey: orthEdgeKey(vr - 1, vc, vr, vc), edgeLabel: 'E' },
+  { edgeKey: orthEdgeKey(vr, vc - 1, vr, vc), edgeLabel: 'S' },
+]);
+
+const buildCornerTraversalToken = (cornerState) => (
+  cornerState && cornerState.edgeTrace.length > 0
+    ? cornerState.edgeTrace.join(',')
+    : '-'
+);
+
 const buildConstraintSignatureForPath = (snapshot, path) => {
   const clueEvents = [];
   const stitchEvents = [];
@@ -188,6 +201,27 @@ const buildConstraintSignatureForPath = (snapshot, path) => {
 
   const corners = Array.isArray(snapshot.cornerCounts) ? snapshot.cornerCounts : [];
   const seenCorners = new Set();
+  const cornerStateByKey = new Map();
+  const cornerRefsByEdgeKey = new Map();
+
+  for (let i = 0; i < corners.length; i += 1) {
+    const [vr, vc] = corners[i];
+    const cornerKey = `${vr},${vc}`;
+    cornerStateByKey.set(cornerKey, {
+      edgeSeen: new Set(),
+      edgeTrace: [],
+    });
+
+    const edgeRefs = collectCornerEdgeRefs(vr, vc);
+    for (let j = 0; j < edgeRefs.length; j += 1) {
+      const edgeRef = edgeRefs[j];
+      if (!cornerRefsByEdgeKey.has(edgeRef.edgeKey)) cornerRefsByEdgeKey.set(edgeRef.edgeKey, []);
+      cornerRefsByEdgeKey.get(edgeRef.edgeKey).push({
+        cornerKey,
+        edgeLabel: edgeRef.edgeLabel,
+      });
+    }
+  }
 
   for (let i = 0; i < corners.length; i += 1) {
     const [vr, vc, target] = corners[i];
@@ -195,7 +229,7 @@ const buildConstraintSignatureForPath = (snapshot, path) => {
     const cornerKey = `${vr},${vc}`;
     seenCorners.add(cornerKey);
     const mask = buildCornerEventMask(vr, vc, orthEdgeSet).toString(16);
-    cornerEvents.push(`${cornerKey}:${mask}`);
+    cornerEvents.push(`${cornerKey}:${mask}:${buildCornerTraversalToken(cornerStateByKey.get(cornerKey))}`);
   }
 
   for (let i = 1; i < path.length; i += 1) {
@@ -215,6 +249,17 @@ const buildConstraintSignatureForPath = (snapshot, path) => {
 
     if (isOrthEdge(prev, cur)) {
       orthEdgeSet.add(currentEdgeKey);
+      const cornerRefs = cornerRefsByEdgeKey.get(currentEdgeKey);
+      if (cornerRefs) {
+        const moveDirection = directionToken(prev, cur);
+        for (let j = 0; j < cornerRefs.length; j += 1) {
+          const cornerRef = cornerRefs[j];
+          const cornerState = cornerStateByKey.get(cornerRef.cornerKey);
+          if (!cornerState || cornerState.edgeSeen.has(cornerRef.edgeLabel)) continue;
+          cornerState.edgeSeen.add(cornerRef.edgeLabel);
+          cornerState.edgeTrace.push(`${cornerRef.edgeLabel}${moveDirection}${i.toString(36)}`);
+        }
+      }
     }
 
     for (let j = 0; j < corners.length; j += 1) {
@@ -224,7 +269,7 @@ const buildConstraintSignatureForPath = (snapshot, path) => {
       if (countCornerOrthConnections(vr, vc, orthEdgeSet) !== target) continue;
       seenCorners.add(cornerKey);
       const mask = buildCornerEventMask(vr, vc, orthEdgeSet).toString(16);
-      cornerEvents.push(`${cornerKey}:${mask}`);
+      cornerEvents.push(`${cornerKey}:${mask}:${buildCornerTraversalToken(cornerStateByKey.get(cornerKey))}`);
     }
   }
 

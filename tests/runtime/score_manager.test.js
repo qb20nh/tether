@@ -29,6 +29,17 @@ const LEVEL_CYCLE = {
   cornerCounts: [],
 };
 
+const LEVEL_CORNER = {
+  name: 'Corner',
+  grid: [
+    '...',
+    '...',
+    '...',
+  ],
+  stitches: [],
+  cornerCounts: [[1, 1, 2]],
+};
+
 const buildSnapshotForPath = (level, path) => {
   const store = createGameStateStore(() => level);
   store.dispatch({ type: 'level/load', payload: { levelIndex: 0 } });
@@ -80,6 +91,40 @@ test('constraint behavior differences produce distinct signatures', () => {
 
   const a = buildSnapshotForPath(LEVEL_STRAIGHT, horizontal);
   const b = buildSnapshotForPath(LEVEL_STRAIGHT, vertical);
+
+  assert.notEqual(
+    buildCanonicalSolutionSignature(a),
+    buildCanonicalSolutionSignature(b),
+  );
+});
+
+test('corner event order differences produce distinct signatures', () => {
+  const pathA = [
+    [0, 0], [1, 0], [2, 0], [2, 1], [1, 1], [0, 1], [0, 2], [1, 2], [2, 2],
+  ];
+  const pathB = [
+    [0, 2], [0, 1], [1, 1], [1, 2], [2, 2], [2, 1], [2, 0], [1, 0], [0, 0],
+  ];
+
+  const a = buildSnapshotForPath(LEVEL_CORNER, pathA);
+  const b = buildSnapshotForPath(LEVEL_CORNER, pathB);
+
+  assert.notEqual(
+    buildCanonicalSolutionSignature(a),
+    buildCanonicalSolutionSignature(b),
+  );
+});
+
+test('corner event direction differences produce distinct signatures', () => {
+  const pathA = [
+    [0, 0], [1, 0], [2, 0], [2, 1], [1, 1], [0, 1], [0, 2], [1, 2], [2, 2],
+  ];
+  const pathB = [
+    [0, 0], [1, 0], [2, 0], [2, 1], [2, 2], [1, 2], [0, 2], [0, 1], [1, 1],
+  ];
+
+  const a = buildSnapshotForPath(LEVEL_CORNER, pathA);
+  const b = buildSnapshotForPath(LEVEL_CORNER, pathB);
 
   assert.notEqual(
     buildCanonicalSolutionSignature(a),
