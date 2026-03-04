@@ -248,3 +248,34 @@ test('session save round-trips with empty path to preserve current level', () =>
     dailyId: null,
   });
 });
+
+test('session save with single-cell path is cleared on write and boot read', () => {
+  const storage = createFakeStorage();
+  const fakeWindow = {
+    localStorage: storage,
+    matchMedia: () => ({ matches: false }),
+    crypto: {
+      getRandomValues(bytes) {
+        for (let i = 0; i < bytes.length; i++) bytes[i] = i + 1;
+      },
+    },
+  };
+
+  const persistence = createLocalStoragePersistence({
+    windowObj: fakeWindow,
+    campaignLevelCount: 10,
+    maxInfiniteIndex: 20,
+  });
+
+  persistence.writeCampaignProgress(3);
+  persistence.writeSessionBoard({
+    levelIndex: 3,
+    path: [[1, 1]],
+    movableWalls: [],
+  });
+  assert.equal(storage.getItem(STORAGE_KEYS.SESSION_SAVE_KEY), null);
+
+  const boot = persistence.readBootState();
+  assert.equal(boot.sessionBoard, null);
+  assert.equal(storage.getItem(STORAGE_KEYS.SESSION_SAVE_KEY), null);
+});

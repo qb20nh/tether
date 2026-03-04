@@ -89,6 +89,8 @@ const normalizeSavedPathEntry = (entry) => {
   return [r, c];
 };
 
+const isTransientSingleCellPath = (path) => Array.isArray(path) && path.length === 1;
+
 const encodePathCompact = (path) => {
   if (!Array.isArray(path) || path.length === 0) return '';
 
@@ -502,6 +504,7 @@ export function createLocalStoragePersistence(options = {}) {
 
       const board = normalizeSavedSingleBoard(parsed.board);
       if (!board) return reject(true);
+      if (isTransientSingleCellPath(board.path)) return reject(true);
       if (!verifyBoardSignature(board, parsed.sig)) return reject(true);
       if (!isSavedLevelAllowed(board.levelIndex)) return reject(true);
       if (
@@ -569,6 +572,10 @@ export function createLocalStoragePersistence(options = {}) {
 
     const normalized = normalizeSavedSingleBoard(board);
     if (!normalized) {
+      removeStorage(SESSION_SAVE_KEY);
+      return;
+    }
+    if (isTransientSingleCellPath(normalized.path)) {
       removeStorage(SESSION_SAVE_KEY);
       return;
     }
