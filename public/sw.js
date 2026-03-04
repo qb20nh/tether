@@ -373,16 +373,9 @@ const cacheFirstRevalidateStatic = async (event, request, options = {}) => {
 
   if (pinned && !cached) {
     const critical = await isPinnedCriticalAssetRequest(cacheName, request);
-    if (critical) {
-      await failOpenPinnedBuildToLatest();
-      return cacheFirstRevalidateStatic(event, request, {
-        cacheName: APP_CACHE,
-        pinned: false,
-      });
-    }
     try {
       const response = await fetchFresh(request);
-      if (isCacheableResponse(response)) {
+      if (critical && isCacheableResponse(response)) {
         await cache.put(request, response.clone());
       }
       return response;
@@ -418,8 +411,7 @@ const cacheFirstRevalidateNavigation = async (event, request) => {
   if (plan.pinned) {
     if (cachedExact) return cachedExact;
     if (cachedShell) return cachedShell;
-    await failOpenPinnedBuildToLatest();
-    return cacheFirstRevalidateNavigation(event, request);
+    return new Response('', { status: 503, statusText: 'Pinned build unavailable' });
   }
 
   const networkPromise = fetchFresh(request)
@@ -710,17 +702,6 @@ const isPinnedBuildCacheUsable = async (buildNumber) => {
     usable,
   };
   return usable;
-};
-
-const failOpenPinnedBuildToLatest = async () => {
-  const current = await ensureUpdatePolicyState();
-  if (resolveServingBuildNumber(current) === BUILD_NUMBER && current.pinnedBuildNumber === BUILD_NUMBER) {
-    return current;
-  }
-  return writeUpdatePolicyState({
-    ...current,
-    pinnedBuildNumber: BUILD_NUMBER,
-  });
 };
 
 const resolveServingBuildPlan = async () => {
