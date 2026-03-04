@@ -970,25 +970,87 @@ button:disabled:active {
   background: rgba(255, 255, 255, 0.03);
   background-clip: padding-box;
   box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0);
+  transition: filter 1000ms ease;
 }
 
-.boardWrap.isDailyLocked {
-  filter: grayscale(0.95) saturate(0.35) brightness(0.72);
-}
-
-.boardWrap.isDailyLocked::after {
+.boardWrap::after {
   content: '';
   position: absolute;
   inset: 0;
   background: rgba(10, 14, 20, 0.46);
   pointer-events: none;
   z-index: 5;
+  opacity: 0;
+  transition: opacity 1000ms ease;
+}
+
+.boardWrap.isDailyLocked {
+  filter: grayscale(1) saturate(0) brightness(0.9);
+}
+
+.theme-light .boardWrap.isDailyLocked {
+  filter: grayscale(1) saturate(0) brightness(0.97);
+}
+
+.boardWrap.isDailyLocked::after {
+  background: rgba(10, 14, 20, 0.2);
+  opacity: 1;
+}
+
+.theme-light .boardWrap.isDailyLocked::after {
+  background: rgba(15, 23, 42, 0.08);
 }
 
 .boardWrap.isDailyLocked #grid,
 .boardWrap.isDailyLocked #pathCanvas,
 .boardWrap.isDailyLocked #symbolCanvas {
   pointer-events: none;
+}
+
+.boardWrap.isDailyLocked #pathCanvas {
+  mix-blend-mode: normal;
+  opacity: 0.9;
+}
+
+.boardWrap.isDailyLocked .cell,
+.boardWrap.isDailyLocked .cell:hover,
+.boardWrap.isDailyLocked .cell:active,
+.boardWrap.isDailyLocked .cell.visited,
+.boardWrap.isDailyLocked .cell.pathStart,
+.boardWrap.isDailyLocked .cell.pathEnd,
+.boardWrap.isDailyLocked .cell.tail,
+.boardWrap.isDailyLocked .cell.goodHint,
+.boardWrap.isDailyLocked .cell.goodRps,
+.boardWrap.isDailyLocked .cell.badHint,
+.boardWrap.isDailyLocked .cell.badBlocked,
+.boardWrap.isDailyLocked .cell.badRps,
+.boardWrap.isDailyLocked .cell.dropTarget {
+  transform: none;
+  border-color: rgba(255, 255, 255, 0.08);
+  background: linear-gradient(180deg, var(--cellbg) 0%, var(--cellbg2) 100%);
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0);
+}
+
+.boardWrap.isDailyLocked .cell::before {
+  opacity: 0;
+}
+
+.boardWrap.isDailyLocked .cell,
+.boardWrap.isDailyLocked .cell::before {
+  transition:
+    background 1000ms ease,
+    border-color 1000ms ease,
+    opacity 1000ms ease,
+    --interactive-corner-color 1000ms ease !important;
+}
+
+.boardWrap.isDailyLocked .cell {
+  transition:
+    background 1000ms ease,
+    border-color 1000ms ease,
+    box-shadow 0ms linear,
+    transform 0ms linear,
+    --interactive-corner-color 1000ms ease !important;
 }
 
 #grid {

@@ -3,6 +3,8 @@ const STYLE_ID = 'tetherLocalDebugPanelStyle';
 const LOGO_TEXT_SELECTOR = '.brandTitle > span';
 const MIDDLE_DOUBLE_CLICK_WINDOW_MS = 360;
 const TOGGLE_BIND_ATTR = 'data-debug-toggle-bound';
+const DEBUG_TAB_NOTIFICATION = 'notification';
+const DEBUG_TAB_DAILY = 'daily';
 
 const ensurePanelStyles = () => {
   if (document.getElementById(STYLE_ID)) return;
@@ -55,6 +57,54 @@ const ensurePanelStyles = () => {
       font-weight: 700;
       letter-spacing: 0.2px;
     }
+    #${PANEL_ID} .debugTabs {
+      display: flex;
+      gap: 4px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.22);
+      padding: 0 2px;
+    }
+    #${PANEL_ID} .debugTabBtn {
+      flex: 1;
+      text-align: center;
+      border-radius: 8px 8px 0 0;
+      border: 1px solid transparent;
+      border-bottom: none;
+      background: rgba(255, 255, 255, 0.02);
+      color: rgba(245, 247, 250, 0.82);
+    }
+    #${PANEL_ID} .debugTabBtn:hover {
+      background: rgba(255, 255, 255, 0.1);
+      color: #f5f7fa;
+    }
+    #${PANEL_ID} .debugTabBtn[aria-selected='true'] {
+      background: rgba(255, 255, 255, 0.22);
+      border-color: rgba(255, 255, 255, 0.42);
+      color: #ffffff;
+      transform: translateY(1px);
+    }
+    #${PANEL_ID} .debugTabPanel {
+      display: grid;
+      gap: 8px;
+      border: 1px solid rgba(255, 255, 255, 0.22);
+      border-radius: 0 8px 8px 8px;
+      background: rgba(255, 255, 255, 0.03);
+      padding: 8px;
+    }
+    #${PANEL_ID} .debugTabPanel[hidden] {
+      display: none;
+    }
+    #${PANEL_ID} .debugOutput {
+      margin: 0;
+      min-block-size: 72px;
+      max-block-size: 180px;
+      overflow: auto;
+      border-radius: 6px;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      background: rgba(255, 255, 255, 0.03);
+      padding: 8px;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
   `;
   document.head.appendChild(style);
 };
@@ -63,6 +113,35 @@ const buildValue = (value, fallback) => {
   if (typeof value !== 'string') return fallback;
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : fallback;
+};
+
+const summarizeDailyPayload = (payload) => {
+  if (!payload || typeof payload !== 'object') return null;
+  const grid = Array.isArray(payload.level?.grid) ? payload.level.grid : [];
+  return {
+    dailyId: typeof payload.dailyId === 'string' ? payload.dailyId : null,
+    hardInvalidateAtUtcMs: Number.parseInt(payload.hardInvalidateAtUtcMs, 10) || null,
+    generatedAtUtcMs: Number.parseInt(payload.generatedAtUtcMs, 10) || null,
+    dailySlot: Number.parseInt(payload.dailySlot, 10) || null,
+    levelName: typeof payload.level?.name === 'string' ? payload.level.name : null,
+    rows: grid.length,
+    cols: grid.length > 0 ? String(grid[0] || '').length : 0,
+  };
+};
+
+const formatDebugOutput = (value) => {
+  if (value === null || value === undefined) return '-';
+  if (typeof value === 'string') return value;
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+};
+
+const setDebugOutput = (outputEl, value) => {
+  if (!outputEl) return;
+  outputEl.textContent = formatDebugOutput(value);
 };
 
 const setPanelVisible = (panelEl, visible) => {
@@ -115,6 +194,21 @@ export const mountLocalDebugPanel = (callbacks = {}) => {
   const clearNotifications = typeof callbacks.clearNotifications === 'function'
     ? callbacks.clearNotifications
     : async () => false;
+  const fetchDailyPayload = typeof callbacks.fetchDailyPayload === 'function'
+    ? callbacks.fetchDailyPayload
+    : async () => null;
+  const runDailyCheck = typeof callbacks.runDailyCheck === 'function'
+    ? callbacks.runDailyCheck
+    : async () => false;
+  const readDailyDebugSnapshot = typeof callbacks.readDailyDebugSnapshot === 'function'
+    ? callbacks.readDailyDebugSnapshot
+    : () => null;
+  const toggleForceDailyFrozenState = typeof callbacks.toggleForceDailyFrozenState === 'function'
+    ? callbacks.toggleForceDailyFrozenState
+    : () => null;
+  const reloadApp = typeof callbacks.reloadApp === 'function'
+    ? callbacks.reloadApp
+    : () => window.location.reload();
 
   const root = document.createElement('section');
   root.id = PANEL_ID;
@@ -123,6 +217,40 @@ export const mountLocalDebugPanel = (callbacks = {}) => {
   const title = document.createElement('div');
   title.className = 'debugTitle';
   title.textContent = 'Local Debug';
+
+  const tabs = document.createElement('div');
+  tabs.className = 'debugTabs';
+  tabs.setAttribute('role', 'tablist');
+  const notificationTabBtn = document.createElement('button');
+  notificationTabBtn.type = 'button';
+  notificationTabBtn.className = 'debugTabBtn';
+  notificationTabBtn.textContent = 'Notifications';
+  notificationTabBtn.id = `${PANEL_ID}TabNotification`;
+  notificationTabBtn.setAttribute('role', 'tab');
+  notificationTabBtn.setAttribute('aria-controls', `${PANEL_ID}PanelNotification`);
+  const dailyTabBtn = document.createElement('button');
+  dailyTabBtn.type = 'button';
+  dailyTabBtn.className = 'debugTabBtn';
+  dailyTabBtn.textContent = 'Daily';
+  dailyTabBtn.id = `${PANEL_ID}TabDaily`;
+  dailyTabBtn.setAttribute('role', 'tab');
+  dailyTabBtn.setAttribute('aria-controls', `${PANEL_ID}PanelDaily`);
+  tabs.appendChild(notificationTabBtn);
+  tabs.appendChild(dailyTabBtn);
+
+  const notificationTab = document.createElement('div');
+  notificationTab.className = 'debugTabPanel';
+  notificationTab.dataset.tab = DEBUG_TAB_NOTIFICATION;
+  notificationTab.id = `${PANEL_ID}PanelNotification`;
+  notificationTab.setAttribute('role', 'tabpanel');
+  notificationTab.setAttribute('aria-labelledby', notificationTabBtn.id);
+
+  const dailyTab = document.createElement('div');
+  dailyTab.className = 'debugTabPanel';
+  dailyTab.dataset.tab = DEBUG_TAB_DAILY;
+  dailyTab.id = `${PANEL_ID}PanelDaily`;
+  dailyTab.setAttribute('role', 'tabpanel');
+  dailyTab.setAttribute('aria-labelledby', dailyTabBtn.id);
 
   const titleRow = document.createElement('div');
   titleRow.className = 'debugRow';
@@ -175,10 +303,91 @@ export const mountLocalDebugPanel = (callbacks = {}) => {
     await clearNotifications();
   }));
 
+  notificationTab.appendChild(titleRow);
+  notificationTab.appendChild(bodyRow);
+  notificationTab.appendChild(buttonGrid);
+
+  const dailyOutput = document.createElement('pre');
+  dailyOutput.className = 'debugOutput';
+  setDebugOutput(dailyOutput, 'Daily debug output');
+
+  const dailyButtons = document.createElement('div');
+  dailyButtons.className = 'debugGrid';
+  dailyButtons.appendChild(mkButton('Snapshot', () => {
+    setDebugOutput(dailyOutput, {
+      nowIsoUtc: new Date().toISOString(),
+      snapshot: readDailyDebugSnapshot(),
+    });
+  }));
+  dailyButtons.appendChild(mkButton('Run Daily Check', async () => {
+    const ok = await runDailyCheck();
+    setDebugOutput(dailyOutput, {
+      nowIsoUtc: new Date().toISOString(),
+      action: 'runDailyCheck',
+      ok,
+    });
+  }));
+  dailyButtons.appendChild(mkButton('Toggle Force Frozen', () => {
+    const nextState = toggleForceDailyFrozenState();
+    setDebugOutput(dailyOutput, {
+      nowIsoUtc: new Date().toISOString(),
+      action: 'toggleForceFrozen',
+      state: nextState,
+    });
+  }));
+  dailyButtons.appendChild(mkButton('Fetch Daily', async () => {
+    const payload = await fetchDailyPayload({ bypassCache: false });
+    setDebugOutput(dailyOutput, {
+      nowIsoUtc: new Date().toISOString(),
+      bypassCache: false,
+      payload: summarizeDailyPayload(payload),
+    });
+  }));
+  dailyButtons.appendChild(mkButton('Fetch Daily (Bypass)', async () => {
+    const payload = await fetchDailyPayload({ bypassCache: true });
+    setDebugOutput(dailyOutput, {
+      nowIsoUtc: new Date().toISOString(),
+      bypassCache: true,
+      payload: summarizeDailyPayload(payload),
+    });
+  }));
+  dailyButtons.appendChild(mkButton('Reload App', () => {
+    reloadApp();
+  }));
+
+  dailyTab.appendChild(dailyButtons);
+  dailyTab.appendChild(dailyOutput);
+
+  const setActiveTab = (tabKey) => {
+    const useNotification = tabKey !== DEBUG_TAB_DAILY;
+    notificationTab.hidden = !useNotification;
+    dailyTab.hidden = useNotification;
+    notificationTabBtn.classList.toggle('isActive', useNotification);
+    dailyTabBtn.classList.toggle('isActive', !useNotification);
+    notificationTabBtn.setAttribute('aria-selected', useNotification ? 'true' : 'false');
+    dailyTabBtn.setAttribute('aria-selected', useNotification ? 'false' : 'true');
+    notificationTabBtn.tabIndex = useNotification ? 0 : -1;
+    dailyTabBtn.tabIndex = useNotification ? -1 : 0;
+  };
+  const tabButtons = [notificationTabBtn, dailyTabBtn];
+  tabButtons.forEach((button, index) => {
+    button.addEventListener('keydown', (event) => {
+      if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') return;
+      event.preventDefault();
+      const dir = event.key === 'ArrowRight' ? 1 : -1;
+      const nextIndex = (index + dir + tabButtons.length) % tabButtons.length;
+      tabButtons[nextIndex].focus();
+      setActiveTab(nextIndex === 0 ? DEBUG_TAB_NOTIFICATION : DEBUG_TAB_DAILY);
+    });
+  });
+  notificationTabBtn.addEventListener('click', () => setActiveTab(DEBUG_TAB_NOTIFICATION));
+  dailyTabBtn.addEventListener('click', () => setActiveTab(DEBUG_TAB_DAILY));
+  setActiveTab(DEBUG_TAB_NOTIFICATION);
+
   root.appendChild(title);
-  root.appendChild(titleRow);
-  root.appendChild(bodyRow);
-  root.appendChild(buttonGrid);
+  root.appendChild(tabs);
+  root.appendChild(notificationTab);
+  root.appendChild(dailyTab);
   document.body.appendChild(root);
   bindLogoToggle(root);
 };

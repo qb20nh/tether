@@ -130,6 +130,7 @@ export function createRuntime(options) {
   let settingsMenuOpen = false;
   let dailyCountdownTimer = 0;
   let dailyBoardLocked = false;
+  let debugForceDailyFrozen = false;
   let evaluateCacheBoardVersion = 0;
   const evaluateCache = new Map();
 
@@ -218,7 +219,8 @@ export function createRuntime(options) {
   const refreshSettingsToggle = () => refreshSettingsToggleCore(renderer.getRefs(), translate);
 
   const isDailyExpired = () =>
-    Number.isInteger(dailyResetUtcMs) && Date.now() >= dailyResetUtcMs;
+    debugForceDailyFrozen
+    || (Number.isInteger(dailyResetUtcMs) && Date.now() >= dailyResetUtcMs);
 
   const applyDailyBoardLockState = (snapshot = null) => {
     const refs = renderer.getRefs();
@@ -234,7 +236,6 @@ export function createRuntime(options) {
       && activeDailyId
       && isDailySnapshot
       && isDailyExpired()
-      && !isLevelPreviouslyCleared(activeSnapshot.levelIndex),
     );
 
     const changed = nextLocked !== dailyBoardLocked;
@@ -247,6 +248,7 @@ export function createRuntime(options) {
       interactionState.isWallDragging = false;
       interactionState.wallGhost = { visible: false, x: 0, y: 0 };
       interactionState.dropTarget = null;
+      renderer.updateInteraction?.(interactionState);
     }
 
     if (refs?.boardWrap) refs.boardWrap.classList.toggle('isDailyLocked', nextLocked);
@@ -313,6 +315,25 @@ export function createRuntime(options) {
       syncDailyUi();
     }, 1000);
   };
+
+  const readDebugDailyFreezeState = () => ({
+    forced: debugForceDailyFrozen,
+    locked: dailyBoardLocked,
+  });
+
+  const setDebugForceDailyFrozen = (forced) => {
+    debugForceDailyFrozen = Boolean(forced);
+    renderDailyMeta();
+    applyDailyBoardLockState(state.getSnapshot());
+    queueBoardLayout(false, {
+      isPathDragging: interactionState.isPathDragging,
+      pathDragSide: interactionState.pathDragSide,
+      pathDragCursor: interactionState.pathDragCursor,
+    });
+    return readDebugDailyFreezeState();
+  };
+
+  const toggleDebugForceDailyFrozen = () => setDebugForceDailyFrozen(!debugForceDailyFrozen);
 
 
 
@@ -879,6 +900,7 @@ export function createRuntime(options) {
         },
       },
       interactionModel: {
+        isDailyLocked: dailyBoardLocked,
         isPathDragging: interactionState.isPathDragging,
         pathDragSide: interactionState.pathDragSide,
         pathDragCursor: interactionState.pathDragCursor,
@@ -968,7 +990,8 @@ export function createRuntime(options) {
     });
   };
 
-  const loadLevel = (idx) => {
+  const loadLevel = (idx, options = {}) => {
+    const suppressFrozenTransition = Boolean(options.suppressFrozenTransition);
     let targetIndex = Number.isInteger(idx) ? idx : 0;
     if (targetIndex < 0) targetIndex = 0;
 
@@ -1012,6 +1035,9 @@ export function createRuntime(options) {
 
     showLevelGoal(targetIndex);
     applyDailyBoardLockState(snapshot);
+    if (suppressFrozenTransition && typeof renderer.setPathFlowFreezeImmediate === 'function') {
+      renderer.setPathFlowFreezeImmediate(dailyBoardLocked);
+    }
     syncMutableBoardStateFromSnapshot(snapshot);
     refreshLevelOptions();
     renderScoreMeta();
@@ -1142,7 +1168,9 @@ export function createRuntime(options) {
     const actionType = payload?.actionType;
 
     if (actionType === UI_ACTIONS.LEVEL_SELECT) {
-      loadLevel(payload.value);
+      loadLevel(payload.value, {
+        suppressFrozenTransition: Boolean(payload?.suppressFrozenTransition),
+      });
       return;
     }
 
@@ -1482,6 +1510,9 @@ export function createRuntime(options) {
     start,
     destroy,
     emitIntent,
+    readDebugDailyFreezeState,
+    setDebugForceDailyFrozen,
+    toggleDebugForceDailyFrozen,
   };
 }
 

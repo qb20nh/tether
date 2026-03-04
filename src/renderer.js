@@ -51,6 +51,9 @@ let pathStartArrivalState = null;
 let pathEndArrivalState = null;
 let pathStartPinPresenceState = null;
 let pathFlowVisibilityState = null;
+let pathFlowFreezeState = null;
+let pathFlowFreezeMix = 1;
+let lastPathFlowFrozen = false;
 let pathReverseTipSwapState = null;
 let pathReverseGradientBlendState = null;
 let pathStartRetainedArcState = null;
@@ -76,7 +79,9 @@ const headPointScratchC = { x: 0, y: 0 };
 const keyParseScratch = { r: 0, c: 0 };
 const EMPTY_MAP = new Map();
 const TUTORIAL_BRACKET_COLOR_RGB = { r: 120, g: 190, b: 255 };
+const FROZEN_PATH_GRAY_RGB = { r: 156, g: 156, b: 156 };
 const tutorialBracketColorScratch = { r: 120, g: 190, b: 255 };
+const pathFlowFreezeMixScratch = { mix: 1, active: false };
 const themeColorScratch = { r: 0, g: 0, b: 0 };
 const pathLayoutMetrics = {
   ready: false,
@@ -109,6 +114,7 @@ const pathFramePayload = {
   completionProgress: 0,
   flowEnabled: false,
   flowMix: 1,
+  flowBaseSpeed: -32,
   flowOffset: 0,
   flowCycle: 128,
   flowPulse: 64,
@@ -140,6 +146,8 @@ const PATH_FLOW_BASE_CELL = 56;
 const PATH_FLOW_ANCHOR_RATIO = 1;
 const PATH_FLOW_RISE = 0.82;
 const PATH_FLOW_DROP = 0.83;
+const PATH_FLOW_FREEZE_DURATION_MS = 2500;
+const PATH_FLOW_FREEZE_EPSILON = 1e-3;
 const PATH_TIP_ARRIVAL_DURATION_MS = 200;
 const PATH_TIP_RETRACT_CUTOFF_MS = 100;
 const PATH_RETAINED_ARC_SETTLE_DURATION_MS = 100;
@@ -192,6 +200,8 @@ const flowVisibilityMixScratch = { mix: 1, active: false };
 const pathTipHoverScaleScratch = { startScale: 1, endScale: 1, active: false };
 const reusableStartPinPresencePoint = { x: 0, y: 0 };
 const reusableStartPinPresencePoints = [reusableStartPinPresencePoint];
+const frozenMainColorScratch = { r: 255, g: 255, b: 255 };
+const frozenCompleteColorScratch = { r: 34, g: 197, b: 94 };
 const reverseTipScaleScratch = { inScale: 1, outScale: 0, active: false };
 const reverseGradientBlendScratch = {
   blend: 1,
@@ -279,6 +289,21 @@ const easeOutCubic = (unit) => {
   return 1 - (inv * inv * inv);
 };
 
+const mixRgb = (from, to, mixUnit, out = null) => {
+  const unit = clampUnit(mixUnit);
+  const target = out || { r: 0, g: 0, b: 0 };
+  const fromR = Number.isFinite(Number(from?.r)) ? Number(from.r) : 0;
+  const fromG = Number.isFinite(Number(from?.g)) ? Number(from.g) : 0;
+  const fromB = Number.isFinite(Number(from?.b)) ? Number(from.b) : 0;
+  const toR = Number.isFinite(Number(to?.r)) ? Number(to.r) : 0;
+  const toG = Number.isFinite(Number(to?.g)) ? Number(to.g) : 0;
+  const toB = Number.isFinite(Number(to?.b)) ? Number(to.b) : 0;
+  target.r = Math.max(0, Math.min(255, Math.round(fromR + ((toR - fromR) * unit))));
+  target.g = Math.max(0, Math.min(255, Math.round(fromG + ((toG - fromG) * unit))));
+  target.b = Math.max(0, Math.min(255, Math.round(fromB + ((toB - fromB) * unit))));
+  return target;
+};
+
 const getPathTipFromPath = (path, side) => {
   if (!Array.isArray(path) || path.length <= 0) return null;
   if (side === 'start') return path[0] || null;
@@ -303,6 +328,52 @@ const clearPathStartPinPresenceState = () => {
 const clearPathFlowVisibilityState = () => {
   pathFlowVisibilityState = null;
 };
+
+const resolvePathFlowFreezeMix = (
+  nowMs = getNowMs(),
+  out = pathFlowFreezeMixScratch,
+) => {
+  out.mix = pathFlowFreezeMix;
+  out.active = false;
+
+  const state = pathFlowFreezeState;
+  if (!state) return out;
+
+  const elapsed = nowMs - state.startTimeMs;
+  if (elapsed >= PATH_FLOW_FREEZE_DURATION_MS) {
+    pathFlowFreezeMix = state.toMix;
+    pathFlowFreezeState = null;
+    out.mix = pathFlowFreezeMix;
+    return out;
+  }
+
+  const eased = easeOutCubic(clampUnit(elapsed / PATH_FLOW_FREEZE_DURATION_MS));
+  pathFlowFreezeMix = clampUnit(state.fromMix + ((state.toMix - state.fromMix) * eased));
+  out.mix = pathFlowFreezeMix;
+  out.active = true;
+  return out;
+};
+
+const syncPathFlowFreezeTarget = (isFrozen, nowMs = getNowMs()) => {
+  if (lastPathFlowFrozen === Boolean(isFrozen)) return;
+  lastPathFlowFrozen = Boolean(isFrozen);
+
+  const currentMix = resolvePathFlowFreezeMix(nowMs, pathFlowFreezeMixScratch).mix;
+  const targetMix = isFrozen ? 0 : 1;
+  if (Math.abs(currentMix - targetMix) <= PATH_FLOW_FREEZE_EPSILON) {
+    pathFlowFreezeMix = targetMix;
+    pathFlowFreezeState = null;
+    return;
+  }
+
+  pathFlowFreezeState = {
+    startTimeMs: nowMs,
+    fromMix: currentMix,
+    toMix: targetMix,
+  };
+};
+
+const isPathFlowFrozen = () => Boolean(latestInteractionModel?.isDailyLocked);
 
 const getPathSegmentCount = (path) => {
   const pathLength = Array.isArray(path) ? path.length : 0;
@@ -2063,12 +2134,18 @@ const animatePathFlow = (timestamp) => {
     return;
   }
 
-  const animateFlow = shouldAnimatePathFlow(
+  syncPathFlowFreezeTarget(isPathFlowFrozen(), nowMs);
+  const flowFreeze = resolvePathFlowFreezeMix(nowMs, pathFlowFreezeMixScratch);
+  const baseAnimateFlow = shouldAnimatePathFlow(
     latestPathSnapshot,
     latestCompletionModel,
     latestTutorialFlags,
   );
-  const animateFlowVisibility = hasActivePathFlowVisibility(latestPathSnapshot.path, nowMs);
+  const animateFlow = baseAnimateFlow && flowFreeze.mix > PATH_FLOW_FREEZE_EPSILON;
+  const animateFlowVisibility = (
+    hasActivePathFlowVisibility(latestPathSnapshot.path, nowMs)
+    && flowFreeze.mix > PATH_FLOW_FREEZE_EPSILON
+  );
   const animateTipArrivals = hasActivePathTipArrivals(nowMs);
   const animateRetainedArc = hasActivePathRetainedArc(latestPathSnapshot.path, nowMs);
   const animateEndArrowRotate = hasActivePathEndArrowRotate(latestPathSnapshot.path, nowMs);
@@ -2088,6 +2165,7 @@ const animatePathFlow = (timestamp) => {
   if (
     !animateFlow
     && !animateFlowVisibility
+    && !flowFreeze.active
     && !animateTipArrivals
     && !animateRetainedArc
     && !animateEndArrowRotate
@@ -2105,9 +2183,11 @@ const animatePathFlow = (timestamp) => {
   if ((animateFlow || animateFlowVisibility) && pathAnimationLastTs > 0) {
     const dt = Math.max(0, (timestamp - pathAnimationLastTs) / 1000);
     if (Number.isFinite(dt)) {
-      const flowSpeed = Number.isFinite(pathFramePayload.flowSpeed)
-        ? pathFramePayload.flowSpeed
+      const baseFlowSpeed = Number.isFinite(pathFramePayload.flowBaseSpeed)
+        ? pathFramePayload.flowBaseSpeed
         : PATH_FLOW_SPEED;
+      const flowSpeed = baseFlowSpeed * clampUnit(flowFreeze.mix);
+      pathFramePayload.flowSpeed = flowSpeed;
       const flowCycle = Number.isFinite(pathFramePayload.flowCycle) && pathFramePayload.flowCycle > 0
         ? pathFramePayload.flowCycle
         : PATH_FLOW_CYCLE;
@@ -2120,7 +2200,7 @@ const animatePathFlow = (timestamp) => {
 
   pathAnimationLastTs = timestamp;
   if (latestPathSnapshot && latestPathRefs) {
-    const flowOffset = (animateFlow || animateFlowVisibility) ? pathAnimationOffset : 0;
+    const flowOffset = (animateFlow || animateFlowVisibility || flowFreeze.active) ? pathAnimationOffset : 0;
     drawIdleAnimatedPath(flowOffset, latestCompletionModel, nowMs);
   }
 
@@ -2420,7 +2500,23 @@ const drawIdleAnimatedPath = (
     nowMs,
     flowVisibilityMixScratch,
   );
+  const flowFreeze = resolvePathFlowFreezeMix(nowMs, pathFlowFreezeMixScratch);
+  const flowFreezeMix = clampUnit(flowFreeze.mix);
+  const frozenMix = 1 - flowFreezeMix;
+  pathFramePayload.mainColorRgb = mixRgb(
+    pathThemeMainRgb,
+    FROZEN_PATH_GRAY_RGB,
+    frozenMix,
+    frozenMainColorScratch,
+  );
+  pathFramePayload.completeColorRgb = mixRgb(
+    pathThemeCompleteRgb,
+    FROZEN_PATH_GRAY_RGB,
+    frozenMix,
+    frozenCompleteColorScratch,
+  );
   const flowMix = clampUnit(Number.isFinite(flowVisibility.mix) ? flowVisibility.mix : 1);
+  const effectiveFlowMix = flowMix * flowFreezeMix;
   const hasRenderableMainFlowPoints = Array.isArray(pathFramePayload.points)
     && pathFramePayload.points.length > 1;
   const hasRenderableRetainedStartFlowPoints = Array.isArray(pathFramePayload.retainedStartArcPoints)
@@ -2435,15 +2531,25 @@ const drawIdleAnimatedPath = (
   pathFramePayload.flowEnabled = (
     !isReducedMotionPreferred()
     && hasRenderableFlowPoints
-    && flowMix > 0
+    && effectiveFlowMix > PATH_FLOW_FREEZE_EPSILON
   );
-  pathFramePayload.flowMix = flowMix;
+  pathFramePayload.flowMix = effectiveFlowMix;
+  const baseFlowSpeed = Number.isFinite(pathFramePayload.flowBaseSpeed)
+    ? pathFramePayload.flowBaseSpeed
+    : PATH_FLOW_SPEED;
+  pathFramePayload.flowSpeed = baseFlowSpeed * flowFreezeMix;
   pathFramePayload.flowOffset = flowOffset + (Number(renderPoints.flowTravelCompensation) || 0);
-  applyPathReverseGradientBlendToPayload(
-    latestPathSnapshot.path,
-    pathFramePayload.flowCycle,
-    nowMs,
-  );
+  if (effectiveFlowMix > PATH_FLOW_FREEZE_EPSILON) {
+    applyPathReverseGradientBlendToPayload(
+      latestPathSnapshot.path,
+      pathFramePayload.flowCycle,
+      nowMs,
+    );
+  } else {
+    pathFramePayload.reverseColorBlend = 1;
+    pathFramePayload.reverseFromFlowOffset = 0;
+    pathFramePayload.reverseTravelSpan = 0;
+  }
   pathFramePayload.isCompletionSolved = Boolean(completionModel?.isSolved);
   pathFramePayload.completionProgress = getCompletionProgress(completionModel);
   latestPathMainFlowTravel = pathRenderer.drawPathFrame(pathFramePayload);
@@ -2875,6 +2981,9 @@ export function cacheElements() {
   clearPathReverseGradientBlendState();
   clearPathStartPinPresenceState();
   clearPathFlowVisibilityState();
+  pathFlowFreezeState = null;
+  pathFlowFreezeMix = 1;
+  lastPathFlowFrozen = false;
   clearPathRetainedArcStates();
   clearPathEndArrowRotateState();
   clearPathStartFlowRotateState();
@@ -2904,6 +3013,7 @@ export function cacheElements() {
   pathFramePayload.completionProgress = 0;
   pathFramePayload.flowEnabled = false;
   pathFramePayload.flowMix = 1;
+  pathFramePayload.flowBaseSpeed = PATH_FLOW_SPEED;
   pathFramePayload.flowOffset = 0;
   pathFramePayload.flowCycle = PATH_FLOW_CYCLE;
   pathFramePayload.flowPulse = PATH_FLOW_PULSE;
@@ -3427,8 +3537,11 @@ export function drawAll(
   const layout = ensurePathLayoutMetrics(refs);
   const flow = getCachedPathFlowMetrics(refs, layout.cell);
   updatePathThemeCache(refs);
-  const animateFlow = shouldAnimatePathFlow(snapshot, completionModel, tutorialFlags);
   const nowMs = getNowMs();
+  syncPathFlowFreezeTarget(isPathFlowFrozen(), nowMs);
+  const flowFreeze = resolvePathFlowFreezeMix(nowMs, pathFlowFreezeMixScratch);
+  const baseAnimateFlow = shouldAnimatePathFlow(snapshot, completionModel, tutorialFlags);
+  const animateFlow = baseAnimateFlow && flowFreeze.mix > PATH_FLOW_FREEZE_EPSILON;
   updatePathTipArrivalStates(
     previousPath,
     snapshot.path,
@@ -3485,8 +3598,11 @@ export function drawAll(
   latestCompletionModel = completionModel;
   latestTutorialFlags = tutorialFlags;
 
-  const animateFlowVisibility = hasActivePathFlowVisibility(snapshot.path, nowMs);
-  const offset = (animateFlow || animateFlowVisibility) ? pathAnimationOffset : 0;
+  const animateFlowVisibility = (
+    hasActivePathFlowVisibility(snapshot.path, nowMs)
+    && flowFreeze.mix > PATH_FLOW_FREEZE_EPSILON
+  );
+  const offset = (animateFlow || animateFlowVisibility || flowFreeze.active) ? pathAnimationOffset : 0;
   drawAllInternal(snapshot, refs, statuses, offset, completionModel, tutorialFlags);
 
   const animateTipArrivals = hasActivePathTipArrivals(nowMs);
@@ -3506,7 +3622,8 @@ export function drawAll(
     nowMs,
   );
   if (
-    animateFlow
+    flowFreeze.active
+    || animateFlow
     || animateFlowVisibility
     || animateTipArrivals
     || animateRetainedArc
@@ -3698,6 +3815,10 @@ export function drawAnimatedPath(
   updateTutorialBracketPayload(snapshot, layout, tutorialFlags);
 
   const nowMs = getNowMs();
+  syncPathFlowFreezeTarget(isPathFlowFrozen(), nowMs);
+  const flowFreeze = resolvePathFlowFreezeMix(nowMs, pathFlowFreezeMixScratch);
+  const flowFreezeMix = clampUnit(flowFreeze.mix);
+  const frozenMix = 1 - flowFreezeMix;
   const renderPoints = getPathRenderPointsForFrame(
     path,
     nowMs,
@@ -3756,12 +3877,23 @@ export function drawAnimatedPath(
     || startFlowRotateActive
     || tipHoverScale.active
   ) ? NaN : renderPoints.geometryToken;
-  pathFramePayload.mainColorRgb = pathThemeMainRgb;
-  pathFramePayload.completeColorRgb = pathThemeCompleteRgb;
+  pathFramePayload.mainColorRgb = mixRgb(
+    pathThemeMainRgb,
+    FROZEN_PATH_GRAY_RGB,
+    frozenMix,
+    frozenMainColorScratch,
+  );
+  pathFramePayload.completeColorRgb = mixRgb(
+    pathThemeCompleteRgb,
+    FROZEN_PATH_GRAY_RGB,
+    frozenMix,
+    frozenCompleteColorScratch,
+  );
   pathFramePayload.isCompletionSolved = isCompletionSolved;
   pathFramePayload.completionProgress = completionProgress;
   const flowVisibility = resolvePathFlowVisibilityMix(path, nowMs, flowVisibilityMixScratch);
   const flowMix = clampUnit(Number.isFinite(flowVisibility.mix) ? flowVisibility.mix : 1);
+  const effectiveFlowMix = flowMix * flowFreezeMix;
   const hasRenderableMainFlowPoints = Array.isArray(pathFramePayload.points)
     && pathFramePayload.points.length > 1;
   const hasRenderableRetainedStartFlowPoints = Array.isArray(pathFramePayload.retainedStartArcPoints)
@@ -3776,14 +3908,21 @@ export function drawAnimatedPath(
   pathFramePayload.flowEnabled = (
     !isReducedMotionPreferred()
     && hasRenderableFlowPoints
-    && flowMix > 0
+    && effectiveFlowMix > PATH_FLOW_FREEZE_EPSILON
   );
-  pathFramePayload.flowMix = flowMix;
+  pathFramePayload.flowMix = effectiveFlowMix;
   pathFramePayload.flowOffset = flowOffset + (Number(renderPoints.flowTravelCompensation) || 0);
   pathFramePayload.flowCycle = flowMetrics.cycle;
   pathFramePayload.flowPulse = flowMetrics.pulse;
-  pathFramePayload.flowSpeed = flowMetrics.speed;
-  applyPathReverseGradientBlendToPayload(path, flowMetrics.cycle, nowMs);
+  pathFramePayload.flowBaseSpeed = flowMetrics.speed;
+  pathFramePayload.flowSpeed = flowMetrics.speed * flowFreezeMix;
+  if (effectiveFlowMix > PATH_FLOW_FREEZE_EPSILON) {
+    applyPathReverseGradientBlendToPayload(path, flowMetrics.cycle, nowMs);
+  } else {
+    pathFramePayload.reverseColorBlend = 1;
+    pathFramePayload.reverseFromFlowOffset = 0;
+    pathFramePayload.reverseTravelSpan = 0;
+  }
   pathFramePayload.flowRise = PATH_FLOW_RISE;
   pathFramePayload.flowDrop = PATH_FLOW_DROP;
   pathFramePayload.drawTutorialBracketsInPathLayer = false;
@@ -4014,3 +4153,10 @@ export function resizeCanvas(refs) {
 export function notifyInteractiveResize() {
   interactiveResizeActive = true;
 }
+
+export const setPathFlowFreezeImmediate = (isFrozen = false) => {
+  const frozen = Boolean(isFrozen);
+  lastPathFlowFrozen = frozen;
+  pathFlowFreezeMix = frozen ? 0 : 1;
+  pathFlowFreezeState = null;
+};

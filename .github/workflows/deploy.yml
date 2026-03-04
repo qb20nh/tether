@@ -41,6 +41,9 @@ jobs:
 
       - name: Verify PWA build artifact
         run: node scripts/verify_pages_pwa_build.js
+
+      - name: Verify release build excludes debug artifacts
+        run: npm run verify:release-no-debug
         
       - name: Setup Pages
         uses: actions/configure-pages@v4

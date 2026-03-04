@@ -6,6 +6,7 @@ import {
   setLegendIcons,
   resizeCanvas,
   notifyInteractiveResize,
+  setPathFlowFreezeImmediate as setPathFlowFreezeImmediateInternal,
   setMessage,
   clearDropTarget,
   setDropTarget,
@@ -357,6 +358,10 @@ export function createDomRenderer(options = {}) {
 
     notifyResizeInteraction() {
       notifyInteractiveResize();
+    },
+
+    setPathFlowFreezeImmediate(isFrozen = false) {
+      setPathFlowFreezeImmediateInternal(isFrozen);
     },
 
     updateInteraction(interactionModel = {}) {

@@ -650,6 +650,13 @@ const resolveNotificationHistoryEntryText = (entry) => {
   return { title, body };
 };
 
+const isOpenDailyHistoryActionable = (entry) => {
+  if (!entry || !entry.action || entry.action.type !== 'open-daily') return false;
+  if (entry.kind !== 'new-level' && entry.kind !== 'unsolved-warning') return true;
+  if (!latestDailyState.dailyId) return false;
+  return entry.action.dailyId === latestDailyState.dailyId;
+};
+
 const renderNotificationHistoryRelativeTimes = () => {
   if (!notificationHistoryListEl) return;
   const locale = getLocale();
@@ -691,13 +698,19 @@ const renderNotificationHistoryList = () => {
     row.removeAttribute('data-action-build-number');
     row.removeAttribute('data-action-daily-id');
 
-    if (entry.action) {
+    const actionableEntry = (
+      entry.action?.type === 'open-daily'
+        ? (isOpenDailyHistoryActionable(entry) ? entry.action : null)
+        : entry.action
+    );
+
+    if (actionableEntry) {
       row.classList.add('isActionable');
-      row.setAttribute('data-action-type', entry.action.type);
-      if (entry.action.type === 'apply-update') {
-        row.setAttribute('data-action-build-number', String(entry.action.buildNumber));
-      } else if (entry.action.type === 'open-daily') {
-        row.setAttribute('data-action-daily-id', entry.action.dailyId);
+      row.setAttribute('data-action-type', actionableEntry.type);
+      if (actionableEntry.type === 'apply-update') {
+        row.setAttribute('data-action-build-number', String(actionableEntry.buildNumber));
+      } else if (actionableEntry.type === 'open-daily') {
+        row.setAttribute('data-action-daily-id', actionableEntry.dailyId);
       }
     }
 
@@ -958,9 +971,15 @@ const openDailyFromHistoryAction = async (dailyId = '', kind = '') => {
   const snapshot = runtimeStateAdapter.getSnapshot();
   if (!snapshot || !Number.isInteger(snapshot.levelIndex)) return;
 
-  if (kind === 'new-level' && dailyId && dailyId === latestDailyState.dailyId) {
+  if (kind === 'new-level') {
     const latestPayload = await fetchDailyPayload({ bypassCache: true });
-    if (latestPayload?.dailyId && latestPayload.dailyId > latestDailyState.dailyId) {
+    if (
+      latestPayload?.dailyId
+      && (
+        !latestDailyState.dailyId
+        || latestPayload.dailyId > latestDailyState.dailyId
+      )
+    ) {
       window.location.reload();
       return;
     }
@@ -980,7 +999,10 @@ const openDailyFromHistoryAction = async (dailyId = '', kind = '') => {
     : null;
   if (!Number.isInteger(dailyAbsIndex)) return;
 
-  runtimeInstance.emitIntent(uiActionIntent(UI_ACTIONS.LEVEL_SELECT, { value: dailyAbsIndex }));
+  runtimeInstance.emitIntent(uiActionIntent(UI_ACTIONS.LEVEL_SELECT, {
+    value: dailyAbsIndex,
+    suppressFrozenTransition: kind === 'new-level',
+  }));
 };
 
 const handleNotificationHistoryItemAction = (event) => {
@@ -1005,6 +1027,12 @@ const handleNotificationHistoryItemAction = (event) => {
   if (actionType === 'open-daily') {
     const dailyId = row.getAttribute('data-action-daily-id') || '';
     const kind = row.getAttribute('data-entry-kind') || '';
+    if (!isOpenDailyHistoryActionable({
+      kind,
+      action: { type: 'open-daily', dailyId },
+    })) {
+      return;
+    }
     void openDailyFromHistoryAction(dailyId, kind);
   }
 };
@@ -1683,6 +1711,29 @@ export async function initTetherApp() {
     canUseServiceWorker,
     requestNotificationPermission,
     postMessageToServiceWorker,
+    fetchDailyPayload,
+    readDailyDebugSnapshot: () => ({
+      nowIsoUtc: new Date().toISOString(),
+      dailyPayloadUrl: DAILY_PAYLOAD_URL,
+      versionUrl: VERSION_URL,
+      localBuildNumber,
+      runtimeDailyFreezeState: (
+        runtimeInstance && typeof runtimeInstance.readDebugDailyFreezeState === 'function'
+          ? runtimeInstance.readDebugDailyFreezeState()
+          : null
+      ),
+      latestDailyState: {
+        dailyId: latestDailyState.dailyId,
+        hardInvalidateAtUtcMs: latestDailyState.hardInvalidateAtUtcMs,
+        dailySolvedDate: latestDailyState.dailySolvedDate,
+      },
+    }),
+    toggleForceDailyFrozenState: () => (
+      runtimeInstance && typeof runtimeInstance.toggleDebugForceDailyFrozen === 'function'
+        ? runtimeInstance.toggleDebugForceDailyFrozen()
+        : null
+    ),
+    reloadApp: () => window.location.reload(),
     showToast: (text, options = {}) => showInAppToast(text, options),
   });
   if (didUpgradeBuild) {
