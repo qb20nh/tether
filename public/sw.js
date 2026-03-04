@@ -1,14 +1,19 @@
 const BUILD_NUMBER = Number.parseInt('__TETHER_BUILD_NUMBER__', 10) || 0;
 const BUILD_LABEL = '__TETHER_BUILD_LABEL__';
 
-const APP_CACHE = `tether-app-${BUILD_NUMBER}`;
-const DAILY_CACHE = `tether-daily-${BUILD_NUMBER}`;
+const APP_CACHE_PREFIX = 'tether-app-';
+const DAILY_CACHE_PREFIX = 'tether-daily-';
+const appCacheNameForBuild = (buildNumber) => `${APP_CACHE_PREFIX}${buildNumber}`;
+const dailyCacheNameForBuild = (buildNumber) => `${DAILY_CACHE_PREFIX}${buildNumber}`;
+const APP_CACHE = appCacheNameForBuild(BUILD_NUMBER);
+const DAILY_CACHE = dailyCacheNameForBuild(BUILD_NUMBER);
 const LEGACY_META_CACHE = 'tether-meta-v1';
 const META_DB_NAME = 'tether-meta-v1';
 const META_DB_VERSION = 1;
 const META_STORE_NAME = 'meta';
 const APP_CACHE_MAX_ENTRIES = 180;
 const DAILY_CACHE_MAX_ENTRIES = 2;
+const UPDATE_POLICY_VERSION = 1;
 
 const DAILY_CHECK_TAG = 'tether-daily-check';
 const DEFAULT_WARNING_HOURS = 8;
@@ -19,6 +24,7 @@ const DAILY_PAYLOAD_PATH_SUFFIX = '__TETHER_DAILY_PAYLOAD_PATH__';
 const META_RECORD_KEYS = Object.freeze({
   DAILY_STATE: 'daily-state',
   HISTORY_STATE: 'notification-history',
+  UPDATE_POLICY: 'update-policy',
 });
 
 const notificationDefaults = Object.freeze({
@@ -41,7 +47,7 @@ const isLocalhostHostname = (hostname = '') =>
   || hostname === '::1'
   || hostname.endsWith('.localhost');
 
-const buildCaches = Object.freeze([APP_CACHE, DAILY_CACHE]);
+const CURRENT_BUILD_CACHES = Object.freeze([APP_CACHE, DAILY_CACHE]);
 
 const isCacheableResponse = (response) =>
   Boolean(response && response.ok && response.type === 'basic');
@@ -103,21 +109,34 @@ const trimCacheEntries = async (cacheName, maxEntries, { matcher = null } = {}) 
   }
 };
 
-const cleanupCurrentBuildCaches = async () => {
+const cleanupCurrentBuildCaches = async (retainedBuildCaches = CURRENT_BUILD_CACHES) => {
+  const retainedSet = retainedBuildCaches instanceof Set
+    ? retainedBuildCaches
+    : new Set(Array.isArray(retainedBuildCaches) ? retainedBuildCaches : CURRENT_BUILD_CACHES);
+
   if (isLocalhostHostname(self.location.hostname)) {
-    await Promise.all([
-      caches.delete(APP_CACHE),
-      caches.delete(DAILY_CACHE),
-    ]);
+    const keys = await caches.keys();
+    await Promise.all(
+      keys
+        .filter((key) => key.startsWith('tether-'))
+        .map((key) => caches.delete(key)),
+    );
     return;
   }
 
-  await Promise.all([
-    trimCacheEntries(APP_CACHE, APP_CACHE_MAX_ENTRIES),
-    trimCacheEntries(DAILY_CACHE, DAILY_CACHE_MAX_ENTRIES, {
-      matcher: (request) => isDailyCacheRequest(request),
-    }),
-  ]);
+  const trimTasks = [];
+  for (const cacheName of retainedSet) {
+    if (cacheName.startsWith(APP_CACHE_PREFIX)) {
+      trimTasks.push(trimCacheEntries(cacheName, APP_CACHE_MAX_ENTRIES));
+      continue;
+    }
+    if (cacheName.startsWith(DAILY_CACHE_PREFIX)) {
+      trimTasks.push(trimCacheEntries(cacheName, DAILY_CACHE_MAX_ENTRIES, {
+        matcher: (request) => isDailyCacheRequest(request),
+      }));
+    }
+  }
+  await Promise.all(trimTasks);
 };
 
 const fetchFresh = (request, options = {}) => {
@@ -131,13 +150,16 @@ const fetchFresh = (request, options = {}) => {
 
 self.addEventListener('activate', (event) => {
   event.waitUntil((async () => {
+    const updatePolicy = normalizeUpdatePolicyForActivation(await ensureUpdatePolicyState());
+    await writeUpdatePolicyState(updatePolicy);
+    const retainedBuildCaches = collectRetainedBuildCaches(updatePolicy);
     const keys = await caches.keys();
     await Promise.all(
       keys
-        .filter((key) => key.startsWith('tether-') && !buildCaches.includes(key))
+        .filter((key) => key.startsWith('tether-') && !retainedBuildCaches.has(key))
         .map((key) => caches.delete(key)),
     );
-    await cleanupCurrentBuildCaches();
+    await cleanupCurrentBuildCaches(retainedBuildCaches);
     await caches.delete(LEGACY_META_CACHE);
     await self.clients.claim();
   })());
@@ -166,9 +188,21 @@ const networkFirstDaily = async (request) => {
   }
 };
 
-const cacheFirstRevalidateStatic = async (event, request) => {
-  const cache = await openCache(APP_CACHE);
+const cacheFirstRevalidateStatic = async (event, request, options = {}) => {
+  const cacheName = normalizeString(options.cacheName, APP_CACHE);
+  const pinned = normalizeBool(options.pinned, false);
+  const cache = await openCache(cacheName);
   const cached = await cache.match(request);
+  if (pinned && cached) return cached;
+
+  if (pinned && !cached) {
+    await failOpenPinnedBuildToLatest();
+    return cacheFirstRevalidateStatic(event, request, {
+      cacheName: APP_CACHE,
+      pinned: false,
+    });
+  }
+
   const networkPromise = fetchFresh(request)
     .then(async (response) => {
       if (isCacheableResponse(response)) {
@@ -187,17 +221,25 @@ const cacheFirstRevalidateStatic = async (event, request) => {
 };
 
 const cacheFirstRevalidateNavigation = async (event, request) => {
-  const cache = await openCache(APP_CACHE);
+  const plan = await resolveServingBuildPlan();
+  const cache = await openCache(plan.appCacheName);
   const shellUrl = resolveShellUrl();
   const cachedExact = await cache.match(request, { ignoreSearch: true });
   const cachedShell = await cache.match(shellUrl, { ignoreSearch: true });
+
+  if (plan.pinned) {
+    if (cachedExact) return cachedExact;
+    if (cachedShell) return cachedShell;
+    await failOpenPinnedBuildToLatest();
+    return cacheFirstRevalidateNavigation(event, request);
+  }
 
   const networkPromise = fetchFresh(request)
     .then(async (response) => {
       if (isCacheableResponse(response)) {
         await cache.put(request, response.clone());
         await cache.put(shellUrl, response.clone());
-        await trimCacheEntries(APP_CACHE, APP_CACHE_MAX_ENTRIES);
+        await trimCacheEntries(plan.appCacheName, APP_CACHE_MAX_ENTRIES);
       }
       return response;
     })
@@ -248,7 +290,13 @@ self.addEventListener('fetch', (event) => {
   }
 
   if (isStaticAssetRequest(request, url)) {
-    event.respondWith(cacheFirstRevalidateStatic(event, request));
+    event.respondWith((async () => {
+      const plan = await resolveServingBuildPlan();
+      return cacheFirstRevalidateStatic(event, request, {
+        cacheName: plan.appCacheName,
+        pinned: plan.pinned,
+      });
+    })());
   }
 });
 
@@ -349,6 +397,205 @@ const writeMetaRecord = async (key, value) => {
     return true;
   } catch {
     return false;
+  }
+};
+
+const normalizeUpdatePolicyPayload = (payload = {}) => {
+  const pinnedParsed = normalizeInt(payload.pinnedBuildNumber, BUILD_NUMBER);
+  const pinnedBuildNumber = Number.isInteger(pinnedParsed) && pinnedParsed > 0
+    ? pinnedParsed
+    : BUILD_NUMBER;
+  return {
+    version: UPDATE_POLICY_VERSION,
+    updatedAtMs: Date.now(),
+    autoUpdateEnabled: normalizeBool(payload.autoUpdateEnabled, false),
+    pinnedBuildNumber,
+  };
+};
+
+let updatePolicyState = normalizeUpdatePolicyPayload();
+let updatePolicyLoaded = false;
+let updatePolicyLoadPromise = null;
+let pinnedShellCacheStatus = {
+  buildNumber: null,
+  hasShell: false,
+};
+
+const resetPinnedShellCacheStatus = () => {
+  pinnedShellCacheStatus = {
+    buildNumber: null,
+    hasShell: false,
+  };
+};
+
+const applyCachedUpdatePolicyState = (state) => {
+  updatePolicyState = normalizeUpdatePolicyPayload(state);
+  updatePolicyLoaded = true;
+  resetPinnedShellCacheStatus();
+  return updatePolicyState;
+};
+
+const readUpdatePolicyState = async () => {
+  const stored = await readMetaRecord(META_RECORD_KEYS.UPDATE_POLICY);
+  const payload = stored && typeof stored === 'object' ? stored : {};
+  return normalizeUpdatePolicyPayload(payload);
+};
+
+const writeUpdatePolicyState = async (state) => {
+  const normalized = normalizeUpdatePolicyPayload(state);
+  await writeMetaRecord(META_RECORD_KEYS.UPDATE_POLICY, normalized);
+  return applyCachedUpdatePolicyState(normalized);
+};
+
+const ensureUpdatePolicyState = async () => {
+  if (updatePolicyLoaded) return updatePolicyState;
+  if (updatePolicyLoadPromise) return updatePolicyLoadPromise;
+  updatePolicyLoadPromise = (async () => {
+    const loaded = await readUpdatePolicyState();
+    return applyCachedUpdatePolicyState(loaded);
+  })();
+  try {
+    return await updatePolicyLoadPromise;
+  } finally {
+    updatePolicyLoadPromise = null;
+  }
+};
+
+const resolveServingBuildNumber = (state = updatePolicyState) => {
+  const normalized = normalizeUpdatePolicyPayload(state);
+  if (normalized.autoUpdateEnabled) return BUILD_NUMBER;
+  if (!Number.isInteger(normalized.pinnedBuildNumber) || normalized.pinnedBuildNumber <= 0) {
+    return BUILD_NUMBER;
+  }
+  if (normalized.pinnedBuildNumber > BUILD_NUMBER) return BUILD_NUMBER;
+  return normalized.pinnedBuildNumber;
+};
+
+const hasPinnedShellCache = async (buildNumber) => {
+  if (!Number.isInteger(buildNumber) || buildNumber <= 0 || buildNumber === BUILD_NUMBER) return true;
+  if (pinnedShellCacheStatus.buildNumber === buildNumber) return pinnedShellCacheStatus.hasShell;
+  const cache = await openCache(appCacheNameForBuild(buildNumber));
+  const cachedShell = await cache.match(resolveShellUrl(), { ignoreSearch: true });
+  const hasShell = Boolean(cachedShell);
+  pinnedShellCacheStatus = {
+    buildNumber,
+    hasShell,
+  };
+  return hasShell;
+};
+
+const failOpenPinnedBuildToLatest = async () => {
+  const current = await ensureUpdatePolicyState();
+  if (resolveServingBuildNumber(current) === BUILD_NUMBER && current.pinnedBuildNumber === BUILD_NUMBER) {
+    return current;
+  }
+  return writeUpdatePolicyState({
+    ...current,
+    pinnedBuildNumber: BUILD_NUMBER,
+  });
+};
+
+const resolveServingBuildPlan = async () => {
+  const policy = await ensureUpdatePolicyState();
+  const servingBuildNumber = resolveServingBuildNumber(policy);
+  const pinned = !policy.autoUpdateEnabled && servingBuildNumber !== BUILD_NUMBER;
+  if (!pinned) {
+    return {
+      servingBuildNumber: BUILD_NUMBER,
+      appCacheName: APP_CACHE,
+      pinned: false,
+    };
+  }
+
+  const pinnedUsable = await hasPinnedShellCache(servingBuildNumber);
+  if (pinnedUsable) {
+    return {
+      servingBuildNumber,
+      appCacheName: appCacheNameForBuild(servingBuildNumber),
+      pinned: true,
+    };
+  }
+
+  await failOpenPinnedBuildToLatest();
+  return {
+    servingBuildNumber: BUILD_NUMBER,
+    appCacheName: APP_CACHE,
+    pinned: false,
+    failedOpen: true,
+  };
+};
+
+const normalizeUpdatePolicyForActivation = (state) => {
+  const normalized = normalizeUpdatePolicyPayload(state);
+  if (normalized.autoUpdateEnabled) {
+    return normalizeUpdatePolicyPayload({
+      ...normalized,
+      pinnedBuildNumber: BUILD_NUMBER,
+    });
+  }
+  if (!Number.isInteger(normalized.pinnedBuildNumber) || normalized.pinnedBuildNumber <= 0) {
+    return normalizeUpdatePolicyPayload({
+      ...normalized,
+      pinnedBuildNumber: BUILD_NUMBER,
+    });
+  }
+  if (normalized.pinnedBuildNumber > BUILD_NUMBER) {
+    return normalizeUpdatePolicyPayload({
+      ...normalized,
+      pinnedBuildNumber: BUILD_NUMBER,
+    });
+  }
+  return normalized;
+};
+
+const mergeUpdatePolicyPayload = (state, payload = {}) => {
+  const next = {
+    ...normalizeUpdatePolicyPayload(state),
+  };
+
+  if (Object.prototype.hasOwnProperty.call(payload, 'autoUpdateEnabled')) {
+    next.autoUpdateEnabled = normalizeBool(payload.autoUpdateEnabled, next.autoUpdateEnabled);
+  }
+
+  const currentBuildNumber = normalizeInt(payload.currentBuildNumber, null);
+  if (!next.autoUpdateEnabled && Number.isInteger(currentBuildNumber) && currentBuildNumber > 0) {
+    next.pinnedBuildNumber = currentBuildNumber;
+  }
+  if (next.autoUpdateEnabled) {
+    next.pinnedBuildNumber = BUILD_NUMBER;
+  }
+
+  return normalizeUpdatePolicyPayload(next);
+};
+
+const confirmPinnedBuildUpdate = async (buildNumber) => {
+  const state = await ensureUpdatePolicyState();
+  const target = normalizeInt(buildNumber, null);
+  if (!Number.isInteger(target) || target <= 0) return null;
+  const nextPinnedBuildNumber = Math.min(target, BUILD_NUMBER);
+  return writeUpdatePolicyState({
+    ...state,
+    pinnedBuildNumber: nextPinnedBuildNumber,
+  });
+};
+
+const collectRetainedBuildCaches = (updatePolicy) => {
+  const policy = normalizeUpdatePolicyForActivation(updatePolicy);
+  const retained = new Set(CURRENT_BUILD_CACHES);
+  const servingBuildNumber = resolveServingBuildNumber(policy);
+  if (servingBuildNumber !== BUILD_NUMBER) {
+    retained.add(appCacheNameForBuild(servingBuildNumber));
+  }
+  return retained;
+};
+
+const replyToMessagePort = (event, payload) => {
+  const port = Array.isArray(event?.ports) ? event.ports[0] : null;
+  if (!port || typeof port.postMessage !== 'function') return;
+  try {
+    port.postMessage(payload);
+  } catch {
+    // Message reply is best effort.
   }
 };
 
@@ -550,6 +797,7 @@ const broadcastHistoryPayload = async (state) => {
 
 let dailyTaskChain = Promise.resolve();
 let historyTaskChain = Promise.resolve();
+let updatePolicyTaskChain = Promise.resolve();
 
 const enqueueDailyTask = (task) => {
   dailyTaskChain = dailyTaskChain
@@ -563,6 +811,27 @@ const enqueueHistoryTask = (task) => {
     .catch(() => undefined)
     .then(task);
   return historyTaskChain;
+};
+
+const enqueueUpdatePolicyTask = (task) => {
+  updatePolicyTaskChain = updatePolicyTaskChain
+    .catch(() => undefined)
+    .then(task);
+  return updatePolicyTaskChain;
+};
+
+const syncUpdatePolicyFromApp = async (payload = {}) => {
+  return enqueueUpdatePolicyTask(async () => {
+    const current = await ensureUpdatePolicyState();
+    const next = mergeUpdatePolicyPayload(current, payload);
+    return writeUpdatePolicyState(next);
+  });
+};
+
+const confirmUpdatePolicyBuild = async (buildNumber) => {
+  return enqueueUpdatePolicyTask(async () => {
+    return confirmPinnedBuildUpdate(buildNumber);
+  });
 };
 
 const appendHistoryEntry = async (entryInput) => {
@@ -920,7 +1189,42 @@ self.addEventListener('message', (event) => {
   if (!data || typeof data !== 'object') return;
 
   if (data.type === 'SW_SKIP_WAITING') {
-    event.waitUntil(self.skipWaiting());
+    const payload = data.payload && typeof data.payload === 'object' ? data.payload : {};
+    const approvedBuildNumber = normalizeInt(payload.approvedBuildNumber, null);
+    event.waitUntil((async () => {
+      if (Number.isInteger(approvedBuildNumber) && approvedBuildNumber > 0) {
+        await confirmUpdatePolicyBuild(approvedBuildNumber);
+      }
+      await self.skipWaiting();
+    })());
+    return;
+  }
+
+  if (data.type === 'SW_SYNC_UPDATE_POLICY') {
+    const payload = data.payload && typeof data.payload === 'object' ? data.payload : {};
+    event.waitUntil(syncUpdatePolicyFromApp(payload));
+    return;
+  }
+
+  if (data.type === 'SW_CONFIRM_BUILD_UPDATE') {
+    const payload = data.payload && typeof data.payload === 'object' ? data.payload : {};
+    const buildNumber = normalizeInt(payload.buildNumber, null);
+    event.waitUntil((async () => {
+      try {
+        const updated = await confirmUpdatePolicyBuild(buildNumber);
+        replyToMessagePort(event, {
+          ok: Boolean(updated),
+          pinnedBuildNumber: Number.isInteger(updated?.pinnedBuildNumber)
+            ? updated.pinnedBuildNumber
+            : null,
+        });
+      } catch {
+        replyToMessagePort(event, {
+          ok: false,
+          pinnedBuildNumber: null,
+        });
+      }
+    })());
     return;
   }
 
