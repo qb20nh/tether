@@ -156,7 +156,7 @@ const PATH_REVERSE_GRADIENT_BLEND_DURATION_MS = 200;
 const PATH_TIP_ARRIVAL_DISTANCE_CELL_FACTOR = 0.5;
 const TUTORIAL_BRACKET_PULSE_CYCLES = 3;
 const TAU = Math.PI * 2;
-const CANVAS_ALIGN_OFFSET_CSS_PX = 0.5;
+const CANVAS_ALIGN_OFFSET_CSS_PX = 0;
 const PATH_RENDERER_RECOVERY_COOLDOWN_MS = 500;
 const INTERACTIVE_RESIZE_IDLE_MS = 200;
 const PATH_TIP_ARRIVAL_BEZIER_X1 = 0;
@@ -831,10 +831,17 @@ const getCellPointFromLayout = (r, c, out = headPointScratchA) => {
   const row = Number(r);
   const col = Number(c);
   if (!Number.isFinite(row) || !Number.isFinite(col)) return null;
+  const deviceScale = getDevicePixelScale();
   const step = pathLayoutMetrics.cell + pathLayoutMetrics.gap;
   const half = pathLayoutMetrics.cell * 0.5;
-  out.x = pathLayoutMetrics.offsetX + pathLayoutMetrics.pad + (col * step) + half;
-  out.y = pathLayoutMetrics.offsetY + pathLayoutMetrics.pad + (row * step) + half;
+  out.x = snapCssToDevicePixel(
+    pathLayoutMetrics.offsetX + pathLayoutMetrics.pad + (col * step) + half,
+    deviceScale,
+  );
+  out.y = snapCssToDevicePixel(
+    pathLayoutMetrics.offsetY + pathLayoutMetrics.pad + (row * step) + half,
+    deviceScale,
+  );
   return out;
 };
 
@@ -2351,6 +2358,42 @@ const schedulePathAnimation = () => {
 const parsePx = (value) => {
   const parsed = parseFloat(value);
   return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const getDevicePixelScale = () => {
+  const dpr = typeof window !== 'undefined'
+    ? Number(window.devicePixelRatio)
+    : NaN;
+  return Number.isFinite(dpr) && dpr > 0 ? dpr : 1;
+};
+
+const snapCssToDevicePixel = (value, scale = getDevicePixelScale()) => {
+  const safeScale = scale > 0 ? scale : 1;
+  return Math.round((Number(value) || 0) * safeScale) / safeScale;
+};
+
+const getCanvasScale = (ctx) => {
+  if (!ctx || typeof ctx.getTransform !== 'function') {
+    return { x: 1, y: 1, min: 1 };
+  }
+  const matrix = ctx.getTransform();
+  const scaleX = Math.abs(Number(matrix?.a) || 1);
+  const scaleY = Math.abs(Number(matrix?.d) || 1);
+  return {
+    x: scaleX > 0 ? scaleX : 1,
+    y: scaleY > 0 ? scaleY : 1,
+    min: Math.max(1, Math.min(scaleX > 0 ? scaleX : 1, scaleY > 0 ? scaleY : 1)),
+  };
+};
+
+const snapCanvasLength = (value, scale) => {
+  const safeScale = scale > 0 ? scale : 1;
+  return Math.max(1, Math.round(Math.max(0, Number(value) || 0) * safeScale)) / safeScale;
+};
+
+const snapCanvasPoint = (value, scale) => {
+  const safeScale = scale > 0 ? scale : 1;
+  return Math.round((Number(value) || 0) * safeScale) / safeScale;
 };
 
 const configureHiDPICanvas = (canvas, ctx, cssWidth, cssHeight) => {
@@ -3874,10 +3917,11 @@ export function drawAnimatedPath(
 
   const layout = ensurePathLayoutMetrics(refs);
   const size = layout.cell;
-  const width = Math.max(7, Math.floor(size * 0.15));
-  const arrowLength = Math.max(Math.floor(size * 0.24), 13);
-  const startRadius = Math.max(Math.floor(width * 0.9), 6);
-  const endHalfWidth = Math.max(6, Math.floor(width * 0.95));
+  const deviceScale = getDevicePixelScale();
+  const width = Math.max(7, snapCssToDevicePixel(Math.floor(size * 0.15), deviceScale));
+  const arrowLength = Math.max(13, snapCssToDevicePixel(Math.floor(size * 0.24), deviceScale));
+  const startRadius = Math.max(6, snapCssToDevicePixel(Math.floor(width * 0.9), deviceScale));
+  const endHalfWidth = Math.max(6, snapCssToDevicePixel(Math.floor(width * 0.95), deviceScale));
 
   if (!pathThemeCacheInitialized) updatePathThemeCache(refs);
   const completionProgress = getCompletionProgress(completionModel);
@@ -3913,8 +3957,14 @@ export function drawAnimatedPath(
       for (let i = 0; i < pathLength; i++) {
         const point = path[i];
         const pooled = reusablePathPoints[i];
-        pooled.x = layout.offsetX + layout.pad + (point.c * step) + half;
-        pooled.y = layout.offsetY + layout.pad + (point.r * step) + half;
+        pooled.x = snapCssToDevicePixel(
+          layout.offsetX + layout.pad + (point.c * step) + half,
+          deviceScale,
+        );
+        pooled.y = snapCssToDevicePixel(
+          layout.offsetY + layout.pad + (point.r * step) + half,
+          deviceScale,
+        );
       }
 
       cachedPathRef = path;
@@ -4081,8 +4131,9 @@ function drawCrossStitches(snapshot, refs, ctx, vertexStatus = EMPTY_MAP) {
 
   const offset = getGridCanvasOffset(refs, gridOffsetScratch);
   const cell = getCellSize(refs.gridEl);
-  const stitchLineHalf = Math.max(2, cell * 0.18);
-  const stitchWidth = Math.max(1, cell * 0.06);
+  const canvasScale = getCanvasScale(ctx);
+  const stitchLineHalf = snapCanvasLength(Math.max(2, cell * 0.18), canvasScale.min);
+  const stitchWidth = snapCanvasLength(Math.max(1, cell * 0.06), canvasScale.min);
   const styleDeclaration = getComputedStyle(document.documentElement);
   const colorGood = resolveThemeGoodColor(styleDeclaration, '#16a34a');
   const colorBad = forceOpaqueColor(styleDeclaration.getPropertyValue('--bad').trim() || '#e85c5c');
@@ -4096,34 +4147,42 @@ function drawCrossStitches(snapshot, refs, ctx, vertexStatus = EMPTY_MAP) {
     return entry?.[key] || 'pending';
   };
 
-  const drawLine = (x1, y1, x2, y2, color, width) => {
+  const buildSnappedLine = (x1, y1, x2, y2) => ({
+    x1: snapCanvasPoint(x1, canvasScale.x),
+    y1: snapCanvasPoint(y1, canvasScale.y),
+    x2: snapCanvasPoint(x2, canvasScale.x),
+    y2: snapCanvasPoint(y2, canvasScale.y),
+  });
+
+  const drawLine = (line, color, width) => {
+    const snappedWidth = snapCanvasLength(width, canvasScale.min);
     ctx.strokeStyle = color;
-    ctx.lineWidth = width;
+    ctx.lineWidth = snappedWidth;
     ctx.lineCap = 'round';
     ctx.beginPath();
-    ctx.moveTo(x1, y1);
-    ctx.lineTo(x2, y2);
+    ctx.moveTo(line.x1, line.y1);
+    ctx.lineTo(line.x2, line.y2);
     ctx.stroke();
   };
 
   for (const [vr, vc] of snapshot.stitches) {
     const point = getVertexPoint(vr, vc, refs, offset, headPointScratchA);
-    drawLine(
-      point.x - stitchLineHalf,
-      point.y - stitchLineHalf,
-      point.x + stitchLineHalf,
-      point.y + stitchLineHalf,
-      shadowOpaque,
-      stitchWidth * 2.0,
+    const centerX = snapCanvasPoint(point.x, canvasScale.x);
+    const centerY = snapCanvasPoint(point.y, canvasScale.y);
+    const diagALine = buildSnappedLine(
+      centerX - stitchLineHalf,
+      centerY - stitchLineHalf,
+      centerX + stitchLineHalf,
+      centerY + stitchLineHalf,
     );
-    drawLine(
-      point.x + stitchLineHalf,
-      point.y - stitchLineHalf,
-      point.x - stitchLineHalf,
-      point.y + stitchLineHalf,
-      shadowOpaque,
-      stitchWidth * 2.0,
+    const diagBLine = buildSnappedLine(
+      centerX + stitchLineHalf,
+      centerY - stitchLineHalf,
+      centerX - stitchLineHalf,
+      centerY + stitchLineHalf,
     );
+    drawLine(diagALine, shadowOpaque, stitchWidth * 2.0);
+    drawLine(diagBLine, shadowOpaque, stitchWidth * 2.0);
   }
 
   const drawStatePass = (state, color) => {
@@ -4133,25 +4192,25 @@ function drawCrossStitches(snapshot, refs, ctx, vertexStatus = EMPTY_MAP) {
       const diagAState = resolveDiagStatus(entry, 'diagA');
       const diagBState = resolveDiagStatus(entry, 'diagB');
       const point = getVertexPoint(vr, vc, refs, offset, headPointScratchB);
+      const centerX = snapCanvasPoint(point.x, canvasScale.x);
+      const centerY = snapCanvasPoint(point.y, canvasScale.y);
+      const diagALine = buildSnappedLine(
+        centerX - stitchLineHalf,
+        centerY - stitchLineHalf,
+        centerX + stitchLineHalf,
+        centerY + stitchLineHalf,
+      );
+      const diagBLine = buildSnappedLine(
+        centerX + stitchLineHalf,
+        centerY - stitchLineHalf,
+        centerX - stitchLineHalf,
+        centerY + stitchLineHalf,
+      );
       if (diagAState === state) {
-        drawLine(
-          point.x - stitchLineHalf,
-          point.y - stitchLineHalf,
-          point.x + stitchLineHalf,
-          point.y + stitchLineHalf,
-          color,
-          stitchWidth,
-        );
+        drawLine(diagALine, color, stitchWidth);
       }
       if (diagBState === state) {
-        drawLine(
-          point.x + stitchLineHalf,
-          point.y - stitchLineHalf,
-          point.x - stitchLineHalf,
-          point.y + stitchLineHalf,
-          color,
-          stitchWidth,
-        );
+        drawLine(diagBLine, color, stitchWidth);
       }
     }
   };
@@ -4168,9 +4227,10 @@ function drawCornerCounts(snapshot, refs, ctx, cornerVertexStatus = EMPTY_MAP) {
 
   const offset = getGridCanvasOffset(refs, gridOffsetScratch);
   const cell = getCellSize(refs.gridEl);
-  const cornerRadius = Math.max(6, cell * 0.17);
-  const cornerLineWidth = Math.max(1, cell * 0.04);
-  const cornerFontSize = Math.max(12, Math.floor(cell * 0.22));
+  const canvasScale = getCanvasScale(ctx);
+  const cornerRadius = snapCanvasLength(Math.max(6, cell * 0.17), canvasScale.min);
+  const cornerLineWidth = snapCanvasLength(Math.max(1, cell * 0.04), canvasScale.min);
+  const cornerFontSize = Math.max(12, Math.round(cell * 0.22));
 
   ctx.save();
   ctx.globalAlpha = 1;
@@ -4192,7 +4252,9 @@ function drawCornerCounts(snapshot, refs, ctx, cornerVertexStatus = EMPTY_MAP) {
     if (state === 'good') accentColor = colorGood;
     else if (state === 'bad') accentColor = colorBad;
 
-    const { x, y } = getVertexPoint(vr, vc, refs, offset, headPointScratchC);
+    const point = getVertexPoint(vr, vc, refs, offset, headPointScratchC);
+    const x = snapCanvasPoint(point.x, canvasScale.x);
+    const y = snapCanvasPoint(point.y, canvasScale.y);
 
     ctx.beginPath();
     ctx.fillStyle = cornerFillColor;
