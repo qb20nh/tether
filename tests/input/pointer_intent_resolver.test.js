@@ -216,6 +216,7 @@ test('chooseSlipperyPathDragStep picks nearest orthogonal candidate', () => {
         ['.', '.', '.'],
         ['.', '.', '.'],
       ],
+      stitchSet: new Set(),
     },
     headNode: { r: 1, c: 1 },
     backtrackNode: null,
@@ -224,6 +225,130 @@ test('chooseSlipperyPathDragStep picks nearest orthogonal candidate', () => {
     isUsableCell: () => true,
     isAdjacentMove: (_snapshot, a, b) => Math.max(Math.abs(a.r - b.r), Math.abs(a.c - b.c)) === 1,
     cellCenter: (r, c) => ({ x: c * 10, y: r * 10 }),
+  });
+
+  assert.deepEqual(picked, { r: 1, c: 2 });
+});
+
+test('chooseSlipperyPathDragStep selects legal stitched diagonal when nearest', () => {
+  const picked = chooseSlipperyPathDragStep({
+    snapshot: {
+      rows: 3,
+      cols: 3,
+      visited: new Set(),
+      gridData: [
+        ['.', '.', '.'],
+        ['.', '.', '.'],
+        ['.', '.', '.'],
+      ],
+      stitchSet: new Set(['2,2']),
+    },
+    headNode: { r: 1, c: 1 },
+    backtrackNode: null,
+    pointer: { x: 19, y: 19 },
+    rawPointer: { x: 19, y: 19 },
+    pointerCell: null,
+    isUsableCell: () => true,
+    isAdjacentMove: (snapshot, a, b) => {
+      const dr = Math.abs(a.r - b.r);
+      const dc = Math.abs(a.c - b.c);
+      if (dr + dc === 1) return true;
+      if (dr === 1 && dc === 1) {
+        return snapshot.stitchSet.has(`${Math.max(a.r, b.r)},${Math.max(a.c, b.c)}`);
+      }
+      return false;
+    },
+    cellCenter: (r, c) => ({ x: c * 10, y: r * 10 }),
+    cellSize: 10,
+  });
+
+  assert.deepEqual(picked, { r: 2, c: 2 });
+});
+
+test('chooseSlipperyPathDragStep holds when pointer is on stitched symbol zone', () => {
+  const picked = chooseSlipperyPathDragStep({
+    snapshot: {
+      rows: 3,
+      cols: 3,
+      visited: new Set(),
+      gridData: [
+        ['.', '.', '.'],
+        ['.', '.', '.'],
+        ['.', '.', '.'],
+      ],
+      stitchSet: new Set(['2,2']),
+    },
+    headNode: { r: 1, c: 1 },
+    backtrackNode: null,
+    pointer: { x: 16.5, y: 16.5 },
+    rawPointer: { x: 16.5, y: 16.5 },
+    pointerCell: null,
+    isUsableCell: () => true,
+    isAdjacentMove: (snapshot, a, b) => {
+      const dr = Math.abs(a.r - b.r);
+      const dc = Math.abs(a.c - b.c);
+      if (dr + dc === 1) return true;
+      if (dr === 1 && dc === 1) {
+        return snapshot.stitchSet.has(`${Math.max(a.r, b.r)},${Math.max(a.c, b.c)}`);
+      }
+      return false;
+    },
+    cellCenter: (r, c) => ({ x: c * 10, y: r * 10 }),
+    cellSize: 10,
+  });
+
+  assert.equal(picked, null);
+});
+
+test('chooseSlipperyPathDragStep rejects predicted-best step that diverges from raw pointer', () => {
+  const picked = chooseSlipperyPathDragStep({
+    snapshot: {
+      rows: 3,
+      cols: 3,
+      visited: new Set(),
+      gridData: [
+        ['.', '.', '.'],
+        ['.', '.', '.'],
+        ['.', '.', '.'],
+      ],
+      stitchSet: new Set(),
+    },
+    headNode: { r: 1, c: 1 },
+    backtrackNode: null,
+    pointer: { x: 17, y: 4 },
+    rawPointer: { x: 10, y: 1 },
+    pointerCell: null,
+    isUsableCell: () => true,
+    isAdjacentMove: (_snapshot, a, b) => Math.abs(a.r - b.r) + Math.abs(a.c - b.c) === 1,
+    cellCenter: (r, c) => ({ x: c * 10, y: r * 10 }),
+    cellSize: 10,
+  });
+
+  assert.deepEqual(picked, { r: 0, c: 1 });
+});
+
+test('chooseSlipperyPathDragStep keeps predicted-best step when raw pointer agrees', () => {
+  const picked = chooseSlipperyPathDragStep({
+    snapshot: {
+      rows: 3,
+      cols: 3,
+      visited: new Set(),
+      gridData: [
+        ['.', '.', '.'],
+        ['.', '.', '.'],
+        ['.', '.', '.'],
+      ],
+      stitchSet: new Set(),
+    },
+    headNode: { r: 1, c: 1 },
+    backtrackNode: null,
+    pointer: { x: 19, y: 10 },
+    rawPointer: { x: 18, y: 10 },
+    pointerCell: null,
+    isUsableCell: () => true,
+    isAdjacentMove: (_snapshot, a, b) => Math.abs(a.r - b.r) + Math.abs(a.c - b.c) === 1,
+    cellCenter: (r, c) => ({ x: c * 10, y: r * 10 }),
+    cellSize: 10,
   });
 
   assert.deepEqual(picked, { r: 1, c: 2 });

@@ -14,6 +14,13 @@ const MAX_SEGMENT_DT_MS = 120;
 const MIN_INPUT_INTERVAL_MS = 4;
 const MAX_INPUT_INTERVAL_MS = 90;
 const STALE_SAMPLE_MAX_AGE_MS = 96;
+const STITCH_HOLD_MIN_HALF_LEN_PX = 2;
+const STITCH_HOLD_HALF_LEN_CELL_RATIO = 0.18;
+const STITCH_HOLD_MIN_HALF_WIDTH_PX = 1;
+const STITCH_HOLD_HALF_WIDTH_CELL_RATIO = 0.06;
+const RAW_POINTER_GUARD_MIN_EPSILON_PX = 1;
+const RAW_POINTER_GUARD_CELL_EPSILON_RATIO = 0.03;
+const DEFAULT_CELL_SIZE_PX = 56;
 
 const clamp = (value, lo, hi) => Math.max(lo, Math.min(hi, value));
 
@@ -22,11 +29,76 @@ const safePoint = (point) => ({
   y: Number.isFinite(point?.y) ? point.y : 0,
 });
 
-const isOrthogonalNeighbor = (a, b) =>
-  Math.abs((a?.r ?? 0) - (b?.r ?? 0)) + Math.abs((a?.c ?? 0) - (b?.c ?? 0)) === 1;
+const isDiagonalNeighbor = (a, b) =>
+  Math.abs((a?.r ?? 0) - (b?.r ?? 0)) === 1 && Math.abs((a?.c ?? 0) - (b?.c ?? 0)) === 1;
 
 const sameCell = (a, b) =>
   Boolean(a && b && a.r === b.r && a.c === b.c);
+
+const pointToSegmentDistance = (point, a, b) => {
+  const ax = Number(a?.x) || 0;
+  const ay = Number(a?.y) || 0;
+  const bx = Number(b?.x) || 0;
+  const by = Number(b?.y) || 0;
+  const px = Number(point?.x) || 0;
+  const py = Number(point?.y) || 0;
+  const abx = bx - ax;
+  const aby = by - ay;
+  const segmentLengthSq = (abx * abx) + (aby * aby);
+  if (!(segmentLengthSq > 0)) return Math.hypot(px - ax, py - ay);
+  const t = clamp((((px - ax) * abx) + ((py - ay) * aby)) / segmentLengthSq, 0, 1);
+  const projX = ax + (abx * t);
+  const projY = ay + (aby * t);
+  return Math.hypot(px - projX, py - projY);
+};
+
+const resolveCellSize = (cellSize) => {
+  const value = Number(cellSize);
+  if (Number.isFinite(value) && value > 0) return value;
+  return DEFAULT_CELL_SIZE_PX;
+};
+
+const shouldHoldOnStitchSymbol = ({
+  snapshot,
+  headNode,
+  headCenter,
+  candidates,
+  pointer,
+  cellCenter,
+  cellSize,
+}) => {
+  if (!snapshot?.stitchSet || !headNode || !headCenter || !pointer) return false;
+  if (!Array.isArray(candidates) || candidates.length <= 0) return false;
+
+  const resolvedCellSize = resolveCellSize(cellSize);
+  const halfLen = Math.max(STITCH_HOLD_MIN_HALF_LEN_PX, resolvedCellSize * STITCH_HOLD_HALF_LEN_CELL_RATIO);
+  const halfWidth = Math.max(STITCH_HOLD_MIN_HALF_WIDTH_PX, resolvedCellSize * STITCH_HOLD_HALF_WIDTH_CELL_RATIO);
+
+  for (let i = 0; i < candidates.length; i += 1) {
+    const candidate = candidates[i];
+    if (!isDiagonalNeighbor(headNode, candidate)) continue;
+
+    const stitchKey = `${Math.max(headNode.r, candidate.r)},${Math.max(headNode.c, candidate.c)}`;
+    if (!snapshot.stitchSet.has(stitchKey)) continue;
+
+    const candidateCenter = cellCenter(candidate.r, candidate.c);
+    const centerX = (headCenter.x + candidateCenter.x) * 0.5;
+    const centerY = (headCenter.y + candidateCenter.y) * 0.5;
+    const diagAStart = { x: centerX - halfLen, y: centerY - halfLen };
+    const diagAEnd = { x: centerX + halfLen, y: centerY + halfLen };
+    const diagBStart = { x: centerX + halfLen, y: centerY - halfLen };
+    const diagBEnd = { x: centerX - halfLen, y: centerY + halfLen };
+
+    if (
+      pointToSegmentDistance(pointer, diagAStart, diagAEnd) <= halfWidth
+      || pointToSegmentDistance(pointer, diagBStart, diagBEnd) <= halfWidth
+    ) {
+      return true;
+    }
+  }
+
+  return false;
+};
 
 const resolveFrameIntervalMs = (frameIntervalMs) => {
   const value = Number(frameIntervalMs);
@@ -260,10 +332,12 @@ export function chooseSlipperyPathDragStep({
   headNode,
   backtrackNode,
   pointer,
+  rawPointer,
   pointerCell,
   isUsableCell,
   isAdjacentMove,
   cellCenter,
+  cellSize,
 }) {
   if (!snapshot || !headNode || !pointer || typeof cellCenter !== 'function') return null;
 
@@ -276,33 +350,70 @@ export function chooseSlipperyPathDragStep({
   });
 
   const headCenter = cellCenter(headNode.r, headNode.c);
+  if (shouldHoldOnStitchSymbol({
+    snapshot,
+    headNode,
+    headCenter,
+    candidates,
+    pointer,
+    cellCenter,
+    cellSize,
+  })) {
+    return null;
+  }
+
+  const resolvedRawPointer = (
+    Number.isFinite(rawPointer?.x) && Number.isFinite(rawPointer?.y)
+      ? rawPointer
+      : pointer
+  );
+  const resolvedCellSize = resolveCellSize(cellSize);
+  const rawGuardEpsilon = Math.max(
+    RAW_POINTER_GUARD_MIN_EPSILON_PX,
+    resolvedCellSize * RAW_POINTER_GUARD_CELL_EPSILON_RATIO,
+  );
+  const rawHoldDistance = Math.hypot(
+    resolvedRawPointer.x - headCenter.x,
+    resolvedRawPointer.y - headCenter.y,
+  );
+
   const holdDistance = Math.hypot(pointer.x - headCenter.x, pointer.y - headCenter.y);
-  let bestCandidate = null;
-  let bestDistance = holdDistance;
-  let bestIsPointerCell = sameCell(pointerCell, headNode);
+  const holdIsPointerCell = sameCell(pointerCell, headNode);
+  const rankedCandidates = [];
 
   for (let i = 0; i < candidates.length; i += 1) {
     const candidate = candidates[i];
-    if (!isOrthogonalNeighbor(headNode, candidate)) continue;
     const center = cellCenter(candidate.r, candidate.c);
-    const dist = Math.hypot(pointer.x - center.x, pointer.y - center.y);
+    const predictedDistance = Math.hypot(pointer.x - center.x, pointer.y - center.y);
+    const rawDistance = Math.hypot(resolvedRawPointer.x - center.x, resolvedRawPointer.y - center.y);
     const isPointerCell = sameCell(pointerCell, candidate);
-
-    if (
-      dist < bestDistance - 1e-6
-      || (
-        Math.abs(dist - bestDistance) <= 1e-6
-        && isPointerCell
-        && !bestIsPointerCell
-      )
-    ) {
-      bestDistance = dist;
-      bestCandidate = candidate;
-      bestIsPointerCell = isPointerCell;
-    }
+    rankedCandidates.push({
+      candidate,
+      predictedDistance,
+      rawDistance,
+      isPointerCell,
+    });
   }
 
-  return bestCandidate
-    ? { r: bestCandidate.r, c: bestCandidate.c }
-    : null;
+  rankedCandidates.sort((a, b) => {
+    if (Math.abs(a.predictedDistance - b.predictedDistance) > 1e-6) {
+      return a.predictedDistance - b.predictedDistance;
+    }
+    if (a.isPointerCell !== b.isPointerCell) {
+      return a.isPointerCell ? -1 : 1;
+    }
+    return 0;
+  });
+
+  for (let i = 0; i < rankedCandidates.length; i += 1) {
+    const ranked = rankedCandidates[i];
+    const predictedEqualToHold = Math.abs(ranked.predictedDistance - holdDistance) <= 1e-6;
+    const predictedImproves = ranked.predictedDistance < holdDistance - 1e-6
+      || (predictedEqualToHold && ranked.isPointerCell && !holdIsPointerCell);
+    if (!predictedImproves) continue;
+    if (ranked.rawDistance > rawHoldDistance + rawGuardEpsilon) continue;
+    return { r: ranked.candidate.r, c: ranked.candidate.c };
+  }
+
+  return null;
 }

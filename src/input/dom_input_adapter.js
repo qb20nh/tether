@@ -459,6 +459,9 @@ export function createDomInputAdapter() {
           : refs.gridEl.getBoundingClientRect();
         const px = metrics ? (pointerClientX - metrics.left) : (pointerClientX - rect.left);
         const py = metrics ? (pointerClientY - metrics.top) : (pointerClientY - rect.top);
+        const rawPx = metrics ? (rawPointerClientX - metrics.left) : (rawPointerClientX - rect.left);
+        const rawPy = metrics ? (rawPointerClientY - metrics.top) : (rawPointerClientY - rect.top);
+        const activeCellSize = metrics?.size ?? getCellSize(refs.gridEl);
         const centerOfCell = metrics
           ? ((r, c) => ({
             x: metrics.pad + (c * metrics.step) + (metrics.size * 0.5),
@@ -498,10 +501,12 @@ export function createDomInputAdapter() {
             headNode,
             backtrackNode,
             pointer: { x: px, y: py },
+            rawPointer: { x: rawPx, y: rawPy },
             pointerCell,
             isUsableCell,
             isAdjacentMove,
             cellCenter: centerOfCell,
+            cellSize: activeCellSize,
           });
           if (!nextStep) break;
 
