@@ -265,7 +265,7 @@ test('chooseSlipperyPathDragStep selects legal stitched diagonal when nearest', 
   assert.deepEqual(picked, { r: 2, c: 2 });
 });
 
-test('chooseSlipperyPathDragStep holds when pointer is on stitched symbol zone', () => {
+test('chooseSlipperyPathDragStep crosses stitched bridge when pointer crosses opposite diagonal', () => {
   const picked = chooseSlipperyPathDragStep({
     snapshot: {
       rows: 3,
@@ -282,6 +282,41 @@ test('chooseSlipperyPathDragStep holds when pointer is on stitched symbol zone',
     backtrackNode: null,
     pointer: { x: 16.5, y: 16.5 },
     rawPointer: { x: 16.5, y: 16.5 },
+    pointerCell: null,
+    isUsableCell: () => true,
+    isAdjacentMove: (snapshot, a, b) => {
+      const dr = Math.abs(a.r - b.r);
+      const dc = Math.abs(a.c - b.c);
+      if (dr + dc === 1) return true;
+      if (dr === 1 && dc === 1) {
+        return snapshot.stitchSet.has(`${Math.max(a.r, b.r)},${Math.max(a.c, b.c)}`);
+      }
+      return false;
+    },
+    cellCenter: (r, c) => ({ x: c * 10, y: r * 10 }),
+    cellSize: 10,
+  });
+
+  assert.deepEqual(picked, { r: 2, c: 2 });
+});
+
+test('chooseSlipperyPathDragStep holds inside stitched circle before crossing bridge', () => {
+  const picked = chooseSlipperyPathDragStep({
+    snapshot: {
+      rows: 3,
+      cols: 3,
+      visited: new Set(),
+      gridData: [
+        ['.', '.', '.'],
+        ['.', '.', '.'],
+        ['.', '.', '.'],
+      ],
+      stitchSet: new Set(['2,2']),
+    },
+    headNode: { r: 1, c: 1 },
+    backtrackNode: null,
+    pointer: { x: 14, y: 14 },
+    rawPointer: { x: 14, y: 14 },
     pointerCell: null,
     isUsableCell: () => true,
     isAdjacentMove: (snapshot, a, b) => {

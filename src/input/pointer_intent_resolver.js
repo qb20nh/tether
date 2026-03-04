@@ -14,10 +14,11 @@ const MAX_SEGMENT_DT_MS = 120;
 const MIN_INPUT_INTERVAL_MS = 4;
 const MAX_INPUT_INTERVAL_MS = 90;
 const STALE_SAMPLE_MAX_AGE_MS = 96;
-const STITCH_HOLD_MIN_HALF_LEN_PX = 2;
-const STITCH_HOLD_HALF_LEN_CELL_RATIO = 0.18;
-const STITCH_HOLD_MIN_HALF_WIDTH_PX = 1;
-const STITCH_HOLD_HALF_WIDTH_CELL_RATIO = 0.06;
+const STITCH_BRIDGE_MIN_HALF_LEN_PX = 2;
+const STITCH_BRIDGE_HALF_LEN_CELL_RATIO = 0.18;
+const STITCH_BRIDGE_MIN_RADIUS_PX = 1;
+const STITCH_BRIDGE_MIN_WIDTH_PX = 1;
+const STITCH_BRIDGE_WIDTH_CELL_RATIO = 0.06;
 const RAW_POINTER_GUARD_MIN_EPSILON_PX = 1;
 const RAW_POINTER_GUARD_CELL_EPSILON_RATIO = 0.03;
 const RAW_POINTER_LEAD_SCALE = 1.25;
@@ -39,22 +40,10 @@ const isDiagonalNeighbor = (a, b) =>
 const sameCell = (a, b) =>
   Boolean(a && b && a.r === b.r && a.c === b.c);
 
-const pointToSegmentDistance = (point, a, b) => {
-  const ax = Number(a?.x) || 0;
-  const ay = Number(a?.y) || 0;
-  const bx = Number(b?.x) || 0;
-  const by = Number(b?.y) || 0;
-  const px = Number(point?.x) || 0;
-  const py = Number(point?.y) || 0;
-  const abx = bx - ax;
-  const aby = by - ay;
-  const segmentLengthSq = (abx * abx) + (aby * aby);
-  if (!(segmentLengthSq > 0)) return Math.hypot(px - ax, py - ay);
-  const t = clamp((((px - ax) * abx) + ((py - ay) * aby)) / segmentLengthSq, 0, 1);
-  const projX = ax + (abx * t);
-  const projY = ay + (aby * t);
-  return Math.hypot(px - projX, py - projY);
-};
+const pointSideOfLine = (point, a, b) => (
+  ((Number(point?.x) || 0) - (Number(a?.x) || 0)) * ((Number(b?.y) || 0) - (Number(a?.y) || 0))
+  - ((Number(point?.y) || 0) - (Number(a?.y) || 0)) * ((Number(b?.x) || 0) - (Number(a?.x) || 0))
+);
 
 const resolveCellSize = (cellSize) => {
   const value = Number(cellSize);
@@ -62,21 +51,32 @@ const resolveCellSize = (cellSize) => {
   return DEFAULT_CELL_SIZE_PX;
 };
 
-const shouldHoldOnStitchSymbol = ({
+const resolveStitchBridgeCrossingStep = ({
   snapshot,
   headNode,
   headCenter,
   candidates,
   pointer,
+  rawPointer,
   cellCenter,
   cellSize,
 }) => {
-  if (!snapshot?.stitchSet || !headNode || !headCenter || !pointer) return false;
-  if (!Array.isArray(candidates) || candidates.length <= 0) return false;
+  if (!snapshot?.stitchSet || !headNode || !headCenter || !pointer) return null;
+  if (!Array.isArray(candidates) || candidates.length <= 0) return null;
 
   const resolvedCellSize = resolveCellSize(cellSize);
-  const halfLen = Math.max(STITCH_HOLD_MIN_HALF_LEN_PX, resolvedCellSize * STITCH_HOLD_HALF_LEN_CELL_RATIO);
-  const halfWidth = Math.max(STITCH_HOLD_MIN_HALF_WIDTH_PX, resolvedCellSize * STITCH_HOLD_HALF_WIDTH_CELL_RATIO);
+  const halfLen = Math.max(STITCH_BRIDGE_MIN_HALF_LEN_PX, resolvedCellSize * STITCH_BRIDGE_HALF_LEN_CELL_RATIO);
+  const symbolStrokeWidth = Math.max(STITCH_BRIDGE_MIN_WIDTH_PX, resolvedCellSize * STITCH_BRIDGE_WIDTH_CELL_RATIO);
+  const symbolRadius = Math.max(
+    STITCH_BRIDGE_MIN_RADIUS_PX,
+    (halfLen * Math.SQRT2) + (symbolStrokeWidth * 0.5),
+  );
+  const bridgePointer = (
+    Number.isFinite(rawPointer?.x) && Number.isFinite(rawPointer?.y)
+      ? rawPointer
+      : pointer
+  );
+  let shouldHold = false;
 
   for (let i = 0; i < candidates.length; i += 1) {
     const candidate = candidates[i];
@@ -92,16 +92,27 @@ const shouldHoldOnStitchSymbol = ({
     const diagAEnd = { x: centerX + halfLen, y: centerY + halfLen };
     const diagBStart = { x: centerX + halfLen, y: centerY - halfLen };
     const diagBEnd = { x: centerX - halfLen, y: centerY + halfLen };
+    if (Math.hypot(bridgePointer.x - centerX, bridgePointer.y - centerY) > symbolRadius) continue;
 
-    if (
-      pointToSegmentDistance(pointer, diagAStart, diagAEnd) <= halfWidth
-      || pointToSegmentDistance(pointer, diagBStart, diagBEnd) <= halfWidth
-    ) {
-      return true;
+    shouldHold = true;
+    const dr = candidate.r - headNode.r;
+    const dc = candidate.c - headNode.c;
+    const usesDiagA = dr === dc;
+    const bridgeStart = usesDiagA ? diagBStart : diagAStart;
+    const bridgeEnd = usesDiagA ? diagBEnd : diagAEnd;
+
+    const headSide = pointSideOfLine(headCenter, bridgeStart, bridgeEnd);
+    if (Math.abs(headSide) <= 1e-6) continue;
+    const pointerSide = pointSideOfLine(bridgePointer, bridgeStart, bridgeEnd);
+    if ((headSide * pointerSide) <= 0) {
+      return {
+        step: { r: candidate.r, c: candidate.c },
+        hold: false,
+      };
     }
   }
 
-  return false;
+  return shouldHold ? { step: null, hold: true } : null;
 };
 
 const resolveFrameIntervalMs = (frameIntervalMs) => {
@@ -354,23 +365,28 @@ export function chooseSlipperyPathDragStep({
   });
 
   const headCenter = cellCenter(headNode.r, headNode.c);
-  if (shouldHoldOnStitchSymbol({
-    snapshot,
-    headNode,
-    headCenter,
-    candidates,
-    pointer,
-    cellCenter,
-    cellSize,
-  })) {
-    return null;
-  }
-
   const resolvedRawPointer = (
     Number.isFinite(rawPointer?.x) && Number.isFinite(rawPointer?.y)
       ? rawPointer
       : pointer
   );
+  const stitchBridgeCrossingStep = resolveStitchBridgeCrossingStep({
+    snapshot,
+    headNode,
+    headCenter,
+    candidates,
+    pointer,
+    rawPointer: resolvedRawPointer,
+    cellCenter,
+    cellSize,
+  });
+  if (stitchBridgeCrossingStep?.step) {
+    return stitchBridgeCrossingStep.step;
+  }
+  if (stitchBridgeCrossingStep?.hold) {
+    return null;
+  }
+
   const resolvedCellSize = resolveCellSize(cellSize);
   const rawGuardEpsilon = Math.max(
     RAW_POINTER_GUARD_MIN_EPSILON_PX,
