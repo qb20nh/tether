@@ -2064,31 +2064,43 @@ const getPathMainTravelFromCells = (
   return getPathMainTravelFromPoints(points, resolvedWidth);
 };
 
-const getHeadShiftDelta = (nextPath, previousPath, refs = {}, offset = { x: 0, y: 0 }) => {
-  const { gridEl } = refs;
+const hasShiftedPathPrefixMatch = (longerPath, shorterPath, shiftCount) => {
+  if (!Array.isArray(longerPath) || !Array.isArray(shorterPath)) return false;
+  if (!Number.isInteger(shiftCount) || shiftCount <= 0) return false;
+  if (longerPath.length !== shorterPath.length + shiftCount) return false;
+
+  for (let i = 0; i < shorterPath.length; i += 1) {
+    if (!pointsMatch(longerPath[i + shiftCount], shorterPath[i])) return false;
+  }
+  return true;
+};
+
+export const resolveHeadShiftStepCount = (nextPath, previousPath) => {
   if (!Array.isArray(nextPath) || !Array.isArray(previousPath)) return 0;
 
   const nextLen = nextPath.length;
   const prevLen = previousPath.length;
-  if (nextLen < 2 || prevLen < 2 || Math.abs(nextLen - prevLen) !== 1) return 0;
+  if (nextLen < 2 || prevLen < 2 || nextLen === prevLen) return 0;
 
-  let shared = true;
   if (nextLen > prevLen) {
-    for (let i = 0; i < prevLen; i++) {
-      if (!pointsMatch(nextPath[i + 1], previousPath[i])) {
-        shared = false;
-        break;
-      }
-    }
-  } else {
-    for (let i = 0; i < nextLen; i++) {
-      if (!pointsMatch(previousPath[i + 1], nextPath[i])) {
-        shared = false;
-        break;
-      }
-    }
+    const shiftCount = nextLen - prevLen;
+    return hasShiftedPathPrefixMatch(nextPath, previousPath, shiftCount)
+      ? shiftCount
+      : 0;
   }
-  if (!shared) return 0;
+
+  const shiftCount = prevLen - nextLen;
+  return hasShiftedPathPrefixMatch(previousPath, nextPath, shiftCount)
+    ? -shiftCount
+    : 0;
+};
+
+const getHeadShiftDelta = (nextPath, previousPath, refs = {}, offset = { x: 0, y: 0 }) => {
+  const { gridEl } = refs;
+  if (!Array.isArray(nextPath) || !Array.isArray(previousPath)) return 0;
+
+  const headShiftStepCount = resolveHeadShiftStepCount(nextPath, previousPath);
+  if (!Number.isInteger(headShiftStepCount) || headShiftStepCount === 0) return 0;
 
   const resolvedCell = getCellSize(gridEl);
   const safeCell = Number.isFinite(resolvedCell) && resolvedCell > 0
@@ -2102,9 +2114,10 @@ const getHeadShiftDelta = (nextPath, previousPath, refs = {}, offset = { x: 0, y
 
   const fallbackStep = (path) =>
     Math.max(1, cellDistance(path?.[0], path?.[1]) * safeCell);
-  return nextLen > prevLen
-    ? -fallbackStep(nextPath)
-    : fallbackStep(previousPath);
+  const stepCount = Math.abs(headShiftStepCount);
+  return headShiftStepCount > 0
+    ? -(fallbackStep(nextPath) * stepCount)
+    : (fallbackStep(previousPath) * stepCount);
 };
 
 
