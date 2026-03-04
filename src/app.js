@@ -31,6 +31,7 @@ const DAILY_HARD_INVALIDATE_GRACE_MS = 60 * 1000;
 const UPDATE_CHECK_THROTTLE_MS = 5 * 60 * 1000;
 const DAILY_NOTIFICATION_WARNING_HOURS = 8;
 const DAILY_CHECK_TAG = 'tether-daily-check';
+const SW_BUILD_NUMBER_RE = /BUILD_NUMBER\s*=\s*Number\.parseInt\(\s*['"](\d+)['"]\s*,\s*10\)/;
 const LAST_SEEN_BUILD_NUMBER_KEY = 'tetherLastSeenBuildNumber';
 const APP_TOAST_ID = 'appToast';
 const APP_TOAST_VISIBLE_MS = 3200;
@@ -908,8 +909,9 @@ const resolveLatestUpdateBuildNumber = async (hintBuildNumber = null) => {
     latest = remoteBuildNumber;
   }
 
-  if (!Number.isInteger(latest) || latest <= localBuildNumber) return null;
-  return latest;
+  const updatableBuildNumber = await resolveUpdatableRemoteBuildNumber(latest);
+  if (!Number.isInteger(updatableBuildNumber) || updatableBuildNumber <= localBuildNumber) return null;
+  return updatableBuildNumber;
 };
 
 const resolveMoveDailyDialogPromptText = () => {
@@ -1301,6 +1303,42 @@ const fetchRemoteBuildNumber = async () => {
   }
 };
 
+const parseServiceWorkerBuildNumber = (source) => {
+  if (typeof source !== 'string' || source.length === 0) return null;
+  const match = source.match(SW_BUILD_NUMBER_RE);
+  if (!match) return null;
+  const parsed = Number.parseInt(match[1], 10);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+};
+
+const fetchRemoteServiceWorkerBuildNumber = async (buildHint = null) => {
+  try {
+    const swUrl = resolveServiceWorkerRegistrationUrl(isLocalhostHostname);
+    if (Number.isInteger(buildHint) && buildHint > 0) {
+      swUrl.searchParams.set('v', String(buildHint));
+    }
+    swUrl.searchParams.set('_swcb', String(Date.now()));
+    const response = await fetch(swUrl.toString(), {
+      cache: 'no-store',
+      headers: {
+        'x-bypass-cache': 'true',
+      },
+    });
+    if (!response.ok) return null;
+    return parseServiceWorkerBuildNumber(await response.text());
+  } catch {
+    return null;
+  }
+};
+
+const resolveUpdatableRemoteBuildNumber = async (remoteBuildNumber) => {
+  if (!Number.isInteger(remoteBuildNumber) || remoteBuildNumber <= 0) return null;
+  const swBuildNumber = await fetchRemoteServiceWorkerBuildNumber(remoteBuildNumber);
+  if (!Number.isInteger(swBuildNumber) || swBuildNumber <= 0) return null;
+  if (swBuildNumber < remoteBuildNumber) return null;
+  return swBuildNumber;
+};
+
 const armControllerChangeReload = () => {
   if (!canUseServiceWorker()) return;
   if (swControllerChangeBound) {
@@ -1466,11 +1504,13 @@ const checkForNewBuild = async ({ force = false } = {}) => {
   try {
     const remoteBuildNumber = await fetchRemoteBuildNumber();
     if (!Number.isInteger(remoteBuildNumber) || remoteBuildNumber <= localBuildNumber) return;
+    const updatableRemoteBuildNumber = await resolveUpdatableRemoteBuildNumber(remoteBuildNumber);
+    if (!Number.isInteger(updatableRemoteBuildNumber) || updatableRemoteBuildNumber <= localBuildNumber) return;
     if (readAutoUpdateEnabledPreference()) {
-      await applyUpdateForBuild(remoteBuildNumber);
+      await applyUpdateForBuild(updatableRemoteBuildNumber);
       return;
     }
-    await notifyUpdateAvailable(remoteBuildNumber);
+    await notifyUpdateAvailable(updatableRemoteBuildNumber);
   } finally {
     updateCheckInFlight = false;
   }
