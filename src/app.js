@@ -1189,14 +1189,22 @@ const normalizeDailyPayload = (raw) => {
   };
 };
 
+const resolveDailyPayloadRequestUrl = ({ bypassCache = false } = {}) => {
+  const url = new URL(DAILY_PAYLOAD_URL);
+  url.searchParams.set('_daily', new Date().toISOString().slice(0, 10));
+  if (bypassCache) {
+    url.searchParams.set('_dailycb', String(Date.now()));
+  }
+  return url.toString();
+};
+
 const fetchDailyPayload = async ({ bypassCache = false } = {}) => {
   try {
-    const headers = bypassCache
-      ? { 'x-bypass-cache': 'true' }
-      : undefined;
-    const response = await fetch(DAILY_PAYLOAD_URL, {
-      cache: bypassCache ? 'no-store' : 'default',
-      headers,
+    const response = await fetch(resolveDailyPayloadRequestUrl({ bypassCache }), {
+      cache: 'no-store',
+      headers: {
+        'x-bypass-cache': 'true',
+      },
     });
 
     if (!response.ok) return null;

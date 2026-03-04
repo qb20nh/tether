@@ -61,7 +61,14 @@ const resolveNotificationIconUrl = () => new URL('icons/icon-192.webp', self.reg
 const resolveNotificationBadgeUrl = () => new URL('icons/icon-96.webp', self.registration.scope).toString();
 
 const openCache = (name) => caches.open(name);
-const fetchFresh = (request) => fetch(new Request(request, { cache: 'no-store' }));
+const fetchFresh = (request, options = {}) => {
+  const { bypassCache = false } = options;
+  const headers = new Headers(request.headers || undefined);
+  if (bypassCache) {
+    headers.set('x-bypass-cache', 'true');
+  }
+  return fetch(new Request(request, { cache: 'no-store', headers }));
+};
 
 self.addEventListener('activate', (event) => {
   event.waitUntil((async () => {
@@ -82,7 +89,7 @@ const networkOnlyVersion = async (request) => {
 const networkFirstDaily = async (request) => {
   const cache = await openCache(DAILY_CACHE);
   try {
-    const response = await fetchFresh(request);
+    const response = await fetchFresh(request, { bypassCache: true });
     if (isCacheableResponse(response)) {
       await cache.put(request, response.clone());
     }
