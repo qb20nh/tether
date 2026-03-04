@@ -149,7 +149,6 @@ const PATH_FLOW_DROP = 0.83;
 const PATH_FLOW_FREEZE_DURATION_MS = 2500;
 const PATH_FLOW_FREEZE_EPSILON = 1e-3;
 const PATH_TIP_ARRIVAL_DURATION_MS = 200;
-const PATH_TIP_RETRACT_CUTOFF_MS = 100;
 const PATH_RETAINED_ARC_SETTLE_DURATION_MS = 100;
 const PATH_REVERSE_TIP_SWAP_DURATION_MS = 200;
 const PATH_REVERSE_GRADIENT_BLEND_DURATION_MS = 200;
@@ -548,7 +547,7 @@ const updatePathEndArrowRotateState = (
     neighborC: neighbor.c,
     fromAngle,
     deltaAngle: angleDeltaSigned(fromAngle, toAngle),
-    cutoffMs: PATH_TIP_RETRACT_CUTOFF_MS,
+    cutoffMs: PATH_TIP_ARRIVAL_DURATION_MS,
   };
 };
 
@@ -671,7 +670,7 @@ const updatePathStartFlowRotateState = (
     neighborC: neighbor.c,
     fromAngle,
     deltaAngle: angleDeltaSigned(fromAngle, toAngle),
-    cutoffMs: PATH_TIP_RETRACT_CUTOFF_MS,
+    cutoffMs: PATH_TIP_ARRIVAL_DURATION_MS,
   };
 };
 
@@ -974,6 +973,13 @@ const resolveSinglePathRetainedArc = (
   const settleUnit = Number.isFinite(state.settleStartTimeMs)
     ? clampUnit((nowMs - state.settleStartTimeMs) / PATH_RETAINED_ARC_SETTLE_DURATION_MS)
     : 0;
+  const retractUnit = Number.isFinite(state.startTimeMs)
+    ? clampUnit((nowMs - state.startTimeMs) / PATH_TIP_ARRIVAL_DURATION_MS)
+    : 0;
+  if (tipMoving || retractUnit > 0) {
+    clearSinglePathRetainedArcState(side);
+    return out;
+  }
   const arcPoints = buildRetainedArcPolyline(
     state,
     width,
@@ -1056,9 +1062,6 @@ const updateSinglePathTipArrivalState = (
     : isEndRetractTransition(prevPath, nextPath);
   if (isRetract) {
     const step = Number.isFinite(cellStep) && cellStep > 0 ? cellStep : Number(cellSize) || 0;
-    const cutoffMs = isRetractUnturnTransition(side, prevTip, nextTip, nextPath)
-      ? PATH_TIP_RETRACT_CUTOFF_MS
-      : PATH_TIP_ARRIVAL_DURATION_MS;
     const state = {
       mode: 'retract',
       startTimeMs: nowMs,
@@ -1066,7 +1069,7 @@ const updateSinglePathTipArrivalState = (
       offsetY: moveDr * step,
       targetR: nextTip.r,
       targetC: nextTip.c,
-      cutoffMs,
+      cutoffMs: PATH_TIP_ARRIVAL_DURATION_MS,
     };
     if (side === 'start') pathStartArrivalState = state;
     else pathEndArrivalState = state;
@@ -2147,10 +2150,16 @@ const getPathMainTravelFromPoints = (points, flowWidth) => {
       continue;
     }
 
-    const tangentOffset = cornerRadius * Math.tan(absTurn * 0.5);
-    if (!(tangentOffset > 0) || !Number.isFinite(tangentOffset)) continue;
-    cornerTangents[i] = tangentOffset;
-    cornerArcs[i] = cornerRadius * absTurn;
+    const tangentScale = Math.tan(absTurn * 0.5);
+    if (!(tangentScale > 0) || !Number.isFinite(tangentScale)) continue;
+    const tangentOffset = cornerRadius * tangentScale;
+    const maxTangentOffset = Math.max(0, Math.min(inLen, outLen));
+    const effectiveTangentOffset = Math.min(tangentOffset, maxTangentOffset);
+    if (!(effectiveTangentOffset > 0) || !Number.isFinite(effectiveTangentOffset)) continue;
+    const effectiveRadius = effectiveTangentOffset / tangentScale;
+    if (!(effectiveRadius > 0) || !Number.isFinite(effectiveRadius)) continue;
+    cornerTangents[i] = effectiveTangentOffset;
+    cornerArcs[i] = effectiveRadius * absTurn;
   }
 
   let flowTravel = 0;

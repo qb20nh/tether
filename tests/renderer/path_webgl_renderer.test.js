@@ -156,6 +156,68 @@ test('buildUnifiedPathMesh handles two-point path and keeps indices in range', (
   assertTravelFinite(mesh);
 });
 
+test('buildUnifiedPathMesh shrinks corner travel when adjacent segment becomes tiny', () => {
+  const options = {
+    width: 10,
+    startRadius: 0,
+    arrowLength: 0,
+    endHalfWidth: 0,
+    renderStartCap: false,
+    renderEndCap: false,
+  };
+  const longTail = buildUnifiedPathMesh(
+    [
+      { x: 0, y: 0 },
+      { x: 40, y: 0 },
+      { x: 40, y: 1 },
+    ],
+    options,
+  );
+  const tinyTail = buildUnifiedPathMesh(
+    [
+      { x: 0, y: 0 },
+      { x: 40, y: 0 },
+      { x: 40, y: 0.1 },
+    ],
+    options,
+  );
+  const straight = buildUnifiedPathMesh(
+    [
+      { x: 0, y: 0 },
+      { x: 40, y: 0 },
+    ],
+    options,
+  );
+
+  assert.equal(tinyTail.mainTravel < longTail.mainTravel, true);
+  assert.equal(tinyTail.mainTravel > straight.mainTravel, true);
+  assert.equal(
+    (tinyTail.mainTravel - straight.mainTravel) < (longTail.mainTravel - straight.mainTravel),
+    true,
+  );
+});
+
+test('buildUnifiedPathMesh keeps start corner geometry when first segment is tiny', () => {
+  const mesh = buildUnifiedPathMesh(
+    [
+      { x: 0, y: 0 },
+      { x: 0.1, y: 0 },
+      { x: 0.1, y: 20 },
+    ],
+    {
+      width: 8,
+      startRadius: 0,
+      arrowLength: 0,
+      endHalfWidth: 0,
+      renderStartCap: false,
+      renderEndCap: false,
+    },
+  );
+
+  const hasCornerVertices = mesh.cornerFlags.some((flag) => flag > 0.5);
+  assert.equal(hasCornerVertices, true);
+});
+
 test('buildUnifiedPathMesh honors end arrow direction override', () => {
   const points = [
     { x: 0, y: 0 },

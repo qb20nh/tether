@@ -69,17 +69,23 @@ const buildCornerTurns = (points, segmentLengths, segmentUx, segmentUy, cornerRa
     const absTurn = Math.abs(headingTurn);
     if (absTurn <= angleTolerance || absTurn >= Math.PI - angleTolerance) continue;
 
-    const tangentOffset = cornerRadius * Math.tan(absTurn * 0.5);
-    if (!(tangentOffset > 0) || !Number.isFinite(tangentOffset)) continue;
+    const tangentScale = Math.tan(absTurn * 0.5);
+    if (!(tangentScale > 0) || !Number.isFinite(tangentScale)) continue;
+    const tangentOffset = cornerRadius * tangentScale;
+    const maxTangentOffset = Math.max(0, Math.min(inLen, outLen));
+    const effectiveTangentOffset = Math.min(tangentOffset, maxTangentOffset);
+    if (!(effectiveTangentOffset > 0) || !Number.isFinite(effectiveTangentOffset)) continue;
+    const effectiveRadius = effectiveTangentOffset / tangentScale;
+    if (!(effectiveRadius > 0) || !Number.isFinite(effectiveRadius)) continue;
 
-    const tangentInX = corner.x - inUx * tangentOffset;
-    const tangentInY = corner.y - inUy * tangentOffset;
-    const tangentOutX = corner.x + outUx * tangentOffset;
-    const tangentOutY = corner.y + outUy * tangentOffset;
+    const tangentInX = corner.x - inUx * effectiveTangentOffset;
+    const tangentInY = corner.y - inUy * effectiveTangentOffset;
+    const tangentOutX = corner.x + outUx * effectiveTangentOffset;
+    const tangentOutY = corner.y + outUy * effectiveTangentOffset;
     const inNormalX = headingTurn > 0 ? -inUy : inUy;
     const inNormalY = headingTurn > 0 ? inUx : -inUx;
-    const cx = tangentInX + inNormalX * cornerRadius;
-    const cy = tangentInY + inNormalY * cornerRadius;
+    const cx = tangentInX + inNormalX * effectiveRadius;
+    const cy = tangentInY + inNormalY * effectiveRadius;
     const centerAngleIn = normalizeAngle(Math.atan2(tangentInY - cy, tangentInX - cx));
     const centerAngleOut = normalizeAngle(Math.atan2(tangentOutY - cy, tangentOutX - cx));
     const centerSweep = angleDeltaSigned(centerAngleIn, centerAngleOut);
@@ -87,8 +93,8 @@ const buildCornerTurns = (points, segmentLengths, segmentUx, segmentUy, cornerRa
     if (centerSweepAbs <= angleTolerance) continue;
 
     cornerTurns[i] = {
-      tangentOffset,
-      arcLength: Math.max(0, cornerRadius * centerSweepAbs),
+      tangentOffset: effectiveTangentOffset,
+      arcLength: Math.max(0, effectiveRadius * centerSweepAbs),
       tangentInX,
       tangentInY,
       tangentOutX,
@@ -217,7 +223,6 @@ export function buildUnifiedPathMesh(points, options = {}) {
     halfWidth,
   );
   const flow = buildFlowPrimitives(safePoints, segmentLengths, cornerTurns);
-  const cornerByIndex = new Map(flow.cornerPrimitives.map((entry) => [entry.cornerIndex, entry]));
 
   const positions = [];
   const travels = [];
@@ -405,20 +410,10 @@ export function buildUnifiedPathMesh(points, options = {}) {
     addTriangle(apex, left, right);
   }
 
-  for (const primitive of flow.linearPrimitives) {
-    const i = primitive.segmentIndex;
-    const start = safePoints[i];
-    const ux = segmentUx[i];
-    const uy = segmentUy[i];
-    const x1 = start.x + ux * primitive.localStart;
-    const y1 = start.y + uy * primitive.localStart;
-    const x2 = start.x + ux * primitive.localEnd;
-    const y2 = start.y + uy * primitive.localEnd;
-    addQuad(x1, y1, x2, y2, halfWidth, primitive.travelStart, primitive.travelEnd);
-
-    const cornerPrimitive = cornerByIndex.get(i + 1);
-    const corner = cornerTurns[i + 1];
-    if (!cornerPrimitive || !corner) continue;
+  const addCornerPrimitive = (cornerIndex, cornerPrimitive) => {
+    const corner = cornerTurns[cornerIndex];
+    const base = safePoints[cornerIndex];
+    if (!corner || !cornerPrimitive || !base) return;
 
     const travelStart = cornerPrimitive.travelStart;
     const travelEnd = cornerPrimitive.travelEnd;
@@ -431,7 +426,6 @@ export function buildUnifiedPathMesh(points, options = {}) {
       travelStart,
       travelSpan,
     };
-    const base = safePoints[i + 1];
 
     addQuad(
       corner.tangentInX,
@@ -464,7 +458,7 @@ export function buildUnifiedPathMesh(points, options = {}) {
     if (corner.turnSigned > 0 && joinSweep < 0) joinSweep += TAU;
     if (corner.turnSigned < 0 && joinSweep > 0) joinSweep -= TAU;
     const joinSteps = Math.max(2, Math.ceil((Math.abs(joinSweep) / Math.PI) * 18));
-    if (!(Math.abs(joinSweep) > FLOW_STOP_EPSILON)) continue;
+    if (!(Math.abs(joinSweep) > FLOW_STOP_EPSILON)) return;
 
     const joinTravel = travelStart;
     const centerIndex = addVertex(
@@ -501,6 +495,21 @@ export function buildUnifiedPathMesh(points, options = {}) {
       if (step > 0) addTriangle(centerIndex, previousRimIndex, rimIndex);
       previousRimIndex = rimIndex;
     }
+  };
+
+  for (const primitive of flow.linearPrimitives) {
+    const i = primitive.segmentIndex;
+    const start = safePoints[i];
+    const ux = segmentUx[i];
+    const uy = segmentUy[i];
+    const x1 = start.x + ux * primitive.localStart;
+    const y1 = start.y + uy * primitive.localStart;
+    const x2 = start.x + ux * primitive.localEnd;
+    const y2 = start.y + uy * primitive.localEnd;
+    addQuad(x1, y1, x2, y2, halfWidth, primitive.travelStart, primitive.travelEnd);
+  }
+  for (const cornerPrimitive of flow.cornerPrimitives) {
+    addCornerPrimitive(cornerPrimitive.cornerIndex, cornerPrimitive);
   }
 
   if (lastSegmentIndex >= 0) {
