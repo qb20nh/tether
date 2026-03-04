@@ -27,7 +27,6 @@ import {
   UPDATE_CHECK_DECISION,
   resolveUpdateCheckDecision,
   shouldResyncManualUpdatePolicy,
-  shouldReloadAfterManualPinConfirm,
 } from './runtime/update_flow_policy.js';
 
 const BUILD_NUMBER_META_NAME = 'tether-build-number';
@@ -53,7 +52,6 @@ const SW_MESSAGE_TYPES = Object.freeze({
   SYNC_DAILY_STATE: 'SW_SYNC_DAILY_STATE',
   SYNC_UPDATE_POLICY: 'SW_SYNC_UPDATE_POLICY',
   GET_UPDATE_POLICY: 'SW_GET_UPDATE_POLICY',
-  CONFIRM_BUILD_UPDATE: 'SW_CONFIRM_BUILD_UPDATE',
   RUN_DAILY_CHECK: 'SW_RUN_DAILY_CHECK',
   GET_HISTORY: 'SW_GET_NOTIFICATION_HISTORY',
   APPEND_TOAST_HISTORY: 'SW_APPEND_TOAST_HISTORY',
@@ -1665,27 +1663,6 @@ const resolveUpdateApplyFailureToastText = () => {
   return 'Could not apply update yet. Try again shortly.';
 };
 
-const confirmBuildUpdateInServiceWorker = async (buildNumber) => {
-  if (!Number.isInteger(buildNumber) || buildNumber <= 0) return false;
-  const targets = resolveSwUpdatePolicyTargets();
-  if (targets.length === 0) return false;
-
-  for (const target of targets) {
-    const reply = await postMessageToServiceWorkerWithReply({
-      type: SW_MESSAGE_TYPES.CONFIRM_BUILD_UPDATE,
-      payload: {
-        buildNumber,
-      },
-    }, { target });
-    if (!reply || reply.ok !== true) continue;
-    const pinnedBuildNumber = Number.parseInt(reply.pinnedBuildNumber, 10);
-    if (!Number.isInteger(pinnedBuildNumber) || pinnedBuildNumber < buildNumber) continue;
-    return true;
-  }
-
-  return false;
-};
-
 const hasNotifiedRemoteBuild = (remoteBuildNumber) => {
   if (!Number.isInteger(remoteBuildNumber) || remoteBuildNumber <= 0) return true;
   if (notifiedRemoteBuildNumbers.has(remoteBuildNumber)) return true;
@@ -1779,26 +1756,12 @@ const applyLatestUpdateForAction = async (hintBuildNumber = null) => {
     return false;
   }
 
-  const confirmedInServiceWorker = await confirmBuildUpdateInServiceWorker(latestBuildNumber);
-  if (!confirmedInServiceWorker) {
-    showInAppToast(resolveUpdateApplyFailureToastText(), { recordInHistory: false });
-    return false;
-  }
-
   const result = await applyUpdateForBuild(latestBuildNumber, {
     force: true,
     toastOnFailure: false,
     approvedBuildNumber: latestBuildNumber,
   });
   if (result.applied) return true;
-
-  if (shouldReloadAfterManualPinConfirm({
-    confirmedInServiceWorker,
-    applyStatus: result.status,
-  })) {
-    window.location.reload();
-    return true;
-  }
 
   showInAppToast(resolveUpdateApplyFailureToastText(), { recordInHistory: false });
   return false;
@@ -1829,13 +1792,8 @@ const checkForNewBuild = async ({ force = false } = {}) => {
       return;
     }
     if (decision === UPDATE_CHECK_DECISION.NOTIFY) {
-      const shouldPrompt = !hasNotifiedRemoteBuild(updatableRemoteBuildNumber);
       await notifyUpdateAvailable(updatableRemoteBuildNumber);
-      if (!shouldPrompt) return;
-      const confirmed = await requestUpdateApplyConfirmation(updatableRemoteBuildNumber);
-      if (confirmed) {
-        await applyLatestUpdateForAction(updatableRemoteBuildNumber);
-      }
+      return;
     }
   } finally {
     updateCheckInFlight = false;
