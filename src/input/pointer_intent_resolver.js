@@ -26,6 +26,9 @@ const RAW_POINTER_LEAD_MAX_CELL_RATIO = 0.55;
 const RAW_POINTER_DIRECTION_MIN_COS = 0.10;
 const RAW_POINTER_DIRECTION_MIN_DISTANCE_CELL_RATIO = 0.08;
 const DEFAULT_CELL_SIZE_PX = 56;
+const MIN_PREDICTION_STRENGTH_LEVEL = 0;
+const MAX_PREDICTION_STRENGTH_LEVEL = 3;
+const DEFAULT_PREDICTION_STRENGTH_LEVEL = 1;
 
 const clamp = (value, lo, hi) => Math.max(lo, Math.min(hi, value));
 
@@ -49,6 +52,12 @@ const resolveCellSize = (cellSize) => {
   const value = Number(cellSize);
   if (Number.isFinite(value) && value > 0) return value;
   return DEFAULT_CELL_SIZE_PX;
+};
+
+const resolvePredictionStrengthLevel = (predictionStrengthLevel) => {
+  const value = Number(predictionStrengthLevel);
+  if (!Number.isInteger(value)) return DEFAULT_PREDICTION_STRENGTH_LEVEL;
+  return clamp(value, MIN_PREDICTION_STRENGTH_LEVEL, MAX_PREDICTION_STRENGTH_LEVEL);
 };
 
 const resolveStitchBridgeCrossingStep = ({
@@ -178,11 +187,13 @@ export function predictPathDragPointer({
   prevPredictedClient,
   frameIntervalMs,
   nowMs,
+  predictionStrengthLevel = DEFAULT_PREDICTION_STRENGTH_LEVEL,
 }) {
   const safeSamples = Array.isArray(samples)
     ? samples.slice(Math.max(0, samples.length - SAMPLE_WINDOW))
     : [];
   const current = safePoint(safeSamples[safeSamples.length - 1]);
+  const resolvedPredictionStrengthLevel = resolvePredictionStrengthLevel(predictionStrengthLevel);
 
   let nextEmaErrorPx = Number.isFinite(prevEmaErrorPx) ? Math.max(0, prevEmaErrorPx) : 0;
   const prevPredicted = Number.isFinite(prevPredictedClient?.x) && Number.isFinite(prevPredictedClient?.y)
@@ -204,6 +215,14 @@ export function predictPathDragPointer({
         nextPredictedClient: null,
       };
     }
+  }
+
+  if (resolvedPredictionStrengthLevel <= MIN_PREDICTION_STRENGTH_LEVEL) {
+    return {
+      effectiveClient: current,
+      nextEmaErrorPx,
+      nextPredictedClient: null,
+    };
   }
 
   if (safeSamples.length < 2) {
@@ -290,16 +309,24 @@ export function predictPathDragPointer({
     x: current.x + projectDx,
     y: current.y + projectDy,
   };
-  const strength = 1 - errorRatio;
+  const baseStrength = 1 - errorRatio;
+  const baseEffectiveClient = {
+    x: current.x + ((projected.x - current.x) * baseStrength),
+    y: current.y + ((projected.y - current.y) * baseStrength),
+  };
   const effectiveClient = {
-    x: current.x + ((projected.x - current.x) * strength),
-    y: current.y + ((projected.y - current.y) * strength),
+    x: current.x + ((baseEffectiveClient.x - current.x) * resolvedPredictionStrengthLevel),
+    y: current.y + ((baseEffectiveClient.y - current.y) * resolvedPredictionStrengthLevel),
+  };
+  const nextPredictedClient = {
+    x: current.x + ((projected.x - current.x) * resolvedPredictionStrengthLevel),
+    y: current.y + ((projected.y - current.y) * resolvedPredictionStrengthLevel),
   };
 
   return {
     effectiveClient,
     nextEmaErrorPx,
-    nextPredictedClient: projected,
+    nextPredictedClient,
   };
 }
 

@@ -149,6 +149,12 @@ export function createDomInputAdapter() {
     return PATH_PREDICTION_DEFAULT_FRAME_INTERVAL_MS;
   };
 
+  const readPathPredictionStrengthLevel = () => {
+    const value = Number.parseInt(refs?.pathPredictionStrengthControl?.dataset?.level || '', 10);
+    if (Number.isInteger(value) && value >= 0 && value <= 3) return value;
+    return 1;
+  };
+
   const captureGridMetrics = (snapshot = null) => {
     if (!refs?.gridEl || !snapshot) return null;
     const rows = Number.isInteger(snapshot.rows) ? snapshot.rows : 0;
@@ -422,9 +428,8 @@ export function createDomInputAdapter() {
         appendPathPredictionSamples(predictionState, e);
         predictionState.frameIntervalMs = readPathDragFrameIntervalMs();
 
-        const shouldPredict = refs?.pathPredictionToggle
-          ? refs.pathPredictionToggle.checked
-          : true;
+        const predictionStrengthLevel = readPathPredictionStrengthLevel();
+        const shouldPredict = predictionStrengthLevel > 0;
         if (shouldPredict) {
           const predicted = predictPathDragPointer({
             samples: predictionState.samples,
@@ -433,6 +438,7 @@ export function createDomInputAdapter() {
             prevPredictedClient: predictionState.lastPredictedClient,
             frameIntervalMs: predictionState.frameIntervalMs,
             nowMs: Number.isFinite(Number(e.timeStamp)) ? Number(e.timeStamp) : undefined,
+            predictionStrengthLevel,
           });
           pointerClientX = predicted.effectiveClient.x;
           pointerClientY = predicted.effectiveClient.y;

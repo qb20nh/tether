@@ -43,6 +43,24 @@ test('predictPathDragPointer returns raw pointer when sample history is insuffic
   assert.equal(out.nextPredictedClient, null);
 });
 
+test('predictPathDragPointer returns raw pointer when prediction strength is none', () => {
+  const out = predictPathDragPointer({
+    samples: [
+      { x: 0, y: 0, t: 0 },
+      { x: 16, y: 0, t: 16 },
+      { x: 32, y: 0, t: 32 },
+      { x: 48, y: 0, t: 48 },
+    ],
+    cellSize: 40,
+    prevEmaErrorPx: 0,
+    prevPredictedClient: null,
+    predictionStrengthLevel: 0,
+  });
+
+  assert.deepEqual(out.effectiveClient, { x: 48, y: 0 });
+  assert.equal(out.nextPredictedClient, null);
+});
+
 test('predictPathDragPointer projects forward on steady movement', () => {
   const out = predictPathDragPointer({
     samples: [
@@ -58,6 +76,47 @@ test('predictPathDragPointer projects forward on steady movement', () => {
 
   assert.ok(out.effectiveClient.x > 48);
   assert.ok(out.nextPredictedClient.x > 48);
+});
+
+test('predictPathDragPointer scales lead distance by exact 1x/2x/3x strength multipliers', () => {
+  const payload = {
+    samples: [
+      { x: 0, y: 0, t: 0 },
+      { x: 16, y: 0, t: 16 },
+      { x: 32, y: 0, t: 32 },
+      { x: 48, y: 0, t: 48 },
+    ],
+    cellSize: 40,
+    prevEmaErrorPx: 0,
+    prevPredictedClient: null,
+  };
+
+  const low = predictPathDragPointer({
+    ...payload,
+    predictionStrengthLevel: 1,
+  });
+  const moderate = predictPathDragPointer({
+    ...payload,
+    predictionStrengthLevel: 2,
+  });
+  const high = predictPathDragPointer({
+    ...payload,
+    predictionStrengthLevel: 3,
+  });
+
+  const lowEffectiveLead = low.effectiveClient.x - 48;
+  const moderateEffectiveLead = moderate.effectiveClient.x - 48;
+  const highEffectiveLead = high.effectiveClient.x - 48;
+  const lowPredictedLead = low.nextPredictedClient.x - 48;
+  const moderatePredictedLead = moderate.nextPredictedClient.x - 48;
+  const highPredictedLead = high.nextPredictedClient.x - 48;
+  const epsilon = 1e-6;
+
+  assert.ok(lowEffectiveLead > 0);
+  assert.ok(Math.abs(moderateEffectiveLead - (lowEffectiveLead * 2)) < epsilon);
+  assert.ok(Math.abs(highEffectiveLead - (lowEffectiveLead * 3)) < epsilon);
+  assert.ok(Math.abs(moderatePredictedLead - (lowPredictedLead * 2)) < epsilon);
+  assert.ok(Math.abs(highPredictedLead - (lowPredictedLead * 3)) < epsilon);
 });
 
 test('predictPathDragPointer increases forward lead when frame interval is higher', () => {

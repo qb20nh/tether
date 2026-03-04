@@ -147,10 +147,35 @@ export const APP_SHELL_TEMPLATE = (t = (k) => k, localeOptions = [], currentLoca
             </div>
             <div class="settingsField">
               <span id="${ELEMENT_IDS.PATH_PREDICTION_LABEL}" class="small" data-i18n="ui.pathPrediction">${t('ui.pathPrediction')}</span>
-              <label class="settingsCheckbox">
-                <input id="${ELEMENT_IDS.PATH_PREDICTION_TOGGLE}" type="checkbox" />
-                <span data-i18n="ui.pathPredictionEnable">${t('ui.pathPredictionEnable')}</span>
-              </label>
+              <div
+                id="${ELEMENT_IDS.PATH_PREDICTION_STRENGTH_CONTROL}"
+                class="settingsStepper"
+                data-level="2"
+                role="group"
+                aria-labelledby="${ELEMENT_IDS.PATH_PREDICTION_LABEL}"
+              >
+                <button
+                  id="${ELEMENT_IDS.PATH_PREDICTION_STRENGTH_DEC_BTN}"
+                  class="settingsStepperBtn"
+                  type="button"
+                  aria-label="${t('ui.pathPrediction')}"
+                >
+                  <span class="uiIconMaterial" aria-hidden="true">chevron_left</span>
+                </button>
+                <span
+                  id="${ELEMENT_IDS.PATH_PREDICTION_STRENGTH_VALUE}"
+                  class="settingsStepperValue"
+                  data-i18n="ui.pathPredictionStrengthModerate"
+                >${t('ui.pathPredictionStrengthModerate')}</span>
+                <button
+                  id="${ELEMENT_IDS.PATH_PREDICTION_STRENGTH_INC_BTN}"
+                  class="settingsStepperBtn"
+                  type="button"
+                  aria-label="${t('ui.pathPrediction')}"
+                >
+                  <span class="uiIconMaterial" aria-hidden="true">chevron_right</span>
+                </button>
+              </div>
             </div>
             <div id="${ELEMENT_IDS.SETTINGS_VERSION}" class="settingsVersion" hidden></div>
           </div>
