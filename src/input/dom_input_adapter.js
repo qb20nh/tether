@@ -7,8 +7,7 @@ import {
   getGridPadding,
 } from '../geometry.js';
 import {
-  buildPathDragCandidates,
-  choosePathDragCell,
+  chooseSlipperyPathDragStep,
   predictPathDragPointer,
 } from './pointer_intent_resolver.js';
 import {
@@ -397,8 +396,10 @@ export function createDomInputAdapter() {
 
     if (dragMode === 'path') {
       if (e.cancelable) e.preventDefault();
-      let pointerClientX = e.clientX;
-      let pointerClientY = e.clientY;
+      const rawPointerClientX = e.clientX;
+      const rawPointerClientY = e.clientY;
+      let pointerClientX = rawPointerClientX;
+      let pointerClientY = rawPointerClientY;
       const snapshotForInput = pathDrag ? readSnapshot() : null;
 
       if (pathDrag) {
@@ -450,51 +451,90 @@ export function createDomInputAdapter() {
 
       if (pathDrag && !pathDrag.applyPathCommands) return;
 
-      let cell = cellFromPoint(pointerClientX, pointerClientY);
-
       if (pathDrag && snapshotForInput) {
-        const headNode = pathDrag.side === 'start'
-          ? snapshotForInput.path[0]
-          : snapshotForInput.path[snapshotForInput.path.length - 1];
-        const backtrackNode = pathDrag.side === 'start'
-          ? snapshotForInput.path[1]
-          : snapshotForInput.path[snapshotForInput.path.length - 2];
+        const metrics = dragGridMetrics || captureGridMetrics(snapshotForInput);
+        if (metrics) dragGridMetrics = metrics;
+        const rect = metrics
+          ? null
+          : refs.gridEl.getBoundingClientRect();
+        const px = metrics ? (pointerClientX - metrics.left) : (pointerClientX - rect.left);
+        const py = metrics ? (pointerClientY - metrics.top) : (pointerClientY - rect.top);
+        const centerOfCell = metrics
+          ? ((r, c) => ({
+            x: metrics.pad + (c * metrics.step) + (metrics.size * 0.5),
+            y: metrics.pad + (r * metrics.step) + (metrics.size * 0.5),
+          }))
+          : ((r, c) => cellCenter(r, c, refs.gridEl));
+        const pointerCell = snapPathCellFromPoint(
+          rawPointerClientX,
+          rawPointerClientY,
+          snapshotForInput,
+          metrics,
+        ) || snapPathCellFromPoint(
+          pointerClientX,
+          pointerClientY,
+          snapshotForInput,
+          metrics,
+        );
+        const commandType = pathDrag.side === 'start'
+          ? GAME_COMMANDS.START_OR_STEP_FROM_START
+          : GAME_COMMANDS.START_OR_STEP;
 
-        if (headNode) {
-          const metrics = dragGridMetrics || captureGridMetrics(snapshotForInput);
-          if (metrics) dragGridMetrics = metrics;
-          const rect = metrics
-            ? null
-            : refs.gridEl.getBoundingClientRect();
-          const px = metrics ? (pointerClientX - metrics.left) : (pointerClientX - rect.left);
-          const py = metrics ? (pointerClientY - metrics.top) : (pointerClientY - rect.top);
-          const size = metrics ? metrics.size : getCellSize(refs.gridEl);
-          const holdCell = { r: headNode.r, c: headNode.c };
+        let stepSnapshot = snapshotForInput;
+        let stepCount = 0;
+        const maxStepCount = Math.max(1, (stepSnapshot.rows * stepSnapshot.cols) + 1);
 
-          const candidates = buildPathDragCandidates({
-            snapshot: snapshotForInput,
+        while (stepCount < maxStepCount) {
+          const headNode = pathDrag.side === 'start'
+            ? stepSnapshot.path[0]
+            : stepSnapshot.path[stepSnapshot.path.length - 1];
+          const backtrackNode = pathDrag.side === 'start'
+            ? stepSnapshot.path[1]
+            : stepSnapshot.path[stepSnapshot.path.length - 2];
+          if (!headNode) break;
+
+          const nextStep = chooseSlipperyPathDragStep({
+            snapshot: stepSnapshot,
             headNode,
             backtrackNode,
+            pointer: { x: px, y: py },
+            pointerCell,
             isUsableCell,
             isAdjacentMove,
+            cellCenter: centerOfCell,
           });
+          if (!nextStep) break;
 
-          cell = choosePathDragCell({
-            headNode,
-            candidates,
-            pointer: { x: px, y: py },
-            holdCell,
-            size,
-            cellCenter: metrics
-              ? ((r, c) => ({
-                x: metrics.pad + (c * metrics.step) + (metrics.size * 0.5),
-                y: metrics.pad + (r * metrics.step) + (metrics.size * 0.5),
-              }))
-              : ((r, c) => cellCenter(r, c, refs.gridEl)),
-          });
+          pathDrag.moved = true;
+          sendGameCommand(commandType, { r: nextStep.r, c: nextStep.c });
+          pathDrag.lastCursorKey = `${nextStep.r},${nextStep.c}`;
+          stepCount += 1;
+
+          const nextSnapshot = readSnapshot();
+          const nextHeadNode = pathDrag.side === 'start'
+            ? nextSnapshot?.path?.[0]
+            : nextSnapshot?.path?.[nextSnapshot?.path?.length - 1];
+          if (
+            !nextHeadNode
+            || (nextHeadNode.r === headNode.r && nextHeadNode.c === headNode.c)
+          ) {
+            break;
+          }
+
+          stepSnapshot = nextSnapshot;
+          if (
+            pointerCell
+            && nextHeadNode.r === pointerCell.r
+            && nextHeadNode.c === pointerCell.c
+          ) {
+            break;
+          }
         }
+
+        return;
       }
 
+      const cell = cellFromPoint(pointerClientX, pointerClientY);
       if (!cell) return;
 
       if (pathDrag && !pathDrag.moved) {

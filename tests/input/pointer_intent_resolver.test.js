@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   buildPathDragCandidates,
   choosePathDragCell,
+  chooseSlipperyPathDragStep,
   predictPathDragPointer,
 } from '../../src/input/pointer_intent_resolver.js';
 
@@ -199,6 +200,102 @@ test('choosePathDragCell applies nearest + hysteresis selection', () => {
     holdCell: { r: 1, c: 1 },
     size: 40,
     cellCenter: (r, c) => ({ x: c * 50, y: r * 50 }),
+  });
+
+  assert.deepEqual(picked, { r: 1, c: 2 });
+});
+
+test('chooseSlipperyPathDragStep picks nearest orthogonal candidate', () => {
+  const picked = chooseSlipperyPathDragStep({
+    snapshot: {
+      rows: 3,
+      cols: 3,
+      visited: new Set(),
+      gridData: [
+        ['.', '.', '.'],
+        ['.', '.', '.'],
+        ['.', '.', '.'],
+      ],
+    },
+    headNode: { r: 1, c: 1 },
+    backtrackNode: null,
+    pointer: { x: 24, y: 10 },
+    pointerCell: null,
+    isUsableCell: () => true,
+    isAdjacentMove: (_snapshot, a, b) => Math.max(Math.abs(a.r - b.r), Math.abs(a.c - b.c)) === 1,
+    cellCenter: (r, c) => ({ x: c * 10, y: r * 10 }),
+  });
+
+  assert.deepEqual(picked, { r: 1, c: 2 });
+});
+
+test('chooseSlipperyPathDragStep returns null when pointer is already on head cell', () => {
+  const picked = chooseSlipperyPathDragStep({
+    snapshot: {
+      rows: 3,
+      cols: 3,
+      visited: new Set(),
+      gridData: [
+        ['.', '.', '.'],
+        ['.', '.', '.'],
+        ['.', '.', '.'],
+      ],
+    },
+    headNode: { r: 1, c: 1 },
+    backtrackNode: null,
+    pointer: { x: 10, y: 10 },
+    pointerCell: { r: 1, c: 1 },
+    isUsableCell: () => true,
+    isAdjacentMove: (_snapshot, a, b) => Math.max(Math.abs(a.r - b.r), Math.abs(a.c - b.c)) === 1,
+    cellCenter: (r, c) => ({ x: c * 10, y: r * 10 }),
+  });
+
+  assert.equal(picked, null);
+});
+
+test('chooseSlipperyPathDragStep keeps current cell when it is nearest', () => {
+  const picked = chooseSlipperyPathDragStep({
+    snapshot: {
+      rows: 3,
+      cols: 3,
+      visited: new Set(),
+      gridData: [
+        ['.', '.', '.'],
+        ['.', '.', '.'],
+        ['.', '.', '.'],
+      ],
+    },
+    headNode: { r: 1, c: 1 },
+    backtrackNode: null,
+    pointer: { x: 11, y: 10 },
+    pointerCell: null,
+    isUsableCell: () => true,
+    isAdjacentMove: (_snapshot, a, b) => Math.max(Math.abs(a.r - b.r), Math.abs(a.c - b.c)) === 1,
+    cellCenter: (r, c) => ({ x: c * 10, y: r * 10 }),
+  });
+
+  assert.equal(picked, null);
+});
+
+test('chooseSlipperyPathDragStep breaks ties toward pointer cell', () => {
+  const picked = chooseSlipperyPathDragStep({
+    snapshot: {
+      rows: 3,
+      cols: 3,
+      visited: new Set(),
+      gridData: [
+        ['.', '.', '.'],
+        ['.', '.', '.'],
+        ['.', '.', '.'],
+      ],
+    },
+    headNode: { r: 1, c: 1 },
+    backtrackNode: null,
+    pointer: { x: 15, y: 5 },
+    pointerCell: { r: 1, c: 2 },
+    isUsableCell: () => true,
+    isAdjacentMove: (_snapshot, a, b) => Math.max(Math.abs(a.r - b.r), Math.abs(a.c - b.c)) === 1,
+    cellCenter: (r, c) => ({ x: c * 10, y: r * 10 }),
   });
 
   assert.deepEqual(picked, { r: 1, c: 2 });

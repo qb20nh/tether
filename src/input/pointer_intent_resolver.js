@@ -22,6 +22,12 @@ const safePoint = (point) => ({
   y: Number.isFinite(point?.y) ? point.y : 0,
 });
 
+const isOrthogonalNeighbor = (a, b) =>
+  Math.abs((a?.r ?? 0) - (b?.r ?? 0)) + Math.abs((a?.c ?? 0) - (b?.c ?? 0)) === 1;
+
+const sameCell = (a, b) =>
+  Boolean(a && b && a.r === b.r && a.c === b.c);
+
 const resolveFrameIntervalMs = (frameIntervalMs) => {
   const value = Number(frameIntervalMs);
   if (!Number.isFinite(value) || value <= 0) return DEFAULT_FRAME_INTERVAL_MS;
@@ -247,4 +253,56 @@ export function choosePathDragCell({
   return bestMoveDist + hysteresis < holdDist
     ? { r: bestMoveCell.r, c: bestMoveCell.c }
     : holdCell;
+}
+
+export function chooseSlipperyPathDragStep({
+  snapshot,
+  headNode,
+  backtrackNode,
+  pointer,
+  pointerCell,
+  isUsableCell,
+  isAdjacentMove,
+  cellCenter,
+}) {
+  if (!snapshot || !headNode || !pointer || typeof cellCenter !== 'function') return null;
+
+  const candidates = buildPathDragCandidates({
+    snapshot,
+    headNode,
+    backtrackNode,
+    isUsableCell,
+    isAdjacentMove,
+  });
+
+  const headCenter = cellCenter(headNode.r, headNode.c);
+  const holdDistance = Math.hypot(pointer.x - headCenter.x, pointer.y - headCenter.y);
+  let bestCandidate = null;
+  let bestDistance = holdDistance;
+  let bestIsPointerCell = sameCell(pointerCell, headNode);
+
+  for (let i = 0; i < candidates.length; i += 1) {
+    const candidate = candidates[i];
+    if (!isOrthogonalNeighbor(headNode, candidate)) continue;
+    const center = cellCenter(candidate.r, candidate.c);
+    const dist = Math.hypot(pointer.x - center.x, pointer.y - center.y);
+    const isPointerCell = sameCell(pointerCell, candidate);
+
+    if (
+      dist < bestDistance - 1e-6
+      || (
+        Math.abs(dist - bestDistance) <= 1e-6
+        && isPointerCell
+        && !bestIsPointerCell
+      )
+    ) {
+      bestDistance = dist;
+      bestCandidate = candidate;
+      bestIsPointerCell = isPointerCell;
+    }
+  }
+
+  return bestCandidate
+    ? { r: bestCandidate.r, c: bestCandidate.c }
+    : null;
 }
