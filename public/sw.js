@@ -3,7 +3,10 @@ const BUILD_LABEL = '__TETHER_BUILD_LABEL__';
 
 const APP_CACHE = `tether-app-${BUILD_NUMBER}`;
 const DAILY_CACHE = `tether-daily-${BUILD_NUMBER}`;
-const META_CACHE = 'tether-meta-v1';
+const LEGACY_META_CACHE = 'tether-meta-v1';
+const META_DB_NAME = 'tether-meta-v1';
+const META_DB_VERSION = 1;
+const META_STORE_NAME = 'meta';
 const APP_CACHE_MAX_ENTRIES = 180;
 const DAILY_CACHE_MAX_ENTRIES = 2;
 
@@ -13,6 +16,10 @@ const HISTORY_MAX_ENTRIES = 10;
 const HISTORY_VERSION_START = 1;
 const SW_PLUGIN_QUERY_PARAM = 'plugin';
 const DAILY_PAYLOAD_PATH_SUFFIX = '__TETHER_DAILY_PAYLOAD_PATH__';
+const META_RECORD_KEYS = Object.freeze({
+  DAILY_STATE: 'daily-state',
+  HISTORY_STATE: 'notification-history',
+});
 
 const notificationDefaults = Object.freeze({
   unsolvedTitle: 'Daily level ending soon',
@@ -34,7 +41,7 @@ const isLocalhostHostname = (hostname = '') =>
   || hostname === '::1'
   || hostname.endsWith('.localhost');
 
-const buildCaches = Object.freeze([APP_CACHE, DAILY_CACHE, META_CACHE]);
+const buildCaches = Object.freeze([APP_CACHE, DAILY_CACHE]);
 
 const isCacheableResponse = (response) =>
   Boolean(response && response.ok && response.type === 'basic');
@@ -58,8 +65,6 @@ const isStaticAssetRequest = (request, url) => {
 };
 
 const resolveShellUrl = () => new URL('index.html', self.registration.scope).toString();
-const resolveMetaStateUrl = () => new URL('__tether_internal__/daily-state', self.registration.scope).toString();
-const resolveMetaHistoryUrl = () => new URL('__tether_internal__/notification-history', self.registration.scope).toString();
 const resolveNotificationIconUrl = () => new URL('icons/icon-192.webp', self.registration.scope).toString();
 const resolveNotificationBadgeUrl = () => new URL('icons/icon-96.webp', self.registration.scope).toString();
 
@@ -133,6 +138,7 @@ self.addEventListener('activate', (event) => {
         .map((key) => caches.delete(key)),
     );
     await cleanupCurrentBuildCaches();
+    await caches.delete(LEGACY_META_CACHE);
     await self.clients.claim();
   })());
 });
@@ -263,6 +269,89 @@ const normalizeBool = (value, fallback = false) => {
   return fallback;
 };
 
+let metaDbPromise = null;
+
+const openMetaDb = async () => {
+  if (metaDbPromise) return metaDbPromise;
+  if (typeof indexedDB === 'undefined') {
+    throw new Error('IndexedDB is unavailable in service worker context.');
+  }
+
+  metaDbPromise = new Promise((resolve, reject) => {
+    const request = indexedDB.open(META_DB_NAME, META_DB_VERSION);
+
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(META_STORE_NAME)) {
+        db.createObjectStore(META_STORE_NAME);
+      }
+    };
+
+    request.onsuccess = () => {
+      const db = request.result;
+      db.onversionchange = () => {
+        db.close();
+        metaDbPromise = null;
+      };
+      resolve(db);
+    };
+
+    request.onerror = () => {
+      reject(request.error || new Error('Failed to open metadata database.'));
+    };
+
+    request.onblocked = () => {
+      reject(new Error('Opening metadata database was blocked.'));
+    };
+  });
+
+  try {
+    return await metaDbPromise;
+  } catch (error) {
+    metaDbPromise = null;
+    throw error;
+  }
+};
+
+const waitForRequest = (request) =>
+  new Promise((resolve, reject) => {
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error || new Error('IndexedDB request failed.'));
+  });
+
+const waitForTransaction = (transaction) =>
+  new Promise((resolve, reject) => {
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error || new Error('IndexedDB transaction failed.'));
+    transaction.onabort = () => reject(transaction.error || new Error('IndexedDB transaction aborted.'));
+  });
+
+const readMetaRecord = async (key) => {
+  try {
+    const db = await openMetaDb();
+    const transaction = db.transaction(META_STORE_NAME, 'readonly');
+    const store = transaction.objectStore(META_STORE_NAME);
+    const value = await waitForRequest(store.get(key));
+    await waitForTransaction(transaction);
+    return value ?? null;
+  } catch {
+    return null;
+  }
+};
+
+const writeMetaRecord = async (key, value) => {
+  try {
+    const db = await openMetaDb();
+    const transaction = db.transaction(META_STORE_NAME, 'readwrite');
+    const store = transaction.objectStore(META_STORE_NAME);
+    await waitForRequest(store.put(value, key));
+    await waitForTransaction(transaction);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 const swPluginMessageHandlers = new Map();
 
 self.__tetherRegisterSwPlugin = (messageHandlers = {}) => {
@@ -354,30 +443,14 @@ const mergeDailyStatePayload = (state, payload) => {
 };
 
 const readDailyState = async () => {
-  const cache = await openCache(META_CACHE);
-  const response = await cache.match(resolveMetaStateUrl(), { ignoreSearch: true });
-  if (!response) {
-    return normalizeDailyStatePayload({});
-  }
-
-  try {
-    const parsed = await response.json();
-    return normalizeDailyStatePayload(parsed);
-  } catch {
-    return normalizeDailyStatePayload({});
-  }
+  const stored = await readMetaRecord(META_RECORD_KEYS.DAILY_STATE);
+  const payload = stored && typeof stored === 'object' ? stored : {};
+  return normalizeDailyStatePayload(payload);
 };
 
 const writeDailyState = async (state) => {
-  const cache = await openCache(META_CACHE);
   const normalized = normalizeDailyStatePayload(state);
-  const body = `${JSON.stringify(normalized)}\n`;
-  await cache.put(
-    resolveMetaStateUrl(),
-    new Response(body, {
-      headers: { 'content-type': 'application/json' },
-    }),
-  );
+  await writeMetaRecord(META_RECORD_KEYS.DAILY_STATE, normalized);
   return normalized;
 };
 
@@ -441,30 +514,14 @@ const normalizeHistoryState = (payload = {}) => {
 };
 
 const readHistoryState = async () => {
-  const cache = await openCache(META_CACHE);
-  const response = await cache.match(resolveMetaHistoryUrl(), { ignoreSearch: true });
-  if (!response) {
-    return normalizeHistoryState({});
-  }
-
-  try {
-    const parsed = await response.json();
-    return normalizeHistoryState(parsed);
-  } catch {
-    return normalizeHistoryState({});
-  }
+  const stored = await readMetaRecord(META_RECORD_KEYS.HISTORY_STATE);
+  const payload = stored && typeof stored === 'object' ? stored : {};
+  return normalizeHistoryState(payload);
 };
 
 const writeHistoryState = async (state) => {
-  const cache = await openCache(META_CACHE);
   const normalized = normalizeHistoryState(state);
-  const body = `${JSON.stringify(normalized)}\n`;
-  await cache.put(
-    resolveMetaHistoryUrl(),
-    new Response(body, {
-      headers: { 'content-type': 'application/json' },
-    }),
-  );
+  await writeMetaRecord(META_RECORD_KEYS.HISTORY_STATE, normalized);
   return normalized;
 };
 
