@@ -93,6 +93,38 @@ const writeJson = (filePath, value) => {
   fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`);
 };
 
+const sortHistoryEntriesByDailyId = (entries = []) =>
+  [...entries].sort((a, b) => (a.dailyId < b.dailyId ? -1 : (a.dailyId > b.dailyId ? 1 : 0)));
+
+const trimHistoryEntries = (entries = [], maxEntries = DAILY_POOL_MAX_SLOTS) => {
+  if (!Number.isInteger(maxEntries) || maxEntries <= 0) return [];
+  if (entries.length <= maxEntries) return entries;
+  return entries.slice(entries.length - maxEntries);
+};
+
+const pruneHistoryForAppend = (entries = [], {
+  maxEntries = DAILY_POOL_MAX_SLOTS,
+  dailyId = '',
+  dailySlot = -1,
+  canonicalKey = '',
+} = {}) => {
+  if (!Number.isInteger(maxEntries) || maxEntries <= 0) return [];
+  const out = [...entries];
+  const hasCollision = () => out.some((entry) => (
+    entry.dailyId !== dailyId
+    && (entry.dailySlot === dailySlot || entry.canonicalKey === canonicalKey)
+  ));
+
+  // Bounded prune loop: at most the original entry count, so it cannot spin forever.
+  for (let i = 0, limit = out.length; i < limit; i += 1) {
+    if (out.length === 0) break;
+    if (out.length < maxEntries && !hasCollision()) break;
+    out.shift();
+  }
+
+  return out;
+};
+
 const normalizeHistory = (raw) => {
   if (!raw || typeof raw !== 'object') {
     return { schemaVersion: HISTORY_SCHEMA_VERSION, entries: [] };
@@ -131,7 +163,19 @@ export const publishDailyLevel = (rawOptions = {}) => {
 
   const nowMs = Number.isInteger(opts.nowMs) ? opts.nowMs : Date.now();
   const dailyId = utcDateIdFromMs(nowMs);
+  const manifest = readJson(opts.manifestFile);
+  const maxSlots = Number.isInteger(manifest?.maxSlots) ? manifest.maxSlots : DAILY_POOL_MAX_SLOTS;
+  if (!Number.isInteger(maxSlots) || maxSlots <= 0) {
+    throw new Error(`Invalid maxSlots in manifest: ${manifest?.maxSlots}`);
+  }
+  const baseVariantId = Number.isInteger(manifest?.baseVariantId)
+    ? manifest.baseVariantId
+    : DAILY_POOL_BASE_VARIANT_ID;
   const history = normalizeHistory(readJson(opts.historyFile, { schemaVersion: HISTORY_SCHEMA_VERSION, entries: [] }));
+  history.entries = trimHistoryEntries(
+    sortHistoryEntriesByDailyId(history.entries),
+    maxSlots,
+  );
   const todayEntry = history.entries.find((entry) => entry.dailyId === dailyId);
 
   if (todayEntry) {
@@ -165,27 +209,19 @@ export const publishDailyLevel = (rawOptions = {}) => {
     throw new Error('DAILY_SECRET is required');
   }
 
-  const manifest = readJson(opts.manifestFile);
-  const maxSlots = Number.isInteger(manifest?.maxSlots) ? manifest.maxSlots : DAILY_POOL_MAX_SLOTS;
-  const baseVariantId = Number.isInteger(manifest?.baseVariantId)
-    ? manifest.baseVariantId
-    : DAILY_POOL_BASE_VARIANT_ID;
-
   const ordinal = computeDayOrdinal(dailyId, manifest.epochUtcDate);
 
   if (ordinal < 0) {
     throw new Error(`Current date ${dailyId} is before pool epoch ${manifest.epochUtcDate}`);
   }
-  if (ordinal >= maxSlots) {
-    throw new Error(`Daily pool exhausted at ordinal ${ordinal} (maxSlots ${maxSlots}). Generate a new pool.`);
-  }
+  const slotOrdinal = ordinal % maxSlots;
 
   const permutation = buildSecretPermutation(
     dailySecret,
     maxSlots,
     `tether|daily|perm|${manifest.poolVersion}|${manifest.epochUtcDate}`,
   );
-  const dailySlot = permutation[ordinal];
+  const dailySlot = permutation[slotOrdinal];
 
   const overrides = readDailyOverridesGzipFile(opts.overridesFile);
   const materialized = materializeDailyLevelForSlot(dailySlot, overrides, baseVariantId);
@@ -194,19 +230,12 @@ export const publishDailyLevel = (rawOptions = {}) => {
     throw new Error(`Daily slot ${dailySlot} failed witness solvability check`);
   }
 
-  const canonicalCollision = history.entries.find(
-    (entry) => entry.canonicalKey === materialized.canonicalKey && entry.dailyId !== dailyId,
-  );
-  if (canonicalCollision) {
-    throw new Error(`History collision: canonical key already used on ${canonicalCollision.dailyId}`);
-  }
-
-  const slotCollision = history.entries.find(
-    (entry) => entry.dailySlot === dailySlot && entry.dailyId !== dailyId,
-  );
-  if (slotCollision) {
-    throw new Error(`History collision: slot ${dailySlot} already used on ${slotCollision.dailyId}`);
-  }
+  history.entries = pruneHistoryForAppend(history.entries, {
+    maxEntries: maxSlots,
+    dailyId,
+    dailySlot,
+    canonicalKey: materialized.canonicalKey,
+  });
 
   const existingTodayPayload = normalizeTodayPayload(readJson(opts.todayFile, null));
   const stableGeneratedAtUtcMs = (
@@ -238,7 +267,10 @@ export const publishDailyLevel = (rawOptions = {}) => {
     poolVersion: String(manifest.poolVersion || ''),
     publishedAtUtcMs: stableGeneratedAtUtcMs,
   });
-  history.entries.sort((a, b) => (a.dailyId < b.dailyId ? -1 : (a.dailyId > b.dailyId ? 1 : 0)));
+  history.entries = trimHistoryEntries(
+    sortHistoryEntriesByDailyId(history.entries),
+    maxSlots,
+  );
 
   writeJson(opts.todayFile, payload);
   writeJson(opts.historyFile, history);

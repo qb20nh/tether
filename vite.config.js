@@ -88,7 +88,8 @@ const buildVersionPlugin = ({ buildNumber, buildLabel, dailyPayloadPathname }) =
 export default defineConfig(({ mode }) => {
     const env = loadEnv(mode, process.cwd(), '');
     const buildNumber = resolveBuildNumber(env);
-    const buildLabel = new Date(buildNumber).toISOString();
+    const buildLabel = (process.env.VITE_BUILD_LABEL ?? env.VITE_BUILD_LABEL ?? '').trim()
+        || new Date(buildNumber).toISOString();
     const dailyPayloadPathname = resolveDailyPayloadPathname(env);
     const isNativeBuild = (process.env.NATIVE_BUILD ?? env.NATIVE_BUILD) === '1';
     const configuredDailyUrl = (process.env.VITE_DAILY_URL ?? env.VITE_DAILY_URL ?? '').trim();
