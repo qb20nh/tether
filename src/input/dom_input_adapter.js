@@ -119,6 +119,17 @@ export function createDomInputAdapter() {
     };
   };
 
+  const clampToRange = (value, lo, hi) => Math.max(lo, Math.min(hi, value));
+
+  const snapCellFromMetrics = (x, y, resolved) => {
+    if (!resolved) return null;
+    const localX = x - resolved.left - resolved.pad - (resolved.size * 0.5);
+    const localY = y - resolved.top - resolved.pad - (resolved.size * 0.5);
+    const c = clampToRange(Math.round(localX / resolved.step), 0, resolved.cols - 1);
+    const r = clampToRange(Math.round(localY / resolved.step), 0, resolved.rows - 1);
+    return { r, c };
+  };
+
   const cellFromPoint = (x, y) => {
     const el = document.elementFromPoint(x, y);
     if (!el) return null;
@@ -143,14 +154,13 @@ export function createDomInputAdapter() {
     ) {
       return null;
     }
+    return snapCellFromMetrics(x, y, resolved);
+  };
 
-    const localX = x - resolved.left - resolved.pad - (resolved.size * 0.5);
-    const localY = y - resolved.top - resolved.pad - (resolved.size * 0.5);
-
-    const clamp = (value, lo, hi) => Math.max(lo, Math.min(hi, value));
-    const c = clamp(Math.round(localX / resolved.step), 0, resolved.cols - 1);
-    const r = clamp(Math.round(localY / resolved.step), 0, resolved.rows - 1);
-    return { r, c };
+  const snapPathCellFromPoint = (x, y, snapshot, metrics = null) => {
+    const resolved = metrics || captureGridMetrics(snapshot);
+    if (!resolved) return null;
+    return snapCellFromMetrics(x, y, resolved);
   };
 
   const wallCellFromPoint = (x, y, snapshot, metrics = null) => {
@@ -336,7 +346,7 @@ export function createDomInputAdapter() {
 
         const hoverMetrics = dragGridMetrics || captureGridMetrics(snapshotForInput);
         if (hoverMetrics) dragGridMetrics = hoverMetrics;
-        const hoverCell = snapWallCellFromPoint(e.clientX, e.clientY, snapshotForInput, hoverMetrics);
+        const hoverCell = snapPathCellFromPoint(e.clientX, e.clientY, snapshotForInput, hoverMetrics);
         const hoverKey = hoverCell ? `${hoverCell.r},${hoverCell.c}` : '';
         if (pathDrag.lastHoverKey !== hoverKey) {
           pathDrag.lastHoverKey = hoverKey;
@@ -361,43 +371,37 @@ export function createDomInputAdapter() {
           : snapshotForInput.path[snapshotForInput.path.length - 2];
 
         if (headNode) {
-          const drRaw = cell ? Math.abs(cell.r - headNode.r) : 0;
-          const dcRaw = cell ? Math.abs(cell.c - headNode.c) : 0;
-          const shouldResolveByPointer = !cell || (drRaw <= 1 && dcRaw <= 1);
+          const metrics = dragGridMetrics || captureGridMetrics(snapshotForInput);
+          if (metrics) dragGridMetrics = metrics;
+          const rect = metrics
+            ? null
+            : refs.gridEl.getBoundingClientRect();
+          const px = metrics ? (pointerClientX - metrics.left) : (pointerClientX - rect.left);
+          const py = metrics ? (pointerClientY - metrics.top) : (pointerClientY - rect.top);
+          const size = metrics ? metrics.size : getCellSize(refs.gridEl);
+          const holdCell = { r: headNode.r, c: headNode.c };
 
-          if (shouldResolveByPointer) {
-            const metrics = dragGridMetrics || captureGridMetrics(snapshotForInput);
-            if (metrics) dragGridMetrics = metrics;
-            const rect = metrics
-              ? null
-              : refs.gridEl.getBoundingClientRect();
-            const px = metrics ? (pointerClientX - metrics.left) : (pointerClientX - rect.left);
-            const py = metrics ? (pointerClientY - metrics.top) : (pointerClientY - rect.top);
-            const size = metrics ? metrics.size : getCellSize(refs.gridEl);
-            const holdCell = { r: headNode.r, c: headNode.c };
+          const candidates = buildPathDragCandidates({
+            snapshot: snapshotForInput,
+            headNode,
+            backtrackNode,
+            isUsableCell,
+            isAdjacentMove,
+          });
 
-            const candidates = buildPathDragCandidates({
-              snapshot: snapshotForInput,
-              headNode,
-              backtrackNode,
-              isUsableCell,
-              isAdjacentMove,
-            });
-
-            cell = choosePathDragCell({
-              headNode,
-              candidates,
-              pointer: { x: px, y: py },
-              holdCell,
-              size,
-              cellCenter: metrics
-                ? ((r, c) => ({
-                  x: metrics.pad + (c * metrics.step) + (metrics.size * 0.5),
-                  y: metrics.pad + (r * metrics.step) + (metrics.size * 0.5),
-                }))
-                : ((r, c) => cellCenter(r, c, refs.gridEl)),
-            });
-          }
+          cell = choosePathDragCell({
+            headNode,
+            candidates,
+            pointer: { x: px, y: py },
+            holdCell,
+            size,
+            cellCenter: metrics
+              ? ((r, c) => ({
+                x: metrics.pad + (c * metrics.step) + (metrics.size * 0.5),
+                y: metrics.pad + (r * metrics.step) + (metrics.size * 0.5),
+              }))
+              : ((r, c) => cellCenter(r, c, refs.gridEl)),
+          });
         }
       }
 
