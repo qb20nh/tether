@@ -249,7 +249,7 @@ test('session save round-trips with empty path to preserve current level', () =>
   });
 });
 
-test('session save with single-cell path is cleared on write and boot read', () => {
+test('session save canonicalizes zero-segment path while preserving opened level', () => {
   const storage = createFakeStorage();
   const fakeWindow = {
     localStorage: storage,
@@ -273,9 +273,13 @@ test('session save with single-cell path is cleared on write and boot read', () 
     path: [[1, 1]],
     movableWalls: [],
   });
-  assert.equal(storage.getItem(STORAGE_KEYS.SESSION_SAVE_KEY), null);
+  assert.notEqual(storage.getItem(STORAGE_KEYS.SESSION_SAVE_KEY), null);
 
   const boot = persistence.readBootState();
-  assert.equal(boot.sessionBoard, null);
-  assert.equal(storage.getItem(STORAGE_KEYS.SESSION_SAVE_KEY), null);
+  assert.deepEqual(boot.sessionBoard, {
+    levelIndex: 3,
+    path: [],
+    movableWalls: [],
+    dailyId: null,
+  });
 });

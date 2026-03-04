@@ -89,7 +89,8 @@ const normalizeSavedPathEntry = (entry) => {
   return [r, c];
 };
 
-const isTransientSingleCellPath = (path) => Array.isArray(path) && path.length === 1;
+const getPathSegmentCount = (path) => (Array.isArray(path) ? Math.max(0, path.length - 1) : 0);
+const canonicalizeSessionPath = (path) => (getPathSegmentCount(path) <= 0 ? [] : path);
 
 const encodePathCompact = (path) => {
   if (!Array.isArray(path) || path.length === 0) return '';
@@ -485,6 +486,18 @@ export function createLocalStoragePersistence(options = {}) {
     dailyId: typeof board.dailyId === 'string' ? board.dailyId : null,
   });
 
+  const persistSignedBoard = (board) => {
+    const persistedBoard = toPersistedBoardState(board);
+    writeStorage(
+      SESSION_SAVE_KEY,
+      JSON.stringify({
+        version: SESSION_SAVE_VERSION,
+        board: persistedBoard,
+        sig: signBoard(board),
+      }),
+    );
+  };
+
   const readSessionSave = () => {
     const emptyResult = null;
 
@@ -504,7 +517,6 @@ export function createLocalStoragePersistence(options = {}) {
 
       const board = normalizeSavedSingleBoard(parsed.board);
       if (!board) return reject(true);
-      if (isTransientSingleCellPath(board.path)) return reject(true);
       if (!verifyBoardSignature(board, parsed.sig)) return reject(true);
       if (!isSavedLevelAllowed(board.levelIndex)) return reject(true);
       if (
@@ -513,6 +525,16 @@ export function createLocalStoragePersistence(options = {}) {
         && board.dailyId !== activeDailyId
       ) {
         return reject(true);
+      }
+
+      const normalizedPath = canonicalizeSessionPath(board.path);
+      if (normalizedPath !== board.path) {
+        const sanitizedBoard = {
+          ...board,
+          path: normalizedPath,
+        };
+        persistSignedBoard(sanitizedBoard);
+        return sanitizedBoard;
       }
 
       return board;
@@ -575,13 +597,11 @@ export function createLocalStoragePersistence(options = {}) {
       removeStorage(SESSION_SAVE_KEY);
       return;
     }
-    if (isTransientSingleCellPath(normalized.path)) {
-      removeStorage(SESSION_SAVE_KEY);
-      return;
-    }
+    const normalizedPath = canonicalizeSessionPath(normalized.path);
 
     const persistedState = {
       ...normalized,
+      path: normalizedPath,
       dailyId: (
         Number.isInteger(dailyAbsIndex)
         && normalized.levelIndex === dailyAbsIndex
@@ -590,16 +610,7 @@ export function createLocalStoragePersistence(options = {}) {
         ? activeDailyId
         : null,
     };
-
-    const persistedBoard = toPersistedBoardState(persistedState);
-    writeStorage(
-      SESSION_SAVE_KEY,
-      JSON.stringify({
-        version: SESSION_SAVE_VERSION,
-        board: persistedBoard,
-        sig: signBoard(persistedState),
-      }),
-    );
+    persistSignedBoard(persistedState);
   };
 
   const clearSessionBoard = () => {
