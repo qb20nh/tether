@@ -1088,6 +1088,113 @@ const updateSinglePathTipArrivalState = (
   else pathEndArrivalState = state;
 };
 
+const resolveTipArrivalSyntheticPrevPathFromHint = (
+  side,
+  nextPath,
+  tipArrivalHint = null,
+) => {
+  if (side !== 'start' && side !== 'end') return null;
+  if (!Array.isArray(nextPath)) return null;
+  if (!tipArrivalHint || tipArrivalHint.side !== side) return null;
+
+  const from = tipArrivalHint.from;
+  const to = tipArrivalHint.to;
+  if (
+    !Number.isInteger(from?.r)
+    || !Number.isInteger(from?.c)
+    || !Number.isInteger(to?.r)
+    || !Number.isInteger(to?.c)
+  ) {
+    return null;
+  }
+
+  const nextLen = nextPath.length;
+  if (nextLen <= 1) return null;
+  const nextTip = side === 'start'
+    ? nextPath[0]
+    : nextPath[nextLen - 1];
+  if (!nextTip || nextTip.r !== to.r || nextTip.c !== to.c) return null;
+  if (cellDistance(from, to) > PATH_TIP_ARRIVAL_ADJACENT_MAX) return null;
+
+  if (side === 'end') {
+    const previousTip = nextPath[nextLen - 2];
+    if (previousTip && previousTip.r === from.r && previousTip.c === from.c) {
+      return nextPath.slice(0, nextLen - 1);
+    }
+    if (nextPath.some((node) => node?.r === from.r && node?.c === from.c)) return null;
+    return [...nextPath, { r: from.r, c: from.c }];
+  }
+
+  const nextNeighbor = nextPath[1];
+  if (nextNeighbor && nextNeighbor.r === from.r && nextNeighbor.c === from.c) {
+    return nextPath.slice(1);
+  }
+  if (nextPath.some((node) => node?.r === from.r && node?.c === from.c)) return null;
+  return [{ r: from.r, c: from.c }, ...nextPath];
+};
+
+export const resolveTipArrivalSyntheticPrevPath = (
+  side,
+  prevPath,
+  nextPath,
+  tipArrivalHint = null,
+) => {
+  if (side !== 'start' && side !== 'end') return null;
+  if (!Array.isArray(prevPath) || !Array.isArray(nextPath)) return null;
+
+  const fromHint = resolveTipArrivalSyntheticPrevPathFromHint(side, nextPath, tipArrivalHint);
+  if (fromHint) return fromHint;
+
+  const prevLen = prevPath.length;
+  const nextLen = nextPath.length;
+  if (prevLen <= 0 || nextLen <= 0) return null;
+
+  if (prevLen === nextLen) {
+    if (nextLen <= 1) return null;
+    if (side === 'end') {
+      const prevTail = prevPath[nextLen - 1];
+      const nextTail = nextPath[nextLen - 1];
+      if (!prevTail || !nextTail || pointsMatch(prevTail, nextTail)) return null;
+      return nextPath.slice(0, nextLen - 1);
+    }
+
+    const prevHead = prevPath[0];
+    const nextHead = nextPath[0];
+    if (!prevHead || !nextHead || pointsMatch(prevHead, nextHead)) return null;
+    return nextPath.slice(1);
+  }
+
+  if (side === 'end') {
+    const sharedLen = Math.min(prevLen, nextLen);
+    for (let i = 0; i < sharedLen; i += 1) {
+      if (!pointsMatch(prevPath[i], nextPath[i])) return null;
+    }
+
+    const delta = nextLen - prevLen;
+    if (delta > 1) {
+      return nextLen > 1 ? nextPath.slice(0, nextLen - 1) : null;
+    }
+    if (delta < -1) {
+      const restored = prevPath[nextLen];
+      return restored ? [...nextPath, restored] : null;
+    }
+    return null;
+  }
+
+  if (nextLen > prevLen) {
+    const stepCount = nextLen - prevLen;
+    if (stepCount <= 1) return null;
+    if (!hasShiftedPathPrefixMatch(nextPath, prevPath, stepCount)) return null;
+    return nextLen > 1 ? nextPath.slice(1) : null;
+  }
+
+  const stepCount = prevLen - nextLen;
+  if (stepCount <= 1) return null;
+  if (!hasShiftedPathPrefixMatch(prevPath, nextPath, stepCount)) return null;
+  const restored = prevPath[stepCount - 1];
+  return restored ? [restored, ...nextPath] : null;
+};
+
 const updatePathTipArrivalStates = (
   prevPath,
   nextPath,
@@ -1114,9 +1221,22 @@ const updatePathTipArrivalStates = (
       return;
     }
   }
-  updateSinglePathTipArrivalState(
+  const tipArrivalHint = latestInteractionModel?.pathTipArrivalHint || null;
+  const startPrevPath = resolveTipArrivalSyntheticPrevPath(
     'start',
     prevPath,
+    nextPath,
+    tipArrivalHint,
+  ) || prevPath;
+  const endPrevPath = resolveTipArrivalSyntheticPrevPath(
+    'end',
+    prevPath,
+    nextPath,
+    tipArrivalHint,
+  ) || prevPath;
+  updateSinglePathTipArrivalState(
+    'start',
+    startPrevPath,
     nextPath,
     cellSize,
     cellStep,
@@ -1125,7 +1245,7 @@ const updatePathTipArrivalStates = (
   );
   updateSinglePathTipArrivalState(
     'end',
-    prevPath,
+    endPrevPath,
     nextPath,
     cellSize,
     cellStep,

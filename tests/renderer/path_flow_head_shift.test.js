@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { resolveHeadShiftStepCount } from '../../src/renderer.js';
+import {
+  resolveHeadShiftStepCount,
+  resolveTipArrivalSyntheticPrevPath,
+} from '../../src/renderer.js';
 
 test('resolveHeadShiftStepCount detects single-step head growth', () => {
   const previousPath = [
@@ -85,4 +88,227 @@ test('resolveHeadShiftStepCount returns 0 when paths are not shifted prefixes', 
   ];
 
   assert.equal(resolveHeadShiftStepCount(nextPath, previousPath), 0);
+});
+
+test('resolveTipArrivalSyntheticPrevPath returns prior one-step path for multi-step end growth', () => {
+  const previousPath = [
+    { r: 1, c: 1 },
+    { r: 1, c: 2 },
+  ];
+  const nextPath = [
+    { r: 1, c: 1 },
+    { r: 1, c: 2 },
+    { r: 1, c: 3 },
+    { r: 1, c: 4 },
+  ];
+
+  const syntheticPrev = resolveTipArrivalSyntheticPrevPath('end', previousPath, nextPath);
+  assert.deepEqual(syntheticPrev, [
+    { r: 1, c: 1 },
+    { r: 1, c: 2 },
+    { r: 1, c: 3 },
+  ]);
+});
+
+test('resolveTipArrivalSyntheticPrevPath returns prior one-step path for multi-step end retract', () => {
+  const previousPath = [
+    { r: 2, c: 1 },
+    { r: 2, c: 2 },
+    { r: 2, c: 3 },
+    { r: 2, c: 4 },
+  ];
+  const nextPath = [
+    { r: 2, c: 1 },
+    { r: 2, c: 2 },
+  ];
+
+  const syntheticPrev = resolveTipArrivalSyntheticPrevPath('end', previousPath, nextPath);
+  assert.deepEqual(syntheticPrev, [
+    { r: 2, c: 1 },
+    { r: 2, c: 2 },
+    { r: 2, c: 3 },
+  ]);
+});
+
+test('resolveTipArrivalSyntheticPrevPath returns prior one-step path for multi-step start growth', () => {
+  const previousPath = [
+    { r: 4, c: 4 },
+    { r: 4, c: 5 },
+  ];
+  const nextPath = [
+    { r: 4, c: 2 },
+    { r: 4, c: 3 },
+    { r: 4, c: 4 },
+    { r: 4, c: 5 },
+  ];
+
+  const syntheticPrev = resolveTipArrivalSyntheticPrevPath('start', previousPath, nextPath);
+  assert.deepEqual(syntheticPrev, [
+    { r: 4, c: 3 },
+    { r: 4, c: 4 },
+    { r: 4, c: 5 },
+  ]);
+});
+
+test('resolveTipArrivalSyntheticPrevPath returns prior one-step path for multi-step start retract', () => {
+  const previousPath = [
+    { r: 7, c: 1 },
+    { r: 7, c: 2 },
+    { r: 7, c: 3 },
+    { r: 7, c: 4 },
+  ];
+  const nextPath = [
+    { r: 7, c: 3 },
+    { r: 7, c: 4 },
+  ];
+
+  const syntheticPrev = resolveTipArrivalSyntheticPrevPath('start', previousPath, nextPath);
+  assert.deepEqual(syntheticPrev, [
+    { r: 7, c: 2 },
+    { r: 7, c: 3 },
+    { r: 7, c: 4 },
+  ]);
+});
+
+test('resolveTipArrivalSyntheticPrevPath handles equal-length end retract-then-expand', () => {
+  const previousPath = [
+    { r: 1, c: 1 },
+    { r: 1, c: 2 },
+    { r: 1, c: 3 },
+    { r: 1, c: 4 },
+  ];
+  const nextPath = [
+    { r: 1, c: 1 },
+    { r: 1, c: 2 },
+    { r: 1, c: 3 },
+    { r: 2, c: 3 },
+  ];
+
+  const syntheticPrev = resolveTipArrivalSyntheticPrevPath('end', previousPath, nextPath);
+  assert.deepEqual(syntheticPrev, [
+    { r: 1, c: 1 },
+    { r: 1, c: 2 },
+    { r: 1, c: 3 },
+  ]);
+});
+
+test('resolveTipArrivalSyntheticPrevPath handles equal-length start retract-then-expand', () => {
+  const previousPath = [
+    { r: 3, c: 1 },
+    { r: 3, c: 2 },
+    { r: 3, c: 3 },
+    { r: 3, c: 4 },
+  ];
+  const nextPath = [
+    { r: 2, c: 2 },
+    { r: 3, c: 2 },
+    { r: 3, c: 3 },
+    { r: 3, c: 4 },
+  ];
+
+  const syntheticPrev = resolveTipArrivalSyntheticPrevPath('start', previousPath, nextPath);
+  assert.deepEqual(syntheticPrev, [
+    { r: 3, c: 2 },
+    { r: 3, c: 3 },
+    { r: 3, c: 4 },
+  ]);
+});
+
+test('resolveTipArrivalSyntheticPrevPath uses hint for mixed end transition with net -1', () => {
+  const previousPath = [
+    { r: 1, c: 1 },
+    { r: 1, c: 2 },
+    { r: 1, c: 3 },
+    { r: 1, c: 4 },
+    { r: 1, c: 5 },
+  ];
+  const nextPath = [
+    { r: 1, c: 1 },
+    { r: 1, c: 2 },
+    { r: 1, c: 3 },
+    { r: 2, c: 3 },
+  ];
+
+  const syntheticPrev = resolveTipArrivalSyntheticPrevPath(
+    'end',
+    previousPath,
+    nextPath,
+    {
+      side: 'end',
+      from: { r: 1, c: 3 },
+      to: { r: 2, c: 3 },
+    },
+  );
+  assert.deepEqual(syntheticPrev, [
+    { r: 1, c: 1 },
+    { r: 1, c: 2 },
+    { r: 1, c: 3 },
+  ]);
+});
+
+test('resolveTipArrivalSyntheticPrevPath uses hint for mixed start transition with net +1', () => {
+  const previousPath = [
+    { r: 3, c: 2 },
+    { r: 3, c: 3 },
+    { r: 3, c: 4 },
+    { r: 3, c: 5 },
+  ];
+  const nextPath = [
+    { r: 1, c: 3 },
+    { r: 2, c: 3 },
+    { r: 3, c: 3 },
+    { r: 3, c: 4 },
+    { r: 3, c: 5 },
+  ];
+
+  const syntheticPrev = resolveTipArrivalSyntheticPrevPath(
+    'start',
+    previousPath,
+    nextPath,
+    {
+      side: 'start',
+      from: { r: 2, c: 3 },
+      to: { r: 1, c: 3 },
+    },
+  );
+  assert.deepEqual(syntheticPrev, [
+    { r: 2, c: 3 },
+    { r: 3, c: 3 },
+    { r: 3, c: 4 },
+    { r: 3, c: 5 },
+  ]);
+});
+
+test('resolveTipArrivalSyntheticPrevPath uses hint for retract final step', () => {
+  const previousPath = [
+    { r: 2, c: 1 },
+    { r: 2, c: 2 },
+    { r: 2, c: 3 },
+    { r: 2, c: 4 },
+    { r: 1, c: 4 },
+  ];
+  const nextPath = [
+    { r: 2, c: 1 },
+    { r: 2, c: 2 },
+    { r: 2, c: 3 },
+    { r: 2, c: 4 },
+  ];
+
+  const syntheticPrev = resolveTipArrivalSyntheticPrevPath(
+    'end',
+    previousPath,
+    nextPath,
+    {
+      side: 'end',
+      from: { r: 1, c: 4 },
+      to: { r: 2, c: 4 },
+    },
+  );
+  assert.deepEqual(syntheticPrev, [
+    { r: 2, c: 1 },
+    { r: 2, c: 2 },
+    { r: 2, c: 3 },
+    { r: 2, c: 4 },
+    { r: 1, c: 4 },
+  ]);
 });

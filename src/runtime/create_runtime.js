@@ -114,6 +114,7 @@ export function createRuntime(options) {
     isPathDragging: false,
     pathDragSide: null,
     pathDragCursor: null,
+    pathTipArrivalHint: null,
     isWallDragging: false,
     wallGhost: {
       visible: false,
@@ -245,6 +246,7 @@ export function createRuntime(options) {
       interactionState.isPathDragging = false;
       interactionState.pathDragSide = null;
       interactionState.pathDragCursor = null;
+      interactionState.pathTipArrivalHint = null;
       interactionState.isWallDragging = false;
       interactionState.wallGhost = { visible: false, x: 0, y: 0 };
       interactionState.dropTarget = null;
@@ -846,6 +848,32 @@ export function createRuntime(options) {
     );
   };
 
+  const buildPathTipArrivalHint = (commandType, prevSnapshot, nextSnapshot) => {
+    const side = commandType === GAME_COMMANDS.START_OR_STEP_FROM_START
+      ? 'start'
+      : (commandType === GAME_COMMANDS.START_OR_STEP ? 'end' : null);
+    if (!side || !prevSnapshot || !nextSnapshot) return null;
+
+    const prevPath = Array.isArray(prevSnapshot.path) ? prevSnapshot.path : [];
+    const nextPath = Array.isArray(nextSnapshot.path) ? nextSnapshot.path : [];
+    if (prevPath.length <= 0 || nextPath.length <= 0) return null;
+
+    const prevTip = side === 'start'
+      ? prevPath[0]
+      : prevPath[prevPath.length - 1];
+    const nextTip = side === 'start'
+      ? nextPath[0]
+      : nextPath[nextPath.length - 1];
+    if (!prevTip || !nextTip) return null;
+    if (prevTip.r === nextTip.r && prevTip.c === nextTip.c) return null;
+
+    return {
+      side,
+      from: { r: prevTip.r, c: prevTip.c },
+      to: { r: nextTip.r, c: nextTip.c },
+    };
+  };
+
   const invalidateEvaluateCache = () => {
     evaluateCacheBoardVersion += 1;
     evaluateCache.clear();
@@ -904,6 +932,7 @@ export function createRuntime(options) {
         isPathDragging: interactionState.isPathDragging,
         pathDragSide: interactionState.pathDragSide,
         pathDragCursor: interactionState.pathDragCursor,
+        pathTipArrivalHint: interactionState.pathTipArrivalHint,
         isWallDragging: interactionState.isWallDragging,
         wallGhost: interactionState.wallGhost,
         dropTarget: interactionState.dropTarget,
@@ -954,6 +983,7 @@ export function createRuntime(options) {
     const snapshot = state.getSnapshot();
     renderer.resize();
     refresh(snapshot, validate, options);
+    interactionState.pathTipArrivalHint = null;
   };
 
   const queueBoardLayout = (validate = false, optionsForInteraction = {}) => {
@@ -1386,17 +1416,33 @@ export function createRuntime(options) {
   const handleGameCommand = (payload) => {
     if (dailyBoardLocked) return;
     if (!payload?.commandType) return;
+    const commandType = payload.commandType;
+    const isPathStepCommand = (
+      commandType === GAME_COMMANDS.START_OR_STEP
+      || commandType === GAME_COMMANDS.START_OR_STEP_FROM_START
+    );
+    const previousSnapshot = isPathStepCommand ? state.getSnapshot() : null;
 
     const transition = state.dispatch({
-      type: payload.commandType,
+      type: commandType,
       payload,
     });
+
+    if (transition.changed && isPathStepCommand) {
+      interactionState.pathTipArrivalHint = buildPathTipArrivalHint(
+        commandType,
+        previousSnapshot,
+        transition.snapshot,
+      );
+    } else if (!isPathStepCommand) {
+      interactionState.pathTipArrivalHint = null;
+    }
 
     if (transition.rebuildGrid) {
       invalidateEvaluateCache();
       renderer.rebuildGrid(transition.snapshot);
     }
-    if (payload.commandType === GAME_COMMANDS.WALL_MOVE_ATTEMPT && transition.changed) {
+    if (commandType === GAME_COMMANDS.WALL_MOVE_ATTEMPT && transition.changed) {
       invalidateEvaluateCache();
     }
 
@@ -1408,7 +1454,7 @@ export function createRuntime(options) {
       isPathDragging: interactionState.isPathDragging,
       pathDragSide: interactionState.pathDragSide,
       pathDragCursor: interactionState.pathDragCursor,
-      validationSource: transition.validate ? payload.commandType : null,
+      validationSource: transition.validate ? commandType : null,
     });
 
     const shouldPersistInputState = Boolean(transition.validate) && !interactionState.isPathDragging;
