@@ -253,7 +253,7 @@ test('predictPathDragPointer uses adaptive projection cap and keeps it bounded',
   );
 
   assert.ok(highProjectedDist > lowProjectedDist);
-  assert.ok(highProjectedDist <= 46.0001);
+  assert.ok(highProjectedDist <= 58.0001);
 });
 
 test('predictPathDragPointer avoids projection when movement speed is near-stationary', () => {

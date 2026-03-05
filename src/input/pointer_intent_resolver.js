@@ -1,17 +1,17 @@
 const SAMPLE_WINDOW = 8;
 const EMA_ALPHA = 0.35;
 const MIN_LOOKAHEAD_MS = 6;
-const MAX_LOOKAHEAD_MS = 34;
+const MAX_LOOKAHEAD_MS = 40;
 const ERROR_SCALE_CELLS = 1.15;
 const ERROR_DAMP_WEIGHT = 0.35;
 const SPARSE_BONUS_WEIGHT = 0.30;
-const LATENCY_BIAS_MS = 2;
+const LATENCY_BIAS_MS = 6;
 const DEFAULT_FRAME_INTERVAL_MS = 16.67;
 const MIN_FRAME_INTERVAL_MS = 8;
 const MAX_FRAME_INTERVAL_MS = 50;
 const MIN_PROJECT_DISTANCE_CELLS = 0.5;
-const BASE_PROJECT_DISTANCE_CELLS = 0.75;
-const MAX_PROJECT_DISTANCE_CELLS = 1.15;
+const BASE_PROJECT_DISTANCE_CELLS = 0.9;
+const MAX_PROJECT_DISTANCE_CELLS = 1.45;
 const MIN_SPEED_PX_PER_MS = 0.02;
 const STOP_CONVERGENCE_SPEED_PX_PER_MS = 0.012;
 const HEADING_COS_STEADY_MIN = 0.80;
@@ -29,9 +29,9 @@ const STITCH_BRIDGE_MIN_RADIUS_PX = 1;
 const STITCH_BRIDGE_MIN_WIDTH_PX = 1;
 const STITCH_BRIDGE_WIDTH_CELL_RATIO = 0.06;
 const RAW_POINTER_DIRECTION_MIN_DISTANCE_CELL_RATIO = 0.08;
-const RAW_POINTER_OPPOSITE_DIRECTION_COS = -0.20;
-const RAW_OVERRIDE_MARGIN_CELL_RATIO = 0.10;
-const RAW_BACKTRACK_OVERRIDE_MARGIN_CELL_RATIO = 0.06;
+const RAW_POINTER_OPPOSITE_DIRECTION_COS = -0.25;
+const RAW_OVERRIDE_MARGIN_CELL_RATIO = 0.30;
+const RAW_BACKTRACK_OVERRIDE_MARGIN_CELL_RATIO = 0.04;
 const DEFAULT_CELL_SIZE_PX = 56;
 const MIN_PREDICTION_STRENGTH_LEVEL = 0;
 const MAX_PREDICTION_STRENGTH_LEVEL = 3;
@@ -588,14 +588,14 @@ export function chooseSlipperyPathDragStep({
     return { r: rawBest.candidate.r, c: rawBest.candidate.c };
   }
 
-  if (rawBest.marginPx > (predictedBest.marginPx + rawOverrideMarginPx)) {
-    return { r: rawBest.candidate.r, c: rawBest.candidate.c };
-  }
-
   if (
     rawBest.candidate.isBacktrack
     && rawBest.marginPx > (predictedBest.marginPx + rawBacktrackOverrideMarginPx)
   ) {
+    return { r: rawBest.candidate.r, c: rawBest.candidate.c };
+  }
+
+  if (rawBest.marginPx > (predictedBest.marginPx + rawOverrideMarginPx)) {
     return { r: rawBest.candidate.r, c: rawBest.candidate.c };
   }
 
