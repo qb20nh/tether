@@ -187,7 +187,7 @@ export const mountLocalDebugPanel = (callbacks = {}) => {
     : async () => 'unsupported';
   const showToast = typeof callbacks.showToast === 'function'
     ? callbacks.showToast
-    : () => {};
+    : () => { };
   const triggerSystemNotification = typeof callbacks.triggerSystemNotification === 'function'
     ? callbacks.triggerSystemNotification
     : async () => false;
@@ -251,6 +251,22 @@ export const mountLocalDebugPanel = (callbacks = {}) => {
   dailyTab.id = `${PANEL_ID}PanelDaily`;
   dailyTab.setAttribute('role', 'tabpanel');
   dailyTab.setAttribute('aria-labelledby', dailyTabBtn.id);
+
+  const animationTabBtn = document.createElement('button');
+  animationTabBtn.type = 'button';
+  animationTabBtn.className = 'debugTabBtn';
+  animationTabBtn.textContent = 'Animations';
+  animationTabBtn.id = `${PANEL_ID}TabAnimation`;
+  animationTabBtn.setAttribute('role', 'tab');
+  animationTabBtn.setAttribute('aria-controls', `${PANEL_ID}PanelAnimation`);
+  tabs.appendChild(animationTabBtn);
+
+  const animationTab = document.createElement('div');
+  animationTab.className = 'debugTabPanel';
+  animationTab.dataset.tab = 'animation';
+  animationTab.id = `${PANEL_ID}PanelAnimation`;
+  animationTab.setAttribute('role', 'tabpanel');
+  animationTab.setAttribute('aria-labelledby', animationTabBtn.id);
 
   const titleRow = document.createElement('div');
   titleRow.className = 'debugRow';
@@ -358,18 +374,53 @@ export const mountLocalDebugPanel = (callbacks = {}) => {
   dailyTab.appendChild(dailyButtons);
   dailyTab.appendChild(dailyOutput);
 
-  const setActiveTab = (tabKey) => {
-    const useNotification = tabKey !== DEBUG_TAB_DAILY;
-    notificationTab.hidden = !useNotification;
-    dailyTab.hidden = useNotification;
-    notificationTabBtn.classList.toggle('isActive', useNotification);
-    dailyTabBtn.classList.toggle('isActive', !useNotification);
-    notificationTabBtn.setAttribute('aria-selected', useNotification ? 'true' : 'false');
-    dailyTabBtn.setAttribute('aria-selected', useNotification ? 'false' : 'true');
-    notificationTabBtn.tabIndex = useNotification ? 0 : -1;
-    dailyTabBtn.tabIndex = useNotification ? -1 : 0;
+  if (typeof window.TETHER_DEBUG_ANIM_SPEED !== 'number') {
+    window.TETHER_DEBUG_ANIM_SPEED = 1;
+  }
+  const animationButtons = document.createElement('div');
+  animationButtons.className = 'debugGrid';
+  animationButtons.appendChild(mkButton('Speed: 1x', () => {
+    window.TETHER_DEBUG_ANIM_SPEED = 1;
+  }));
+  animationButtons.appendChild(mkButton('Speed: 0.25x (4x slower)', () => {
+    window.TETHER_DEBUG_ANIM_SPEED = 4;
+  }));
+  animationButtons.appendChild(mkButton('Speed: 0.1x (10x slower)', () => {
+    window.TETHER_DEBUG_ANIM_SPEED = 10;
+  }));
+  animationTab.appendChild(animationButtons);
+
+  let animationRafId;
+  const syncAnimationsSpeed = () => {
+    const currentSpeed = typeof window.TETHER_DEBUG_ANIM_SPEED === 'number' ? window.TETHER_DEBUG_ANIM_SPEED : 1;
+    const targetPlaybackRate = 1 / Math.max(0.1, currentSpeed);
+    document.getAnimations().forEach((anim) => {
+      if (anim.playbackRate !== targetPlaybackRate) {
+        anim.playbackRate = targetPlaybackRate;
+      }
+    });
+    animationRafId = requestAnimationFrame(syncAnimationsSpeed);
   };
-  const tabButtons = [notificationTabBtn, dailyTabBtn];
+  syncAnimationsSpeed();
+
+  const setActiveTab = (tabKey) => {
+    const useNotification = tabKey === DEBUG_TAB_NOTIFICATION;
+    const useDaily = tabKey === DEBUG_TAB_DAILY;
+    const useAnimation = tabKey === 'animation';
+    notificationTab.hidden = !useNotification;
+    dailyTab.hidden = !useDaily;
+    animationTab.hidden = !useAnimation;
+    notificationTabBtn.classList.toggle('isActive', useNotification);
+    dailyTabBtn.classList.toggle('isActive', useDaily);
+    animationTabBtn.classList.toggle('isActive', useAnimation);
+    notificationTabBtn.setAttribute('aria-selected', useNotification ? 'true' : 'false');
+    dailyTabBtn.setAttribute('aria-selected', useDaily ? 'true' : 'false');
+    animationTabBtn.setAttribute('aria-selected', useAnimation ? 'true' : 'false');
+    notificationTabBtn.tabIndex = useNotification ? 0 : -1;
+    dailyTabBtn.tabIndex = useDaily ? 0 : -1;
+    animationTabBtn.tabIndex = useAnimation ? 0 : -1;
+  };
+  const tabButtons = [notificationTabBtn, dailyTabBtn, animationTabBtn];
   tabButtons.forEach((button, index) => {
     button.addEventListener('keydown', (event) => {
       if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') return;
@@ -377,17 +428,19 @@ export const mountLocalDebugPanel = (callbacks = {}) => {
       const dir = event.key === 'ArrowRight' ? 1 : -1;
       const nextIndex = (index + dir + tabButtons.length) % tabButtons.length;
       tabButtons[nextIndex].focus();
-      setActiveTab(nextIndex === 0 ? DEBUG_TAB_NOTIFICATION : DEBUG_TAB_DAILY);
+      setActiveTab(nextIndex === 0 ? DEBUG_TAB_NOTIFICATION : (nextIndex === 1 ? DEBUG_TAB_DAILY : 'animation'));
     });
   });
   notificationTabBtn.addEventListener('click', () => setActiveTab(DEBUG_TAB_NOTIFICATION));
   dailyTabBtn.addEventListener('click', () => setActiveTab(DEBUG_TAB_DAILY));
+  animationTabBtn.addEventListener('click', () => setActiveTab('animation'));
   setActiveTab(DEBUG_TAB_NOTIFICATION);
 
   root.appendChild(title);
   root.appendChild(tabs);
   root.appendChild(notificationTab);
   root.appendChild(dailyTab);
+  root.appendChild(animationTab);
   document.body.appendChild(root);
   bindLogoToggle(root);
 };

@@ -2059,11 +2059,32 @@ const getPathRenderPointsForFrame = (
 
 
 
+let realTimeLastMs = 0;
+let scaledTimeAccumulatorMs = 0;
+
 const getNowMs = () => {
-  if (typeof performance !== 'undefined' && typeof performance.now === 'function') {
-    return performance.now();
+  const getRealTime = () => {
+    if (typeof performance !== 'undefined' && typeof performance.now === 'function') {
+      return performance.now();
+    }
+    return Date.now();
+  };
+
+  const currentRealTime = getRealTime();
+  if (realTimeLastMs === 0) {
+    realTimeLastMs = currentRealTime;
+    scaledTimeAccumulatorMs = currentRealTime;
   }
-  return Date.now();
+
+  const delta = currentRealTime - realTimeLastMs;
+  realTimeLastMs = currentRealTime;
+
+  const speedMultiplier = typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.DEV && typeof window.TETHER_DEBUG_ANIM_SPEED === 'number'
+    ? Math.max(0.1, window.TETHER_DEBUG_ANIM_SPEED)
+    : 1;
+
+  scaledTimeAccumulatorMs += (delta / speedMultiplier);
+  return scaledTimeAccumulatorMs;
 };
 
 const getCompletionProgress = (completionModel = latestCompletionModel) => {
@@ -3094,11 +3115,6 @@ export function cacheElements() {
     langSel: get(ELEMENT_IDS.LANG_SEL),
     themeLabel: get(ELEMENT_IDS.THEME_LABEL),
     themeToggle: get(ELEMENT_IDS.THEME_TOGGLE),
-    pathPredictionLabel: get(ELEMENT_IDS.PATH_PREDICTION_LABEL),
-    pathPredictionStrengthControl: get(ELEMENT_IDS.PATH_PREDICTION_STRENGTH_CONTROL),
-    pathPredictionStrengthDecBtn: get(ELEMENT_IDS.PATH_PREDICTION_STRENGTH_DEC_BTN),
-    pathPredictionStrengthValue: get(ELEMENT_IDS.PATH_PREDICTION_STRENGTH_VALUE),
-    pathPredictionStrengthIncBtn: get(ELEMENT_IDS.PATH_PREDICTION_STRENGTH_INC_BTN),
     settingsToggle: get(ELEMENT_IDS.SETTINGS_TOGGLE),
     settingsPanel: get(ELEMENT_IDS.SETTINGS_PANEL),
     themeSwitchDialog: get(ELEMENT_IDS.THEME_SWITCH_DIALOG),

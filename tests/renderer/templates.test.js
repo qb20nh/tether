@@ -9,8 +9,6 @@ test('templates source uses material icon ligatures for header and dialog icons'
   assert.match(source, /<span class="uiIconMaterial" aria-hidden="true">settings<\/span>/);
   assert.match(source, /<span class="uiIconMaterial settingsLabelIcon" aria-hidden="true">language<\/span>/);
   assert.match(source, /<span class="uiIconMaterial settingsLabelIcon" aria-hidden="true">palette<\/span>/);
-  assert.match(source, /<span class="uiIconMaterial" aria-hidden="true">chevron_left<\/span>/);
-  assert.match(source, /<span class="uiIconMaterial" aria-hidden="true">chevron_right<\/span>/);
   assert.match(source, /<span class="uiIconMaterial controlActionIcon" aria-hidden="true">restart_alt<\/span>/);
   assert.match(source, /<span class="uiIconMaterial controlActionIcon" aria-hidden="true">swap_horiz<\/span>/);
   assert.match(source, /<span class="themeSwitchDialog__icon uiIconMaterial" aria-hidden="true">warning<\/span>/);

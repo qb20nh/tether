@@ -8,7 +8,6 @@ import {
 } from '../geometry.js';
 import {
   chooseSlipperyPathDragStep,
-  predictPathDragPointer,
 } from './pointer_intent_resolver.js';
 import {
   INTENT_TYPES,
@@ -18,12 +17,6 @@ import {
 } from '../runtime/intents.js';
 
 export function createDomInputAdapter() {
-  const PATH_PREDICTION_SAMPLE_WINDOW = 8;
-  const PATH_PREDICTION_DEFAULT_FRAME_INTERVAL_MS = 16.67;
-  const PATH_PREDICTION_MIN_FRAME_INTERVAL_MS = 8;
-  const PATH_PREDICTION_MAX_FRAME_INTERVAL_MS = 50;
-  const PATH_PREDICTION_FRAME_EMA_ALPHA = 0.2;
-
   let refs = null;
   let readSnapshot = () => null;
   let emitIntent = () => { };
@@ -36,7 +29,6 @@ export function createDomInputAdapter() {
   let dragGridMetrics = null;
   let wallDragFrame = 0;
   let wallDragQueuedPoint = null;
-  let pathDragFrameTracker = null;
 
   const addListener = (target, event, handler, options) => {
     if (!target?.addEventListener) return;
@@ -95,64 +87,6 @@ export function createDomInputAdapter() {
     if (!wallDragFrame) return;
     cancelAnimationFrame(wallDragFrame);
     wallDragFrame = 0;
-  };
-
-  const startPathDragFrameTracker = () => {
-    if (pathDragFrameTracker) return;
-    if (typeof requestAnimationFrame !== 'function') return;
-
-    const tracker = {
-      frameId: 0,
-      lastTs: NaN,
-      emaFrameIntervalMs: PATH_PREDICTION_DEFAULT_FRAME_INTERVAL_MS,
-    };
-
-    const tick = (ts) => {
-      if (!pathDragFrameTracker) return;
-      const lastTs = Number(pathDragFrameTracker.lastTs);
-      if (Number.isFinite(lastTs)) {
-        const rawDt = Number(ts) - lastTs;
-        if (Number.isFinite(rawDt) && rawDt > 0) {
-          const clampedDt = Math.max(
-            PATH_PREDICTION_MIN_FRAME_INTERVAL_MS,
-            Math.min(PATH_PREDICTION_MAX_FRAME_INTERVAL_MS, rawDt),
-          );
-          pathDragFrameTracker.emaFrameIntervalMs = (
-            pathDragFrameTracker.emaFrameIntervalMs * (1 - PATH_PREDICTION_FRAME_EMA_ALPHA)
-          ) + (clampedDt * PATH_PREDICTION_FRAME_EMA_ALPHA);
-        }
-      }
-      pathDragFrameTracker.lastTs = Number(ts);
-      pathDragFrameTracker.frameId = requestAnimationFrame(tick);
-    };
-
-    tracker.frameId = requestAnimationFrame(tick);
-    pathDragFrameTracker = tracker;
-  };
-
-  const stopPathDragFrameTracker = () => {
-    if (!pathDragFrameTracker) return;
-    if (pathDragFrameTracker.frameId && typeof cancelAnimationFrame === 'function') {
-      cancelAnimationFrame(pathDragFrameTracker.frameId);
-    }
-    pathDragFrameTracker = null;
-  };
-
-  const readPathDragFrameIntervalMs = () => {
-    const value = Number(pathDragFrameTracker?.emaFrameIntervalMs);
-    if (Number.isFinite(value) && value > 0) {
-      return Math.max(
-        PATH_PREDICTION_MIN_FRAME_INTERVAL_MS,
-        Math.min(PATH_PREDICTION_MAX_FRAME_INTERVAL_MS, value),
-      );
-    }
-    return PATH_PREDICTION_DEFAULT_FRAME_INTERVAL_MS;
-  };
-
-  const readPathPredictionStrengthLevel = () => {
-    const value = Number.parseInt(refs?.pathPredictionStrengthControl?.dataset?.level || '', 10);
-    if (Number.isInteger(value) && value >= 0 && value <= 3) return value;
-    return 1;
   };
 
   const captureGridMetrics = (snapshot = null) => {
@@ -247,33 +181,6 @@ export function createDomInputAdapter() {
     return true;
   };
 
-  const appendPathPredictionSamples = (predictionState, event) => {
-    if (!predictionState || !event) return;
-    const rawCoalesced = typeof event.getCoalescedEvents === 'function'
-      ? event.getCoalescedEvents()
-      : null;
-    const sourceEvents = (rawCoalesced && rawCoalesced.length > 0)
-      ? rawCoalesced
-      : [event];
-
-    for (let i = 0; i < sourceEvents.length; i += 1) {
-      const sampleEvent = sourceEvents[i];
-      const x = Number(sampleEvent?.clientX);
-      const y = Number(sampleEvent?.clientY);
-      const t = Number(sampleEvent?.timeStamp);
-      if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
-      predictionState.samples.push({
-        x,
-        y,
-        t: Number.isFinite(t) ? t : Number(event.timeStamp) || Date.now(),
-      });
-    }
-
-    if (predictionState.samples.length > PATH_PREDICTION_SAMPLE_WINDOW) {
-      predictionState.samples.splice(0, predictionState.samples.length - PATH_PREDICTION_SAMPLE_WINDOW);
-    }
-  };
-
   const onPointerDown = (e) => {
     const snapshot = readSnapshot();
     const cell = cellFromPoint(e.clientX, e.clientY);
@@ -316,17 +223,10 @@ export function createDomInputAdapter() {
         origin: { r: cell.r, c: cell.c },
         lastCursorKey: `${cell.r},${cell.c}`,
         lastHoverKey: `${cell.r},${cell.c}`,
-        prediction: {
-          samples: [{ x: e.clientX, y: e.clientY, t: e.timeStamp }],
-          emaErrorPx: 0,
-          lastPredictedClient: null,
-          frameIntervalMs: PATH_PREDICTION_DEFAULT_FRAME_INTERVAL_MS,
-        },
       };
       dragGridMetrics = captureGridMetrics(nextSnapshot);
       activePointerId = e.pointerId;
       refs.gridEl.setPointerCapture(e.pointerId);
-      startPathDragFrameTracker();
       sendInteractionUpdate(INTERACTION_UPDATES.PATH_DRAG, {
         isPathDragging: true,
         pathDragSide: pathDrag.side,
@@ -348,18 +248,11 @@ export function createDomInputAdapter() {
         origin: { r: cell.r, c: cell.c },
         lastCursorKey: `${cell.r},${cell.c}`,
         lastHoverKey: `${cell.r},${cell.c}`,
-        prediction: {
-          samples: [{ x: e.clientX, y: e.clientY, t: e.timeStamp }],
-          emaErrorPx: 0,
-          lastPredictedClient: null,
-          frameIntervalMs: PATH_PREDICTION_DEFAULT_FRAME_INTERVAL_MS,
-        },
       };
       dragGridMetrics = captureGridMetrics(snapshot);
       dragMode = 'path';
       activePointerId = e.pointerId;
       refs.gridEl.setPointerCapture(e.pointerId);
-      startPathDragFrameTracker();
       sendInteractionUpdate(INTERACTION_UPDATES.PATH_DRAG, {
         isPathDragging: true,
         pathDragSide: null,
@@ -376,19 +269,12 @@ export function createDomInputAdapter() {
       origin: { r: cell.r, c: cell.c },
       lastCursorKey: `${cell.r},${cell.c}`,
       lastHoverKey: `${cell.r},${cell.c}`,
-      prediction: {
-        samples: [{ x: e.clientX, y: e.clientY, t: e.timeStamp }],
-        emaErrorPx: 0,
-        lastPredictedClient: null,
-        frameIntervalMs: PATH_PREDICTION_DEFAULT_FRAME_INTERVAL_MS,
-      },
     };
     dragGridMetrics = captureGridMetrics(snapshot);
 
     dragMode = 'path';
     activePointerId = e.pointerId;
     refs.gridEl.setPointerCapture(e.pointerId);
-    startPathDragFrameTracker();
     sendInteractionUpdate(INTERACTION_UPDATES.PATH_DRAG, {
       isPathDragging: true,
       pathDragSide: pathDrag.side,
@@ -410,45 +296,11 @@ export function createDomInputAdapter() {
 
     if (dragMode === 'path') {
       if (e.cancelable) e.preventDefault();
-      const rawPointerClientX = e.clientX;
-      const rawPointerClientY = e.clientY;
-      let pointerClientX = rawPointerClientX;
-      let pointerClientY = rawPointerClientY;
+      const pointerClientX = e.clientX;
+      const pointerClientY = e.clientY;
       const snapshotForInput = pathDrag ? readSnapshot() : null;
 
       if (pathDrag) {
-        if (!pathDrag.prediction) {
-          pathDrag.prediction = {
-            samples: [],
-            emaErrorPx: 0,
-            lastPredictedClient: null,
-          };
-        }
-        const predictionState = pathDrag.prediction;
-        appendPathPredictionSamples(predictionState, e);
-        predictionState.frameIntervalMs = readPathDragFrameIntervalMs();
-
-        const predictionStrengthLevel = readPathPredictionStrengthLevel();
-        const shouldPredict = predictionStrengthLevel > 0;
-        if (shouldPredict) {
-          const predicted = predictPathDragPointer({
-            samples: predictionState.samples,
-            cellSize: dragGridMetrics?.size ?? getCellSize(refs.gridEl),
-            prevEmaErrorPx: predictionState.emaErrorPx,
-            prevPredictedClient: predictionState.lastPredictedClient,
-            frameIntervalMs: predictionState.frameIntervalMs,
-            nowMs: Number.isFinite(Number(e.timeStamp)) ? Number(e.timeStamp) : undefined,
-            predictionStrengthLevel,
-          });
-          pointerClientX = predicted.effectiveClient.x;
-          pointerClientY = predicted.effectiveClient.y;
-          predictionState.emaErrorPx = predicted.nextEmaErrorPx;
-          predictionState.lastPredictedClient = predicted.nextPredictedClient;
-        } else {
-          predictionState.emaErrorPx = 0;
-          predictionState.lastPredictedClient = null;
-        }
-
         const hoverMetrics = dragGridMetrics || captureGridMetrics(snapshotForInput);
         if (hoverMetrics) dragGridMetrics = hoverMetrics;
         const hoverCell = snapPathCellFromPoint(e.clientX, e.clientY, snapshotForInput, hoverMetrics);
@@ -473,8 +325,6 @@ export function createDomInputAdapter() {
           : refs.gridEl.getBoundingClientRect();
         const px = metrics ? (pointerClientX - metrics.left) : (pointerClientX - rect.left);
         const py = metrics ? (pointerClientY - metrics.top) : (pointerClientY - rect.top);
-        const rawPx = metrics ? (rawPointerClientX - metrics.left) : (rawPointerClientX - rect.left);
-        const rawPy = metrics ? (rawPointerClientY - metrics.top) : (rawPointerClientY - rect.top);
         const activeCellSize = metrics?.size ?? getCellSize(refs.gridEl);
         const centerOfCell = metrics
           ? ((r, c) => ({
@@ -483,11 +333,6 @@ export function createDomInputAdapter() {
           }))
           : ((r, c) => cellCenter(r, c, refs.gridEl));
         const pointerCell = snapPathCellFromPoint(
-          rawPointerClientX,
-          rawPointerClientY,
-          snapshotForInput,
-          metrics,
-        ) || snapPathCellFromPoint(
           pointerClientX,
           pointerClientY,
           snapshotForInput,
@@ -515,7 +360,6 @@ export function createDomInputAdapter() {
             headNode,
             backtrackNode,
             pointer: { x: px, y: py },
-            rawPointer: { x: rawPx, y: rawPy },
             pointerCell,
             isUsableCell,
             isAdjacentMove,
@@ -615,7 +459,6 @@ export function createDomInputAdapter() {
     const wallMoveTo = wallDrag?.hover || null;
 
     clearQueuedWallDragGhostUpdate();
-    stopPathDragFrameTracker();
     dragMode = null;
     activePointerId = null;
     wallDrag = null;
@@ -734,7 +577,6 @@ export function createDomInputAdapter() {
     unbind() {
       clearListeners();
       clearQueuedWallDragGhostUpdate();
-      stopPathDragFrameTracker();
       dragMode = null;
       activePointerId = null;
       wallDrag = null;

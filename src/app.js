@@ -65,24 +65,12 @@ const SW_MESSAGE_TYPES = Object.freeze({
 
 const NOTIFICATION_AUTO_PROMPT_KEY = 'tetherNotificationAutoPromptDecision';
 const NOTIFICATION_ENABLED_KEY = 'tetherNotificationsEnabled';
-const PATH_PREDICTION_ENABLED_KEY = 'tetherPathPredictionEnabled';
-const PATH_PREDICTION_STRENGTH_KEY = 'tetherPathPredictionStrength';
 const AUTO_UPDATE_ENABLED_KEY = 'tetherAutoUpdateEnabled';
 const LAST_NOTIFIED_REMOTE_BUILD_KEY = 'tetherLastNotifiedRemoteBuildNumber';
-const PATH_PREDICTION_STRENGTH_MIN = 0;
-const PATH_PREDICTION_STRENGTH_MAX = 3;
-const PATH_PREDICTION_STRENGTH_DEFAULT = 2;
-const PATH_PREDICTION_STRENGTH_FALLBACK_ENABLED = 1;
 const NOTIFICATION_AUTO_PROMPT_DECISIONS = Object.freeze({
   UNSET: 'unset',
   ACCEPTED: 'accepted',
   DECLINED: 'declined',
-});
-const PATH_PREDICTION_STRENGTH_LABEL_KEYS = Object.freeze({
-  0: 'ui.pathPredictionStrengthNone',
-  1: 'ui.pathPredictionStrengthLow',
-  2: 'ui.pathPredictionStrengthModerate',
-  3: 'ui.pathPredictionStrengthHigh',
 });
 
 let runtimeInstance = null;
@@ -99,11 +87,6 @@ let notificationsToggleEl = null;
 let notificationsToggleBound = false;
 let autoUpdateToggleEl = null;
 let autoUpdateToggleBound = false;
-let pathPredictionStrengthControlEl = null;
-let pathPredictionStrengthDecBtnEl = null;
-let pathPredictionStrengthValueEl = null;
-let pathPredictionStrengthIncBtnEl = null;
-let pathPredictionStrengthControlBound = false;
 let notificationHistoryToggleEl = null;
 let notificationHistoryBadgeEl = null;
 let notificationHistoryPanelEl = null;
@@ -390,46 +373,6 @@ const writeNotificationEnabledPreference = (enabled) => {
   }
 };
 
-const normalizePathPredictionStrength = (value) => {
-  const parsed = Number.parseInt(String(value ?? ''), 10);
-  if (!Number.isInteger(parsed)) return null;
-  if (parsed < PATH_PREDICTION_STRENGTH_MIN || parsed > PATH_PREDICTION_STRENGTH_MAX) return null;
-  return parsed;
-};
-
-const readPathPredictionStrengthPreference = () => {
-  try {
-    const rawStrength = window.localStorage.getItem(PATH_PREDICTION_STRENGTH_KEY);
-    const normalizedStrength = normalizePathPredictionStrength(rawStrength);
-    if (normalizedStrength !== null) return normalizedStrength;
-  } catch {
-    // localStorage can be unavailable in restricted browser contexts.
-  }
-
-  try {
-    const rawEnabled = window.localStorage.getItem(PATH_PREDICTION_ENABLED_KEY);
-    if (rawEnabled === 'true') return PATH_PREDICTION_STRENGTH_FALLBACK_ENABLED;
-    if (rawEnabled === 'false') return PATH_PREDICTION_STRENGTH_MIN;
-  } catch {
-    // localStorage can be unavailable in restricted browser contexts.
-  }
-  return PATH_PREDICTION_STRENGTH_DEFAULT;
-};
-
-const writePathPredictionStrengthPreference = (level) => {
-  const normalized = normalizePathPredictionStrength(level);
-  if (normalized === null) return;
-  try {
-    window.localStorage.setItem(PATH_PREDICTION_STRENGTH_KEY, String(normalized));
-    window.localStorage.setItem(
-      PATH_PREDICTION_ENABLED_KEY,
-      normalized > PATH_PREDICTION_STRENGTH_MIN ? 'true' : 'false',
-    );
-  } catch {
-    // localStorage can be unavailable in restricted browser contexts.
-  }
-};
-
 const readAutoUpdateEnabledPreference = () => {
   try {
     return window.localStorage.getItem(AUTO_UPDATE_ENABLED_KEY) === 'true';
@@ -486,24 +429,6 @@ const refreshNotificationsToggleUi = () => {
   const permission = notificationPermissionState();
   notificationsToggleEl.checked = enabled;
   notificationsToggleEl.disabled = permission === 'unsupported';
-};
-
-const refreshPathPredictionStrengthUi = () => {
-  if (
-    !pathPredictionStrengthControlEl
-    || !pathPredictionStrengthDecBtnEl
-    || !pathPredictionStrengthValueEl
-    || !pathPredictionStrengthIncBtnEl
-  ) {
-    return;
-  }
-
-  const level = readPathPredictionStrengthPreference();
-  const labelKey = PATH_PREDICTION_STRENGTH_LABEL_KEYS[level] || PATH_PREDICTION_STRENGTH_LABEL_KEYS[1];
-  pathPredictionStrengthControlEl.dataset.level = String(level);
-  pathPredictionStrengthValueEl.textContent = translateNow(labelKey);
-  pathPredictionStrengthDecBtnEl.disabled = level <= PATH_PREDICTION_STRENGTH_MIN;
-  pathPredictionStrengthIncBtnEl.disabled = level >= PATH_PREDICTION_STRENGTH_MAX;
 };
 
 const refreshAutoUpdateToggleUi = () => {
@@ -834,46 +759,6 @@ const bindAutoUpdateToggle = () => {
 
   autoUpdateToggleBound = true;
   refreshAutoUpdateToggleUi();
-};
-
-const bindPathPredictionStrengthControl = () => {
-  pathPredictionStrengthControlEl = document.getElementById(ELEMENT_IDS.PATH_PREDICTION_STRENGTH_CONTROL);
-  pathPredictionStrengthDecBtnEl = document.getElementById(ELEMENT_IDS.PATH_PREDICTION_STRENGTH_DEC_BTN);
-  pathPredictionStrengthValueEl = document.getElementById(ELEMENT_IDS.PATH_PREDICTION_STRENGTH_VALUE);
-  pathPredictionStrengthIncBtnEl = document.getElementById(ELEMENT_IDS.PATH_PREDICTION_STRENGTH_INC_BTN);
-
-  if (
-    !pathPredictionStrengthControlEl
-    || !pathPredictionStrengthDecBtnEl
-    || !pathPredictionStrengthValueEl
-    || !pathPredictionStrengthIncBtnEl
-    || pathPredictionStrengthControlBound
-  ) {
-    refreshPathPredictionStrengthUi();
-    return;
-  }
-
-  const adjustLevel = (delta) => {
-    const current = readPathPredictionStrengthPreference();
-    const next = Math.max(
-      PATH_PREDICTION_STRENGTH_MIN,
-      Math.min(PATH_PREDICTION_STRENGTH_MAX, current + delta),
-    );
-    if (next === current) return;
-    writePathPredictionStrengthPreference(next);
-    refreshPathPredictionStrengthUi();
-  };
-
-  pathPredictionStrengthDecBtnEl.addEventListener('click', () => {
-    adjustLevel(-1);
-  });
-
-  pathPredictionStrengthIncBtnEl.addEventListener('click', () => {
-    adjustLevel(1);
-  });
-
-  pathPredictionStrengthControlBound = true;
-  refreshPathPredictionStrengthUi();
 };
 
 const normalizeHistoryEntry = (entry) => {
@@ -2074,11 +1959,6 @@ const bindConfigSync = () => {
     if (event.key === NOTIFICATION_ENABLED_KEY) {
       refreshNotificationsToggleUi();
       void syncDailyStateToServiceWorker();
-    } else if (
-      event.key === PATH_PREDICTION_ENABLED_KEY
-      || event.key === PATH_PREDICTION_STRENGTH_KEY
-    ) {
-      refreshPathPredictionStrengthUi();
     } else if (event.key === AUTO_UPDATE_ENABLED_KEY) {
       refreshAutoUpdateToggleUi();
       void syncUpdatePolicyToServiceWorker();
@@ -2123,7 +2003,6 @@ export async function initTetherApp() {
 
   bindNotificationsToggle();
   bindAutoUpdateToggle();
-  bindPathPredictionStrengthControl();
   bindConfigSync();
   bindNotificationHistoryPanel();
   bindUpdateApplyDialog();
@@ -2151,7 +2030,6 @@ export async function initTetherApp() {
     const resolved = setLocaleCore(locale);
     refreshNotificationsToggleUi();
     refreshAutoUpdateToggleUi();
-    refreshPathPredictionStrengthUi();
     refreshNotificationHistoryUi();
     if (updateApplyMessageEl) {
       updateApplyMessageEl.textContent = resolveUpdateApplyDialogPromptText(
@@ -2194,7 +2072,6 @@ export async function initTetherApp() {
   runtimeInstance.start();
   refreshNotificationsToggleUi();
   refreshAutoUpdateToggleUi();
-  refreshPathPredictionStrengthUi();
   refreshNotificationHistoryUi();
   void mountRuntimePlugins({
     isLocalhostHostname,

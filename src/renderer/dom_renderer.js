@@ -93,14 +93,18 @@ export function createDomRenderer(options = {}) {
       };
     }
     const styles = getComputedStyle(refs.boardWrap);
-    const totalMs = parseDurationMs(styles.getPropertyValue(COMPLETE_TOTAL_VAR));
-    const stepMs = parseDurationMs(styles.getPropertyValue(COMPLETE_STEP_VAR));
-    const baseCellMs = parseDurationMs(styles.getPropertyValue(COMPLETE_BASE_CELL_VAR));
-    const cellMs = baseCellMs > 0
-      ? baseCellMs
-      : parseDurationMs(styles.getPropertyValue(COMPLETE_CELL_VAR));
-    const pulseMs = parseDurationMs(styles.getPropertyValue(COMPLETE_PULSE_VAR));
-    const pulseStepMs = parseDurationMs(styles.getPropertyValue(COMPLETE_PULSE_STEP_VAR));
+
+    const speedMultiplier = typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.DEV && typeof window.TETHER_DEBUG_ANIM_SPEED === 'number'
+      ? Math.max(0.1, window.TETHER_DEBUG_ANIM_SPEED)
+      : 1;
+
+    const totalMs = parseDurationMs(styles.getPropertyValue(COMPLETE_TOTAL_VAR)) * speedMultiplier;
+    const stepMs = parseDurationMs(styles.getPropertyValue(COMPLETE_STEP_VAR)) * speedMultiplier;
+    const baseCellMs = parseDurationMs(styles.getPropertyValue(COMPLETE_BASE_CELL_VAR)) * speedMultiplier;
+    const fallbackCellMs = parseDurationMs(styles.getPropertyValue(COMPLETE_CELL_VAR)) * speedMultiplier;
+    const cellMs = baseCellMs > 0 ? baseCellMs : fallbackCellMs;
+    const pulseMs = parseDurationMs(styles.getPropertyValue(COMPLETE_PULSE_VAR)) * speedMultiplier;
+    const pulseStepMs = parseDurationMs(styles.getPropertyValue(COMPLETE_PULSE_STEP_VAR)) * speedMultiplier;
     return {
       totalMs,
       stepMs,
