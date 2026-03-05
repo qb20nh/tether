@@ -430,7 +430,7 @@ const isEndRetractTransition = (prevPath, nextPath) => {
   if (!Array.isArray(prevPath) || !Array.isArray(nextPath)) return false;
   const prevLen = prevPath.length;
   const nextLen = nextPath.length;
-  if (nextLen !== prevLen - 1) return false;
+  if (nextLen >= prevLen || nextLen < 1) return false;
   for (let i = 0; i < nextLen; i++) {
     if (!pointsMatch(nextPath[i], prevPath[i])) return false;
   }
@@ -441,9 +441,10 @@ const isStartRetractTransition = (prevPath, nextPath) => {
   if (!Array.isArray(prevPath) || !Array.isArray(nextPath)) return false;
   const prevLen = prevPath.length;
   const nextLen = nextPath.length;
-  if (nextLen !== prevLen - 1) return false;
+  if (nextLen >= prevLen || nextLen < 1) return false;
+  const diff = prevLen - nextLen;
   for (let i = 0; i < nextLen; i++) {
-    if (!pointsMatch(nextPath[i], prevPath[i + 1])) return false;
+    if (!pointsMatch(nextPath[i], prevPath[i + diff])) return false;
   }
   return true;
 };
@@ -470,8 +471,8 @@ const isStartAdvanceTransition = (prevPath, nextPath) => {
   return true;
 };
 
-const isRetractUnturnTransition = (side, prevTip, nextTip, nextPath) => {
-  if (!prevTip || !nextTip || !Array.isArray(nextPath)) return false;
+const isRetractUnturnTransition = (side, retractedTip, nextTip, nextPath) => {
+  if (!retractedTip || !nextTip || !Array.isArray(nextPath)) return false;
   let neighbor = null;
   if (side === 'start') neighbor = nextPath[1] || null;
   else if (side === 'end') neighbor = nextPath[nextPath.length - 2] || null;
@@ -479,8 +480,8 @@ const isRetractUnturnTransition = (side, prevTip, nextTip, nextPath) => {
 
   const inR = neighbor.r - nextTip.r;
   const inC = neighbor.c - nextTip.c;
-  const outR = prevTip.r - nextTip.r;
-  const outC = prevTip.c - nextTip.c;
+  const outR = retractedTip.r - nextTip.r;
+  const outC = retractedTip.c - nextTip.c;
   if ((inR === 0 && inC === 0) || (outR === 0 && outC === 0)) return false;
   return ((inR * outC) - (inC * outR)) !== 0;
 };
@@ -510,21 +511,21 @@ const updatePathEndArrowRotateState = (
     return;
   }
 
-  const prevTip = getPathTipFromPath(prevPath, 'end');
+  const retractedTip = prevPath[nextPath.length];
   const nextTip = getPathTipFromPath(nextPath, 'end');
   const neighbor = Array.isArray(nextPath) ? nextPath[nextPath.length - 2] : null;
-  if (!prevTip || !nextTip || !neighbor) {
+  if (!retractedTip || !nextTip || !neighbor) {
     clearPathEndArrowRotateState();
     return;
   }
-  if (!isRetractUnturnTransition('end', prevTip, nextTip, nextPath)) {
+  if (!isRetractUnturnTransition('end', retractedTip, nextTip, nextPath)) {
     clearPathEndArrowRotateState();
     return;
   }
 
   const fromDir = normalizeDirectionInto(
-    prevTip.c - nextTip.c,
-    prevTip.r - nextTip.r,
+    retractedTip.c - nextTip.c,
+    retractedTip.r - nextTip.r,
     headPointScratchA,
   );
   const toDir = normalizeDirectionInto(
@@ -633,21 +634,21 @@ const updatePathStartFlowRotateState = (
     return;
   }
 
-  const prevTip = getPathTipFromPath(prevPath, 'start');
+  const retractedTip = prevPath[prevPath.length - nextPath.length - 1];
   const nextTip = getPathTipFromPath(nextPath, 'start');
   const neighbor = Array.isArray(nextPath) ? nextPath[1] : null;
-  if (!prevTip || !nextTip || !neighbor) {
+  if (!retractedTip || !nextTip || !neighbor) {
     clearPathStartFlowRotateState();
     return;
   }
-  if (!isRetractUnturnTransition('start', prevTip, nextTip, nextPath)) {
+  if (!isRetractUnturnTransition('start', retractedTip, nextTip, nextPath)) {
     clearPathStartFlowRotateState();
     return;
   }
 
   const fromDir = normalizeDirectionInto(
-    nextTip.c - prevTip.c,
-    nextTip.r - prevTip.r,
+    nextTip.c - retractedTip.c,
+    nextTip.r - retractedTip.r,
     headPointScratchA,
   );
   const toDir = normalizeDirectionInto(
