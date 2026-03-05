@@ -1,8 +1,9 @@
 const SAMPLE_WINDOW = 8;
 const EMA_ALPHA = 0.35;
+const LOOKAHEAD_GAIN = 1.35;
 const MIN_LOOKAHEAD_MS = 6;
 const MAX_LOOKAHEAD_MS = 34;
-const ERROR_SCALE_CELLS = 0.75;
+const ERROR_SCALE_CELLS = 1.15;
 const DEFAULT_FRAME_INTERVAL_MS = 16.67;
 const MIN_FRAME_INTERVAL_MS = 8;
 const MAX_FRAME_INTERVAL_MS = 50;
@@ -10,6 +11,7 @@ const MIN_PROJECT_DISTANCE_CELLS = 0.5;
 const BASE_PROJECT_DISTANCE_CELLS = 0.75;
 const MAX_PROJECT_DISTANCE_CELLS = 1.15;
 const MIN_SPEED_PX_PER_MS = 0.02;
+const STOP_CONVERGENCE_SPEED_PX_PER_MS = 0.01;
 const MAX_SEGMENT_DT_MS = 120;
 const MIN_INPUT_INTERVAL_MS = 4;
 const MAX_INPUT_INTERVAL_MS = 90;
@@ -19,12 +21,8 @@ const STITCH_BRIDGE_HALF_LEN_CELL_RATIO = 0.18;
 const STITCH_BRIDGE_MIN_RADIUS_PX = 1;
 const STITCH_BRIDGE_MIN_WIDTH_PX = 1;
 const STITCH_BRIDGE_WIDTH_CELL_RATIO = 0.06;
-const RAW_POINTER_GUARD_MIN_EPSILON_PX = 1;
-const RAW_POINTER_GUARD_CELL_EPSILON_RATIO = 0.03;
-const RAW_POINTER_LEAD_SCALE = 1.25;
-const RAW_POINTER_LEAD_MAX_CELL_RATIO = 0.55;
-const RAW_POINTER_DIRECTION_MIN_COS = 0.10;
 const RAW_POINTER_DIRECTION_MIN_DISTANCE_CELL_RATIO = 0.08;
+const RAW_POINTER_OPPOSITE_DIRECTION_COS = -0.15;
 const DEFAULT_CELL_SIZE_PX = 56;
 const MIN_PREDICTION_STRENGTH_LEVEL = 0;
 const MAX_PREDICTION_STRENGTH_LEVEL = 3;
@@ -146,6 +144,54 @@ const resolveInputIntervalMs = (samples) => {
   return clamp(median, MIN_INPUT_INTERVAL_MS, MAX_INPUT_INTERVAL_MS);
 };
 
+const resolveBestMoveCandidate = ({
+  candidates,
+  pointer,
+  pointerCell,
+  headNode,
+  headCenter,
+  cellCenter,
+}) => {
+  if (!Array.isArray(candidates) || candidates.length <= 0) return null;
+  if (!pointer || !headNode || !headCenter || typeof cellCenter !== 'function') return null;
+
+  const holdDistance = Math.hypot(pointer.x - headCenter.x, pointer.y - headCenter.y);
+  const holdIsPointerCell = sameCell(pointerCell, headNode);
+  const rankedCandidates = [];
+
+  for (let i = 0; i < candidates.length; i += 1) {
+    const candidate = candidates[i];
+    const center = cellCenter(candidate.r, candidate.c);
+    rankedCandidates.push({
+      candidate,
+      center,
+      distance: Math.hypot(pointer.x - center.x, pointer.y - center.y),
+      isPointerCell: sameCell(pointerCell, candidate),
+    });
+  }
+
+  rankedCandidates.sort((a, b) => {
+    if (Math.abs(a.distance - b.distance) > 1e-6) {
+      return a.distance - b.distance;
+    }
+    if (a.isPointerCell !== b.isPointerCell) {
+      return a.isPointerCell ? -1 : 1;
+    }
+    return 0;
+  });
+
+  for (let i = 0; i < rankedCandidates.length; i += 1) {
+    const ranked = rankedCandidates[i];
+    const equalToHold = Math.abs(ranked.distance - holdDistance) <= 1e-6;
+    const improves = ranked.distance < holdDistance - 1e-6
+      || (equalToHold && ranked.isPointerCell && !holdIsPointerCell);
+    if (!improves) continue;
+    return ranked;
+  }
+
+  return null;
+};
+
 export function buildPathDragCandidates({
   snapshot,
   headNode,
@@ -237,6 +283,9 @@ export function predictPathDragPointer({
   let weightedVy = 0;
   let totalWeight = 0;
   let segmentWeight = 1;
+  let latestSegmentVx = 0;
+  let latestSegmentVy = 0;
+  let hasLatestSegmentVelocity = false;
 
   for (let i = 1; i < safeSamples.length; i++) {
     const prev = safeSamples[i - 1];
@@ -246,6 +295,9 @@ export function predictPathDragPointer({
 
     const vx = (Number(next.x) - Number(prev.x)) / dt;
     const vy = (Number(next.y) - Number(prev.y)) / dt;
+    latestSegmentVx = vx;
+    latestSegmentVy = vy;
+    hasLatestSegmentVelocity = true;
     weightedVx += vx * segmentWeight;
     weightedVy += vy * segmentWeight;
     totalWeight += segmentWeight;
@@ -263,6 +315,16 @@ export function predictPathDragPointer({
   const vx = weightedVx / totalWeight;
   const vy = weightedVy / totalWeight;
   const speed = Math.hypot(vx, vy);
+  const latestVx = hasLatestSegmentVelocity ? latestSegmentVx : vx;
+  const latestVy = hasLatestSegmentVelocity ? latestSegmentVy : vy;
+  const latestSpeed = Math.hypot(latestVx, latestVy);
+  if (latestSpeed < STOP_CONVERGENCE_SPEED_PX_PER_MS) {
+    return {
+      effectiveClient: current,
+      nextEmaErrorPx,
+      nextPredictedClient: current,
+    };
+  }
   if (speed < MIN_SPEED_PX_PER_MS) {
     return {
       effectiveClient: current,
@@ -284,14 +346,23 @@ export function predictPathDragPointer({
 
   const errorDenominator = resolvedCellSize * ERROR_SCALE_CELLS;
   const errorRatio = clamp(nextEmaErrorPx / errorDenominator, 0, 1);
-  const lookaheadMs = clamp(
-    cadenceIntervalMs * (1 - (0.65 * errorRatio)),
+  const boostedCadenceIntervalMs = clamp(
+    cadenceIntervalMs * LOOKAHEAD_GAIN,
     MIN_LOOKAHEAD_MS,
     MAX_LOOKAHEAD_MS,
   );
+  const lookaheadMs = clamp(
+    boostedCadenceIntervalMs * (1 - (0.45 * errorRatio)),
+    MIN_LOOKAHEAD_MS,
+    MAX_LOOKAHEAD_MS,
+  );
+  const decelRatio = clamp(latestSpeed / speed, 0, 1);
+  const decelLookaheadScale = decelRatio * decelRatio;
+  const projectedVx = (vx * decelRatio) + (latestVx * (1 - decelRatio));
+  const projectedVy = (vy * decelRatio) + (latestVy * (1 - decelRatio));
 
-  let projectDx = vx * lookaheadMs;
-  let projectDy = vy * lookaheadMs;
+  let projectDx = projectedVx * lookaheadMs * decelLookaheadScale;
+  let projectDy = projectedVy * lookaheadMs * decelLookaheadScale;
   const projectionCapCells = clamp(
     BASE_PROJECT_DISTANCE_CELLS * clamp(cadenceIntervalMs / DEFAULT_FRAME_INTERVAL_MS, 0.75, 1.5),
     MIN_PROJECT_DISTANCE_CELLS,
@@ -415,79 +486,50 @@ export function chooseSlipperyPathDragStep({
   }
 
   const resolvedCellSize = resolveCellSize(cellSize);
-  const rawGuardEpsilon = Math.max(
-    RAW_POINTER_GUARD_MIN_EPSILON_PX,
-    resolvedCellSize * RAW_POINTER_GUARD_CELL_EPSILON_RATIO,
-  );
-  const predictedLeadDistance = Math.hypot(
-    pointer.x - resolvedRawPointer.x,
-    pointer.y - resolvedRawPointer.y,
-  );
-  const rawLeadAllowance = clamp(
-    predictedLeadDistance * RAW_POINTER_LEAD_SCALE,
-    0,
-    resolvedCellSize * RAW_POINTER_LEAD_MAX_CELL_RATIO,
-  );
-  const rawHoldDistance = Math.hypot(
-    resolvedRawPointer.x - headCenter.x,
-    resolvedRawPointer.y - headCenter.y,
-  );
   const rawIntentX = resolvedRawPointer.x - headCenter.x;
   const rawIntentY = resolvedRawPointer.y - headCenter.y;
   const rawIntentLength = Math.hypot(rawIntentX, rawIntentY);
   const shouldCheckRawDirection = rawIntentLength > (
     resolvedCellSize * RAW_POINTER_DIRECTION_MIN_DISTANCE_CELL_RATIO
   );
-
-  const holdDistance = Math.hypot(pointer.x - headCenter.x, pointer.y - headCenter.y);
-  const holdIsPointerCell = sameCell(pointerCell, headNode);
-  const rankedCandidates = [];
-
-  for (let i = 0; i < candidates.length; i += 1) {
-    const candidate = candidates[i];
-    const center = cellCenter(candidate.r, candidate.c);
-    const predictedDistance = Math.hypot(pointer.x - center.x, pointer.y - center.y);
-    const rawDistance = Math.hypot(resolvedRawPointer.x - center.x, resolvedRawPointer.y - center.y);
-    const isPointerCell = sameCell(pointerCell, candidate);
-    const candidateVecX = center.x - headCenter.x;
-    const candidateVecY = center.y - headCenter.y;
-    const candidateVecLength = Math.hypot(candidateVecX, candidateVecY);
-    const rawDirectionCos = (
-      shouldCheckRawDirection
-      && candidateVecLength > 0
-    )
-      ? ((candidateVecX * rawIntentX) + (candidateVecY * rawIntentY))
-        / (candidateVecLength * rawIntentLength)
-      : 1;
-    rankedCandidates.push({
-      candidate,
-      predictedDistance,
-      rawDistance,
-      isPointerCell,
-      rawDirectionCos,
-    });
-  }
-
-  rankedCandidates.sort((a, b) => {
-    if (Math.abs(a.predictedDistance - b.predictedDistance) > 1e-6) {
-      return a.predictedDistance - b.predictedDistance;
-    }
-    if (a.isPointerCell !== b.isPointerCell) {
-      return a.isPointerCell ? -1 : 1;
-    }
-    return 0;
+  const predictedBest = resolveBestMoveCandidate({
+    candidates,
+    pointer,
+    pointerCell,
+    headNode,
+    headCenter,
+    cellCenter,
   });
+  if (!predictedBest) return null;
 
-  for (let i = 0; i < rankedCandidates.length; i += 1) {
-    const ranked = rankedCandidates[i];
-    const predictedEqualToHold = Math.abs(ranked.predictedDistance - holdDistance) <= 1e-6;
-    const predictedImproves = ranked.predictedDistance < holdDistance - 1e-6
-      || (predictedEqualToHold && ranked.isPointerCell && !holdIsPointerCell);
-    if (!predictedImproves) continue;
-    if (ranked.rawDirectionCos < RAW_POINTER_DIRECTION_MIN_COS) continue;
-    if (ranked.rawDistance > rawHoldDistance + rawGuardEpsilon + rawLeadAllowance) continue;
-    return { r: ranked.candidate.r, c: ranked.candidate.c };
+  const rawBest = resolveBestMoveCandidate({
+    candidates,
+    pointer: resolvedRawPointer,
+    pointerCell,
+    headNode,
+    headCenter,
+    cellCenter,
+  });
+  if (rawBest) {
+    const matches = rawBest.candidate.r === predictedBest.candidate.r
+      && rawBest.candidate.c === predictedBest.candidate.c;
+    if (!matches) {
+      return { r: rawBest.candidate.r, c: rawBest.candidate.c };
+    }
+    return { r: predictedBest.candidate.r, c: predictedBest.candidate.c };
   }
 
-  return null;
+  if (shouldCheckRawDirection) {
+    const candidateVecX = predictedBest.center.x - headCenter.x;
+    const candidateVecY = predictedBest.center.y - headCenter.y;
+    const candidateVecLength = Math.hypot(candidateVecX, candidateVecY);
+    if (candidateVecLength > 0) {
+      const rawDirectionCos = (
+        (candidateVecX * rawIntentX) + (candidateVecY * rawIntentY)
+      ) / (candidateVecLength * rawIntentLength);
+      if (rawDirectionCos < RAW_POINTER_OPPOSITE_DIRECTION_COS) return null;
+    }
+  }
+
+  return { r: predictedBest.candidate.r, c: predictedBest.candidate.c };
 }
