@@ -1,9 +1,11 @@
 const SAMPLE_WINDOW = 8;
 const EMA_ALPHA = 0.35;
-const LOOKAHEAD_GAIN = 1.35;
 const MIN_LOOKAHEAD_MS = 6;
 const MAX_LOOKAHEAD_MS = 34;
 const ERROR_SCALE_CELLS = 1.15;
+const ERROR_DAMP_WEIGHT = 0.35;
+const SPARSE_BONUS_WEIGHT = 0.30;
+const LATENCY_BIAS_MS = 2;
 const DEFAULT_FRAME_INTERVAL_MS = 16.67;
 const MIN_FRAME_INTERVAL_MS = 8;
 const MAX_FRAME_INTERVAL_MS = 50;
@@ -11,7 +13,12 @@ const MIN_PROJECT_DISTANCE_CELLS = 0.5;
 const BASE_PROJECT_DISTANCE_CELLS = 0.75;
 const MAX_PROJECT_DISTANCE_CELLS = 1.15;
 const MIN_SPEED_PX_PER_MS = 0.02;
-const STOP_CONVERGENCE_SPEED_PX_PER_MS = 0.01;
+const STOP_CONVERGENCE_SPEED_PX_PER_MS = 0.012;
+const HEADING_COS_STEADY_MIN = 0.80;
+const HEADING_COS_TRANSITION_MIN = 0.40;
+const INTENT_FACTOR_STEADY = 1.00;
+const INTENT_FACTOR_TRANSITION = 0.85;
+const INTENT_FACTOR_TURN = 0.60;
 const MAX_SEGMENT_DT_MS = 120;
 const MIN_INPUT_INTERVAL_MS = 4;
 const MAX_INPUT_INTERVAL_MS = 90;
@@ -22,7 +29,9 @@ const STITCH_BRIDGE_MIN_RADIUS_PX = 1;
 const STITCH_BRIDGE_MIN_WIDTH_PX = 1;
 const STITCH_BRIDGE_WIDTH_CELL_RATIO = 0.06;
 const RAW_POINTER_DIRECTION_MIN_DISTANCE_CELL_RATIO = 0.08;
-const RAW_POINTER_OPPOSITE_DIRECTION_COS = -0.15;
+const RAW_POINTER_OPPOSITE_DIRECTION_COS = -0.20;
+const RAW_OVERRIDE_MARGIN_CELL_RATIO = 0.10;
+const RAW_BACKTRACK_OVERRIDE_MARGIN_CELL_RATIO = 0.06;
 const DEFAULT_CELL_SIZE_PX = 56;
 const MIN_PREDICTION_STRENGTH_LEVEL = 0;
 const MAX_PREDICTION_STRENGTH_LEVEL = 3;
@@ -186,7 +195,11 @@ const resolveBestMoveCandidate = ({
     const improves = ranked.distance < holdDistance - 1e-6
       || (equalToHold && ranked.isPointerCell && !holdIsPointerCell);
     if (!improves) continue;
-    return ranked;
+    return {
+      ...ranked,
+      holdDistance,
+      marginPx: holdDistance - ranked.distance,
+    };
   }
 
   return null;
@@ -286,6 +299,9 @@ export function predictPathDragPointer({
   let latestSegmentVx = 0;
   let latestSegmentVy = 0;
   let hasLatestSegmentVelocity = false;
+  let previousSegmentVx = 0;
+  let previousSegmentVy = 0;
+  let hasPreviousSegmentVelocity = false;
 
   for (let i = 1; i < safeSamples.length; i++) {
     const prev = safeSamples[i - 1];
@@ -295,6 +311,11 @@ export function predictPathDragPointer({
 
     const vx = (Number(next.x) - Number(prev.x)) / dt;
     const vy = (Number(next.y) - Number(prev.y)) / dt;
+    if (hasLatestSegmentVelocity) {
+      previousSegmentVx = latestSegmentVx;
+      previousSegmentVy = latestSegmentVy;
+      hasPreviousSegmentVelocity = true;
+    }
     latestSegmentVx = vx;
     latestSegmentVy = vy;
     hasLatestSegmentVelocity = true;
@@ -318,6 +339,9 @@ export function predictPathDragPointer({
   const latestVx = hasLatestSegmentVelocity ? latestSegmentVx : vx;
   const latestVy = hasLatestSegmentVelocity ? latestSegmentVy : vy;
   const latestSpeed = Math.hypot(latestVx, latestVy);
+  const previousVx = hasPreviousSegmentVelocity ? previousSegmentVx : latestVx;
+  const previousVy = hasPreviousSegmentVelocity ? previousSegmentVy : latestVy;
+  const previousSpeed = Math.hypot(previousVx, previousVy);
   if (latestSpeed < STOP_CONVERGENCE_SPEED_PX_PER_MS) {
     return {
       effectiveClient: current,
@@ -336,6 +360,19 @@ export function predictPathDragPointer({
   const resolvedCellSize = Number.isFinite(cellSize) && cellSize > 0 ? cellSize : 1;
   const resolvedFrameIntervalMs = resolveFrameIntervalMs(frameIntervalMs);
   const inputIntervalMs = resolveInputIntervalMs(safeSamples);
+  const sampleAgeMs = (Number.isFinite(resolvedNowMs) && Number.isFinite(currentSampleTs))
+    ? clamp(Math.max(0, resolvedNowMs - currentSampleTs), 0, MAX_LOOKAHEAD_MS)
+    : 0;
+  const frameLagMs = resolvedFrameIntervalMs;
+  const baselineInputIntervalMs = inputIntervalMs === null
+    ? frameLagMs
+    : inputIntervalMs;
+  const sparseBonusMs = Math.max(0, baselineInputIntervalMs - frameLagMs) * SPARSE_BONUS_WEIGHT;
+  const targetLagMs = clamp(
+    sampleAgeMs + frameLagMs + sparseBonusMs + LATENCY_BIAS_MS,
+    MIN_LOOKAHEAD_MS,
+    MAX_LOOKAHEAD_MS,
+  );
   const cadenceIntervalMs = inputIntervalMs === null
     ? resolvedFrameIntervalMs
     : clamp(
@@ -346,23 +383,32 @@ export function predictPathDragPointer({
 
   const errorDenominator = resolvedCellSize * ERROR_SCALE_CELLS;
   const errorRatio = clamp(nextEmaErrorPx / errorDenominator, 0, 1);
-  const boostedCadenceIntervalMs = clamp(
-    cadenceIntervalMs * LOOKAHEAD_GAIN,
-    MIN_LOOKAHEAD_MS,
-    MAX_LOOKAHEAD_MS,
-  );
+  const weightedSpeed = speed;
+  const headingCos = (weightedSpeed > 0 && latestSpeed > 0)
+    ? clamp(
+      ((latestVx * vx) + (latestVy * vy)) / (latestSpeed * weightedSpeed),
+      -1,
+      1,
+    )
+    : 1;
+  let intentFactor = INTENT_FACTOR_TURN;
+  if (headingCos >= HEADING_COS_STEADY_MIN) {
+    intentFactor = INTENT_FACTOR_STEADY;
+  } else if (headingCos >= HEADING_COS_TRANSITION_MIN) {
+    intentFactor = INTENT_FACTOR_TRANSITION;
+  }
+  if (previousSpeed > 0 && latestSpeed > 0 && latestSpeed < (previousSpeed * 0.45)) {
+    intentFactor = Math.min(intentFactor, INTENT_FACTOR_TRANSITION);
+  }
+  const errorScale = 1 - (ERROR_DAMP_WEIGHT * errorRatio);
   const lookaheadMs = clamp(
-    boostedCadenceIntervalMs * (1 - (0.45 * errorRatio)),
+    targetLagMs * errorScale * intentFactor,
     MIN_LOOKAHEAD_MS,
     MAX_LOOKAHEAD_MS,
   );
-  const decelRatio = clamp(latestSpeed / speed, 0, 1);
-  const decelLookaheadScale = decelRatio * decelRatio;
-  const projectedVx = (vx * decelRatio) + (latestVx * (1 - decelRatio));
-  const projectedVy = (vy * decelRatio) + (latestVy * (1 - decelRatio));
 
-  let projectDx = projectedVx * lookaheadMs * decelLookaheadScale;
-  let projectDy = projectedVy * lookaheadMs * decelLookaheadScale;
+  let projectDx = vx * lookaheadMs;
+  let projectDy = vy * lookaheadMs;
   const projectionCapCells = clamp(
     BASE_PROJECT_DISTANCE_CELLS * clamp(cadenceIntervalMs / DEFAULT_FRAME_INTERVAL_MS, 0.75, 1.5),
     MIN_PROJECT_DISTANCE_CELLS,
@@ -486,6 +532,8 @@ export function chooseSlipperyPathDragStep({
   }
 
   const resolvedCellSize = resolveCellSize(cellSize);
+  const rawOverrideMarginPx = resolvedCellSize * RAW_OVERRIDE_MARGIN_CELL_RATIO;
+  const rawBacktrackOverrideMarginPx = resolvedCellSize * RAW_BACKTRACK_OVERRIDE_MARGIN_CELL_RATIO;
   const rawIntentX = resolvedRawPointer.x - headCenter.x;
   const rawIntentY = resolvedRawPointer.y - headCenter.y;
   const rawIntentLength = Math.hypot(rawIntentX, rawIntentY);
@@ -501,6 +549,7 @@ export function chooseSlipperyPathDragStep({
     cellCenter,
   });
   if (!predictedBest) return null;
+  const predictedCenter = predictedBest.center;
 
   const rawBest = resolveBestMoveCandidate({
     candidates,
@@ -510,25 +559,44 @@ export function chooseSlipperyPathDragStep({
     headCenter,
     cellCenter,
   });
-  if (rawBest) {
-    const matches = rawBest.candidate.r === predictedBest.candidate.r
-      && rawBest.candidate.c === predictedBest.candidate.c;
-    if (!matches) {
-      return { r: rawBest.candidate.r, c: rawBest.candidate.c };
-    }
+  const resolveRawDirectionCos = (center) => {
+    if (!shouldCheckRawDirection) return 1;
+    const candidateVecX = center.x - headCenter.x;
+    const candidateVecY = center.y - headCenter.y;
+    const candidateVecLength = Math.hypot(candidateVecX, candidateVecY);
+    if (!(candidateVecLength > 0)) return 1;
+    return clamp(
+      ((candidateVecX * rawIntentX) + (candidateVecY * rawIntentY)) / (candidateVecLength * rawIntentLength),
+      -1,
+      1,
+    );
+  };
+  const predictedRawDirectionCos = resolveRawDirectionCos(predictedCenter);
+
+  if (!rawBest) {
+    if (predictedRawDirectionCos < RAW_POINTER_OPPOSITE_DIRECTION_COS) return null;
     return { r: predictedBest.candidate.r, c: predictedBest.candidate.c };
   }
 
-  if (shouldCheckRawDirection) {
-    const candidateVecX = predictedBest.center.x - headCenter.x;
-    const candidateVecY = predictedBest.center.y - headCenter.y;
-    const candidateVecLength = Math.hypot(candidateVecX, candidateVecY);
-    if (candidateVecLength > 0) {
-      const rawDirectionCos = (
-        (candidateVecX * rawIntentX) + (candidateVecY * rawIntentY)
-      ) / (candidateVecLength * rawIntentLength);
-      if (rawDirectionCos < RAW_POINTER_OPPOSITE_DIRECTION_COS) return null;
-    }
+  const matches = rawBest.candidate.r === predictedBest.candidate.r
+    && rawBest.candidate.c === predictedBest.candidate.c;
+  if (matches) {
+    return { r: predictedBest.candidate.r, c: predictedBest.candidate.c };
+  }
+
+  if (predictedRawDirectionCos < RAW_POINTER_OPPOSITE_DIRECTION_COS) {
+    return { r: rawBest.candidate.r, c: rawBest.candidate.c };
+  }
+
+  if (rawBest.marginPx > (predictedBest.marginPx + rawOverrideMarginPx)) {
+    return { r: rawBest.candidate.r, c: rawBest.candidate.c };
+  }
+
+  if (
+    rawBest.candidate.isBacktrack
+    && rawBest.marginPx > (predictedBest.marginPx + rawBacktrackOverrideMarginPx)
+  ) {
+    return { r: rawBest.candidate.r, c: rawBest.candidate.c };
   }
 
   return { r: predictedBest.candidate.r, c: predictedBest.candidate.c };

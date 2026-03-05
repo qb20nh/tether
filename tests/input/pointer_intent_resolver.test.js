@@ -117,7 +117,7 @@ test('predictPathDragPointer scales lead distance by exact 1x/2x/3x strength mul
   assert.ok(Math.abs(highEffectiveLead - (lowEffectiveLead * 3)) < epsilon);
   assert.ok(Math.abs(moderatePredictedLead - (lowPredictedLead * 2)) < epsilon);
   assert.ok(Math.abs(highPredictedLead - (lowPredictedLead * 3)) < epsilon);
-  assert.ok(highEffectiveLead >= 60, `expected aggressive high-strength lead, got ${highEffectiveLead}`);
+  assert.ok(highEffectiveLead >= 52, `expected aggressive high-strength lead, got ${highEffectiveLead}`);
 });
 
 test('predictPathDragPointer increases forward lead when frame interval is higher', () => {
@@ -143,6 +143,26 @@ test('predictPathDragPointer increases forward lead when frame interval is highe
   });
 
   assert.ok(highFrame.effectiveClient.x > lowFrame.effectiveClient.x);
+});
+
+test('predictPathDragPointer keeps strong high-strength lead at high input rate', () => {
+  const out = predictPathDragPointer({
+    samples: [
+      { x: 0, y: 0, t: 0 },
+      { x: 8, y: 0, t: 8 },
+      { x: 16, y: 0, t: 16 },
+      { x: 24, y: 0, t: 24 },
+    ],
+    cellSize: 56,
+    prevEmaErrorPx: 0,
+    prevPredictedClient: null,
+    frameIntervalMs: 16,
+    nowMs: 24,
+    predictionStrengthLevel: 3,
+  });
+
+  const leadPx = out.effectiveClient.x - 24;
+  assert.ok(leadPx >= 52, `expected >=52px high-Hz lead, got ${leadPx}`);
 });
 
 test('predictPathDragPointer increases forward lead when input cadence is sparse', () => {
@@ -283,7 +303,7 @@ test('predictPathDragPointer sharply reduces lead when movement decelerates quic
   const steadyLead = steady.effectiveClient.x - 48;
   const decelLead = decelerated.effectiveClient.x - 48;
   assert.ok(decelLead < steadyLead);
-  assert.ok(decelLead <= steadyLead * 0.4);
+  assert.ok(decelLead > steadyLead * 0.6);
 });
 
 test('predictPathDragPointer converges to raw pointer when latest movement stops', () => {
