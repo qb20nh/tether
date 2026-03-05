@@ -3,6 +3,10 @@ name: Deploy static content to Pages
 on:
   push:
     branches: ["main"]
+  workflow_run:
+    workflows: ["daily-level"]
+    types: [completed]
+    branches: ["main"]
   workflow_dispatch:
 
 # Sets permissions of the GITHUB_TOKEN to allow deployment to GitHub Pages
@@ -19,6 +23,7 @@ concurrency:
 
 jobs:
   deploy:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
