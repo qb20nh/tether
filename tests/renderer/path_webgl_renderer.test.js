@@ -218,6 +218,64 @@ test('buildUnifiedPathMesh keeps start corner geometry when first segment is tin
   assert.equal(hasCornerVertices, true);
 });
 
+test('buildUnifiedPathMesh keeps tiny tip-adjacent corner when end cap is rendered', () => {
+  const points = [
+    { x: 0, y: 0 },
+    { x: 40, y: 0 },
+    { x: 40, y: 2 },
+  ];
+  const meshWithoutCaps = buildUnifiedPathMesh(points, {
+    width: 10,
+    startRadius: 0,
+    arrowLength: 0,
+    endHalfWidth: 0,
+    renderStartCap: false,
+    renderEndCap: false,
+  });
+  const meshWithEndCap = buildUnifiedPathMesh(points, {
+    width: 10,
+    startRadius: 8,
+    arrowLength: 12,
+    endHalfWidth: 8,
+    renderStartCap: true,
+    renderEndCap: true,
+  });
+
+  const hasCornerWithoutCaps = meshWithoutCaps.cornerFlags.some((flag) => flag > 0.5);
+  const hasCornerWithEndCap = meshWithEndCap.cornerFlags.some((flag) => flag > 0.5);
+  assert.equal(hasCornerWithoutCaps, true);
+  assert.equal(hasCornerWithEndCap, true);
+});
+
+test('buildUnifiedPathMesh appends start tip geometry after path body geometry', () => {
+  const head = { x: 0, y: 0 };
+  const mesh = buildUnifiedPathMesh(
+    [
+      head,
+      { x: 40, y: 0 },
+      { x: 40, y: 20 },
+    ],
+    {
+      width: 10,
+      startRadius: 8,
+      arrowLength: 0,
+      endHalfWidth: 0,
+      renderStartCap: true,
+      renderEndCap: false,
+    },
+  );
+
+  let headCenterVertexIndex = -1;
+  for (let i = 0; i < mesh.vertexCount; i++) {
+    if (mesh.positions[i * 2] === head.x && mesh.positions[(i * 2) + 1] === head.y) {
+      headCenterVertexIndex = i;
+      break;
+    }
+  }
+
+  assert.equal(headCenterVertexIndex > 0, true);
+});
+
 test('buildUnifiedPathMesh honors end arrow direction override', () => {
   const points = [
     { x: 0, y: 0 },
@@ -281,12 +339,42 @@ test('buildUnifiedPathMesh honors start flow direction override', () => {
     startFlowDirY: 1,
   });
 
-  const rightRimIndex = 1;
-  const nearVerticalRimIndex = 5;
-  assert.equal(defaultMesh.travels[rightRimIndex] > 6, true);
-  assert.equal(Math.abs(overrideMesh.travels[rightRimIndex]) < 3, true);
-  assert.equal(Math.abs(defaultMesh.travels[nearVerticalRimIndex]) < 3, true);
-  assert.equal(Math.abs(overrideMesh.travels[nearVerticalRimIndex]) > 6, true);
+  const resolveStartCapTravel = (mesh, scoreFn) => {
+    const centerX = points[0].x;
+    const centerY = points[0].y;
+    const radius = base.startRadius;
+    let bestIndex = -1;
+    let bestScore = -Infinity;
+    for (let i = 0; i < mesh.vertexCount; i++) {
+      const x = mesh.positions[i * 2];
+      const y = mesh.positions[(i * 2) + 1];
+      const distance = Math.hypot(x - centerX, y - centerY);
+      if (distance < radius * 0.7 || distance > radius * 1.15) continue;
+      const score = scoreFn(x - centerX, y - centerY);
+      if (score > bestScore) {
+        bestScore = score;
+        bestIndex = i;
+      }
+    }
+    assert.equal(bestIndex >= 0, true);
+    return mesh.travels[bestIndex];
+  };
+
+  const defaultRightRimTravel = resolveStartCapTravel(defaultMesh, (dx, dy) => dx - (Math.abs(dy) * 0.2));
+  const overrideRightRimTravel = resolveStartCapTravel(overrideMesh, (dx, dy) => dx - (Math.abs(dy) * 0.2));
+  const defaultNearVerticalTravel = resolveStartCapTravel(
+    defaultMesh,
+    (dx, dy) => (dx >= 0 ? 1 : -1e6) + (dy * 10) - Math.abs(dx),
+  );
+  const overrideNearVerticalTravel = resolveStartCapTravel(
+    overrideMesh,
+    (dx, dy) => (dx >= 0 ? 1 : -1e6) + (dy * 10) - Math.abs(dx),
+  );
+
+  assert.equal(defaultRightRimTravel > 6, true);
+  assert.equal(Math.abs(overrideRightRimTravel) < 3, true);
+  assert.equal(Math.abs(defaultNearVerticalTravel) < 3, true);
+  assert.equal(Math.abs(overrideNearVerticalTravel) > 6, true);
 });
 
 test('buildUnifiedPathMesh applies end direction override to tail flow orientation', () => {

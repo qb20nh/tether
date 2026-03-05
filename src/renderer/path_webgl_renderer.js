@@ -46,14 +46,18 @@ const createEmptyBracketMesh = () => ({
   indexCount: 0,
 });
 
-const buildCornerTurns = (points, segmentLengths, segmentUx, segmentUy, cornerRadius) => {
+const buildCornerTurns = (
+  points,
+  segmentLengths,
+  segmentUx,
+  segmentUy,
+  cornerRadius,
+) => {
   const cornerTurns = new Array(points.length).fill(null);
   const angleTolerance = 1e-4;
 
   for (let i = 1; i < points.length - 1; i++) {
-    const prev = points[i - 1];
     const corner = points[i];
-    const next = points[i + 1];
     const inLen = segmentLengths[i - 1];
     const outLen = segmentLengths[i];
     if (inLen <= 0 || outLen <= 0) continue;
@@ -378,37 +382,39 @@ export function buildUnifiedPathMesh(points, options = {}) {
     ((x - head.x) * headTravelUx)
     + ((y - head.y) * headTravelUy)
   );
-  if (renderStartCap) {
-    addCircle(head.x, head.y, startRadius, 18, headTravelAt);
-  }
-  if (reverseHeadArrowLength > 0 && reverseHeadArrowHalfWidth > 0 && firstSegmentIndex >= 0) {
-    const ux = -segmentUx[firstSegmentIndex];
-    const uy = -segmentUy[firstSegmentIndex];
-    const perpX = -uy;
-    const perpY = ux;
-    const baseCenterShift = reverseHeadArrowLength / 3;
-    const baseCenterX = head.x - (ux * baseCenterShift);
-    const baseCenterY = head.y - (uy * baseCenterShift);
-    const baseTravel = -baseCenterShift;
-    const apexTravel = baseTravel + reverseHeadArrowLength;
+  const addStartTipPrimitives = () => {
+    if (renderStartCap) {
+      addCircle(head.x, head.y, startRadius, 18, headTravelAt);
+    }
+    if (reverseHeadArrowLength > 0 && reverseHeadArrowHalfWidth > 0 && firstSegmentIndex >= 0) {
+      const ux = -segmentUx[firstSegmentIndex];
+      const uy = -segmentUy[firstSegmentIndex];
+      const perpX = -uy;
+      const perpY = ux;
+      const baseCenterShift = reverseHeadArrowLength / 3;
+      const baseCenterX = head.x - (ux * baseCenterShift);
+      const baseCenterY = head.y - (uy * baseCenterShift);
+      const baseTravel = -baseCenterShift;
+      const apexTravel = baseTravel + reverseHeadArrowLength;
 
-    const left = addVertex(
-      baseCenterX - perpX * reverseHeadArrowHalfWidth,
-      baseCenterY - perpY * reverseHeadArrowHalfWidth,
-      baseTravel,
-    );
-    const right = addVertex(
-      baseCenterX + perpX * reverseHeadArrowHalfWidth,
-      baseCenterY + perpY * reverseHeadArrowHalfWidth,
-      baseTravel,
-    );
-    const apex = addVertex(
-      baseCenterX + ux * reverseHeadArrowLength,
-      baseCenterY + uy * reverseHeadArrowLength,
-      apexTravel,
-    );
-    addTriangle(apex, left, right);
-  }
+      const left = addVertex(
+        baseCenterX - perpX * reverseHeadArrowHalfWidth,
+        baseCenterY - perpY * reverseHeadArrowHalfWidth,
+        baseTravel,
+      );
+      const right = addVertex(
+        baseCenterX + perpX * reverseHeadArrowHalfWidth,
+        baseCenterY + perpY * reverseHeadArrowHalfWidth,
+        baseTravel,
+      );
+      const apex = addVertex(
+        baseCenterX + ux * reverseHeadArrowLength,
+        baseCenterY + uy * reverseHeadArrowLength,
+        apexTravel,
+      );
+      addTriangle(apex, left, right);
+    }
+  };
 
   const addCornerPrimitive = (cornerIndex, cornerPrimitive) => {
     const corner = cornerTurns[cornerIndex];
@@ -511,6 +517,7 @@ export function buildUnifiedPathMesh(points, options = {}) {
   for (const cornerPrimitive of flow.cornerPrimitives) {
     addCornerPrimitive(cornerPrimitive.cornerIndex, cornerPrimitive);
   }
+  addStartTipPrimitives();
 
   if (lastSegmentIndex >= 0) {
     const tail = safePoints[safePoints.length - 1];
