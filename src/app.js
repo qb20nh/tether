@@ -14,6 +14,8 @@ import { createRuntime } from './runtime/create_runtime.js';
 import { uiActionIntent, UI_ACTIONS } from './runtime/intents.js';
 import { mountRuntimePlugins, resolveServiceWorkerRegistrationUrl } from './plugins/runtime_plugins.js';
 import { DAILY_PAYLOAD_FILE } from './shared/paths.js';
+import { createSwMessenger } from './app/sw_messenger.js';
+import { createSwUpdateOrchestrator } from './app/sw_update_orchestrator.js';
 import {
   HISTORY_DOT_COLORS,
   formatHistoryAbsoluteTime,
@@ -76,13 +78,6 @@ const NOTIFICATION_AUTO_PROMPT_DECISIONS = Object.freeze({
 let runtimeInstance = null;
 let runtimeStateAdapter = null;
 let runtimeCoreAdapter = null;
-let swRegistration = null;
-let swReloadOnControllerChangeArmed = false;
-let swControllerChangeBound = false;
-let updateApplyReloadFallbackTimer = 0;
-let updateCheckInFlight = false;
-let lastUpdateCheckAtMs = 0;
-let promptedRemoteBuildNumbers = new Set();
 let notificationsToggleEl = null;
 let notificationsToggleBound = false;
 let autoUpdateToggleEl = null;
@@ -107,9 +102,6 @@ let moveDailyDialogEl = null;
 let moveDailyMessageEl = null;
 let moveDailyDialogBound = false;
 let moveDailyDialogResolver = null;
-const notifiedRemoteBuildNumbers = new Set();
-let swMessageListenerBound = false;
-const pendingSwMessages = [];
 const notificationHistoryState = {
   historyVersion: 1,
   entries: [],
@@ -315,15 +307,9 @@ const showInAppToast = (text, options = {}) => {
   }
 };
 
-const canUseServiceWorker = () =>
-  typeof window !== 'undefined'
-  && window.isSecureContext
-  && typeof navigator !== 'undefined'
-  && 'serviceWorker' in navigator;
+const canUseServiceWorker = () => swMessenger.canUseServiceWorker();
 
-const supportsNotifications = () =>
-  typeof window !== 'undefined'
-  && 'Notification' in window;
+const supportsNotifications = () => swMessenger.supportsNotifications();
 
 const readAutoPromptDecision = () => {
   try {
@@ -466,204 +452,23 @@ const buildNotificationTextPayload = (locale = getLocale()) => {
   };
 };
 
-const flushPendingSwMessages = async () => {
-  if (!canUseServiceWorker() || pendingSwMessages.length === 0) return;
-  while (pendingSwMessages.length > 0) {
-    const next = pendingSwMessages.shift();
-    const posted = await postMessageToServiceWorker(next, { queueWhenUnavailable: false });
-    if (posted) continue;
-    pendingSwMessages.unshift(next);
-    break;
-  }
-};
+const postMessageToServiceWorker = async (message, options = {}) =>
+  swMessenger.postMessage(message, options);
 
-const resolveSwMessageTarget = () => {
-  if (!canUseServiceWorker()) return null;
-  if (navigator.serviceWorker.controller) {
-    return navigator.serviceWorker.controller;
-  }
-  if (!swRegistration) return null;
-  return swRegistration.active || swRegistration.waiting || swRegistration.installing || null;
-};
+const syncDailyStateToServiceWorker = async () =>
+  swUpdateOrchestrator.syncDailyStateToServiceWorker();
 
-const resolveSwUpdatePolicyTargets = () => {
-  if (!canUseServiceWorker()) return [];
-  const ordered = [];
-  const pushUnique = (target) => {
-    if (!target) return;
-    if (ordered.includes(target)) return;
-    ordered.push(target);
-  };
+const syncUpdatePolicyToServiceWorker = async () =>
+  swUpdateOrchestrator.syncUpdatePolicyToServiceWorker();
 
-  if (swRegistration) {
-    pushUnique(swRegistration.waiting);
-    pushUnique(swRegistration.active);
-  }
-  pushUnique(navigator.serviceWorker.controller);
-  if (swRegistration) {
-    pushUnique(swRegistration.installing);
-  }
-  return ordered;
-};
+const ensureServiceWorkerUpdatePolicyConsistency = async () =>
+  swUpdateOrchestrator.ensureServiceWorkerUpdatePolicyConsistency();
 
-const postMessageToServiceWorker = async (message, options = {}) => {
-  const { queueWhenUnavailable = false } = options;
-  if (!canUseServiceWorker()) return false;
-  const target = resolveSwMessageTarget();
-  if (target) {
-    target.postMessage(message);
-    return true;
-  }
-  if (!swRegistration) {
-    if (queueWhenUnavailable) pendingSwMessages.push(message);
-    return false;
-  }
-  if (queueWhenUnavailable) {
-    pendingSwMessages.push(message);
-  }
-  return false;
-};
+const requestServiceWorkerDailyCheck = async () =>
+  swUpdateOrchestrator.requestServiceWorkerDailyCheck();
 
-const postMessageToServiceWorkerWithReply = async (message, options = {}) => {
-  const { timeoutMs = 1500, target = null } = options;
-  if (!canUseServiceWorker()) return null;
-  const messageTarget = target || resolveSwMessageTarget();
-  if (!messageTarget) return null;
-  if (typeof MessageChannel !== 'function') return null;
-
-  const channel = new MessageChannel();
-  return new Promise((resolve) => {
-    let settled = false;
-    const cleanup = () => {
-      channel.port1.onmessage = null;
-      try {
-        channel.port1.close();
-      } catch {
-        // no-op
-      }
-      try {
-        channel.port2.close();
-      } catch {
-        // no-op
-      }
-    };
-    const finish = (value) => {
-      if (settled) return;
-      settled = true;
-      cleanup();
-      resolve(value);
-    };
-
-    const timer = window.setTimeout(() => {
-      finish(null);
-    }, Math.max(250, Number(timeoutMs) || 1500));
-
-    channel.port1.onmessage = (event) => {
-      window.clearTimeout(timer);
-      finish(event?.data ?? null);
-    };
-
-    try {
-      messageTarget.postMessage(message, [channel.port2]);
-    } catch {
-      window.clearTimeout(timer);
-      finish(null);
-    }
-  });
-};
-
-const syncDailyStateToServiceWorker = async () => {
-  if (!canUseServiceWorker()) return;
-  await postMessageToServiceWorker({
-    type: SW_MESSAGE_TYPES.SYNC_DAILY_STATE,
-    payload: {
-      dailyId: latestDailyState.dailyId,
-      hardInvalidateAtUtcMs: latestDailyState.hardInvalidateAtUtcMs,
-      dailySolvedDate: latestDailyState.dailySolvedDate,
-      notificationsEnabled: readNotificationEnabledPreference(),
-      warningHours: DAILY_NOTIFICATION_WARNING_HOURS,
-      notificationText: buildNotificationTextPayload(),
-    },
-  });
-};
-
-const syncUpdatePolicyToServiceWorker = async () => {
-  if (!canUseServiceWorker()) return;
-  await postMessageToServiceWorker({
-    type: SW_MESSAGE_TYPES.SYNC_UPDATE_POLICY,
-    payload: {
-      autoUpdateEnabled: readAutoUpdateEnabledPreference(),
-      currentBuildNumber: localBuildNumber,
-    },
-  }, { queueWhenUnavailable: true });
-};
-
-const readServiceWorkerUpdatePolicy = async (target = null) => {
-  const reply = await postMessageToServiceWorkerWithReply({
-    type: SW_MESSAGE_TYPES.GET_UPDATE_POLICY,
-  }, { target, timeoutMs: 2000 });
-  if (!reply || reply.ok !== true) return null;
-  return {
-    autoUpdateEnabled: reply.autoUpdateEnabled === true,
-    pinnedBuildNumber: Number.parseInt(reply.pinnedBuildNumber, 10),
-    servingBuildNumber: Number.parseInt(reply.servingBuildNumber, 10),
-    swBuildNumber: Number.parseInt(reply.swBuildNumber, 10),
-    pinnedCacheUsable: reply.pinnedCacheUsable !== false,
-  };
-};
-
-const ensureServiceWorkerUpdatePolicyConsistency = async () => {
-  if (!canUseServiceWorker()) return;
-  if (readAutoUpdateEnabledPreference()) return;
-  if (!Number.isInteger(localBuildNumber) || localBuildNumber <= 0) return;
-
-  const targets = resolveSwUpdatePolicyTargets();
-  if (targets.length === 0) return;
-
-  let swPolicy = null;
-  for (const target of targets) {
-    const policy = await readServiceWorkerUpdatePolicy(target);
-    if (!policy) continue;
-    swPolicy = policy;
-    break;
-  }
-
-  if (!shouldResyncManualUpdatePolicy({
-    localAutoUpdateEnabled: false,
-    localBuildNumber,
-    swPolicy,
-  })) {
-    return;
-  }
-
-  await syncUpdatePolicyToServiceWorker();
-};
-
-const requestServiceWorkerDailyCheck = async () => {
-  if (!canUseServiceWorker()) return;
-  await postMessageToServiceWorker({ type: SW_MESSAGE_TYPES.RUN_DAILY_CHECK });
-};
-
-const registerBackgroundDailyCheck = async () => {
-  if (!swRegistration || !supportsNotifications() || Notification.permission !== 'granted') return;
-  if (!readNotificationEnabledPreference()) return;
-  try {
-    if (typeof swRegistration.sync?.register === 'function') {
-      await swRegistration.sync.register(DAILY_CHECK_TAG);
-    }
-  } catch {
-    // One-shot sync registration is best effort.
-  }
-  try {
-    if (typeof swRegistration.periodicSync?.register === 'function') {
-      await swRegistration.periodicSync.register(DAILY_CHECK_TAG, {
-        minInterval: 12 * 60 * 60 * 1000,
-      });
-    }
-  } catch {
-    // Periodic sync support and permission are browser-dependent.
-  }
-};
+const registerBackgroundDailyCheck = async () =>
+  swUpdateOrchestrator.registerBackgroundDailyCheck();
 
 const requestNotificationPermission = async () => {
   if (!supportsNotifications()) return 'unsupported';
@@ -800,15 +605,8 @@ const applyNotificationHistoryPayload = (payload) => {
   }
 };
 
-const clearAppliedUpdateHistoryActions = async (appliedBuildNumber = localBuildNumber) => {
-  if (!Number.isInteger(appliedBuildNumber) || appliedBuildNumber <= 0) return;
-  await postMessageToServiceWorker({
-    type: SW_MESSAGE_TYPES.CLEAR_UPDATE_HISTORY_ACTIONS,
-    payload: {
-      buildNumber: appliedBuildNumber,
-    },
-  }, { queueWhenUnavailable: true });
-};
+const clearAppliedUpdateHistoryActions = async (appliedBuildNumber = localBuildNumber) =>
+  swUpdateOrchestrator.clearAppliedUpdateHistoryActions(appliedBuildNumber);
 
 const refreshNotificationHistoryBadgeUi = () => {
   if (!notificationHistoryToggleEl || !notificationHistoryBadgeEl) return;
@@ -1346,15 +1144,12 @@ const bindMoveDailyDialog = () => {
 };
 
 const bindServiceWorkerHistoryMessages = () => {
-  if (!canUseServiceWorker() || swMessageListenerBound) return;
-  navigator.serviceWorker.addEventListener('message', (event) => {
-    const data = event.data;
-    if (!data || typeof data !== 'object') return;
-    if (data.type !== SW_MESSAGE_TYPES.HISTORY_UPDATE) return;
-    applyNotificationHistoryPayload(data.payload);
-    refreshNotificationHistoryUi();
+  swUpdateOrchestrator.bindHistoryUpdates({
+    onPayload: (payload) => {
+      applyNotificationHistoryPayload(payload);
+      refreshNotificationHistoryUi();
+    },
   });
-  swMessageListenerBound = true;
 };
 
 const utcDateIdFromMs = (ms) => {
@@ -1548,173 +1343,11 @@ const setupDailyHardInvalidationWatcher = (bootDaily) => {
   });
 };
 
-const parseRemoteBuildNumber = (payload) => {
-  if (!payload || typeof payload !== 'object') return null;
-  const parsed = Number.parseInt(payload.buildNumber, 10);
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
-};
+const fetchRemoteBuildNumber = async () =>
+  swUpdateOrchestrator.fetchRemoteBuildNumber();
 
-const fetchRemoteBuildNumber = async () => {
-  try {
-    const response = await fetch(VERSION_URL, { cache: 'no-store' });
-    if (!response.ok) return null;
-    const payload = await response.json();
-    return parseRemoteBuildNumber(payload);
-  } catch {
-    return null;
-  }
-};
-
-const parseServiceWorkerBuildNumber = (source) => {
-  if (typeof source !== 'string' || source.length === 0) return null;
-  const match = source.match(SW_BUILD_NUMBER_RE);
-  if (!match) return null;
-  const parsed = Number.parseInt(match[1], 10);
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
-};
-
-const fetchRemoteServiceWorkerBuildNumber = async (buildHint = null) => {
-  try {
-    const swUrl = resolveServiceWorkerRegistrationUrl(isLocalhostHostname);
-    if (Number.isInteger(buildHint) && buildHint > 0) {
-      swUrl.searchParams.set('v', String(buildHint));
-    }
-    swUrl.searchParams.set('_swcb', String(Date.now()));
-    const response = await fetch(swUrl.toString(), {
-      cache: 'no-store',
-      headers: {
-        'x-bypass-cache': 'true',
-      },
-    });
-    if (!response.ok) return null;
-    return parseServiceWorkerBuildNumber(await response.text());
-  } catch {
-    return null;
-  }
-};
-
-const resolveUpdatableRemoteBuildNumber = async (remoteBuildNumber) => {
-  if (!Number.isInteger(remoteBuildNumber) || remoteBuildNumber <= 0) return null;
-  const swBuildNumber = await fetchRemoteServiceWorkerBuildNumber(remoteBuildNumber);
-  if (!Number.isInteger(swBuildNumber) || swBuildNumber <= 0) return null;
-  if (swBuildNumber < remoteBuildNumber) return null;
-  return swBuildNumber;
-};
-
-const clearUpdateApplyReloadFallbackTimer = () => {
-  if (!updateApplyReloadFallbackTimer) return;
-  window.clearTimeout(updateApplyReloadFallbackTimer);
-  updateApplyReloadFallbackTimer = 0;
-};
-
-const triggerAppliedUpdateReload = () => {
-  if (!swReloadOnControllerChangeArmed) return false;
-  swReloadOnControllerChangeArmed = false;
-  clearUpdateApplyReloadFallbackTimer();
-  window.location.reload();
-  return true;
-};
-
-const scheduleUpdateApplyReloadFallback = () => {
-  clearUpdateApplyReloadFallbackTimer();
-  updateApplyReloadFallbackTimer = window.setTimeout(() => {
-    updateApplyReloadFallbackTimer = 0;
-    triggerAppliedUpdateReload();
-  }, UPDATE_APPLY_RELOAD_FALLBACK_MS);
-};
-
-const observeWaitingWorkerActivation = (waitingWorker) => {
-  if (!waitingWorker || typeof waitingWorker.addEventListener !== 'function') return;
-
-  const clearWaitingWorkerObserver = () => {
-    waitingWorker.removeEventListener('statechange', onStateChange);
-  };
-
-  const onStateChange = () => {
-    if (waitingWorker.state === 'activated') {
-      clearWaitingWorkerObserver();
-      triggerAppliedUpdateReload();
-      return;
-    }
-    if (waitingWorker.state === 'redundant') {
-      clearWaitingWorkerObserver();
-      clearUpdateApplyReloadFallbackTimer();
-      swReloadOnControllerChangeArmed = false;
-      setUpdateProgressOverlayActive(false);
-    }
-  };
-
-  waitingWorker.addEventListener('statechange', onStateChange);
-  if (waitingWorker.state === 'activated') {
-    clearWaitingWorkerObserver();
-    triggerAppliedUpdateReload();
-    return;
-  }
-  if (waitingWorker.state === 'redundant') {
-    clearWaitingWorkerObserver();
-    clearUpdateApplyReloadFallbackTimer();
-    swReloadOnControllerChangeArmed = false;
-    setUpdateProgressOverlayActive(false);
-  }
-};
-
-const armControllerChangeReload = () => {
-  if (!canUseServiceWorker()) return;
-  if (swControllerChangeBound) {
-    swReloadOnControllerChangeArmed = true;
-    return;
-  }
-  swControllerChangeBound = true;
-  swReloadOnControllerChangeArmed = true;
-  navigator.serviceWorker.addEventListener('controllerchange', () => {
-    triggerAppliedUpdateReload();
-  });
-};
-
-const waitForWaitingWorker = (registration, timeoutMs = 8000) =>
-  new Promise((resolve) => {
-    if (registration.waiting) {
-      resolve(registration.waiting);
-      return;
-    }
-
-    let settled = false;
-    const cleanups = [];
-    const finish = (worker = null) => {
-      if (settled) return;
-      settled = true;
-      for (const fn of cleanups) fn();
-      resolve(worker || registration.waiting || null);
-    };
-
-    const bindInstallingWorker = (worker) => {
-      if (!worker) return;
-      if (worker.state === 'installed') {
-        finish(registration.waiting || worker);
-        return;
-      }
-      const onStateChange = () => {
-        if (worker.state === 'installed') {
-          finish(registration.waiting || worker);
-        }
-      };
-      worker.addEventListener('statechange', onStateChange);
-      cleanups.push(() => worker.removeEventListener('statechange', onStateChange));
-    };
-
-    bindInstallingWorker(registration.installing);
-
-    const onUpdateFound = () => {
-      bindInstallingWorker(registration.installing);
-    };
-    registration.addEventListener('updatefound', onUpdateFound);
-    cleanups.push(() => registration.removeEventListener('updatefound', onUpdateFound));
-
-    const timer = window.setTimeout(() => {
-      finish(null);
-    }, timeoutMs);
-    cleanups.push(() => window.clearTimeout(timer));
-  });
+const resolveUpdatableRemoteBuildNumber = async (remoteBuildNumber) =>
+  swUpdateOrchestrator.resolveUpdatableRemoteBuildNumber(remoteBuildNumber);
 
 const resolveNewVersionToastText = () => {
   const localized = translateNow('ui.newVersionAvailableToast');
@@ -1740,108 +1373,40 @@ const resolveUpdateApplyFailureToastText = () => {
   return 'Could not apply update yet. Try again shortly.';
 };
 
-const hasNotifiedRemoteBuild = (remoteBuildNumber) => {
-  if (!Number.isInteger(remoteBuildNumber) || remoteBuildNumber <= 0) return true;
-  if (notifiedRemoteBuildNumbers.has(remoteBuildNumber)) return true;
-  const stored = readLastNotifiedRemoteBuildNumber();
-  return Number.isInteger(stored) && stored >= remoteBuildNumber;
-};
+const swMessenger = createSwMessenger();
 
-const markRemoteBuildNotified = (remoteBuildNumber) => {
-  if (!Number.isInteger(remoteBuildNumber) || remoteBuildNumber <= 0) return;
-  notifiedRemoteBuildNumbers.add(remoteBuildNumber);
-  writeLastNotifiedRemoteBuildNumber(remoteBuildNumber);
-};
+const swUpdateOrchestrator = createSwUpdateOrchestrator({
+  swMessenger,
+  swMessageTypes: SW_MESSAGE_TYPES,
+  updateApplyStatus: UPDATE_APPLY_STATUS,
+  updateCheckDecision: UPDATE_CHECK_DECISION,
+  localBuildNumber,
+  versionUrl: VERSION_URL,
+  swBuildNumberRe: SW_BUILD_NUMBER_RE,
+  resolveServiceWorkerRegistrationUrl,
+  isLocalhostHostname,
+  readAutoUpdateEnabledPreference,
+  readNotificationEnabledPreference,
+  readLastNotifiedRemoteBuildNumber,
+  writeLastNotifiedRemoteBuildNumber,
+  buildNotificationTextPayload,
+  getLatestDailyState: () => latestDailyState,
+  resolveUpdateCheckDecision,
+  shouldResyncManualUpdatePolicy,
+  showInAppToast,
+  resolveNewVersionToastText,
+  resolveNewVersionTitleText,
+  resolveNewVersionBodyText,
+  resolveUpdateApplyFailureToastText,
+  setUpdateProgressOverlayActive,
+  updateCheckThrottleMs: UPDATE_CHECK_THROTTLE_MS,
+  updateApplyReloadFallbackMs: UPDATE_APPLY_RELOAD_FALLBACK_MS,
+  dailyCheckTag: DAILY_CHECK_TAG,
+  dailyNotificationWarningHours: DAILY_NOTIFICATION_WARNING_HOURS,
+});
 
-const notifyUpdateAvailable = async (remoteBuildNumber) => {
-  if (!Number.isInteger(remoteBuildNumber) || remoteBuildNumber <= localBuildNumber) return;
-  if (hasNotifiedRemoteBuild(remoteBuildNumber)) return;
-
-  markRemoteBuildNotified(remoteBuildNumber);
-  showInAppToast(resolveNewVersionToastText(), { recordInHistory: false });
-  await postMessageToServiceWorker({
-    type: SW_MESSAGE_TYPES.APPEND_SYSTEM_HISTORY,
-    payload: {
-      kind: 'new-version-available',
-      title: resolveNewVersionTitleText(),
-      body: resolveNewVersionBodyText(),
-      action: {
-        type: 'apply-update',
-        buildNumber: remoteBuildNumber,
-      },
-    },
-  }, { queueWhenUnavailable: true });
-};
-
-const maybeApplyUpdate = async (remoteBuildNumber, options = {}) => {
-  const {
-    force = false,
-    approvedBuildNumber = null,
-  } = options;
-  if (!swRegistration) {
-    return { applied: false, status: UPDATE_APPLY_STATUS.UNAVAILABLE };
-  }
-  if (!force && promptedRemoteBuildNumbers.has(remoteBuildNumber)) {
-    return { applied: false, status: UPDATE_APPLY_STATUS.ALREADY_PROMPTED };
-  }
-
-  setUpdateProgressOverlayActive(true);
-  let applied = false;
-  try {
-    for (let attempt = 0; attempt < 2; attempt += 1) {
-      const waitingWorkerPromise = waitForWaitingWorker(
-        swRegistration,
-        attempt === 0 ? 8000 : 4000,
-      );
-      try {
-        await swRegistration.update();
-      } catch {
-        return { applied: false, status: UPDATE_APPLY_STATUS.UPDATE_FAILED };
-      }
-
-      const waitingWorker = await waitingWorkerPromise;
-      if (!waitingWorker) continue;
-
-      promptedRemoteBuildNumbers.add(remoteBuildNumber);
-      armControllerChangeReload();
-      waitingWorker.postMessage({
-        type: 'SW_SKIP_WAITING',
-        payload: Number.isInteger(approvedBuildNumber) && approvedBuildNumber > 0
-          ? { approvedBuildNumber }
-          : {},
-      });
-      scheduleUpdateApplyReloadFallback();
-      observeWaitingWorkerActivation(waitingWorker);
-      applied = true;
-      return { applied: true, status: UPDATE_APPLY_STATUS.APPLIED };
-    }
-  } finally {
-    if (!applied) {
-      setUpdateProgressOverlayActive(false);
-    }
-  }
-
-  return { applied: false, status: UPDATE_APPLY_STATUS.NO_WAITING };
-};
-
-const applyUpdateForBuild = async (remoteBuildNumber, options = {}) => {
-  const {
-    force = false,
-    toastOnFailure = false,
-    approvedBuildNumber = null,
-  } = options;
-  if (!Number.isInteger(remoteBuildNumber) || remoteBuildNumber <= localBuildNumber) {
-    return { applied: false, status: UPDATE_APPLY_STATUS.UNAVAILABLE };
-  }
-  const result = await maybeApplyUpdate(remoteBuildNumber, {
-    force,
-    approvedBuildNumber,
-  });
-  if (!result.applied && toastOnFailure) {
-    showInAppToast(resolveUpdateApplyFailureToastText(), { recordInHistory: false });
-  }
-  return result;
-};
+const applyUpdateForBuild = async (remoteBuildNumber, options = {}) =>
+  swUpdateOrchestrator.applyUpdateForBuild(remoteBuildNumber, options);
 
 const applyLatestUpdateForAction = async (hintBuildNumber = null) => {
   const latestBuildNumber = await resolveLatestUpdateBuildNumber(hintBuildNumber);
@@ -1861,77 +1426,14 @@ const applyLatestUpdateForAction = async (hintBuildNumber = null) => {
   return false;
 };
 
-const checkForNewBuild = async ({ force = false } = {}) => {
-  if (!canUseServiceWorker() || !swRegistration) return;
-  if (!navigator.onLine) return;
-  if (updateCheckInFlight) return;
+const checkForNewBuild = async (options = {}) =>
+  swUpdateOrchestrator.checkForNewBuild(options);
 
-  const nowMs = Date.now();
-  if (!force && nowMs - lastUpdateCheckAtMs < UPDATE_CHECK_THROTTLE_MS) return;
+const registerServiceWorker = async () =>
+  swUpdateOrchestrator.registerServiceWorker();
 
-  updateCheckInFlight = true;
-  lastUpdateCheckAtMs = nowMs;
-  try {
-    const remoteBuildNumber = await fetchRemoteBuildNumber();
-    if (!Number.isInteger(remoteBuildNumber) || remoteBuildNumber <= localBuildNumber) return;
-    const updatableRemoteBuildNumber = await resolveUpdatableRemoteBuildNumber(remoteBuildNumber);
-    if (!Number.isInteger(updatableRemoteBuildNumber) || updatableRemoteBuildNumber <= localBuildNumber) return;
-    const decision = resolveUpdateCheckDecision({
-      localBuildNumber,
-      updatableRemoteBuildNumber,
-      autoUpdateEnabled: readAutoUpdateEnabledPreference(),
-    });
-    if (decision === UPDATE_CHECK_DECISION.APPLY) {
-      await applyUpdateForBuild(updatableRemoteBuildNumber);
-      return;
-    }
-    if (decision === UPDATE_CHECK_DECISION.NOTIFY) {
-      await notifyUpdateAvailable(updatableRemoteBuildNumber);
-      return;
-    }
-  } finally {
-    updateCheckInFlight = false;
-  }
-};
-
-const registerServiceWorker = async () => {
-  if (!canUseServiceWorker()) return null;
-  try {
-    swRegistration = await navigator.serviceWorker.register(
-      resolveServiceWorkerRegistrationUrl(isLocalhostHostname),
-    );
-    await navigator.serviceWorker.ready;
-    await flushPendingSwMessages();
-    await syncDailyStateToServiceWorker();
-    await syncUpdatePolicyToServiceWorker();
-    await ensureServiceWorkerUpdatePolicyConsistency();
-    await registerBackgroundDailyCheck();
-    await requestServiceWorkerDailyCheck();
-    await postMessageToServiceWorker({ type: SW_MESSAGE_TYPES.GET_HISTORY }, { queueWhenUnavailable: true });
-    void checkForNewBuild({ force: true });
-    return swRegistration;
-  } catch {
-    swRegistration = null;
-    return null;
-  }
-};
-
-const bindServiceWorkerRuntimeEvents = () => {
-  if (!canUseServiceWorker()) return;
-
-  window.addEventListener('online', () => {
-    void checkForNewBuild();
-    void requestServiceWorkerDailyCheck();
-    void postMessageToServiceWorker({ type: SW_MESSAGE_TYPES.GET_HISTORY }, { queueWhenUnavailable: true });
-  });
-
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState !== 'visible') return;
-    void checkForNewBuild();
-    void requestServiceWorkerDailyCheck();
-    void postMessageToServiceWorker({ type: SW_MESSAGE_TYPES.GET_HISTORY }, { queueWhenUnavailable: true });
-  });
-};
+const bindServiceWorkerRuntimeEvents = () =>
+  swUpdateOrchestrator.bindRuntimeEvents();
 
 const wrapPersistenceForDailySideEffects = (persistence) => {
   if (!persistence || typeof persistence.writeDailySolvedDate !== 'function') return;
@@ -2110,7 +1612,7 @@ export async function initTetherApp() {
     }
   }
 
-  if (!swRegistration) {
+  if (!swUpdateOrchestrator.getRegistration()) {
     void registerServiceWorker();
   } else {
     void (async () => {
