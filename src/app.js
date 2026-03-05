@@ -36,6 +36,7 @@ const VERSION_FILE = 'version.json';
 
 const DAILY_HARD_INVALIDATE_GRACE_MS = 60 * 1000;
 const UPDATE_CHECK_THROTTLE_MS = 5 * 60 * 1000;
+const UPDATE_APPLY_RELOAD_FALLBACK_MS = 5 * 1000;
 const DAILY_NOTIFICATION_WARNING_HOURS = 8;
 const DAILY_CHECK_TAG = 'tether-daily-check';
 const SW_BUILD_NUMBER_RE = /BUILD_NUMBER\s*=\s*Number\.parseInt\(\s*['"](\d+)['"]\s*,\s*10\)/;
@@ -90,6 +91,7 @@ let runtimeCoreAdapter = null;
 let swRegistration = null;
 let swReloadOnControllerChangeArmed = false;
 let swControllerChangeBound = false;
+let updateApplyReloadFallbackTimer = 0;
 let updateCheckInFlight = false;
 let lastUpdateCheckAtMs = 0;
 let promptedRemoteBuildNumbers = new Set();
@@ -1714,6 +1716,63 @@ const resolveUpdatableRemoteBuildNumber = async (remoteBuildNumber) => {
   return swBuildNumber;
 };
 
+const clearUpdateApplyReloadFallbackTimer = () => {
+  if (!updateApplyReloadFallbackTimer) return;
+  window.clearTimeout(updateApplyReloadFallbackTimer);
+  updateApplyReloadFallbackTimer = 0;
+};
+
+const triggerAppliedUpdateReload = () => {
+  if (!swReloadOnControllerChangeArmed) return false;
+  swReloadOnControllerChangeArmed = false;
+  clearUpdateApplyReloadFallbackTimer();
+  window.location.reload();
+  return true;
+};
+
+const scheduleUpdateApplyReloadFallback = () => {
+  clearUpdateApplyReloadFallbackTimer();
+  updateApplyReloadFallbackTimer = window.setTimeout(() => {
+    updateApplyReloadFallbackTimer = 0;
+    triggerAppliedUpdateReload();
+  }, UPDATE_APPLY_RELOAD_FALLBACK_MS);
+};
+
+const observeWaitingWorkerActivation = (waitingWorker) => {
+  if (!waitingWorker || typeof waitingWorker.addEventListener !== 'function') return;
+
+  const clearWaitingWorkerObserver = () => {
+    waitingWorker.removeEventListener('statechange', onStateChange);
+  };
+
+  const onStateChange = () => {
+    if (waitingWorker.state === 'activated') {
+      clearWaitingWorkerObserver();
+      triggerAppliedUpdateReload();
+      return;
+    }
+    if (waitingWorker.state === 'redundant') {
+      clearWaitingWorkerObserver();
+      clearUpdateApplyReloadFallbackTimer();
+      swReloadOnControllerChangeArmed = false;
+      setUpdateProgressOverlayActive(false);
+    }
+  };
+
+  waitingWorker.addEventListener('statechange', onStateChange);
+  if (waitingWorker.state === 'activated') {
+    clearWaitingWorkerObserver();
+    triggerAppliedUpdateReload();
+    return;
+  }
+  if (waitingWorker.state === 'redundant') {
+    clearWaitingWorkerObserver();
+    clearUpdateApplyReloadFallbackTimer();
+    swReloadOnControllerChangeArmed = false;
+    setUpdateProgressOverlayActive(false);
+  }
+};
+
 const armControllerChangeReload = () => {
   if (!canUseServiceWorker()) return;
   if (swControllerChangeBound) {
@@ -1723,9 +1782,7 @@ const armControllerChangeReload = () => {
   swControllerChangeBound = true;
   swReloadOnControllerChangeArmed = true;
   navigator.serviceWorker.addEventListener('controllerchange', () => {
-    if (!swReloadOnControllerChangeArmed) return;
-    swReloadOnControllerChangeArmed = false;
-    window.location.reload();
+    triggerAppliedUpdateReload();
   });
 };
 
@@ -1868,6 +1925,8 @@ const maybeApplyUpdate = async (remoteBuildNumber, options = {}) => {
           ? { approvedBuildNumber }
           : {},
       });
+      scheduleUpdateApplyReloadFallback();
+      observeWaitingWorkerActivation(waitingWorker);
       applied = true;
       return { applied: true, status: UPDATE_APPLY_STATUS.APPLIED };
     }
