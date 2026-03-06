@@ -54,6 +54,7 @@ export function createSwUpdateOrchestrator(options = {}) {
     navigatorObj = typeof navigator !== 'undefined' ? navigator : undefined,
     notificationApi = typeof Notification !== 'undefined' ? Notification : undefined,
     now = () => Date.now(),
+    noWaitingReloadBuildStorageKey = 'tetherUpdateNoWaitingReloadBuild',
   } = options;
 
   if (!swMessenger || typeof swMessenger.postMessage !== 'function') {
@@ -71,6 +72,7 @@ export function createSwUpdateOrchestrator(options = {}) {
   let updateApplyReloadFallbackTimer = 0;
   let updateCheckInFlight = false;
   let lastUpdateCheckAtMs = 0;
+  let noWaitingReloadGuardBuild = null;
   const promptedRemoteBuildNumbers = new Set();
   const notifiedRemoteBuildNumbers = new Set();
 
@@ -246,6 +248,40 @@ export function createSwUpdateOrchestrator(options = {}) {
       updateApplyReloadFallbackTimer = 0;
       triggerAppliedUpdateReload();
     }, updateApplyReloadFallbackMs);
+  };
+
+  const readNoWaitingReloadGuardBuild = () => {
+    try {
+      const raw = windowObj?.sessionStorage?.getItem(noWaitingReloadBuildStorageKey);
+      const parsed = Number.parseInt(raw || '', 10);
+      if (Number.isInteger(parsed) && parsed > 0) return parsed;
+    } catch {
+      // sessionStorage can be unavailable in restricted browser contexts.
+    }
+    return Number.isInteger(noWaitingReloadGuardBuild) && noWaitingReloadGuardBuild > 0
+      ? noWaitingReloadGuardBuild
+      : null;
+  };
+
+  const writeNoWaitingReloadGuardBuild = (buildNumber) => {
+    if (!Number.isInteger(buildNumber) || buildNumber <= 0) return;
+    noWaitingReloadGuardBuild = buildNumber;
+    try {
+      windowObj?.sessionStorage?.setItem(noWaitingReloadBuildStorageKey, String(buildNumber));
+    } catch {
+      // sessionStorage can be unavailable in restricted browser contexts.
+    }
+  };
+
+  const tryNoWaitingReloadFallback = (remoteBuildNumber) => {
+    if (!Number.isInteger(remoteBuildNumber) || remoteBuildNumber <= localBuildNumber) return false;
+    const guardedBuildNumber = readNoWaitingReloadGuardBuild();
+    if (Number.isInteger(guardedBuildNumber) && guardedBuildNumber >= remoteBuildNumber) {
+      return false;
+    }
+    writeNoWaitingReloadGuardBuild(remoteBuildNumber);
+    windowObj.location.reload();
+    return true;
   };
 
   const observeWaitingWorkerActivation = (waitingWorker) => {
@@ -439,6 +475,14 @@ export function createSwUpdateOrchestrator(options = {}) {
       force,
       approvedBuildNumber,
     });
+    if (!result.applied && result.status === updateApplyStatus.NO_WAITING) {
+      if (tryNoWaitingReloadFallback(remoteBuildNumber)) {
+        return {
+          applied: true,
+          status: updateApplyStatus.APPLIED,
+        };
+      }
+    }
     if (!result.applied && toastOnFailure) {
       showInAppToast(resolveUpdateApplyFailureToastText(), { recordInHistory: false });
     }

@@ -14,8 +14,8 @@ import { createRuntime } from './runtime/create_runtime.js';
 import { uiActionIntent, UI_ACTIONS } from './runtime/intents.js';
 import { mountRuntimePlugins, resolveServiceWorkerRegistrationUrl } from './plugins/runtime_plugins.js';
 import { DAILY_PAYLOAD_FILE } from './shared/paths.js';
-import { createSwMessenger } from './app/sw_messenger.js';
-import { createSwUpdateOrchestrator } from './app/sw_update_orchestrator.js';
+import { createUpdateFlow } from './app/update_flow.js';
+import { resolveLatestUpdateBuildNumber as resolveLatestUpdateBuildNumberCore } from './app/update_build_resolver.js';
 import {
   HISTORY_DOT_COLORS,
   formatHistoryAbsoluteTime,
@@ -307,9 +307,9 @@ const showInAppToast = (text, options = {}) => {
   }
 };
 
-const canUseServiceWorker = () => swMessenger.canUseServiceWorker();
+const canUseServiceWorker = () => updateFlow.canUseServiceWorker();
 
-const supportsNotifications = () => swMessenger.supportsNotifications();
+const supportsNotifications = () => updateFlow.supportsNotifications();
 
 const readAutoPromptDecision = () => {
   try {
@@ -453,22 +453,22 @@ const buildNotificationTextPayload = (locale = getLocale()) => {
 };
 
 const postMessageToServiceWorker = async (message, options = {}) =>
-  swMessenger.postMessage(message, options);
+  updateFlow.postMessageToServiceWorker(message, options);
 
 const syncDailyStateToServiceWorker = async () =>
-  swUpdateOrchestrator.syncDailyStateToServiceWorker();
+  updateFlow.syncDailyStateToServiceWorker();
 
 const syncUpdatePolicyToServiceWorker = async () =>
-  swUpdateOrchestrator.syncUpdatePolicyToServiceWorker();
+  updateFlow.syncUpdatePolicyToServiceWorker();
 
 const ensureServiceWorkerUpdatePolicyConsistency = async () =>
-  swUpdateOrchestrator.ensureServiceWorkerUpdatePolicyConsistency();
+  updateFlow.ensureServiceWorkerUpdatePolicyConsistency();
 
 const requestServiceWorkerDailyCheck = async () =>
-  swUpdateOrchestrator.requestServiceWorkerDailyCheck();
+  updateFlow.requestServiceWorkerDailyCheck();
 
 const registerBackgroundDailyCheck = async () =>
-  swUpdateOrchestrator.registerBackgroundDailyCheck();
+  updateFlow.registerBackgroundDailyCheck();
 
 const requestNotificationPermission = async () => {
   if (!supportsNotifications()) return 'unsupported';
@@ -606,7 +606,7 @@ const applyNotificationHistoryPayload = (payload) => {
 };
 
 const clearAppliedUpdateHistoryActions = async (appliedBuildNumber = localBuildNumber) =>
-  swUpdateOrchestrator.clearAppliedUpdateHistoryActions(appliedBuildNumber);
+  updateFlow.clearAppliedUpdateHistoryActions(appliedBuildNumber);
 
 const refreshNotificationHistoryBadgeUi = () => {
   if (!notificationHistoryToggleEl || !notificationHistoryBadgeEl) return;
@@ -911,30 +911,14 @@ const requestUpdateApplyConfirmation = async (buildNumber) => {
 };
 
 const resolveLatestUpdateBuildNumber = async (hintBuildNumber = null) => {
-  let latest = Number.isInteger(hintBuildNumber) ? hintBuildNumber : 0;
-
-  const storedNotifiedBuild = readLastNotifiedRemoteBuildNumber();
-  if (Number.isInteger(storedNotifiedBuild) && storedNotifiedBuild > latest) {
-    latest = storedNotifiedBuild;
-  }
-
-  for (const entry of notificationHistoryState.entries) {
-    if (!entry || entry.kind !== 'new-version-available') continue;
-    const action = entry.action;
-    if (!action || action.type !== 'apply-update') continue;
-    if (Number.isInteger(action.buildNumber) && action.buildNumber > latest) {
-      latest = action.buildNumber;
-    }
-  }
-
-  const remoteBuildNumber = await fetchRemoteBuildNumber();
-  if (Number.isInteger(remoteBuildNumber) && remoteBuildNumber > latest) {
-    latest = remoteBuildNumber;
-  }
-
-  const updatableBuildNumber = await resolveUpdatableRemoteBuildNumber(latest);
-  if (!Number.isInteger(updatableBuildNumber) || updatableBuildNumber <= localBuildNumber) return null;
-  return updatableBuildNumber;
+  return resolveLatestUpdateBuildNumberCore({
+    hintBuildNumber,
+    readLastNotifiedRemoteBuildNumber,
+    notificationHistoryEntries: notificationHistoryState.entries,
+    fetchRemoteBuildNumber,
+    resolveUpdatableRemoteBuildNumber,
+    localBuildNumber,
+  });
 };
 
 const resolveMoveDailyDialogPromptText = () => {
@@ -1144,7 +1128,7 @@ const bindMoveDailyDialog = () => {
 };
 
 const bindServiceWorkerHistoryMessages = () => {
-  swUpdateOrchestrator.bindHistoryUpdates({
+  updateFlow.bindServiceWorkerHistoryMessages({
     onPayload: (payload) => {
       applyNotificationHistoryPayload(payload);
       refreshNotificationHistoryUi();
@@ -1344,10 +1328,10 @@ const setupDailyHardInvalidationWatcher = (bootDaily) => {
 };
 
 const fetchRemoteBuildNumber = async () =>
-  swUpdateOrchestrator.fetchRemoteBuildNumber();
+  updateFlow.fetchRemoteBuildNumber();
 
 const resolveUpdatableRemoteBuildNumber = async (remoteBuildNumber) =>
-  swUpdateOrchestrator.resolveUpdatableRemoteBuildNumber(remoteBuildNumber);
+  updateFlow.resolveUpdatableRemoteBuildNumber(remoteBuildNumber);
 
 const resolveNewVersionToastText = () => {
   const localized = translateNow('ui.newVersionAvailableToast');
@@ -1373,10 +1357,7 @@ const resolveUpdateApplyFailureToastText = () => {
   return 'Could not apply update yet. Try again shortly.';
 };
 
-const swMessenger = createSwMessenger();
-
-const swUpdateOrchestrator = createSwUpdateOrchestrator({
-  swMessenger,
+const updateFlow = createUpdateFlow({
   swMessageTypes: SW_MESSAGE_TYPES,
   updateApplyStatus: UPDATE_APPLY_STATUS,
   updateCheckDecision: UPDATE_CHECK_DECISION,
@@ -1406,7 +1387,7 @@ const swUpdateOrchestrator = createSwUpdateOrchestrator({
 });
 
 const applyUpdateForBuild = async (remoteBuildNumber, options = {}) =>
-  swUpdateOrchestrator.applyUpdateForBuild(remoteBuildNumber, options);
+  updateFlow.applyUpdateForBuild(remoteBuildNumber, options);
 
 const applyLatestUpdateForAction = async (hintBuildNumber = null) => {
   const latestBuildNumber = await resolveLatestUpdateBuildNumber(hintBuildNumber);
@@ -1427,13 +1408,13 @@ const applyLatestUpdateForAction = async (hintBuildNumber = null) => {
 };
 
 const checkForNewBuild = async (options = {}) =>
-  swUpdateOrchestrator.checkForNewBuild(options);
+  updateFlow.checkForNewBuild(options);
 
 const registerServiceWorker = async () =>
-  swUpdateOrchestrator.registerServiceWorker();
+  updateFlow.registerServiceWorker();
 
 const bindServiceWorkerRuntimeEvents = () =>
-  swUpdateOrchestrator.bindRuntimeEvents();
+  updateFlow.bindServiceWorkerRuntimeEvents();
 
 const wrapPersistenceForDailySideEffects = (persistence) => {
   if (!persistence || typeof persistence.writeDailySolvedDate !== 'function') return;
@@ -1612,7 +1593,7 @@ export async function initTetherApp() {
     }
   }
 
-  if (!swUpdateOrchestrator.getRegistration()) {
+  if (!updateFlow.getRegistration()) {
     void registerServiceWorker();
   } else {
     void (async () => {
