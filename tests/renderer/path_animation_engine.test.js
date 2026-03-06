@@ -1,6 +1,97 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createPathAnimationEngine } from '../../src/renderer/path_animation_engine.js';
+import {
+  createPathAnimationEngine,
+  resolveHeadShiftTransitionWindow,
+} from '../../src/renderer/path_animation_engine.js';
+
+test('resolveHeadShiftTransitionWindow returns pure head-shift window', () => {
+  const previousPath = [
+    { r: 1, c: 1 },
+    { r: 1, c: 2 },
+    { r: 1, c: 3 },
+  ];
+  const nextPath = [
+    { r: 1, c: 0 },
+    { r: 1, c: 1 },
+    { r: 1, c: 2 },
+    { r: 1, c: 3 },
+  ];
+
+  assert.deepEqual(resolveHeadShiftTransitionWindow(nextPath, previousPath), {
+    shiftCount: 1,
+    nextStart: 1,
+    prevStart: 0,
+    overlap: 3,
+    isFullLengthOverlap: true,
+    isPureHeadShift: true,
+  });
+});
+
+test('resolveHeadShiftTransitionWindow returns mixed retract+advance window', () => {
+  const previousPath = [
+    { r: 0, c: 0 },
+    { r: 1, c: 0 },
+    { r: 1, c: 1 },
+    { r: 0, c: 1 },
+  ];
+  const nextPath = [
+    { r: 1, c: 2 },
+    { r: 1, c: 1 },
+    { r: 0, c: 1 },
+  ];
+
+  assert.deepEqual(resolveHeadShiftTransitionWindow(nextPath, previousPath), {
+    shiftCount: -1,
+    nextStart: 1,
+    prevStart: 2,
+    overlap: 2,
+    isFullLengthOverlap: false,
+    isPureHeadShift: false,
+  });
+});
+
+test('resolveHeadShiftTransitionWindow falls back to single-overlap head-changed transition', () => {
+  const previousPath = [
+    { r: 0, c: 0 },
+    { r: 1, c: 0 },
+    { r: 1, c: 1 },
+    { r: 0, c: 1 },
+    { r: 0, c: 2 },
+  ];
+  const nextPath = [
+    { r: 2, c: 1 },
+    { r: 1, c: 1 },
+    { r: 1, c: 2 },
+    { r: 0, c: 2 },
+  ];
+
+  assert.deepEqual(resolveHeadShiftTransitionWindow(nextPath, previousPath), {
+    shiftCount: -1,
+    nextStart: 1,
+    prevStart: 2,
+    overlap: 1,
+    isFullLengthOverlap: false,
+    isPureHeadShift: false,
+  });
+});
+
+test('resolveHeadShiftTransitionWindow does not use single-overlap fallback when head is unchanged', () => {
+  const previousPath = [
+    { r: 0, c: 0 },
+    { r: 0, c: 1 },
+    { r: 1, c: 1 },
+    { r: 1, c: 2 },
+  ];
+  const nextPath = [
+    { r: 0, c: 0 },
+    { r: 1, c: 0 },
+    { r: 1, c: 1 },
+    { r: 2, c: 1 },
+  ];
+
+  assert.equal(resolveHeadShiftTransitionWindow(nextPath, previousPath), null);
+});
 
 test('drawAll schedules animation frame when delegate signals animation', () => {
   const frameQueue = [];

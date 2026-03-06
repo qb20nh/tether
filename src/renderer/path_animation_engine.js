@@ -137,6 +137,69 @@ export const resolveTipArrivalSyntheticPrevPath = (
   return restored ? [restored, ...nextPath] : null;
 };
 
+const resolveBestPathOverlap = (
+  nextPath,
+  previousPath,
+  minOverlap = 1,
+  shiftCount = null,
+) => {
+  if (!Array.isArray(nextPath) || !Array.isArray(previousPath)) return null;
+  const nextLen = nextPath.length;
+  const prevLen = previousPath.length;
+  if (nextLen <= 0 || prevLen <= 0) return null;
+
+  let bestNextStart = 0;
+  let bestPrevStart = 0;
+  let bestOverlap = 0;
+  let bestHeadShiftAbs = Infinity;
+  let bestHeadCost = Infinity;
+
+  for (let prevStart = 0; prevStart < prevLen; prevStart += 1) {
+    for (let nextStart = 0; nextStart < nextLen; nextStart += 1) {
+      if (Number.isInteger(shiftCount) && (nextStart - prevStart) !== shiftCount) continue;
+
+      let overlap = 0;
+      const maxCompare = Math.min(prevLen - prevStart, nextLen - nextStart);
+      while (overlap < maxCompare && pointsMatch(nextPath[nextStart + overlap], previousPath[prevStart + overlap])) {
+        overlap += 1;
+      }
+      if (overlap < minOverlap) continue;
+
+      const headShiftAbs = Math.abs(nextStart - prevStart);
+      const headCost = nextStart + prevStart;
+      const isBetter = Number.isInteger(shiftCount)
+        ? (
+          overlap > bestOverlap
+          || (overlap === bestOverlap && headCost < bestHeadCost)
+        )
+        : (
+          overlap > bestOverlap
+          || (
+            overlap === bestOverlap
+            && (
+              headShiftAbs < bestHeadShiftAbs
+              || (headShiftAbs === bestHeadShiftAbs && headCost < bestHeadCost)
+            )
+          )
+        );
+      if (!isBetter) continue;
+
+      bestOverlap = overlap;
+      bestNextStart = nextStart;
+      bestPrevStart = prevStart;
+      bestHeadShiftAbs = headShiftAbs;
+      bestHeadCost = headCost;
+    }
+  }
+
+  if (bestOverlap < minOverlap) return null;
+  return {
+    nextStart: bestNextStart,
+    prevStart: bestPrevStart,
+    overlap: bestOverlap,
+  };
+};
+
 export const resolveHeadShiftStepCount = (nextPath, previousPath) => {
   if (!Array.isArray(nextPath) || !Array.isArray(previousPath)) return 0;
 
@@ -157,45 +220,54 @@ export const resolveHeadShiftStepCount = (nextPath, previousPath) => {
   }
 
   const minOverlap = Math.min(nextLen, prevLen) <= 2 ? 1 : 2;
-  let bestNextStart = 0;
-  let bestPrevStart = 0;
-  let bestOverlap = 0;
-  let bestHeadShiftAbs = Infinity;
-  let bestHeadCost = Infinity;
+  const overlap = resolveBestPathOverlap(nextPath, previousPath, minOverlap);
+  if (!overlap) return 0;
+  return overlap.nextStart - overlap.prevStart;
+};
 
-  for (let prevStart = 0; prevStart < prevLen; prevStart += 1) {
-    for (let nextStart = 0; nextStart < nextLen; nextStart += 1) {
-      let overlap = 0;
-      const maxCompare = Math.min(prevLen - prevStart, nextLen - nextStart);
-      while (overlap < maxCompare && pointsMatch(nextPath[nextStart + overlap], previousPath[prevStart + overlap])) {
-        overlap += 1;
-      }
-      if (overlap < minOverlap) continue;
+export const resolveHeadShiftTransitionWindow = (nextPath, previousPath) => {
+  if (!Array.isArray(nextPath) || !Array.isArray(previousPath)) return null;
+  const nextLen = nextPath.length;
+  const prevLen = previousPath.length;
+  if (nextLen < 2 || prevLen < 2) return null;
 
-      const headShiftAbs = Math.abs(nextStart - prevStart);
-      const headCost = nextStart + prevStart;
-      const isBetter = (
-        overlap > bestOverlap
-        || (
-          overlap === bestOverlap
-          && (
-            headShiftAbs < bestHeadShiftAbs
-            || (headShiftAbs === bestHeadShiftAbs && headCost < bestHeadCost)
-          )
-        )
-      );
-      if (!isBetter) continue;
+  const minOverlap = Math.min(nextLen, prevLen) <= 2 ? 1 : 2;
+  let shiftCount = resolveHeadShiftStepCount(nextPath, previousPath);
+  let overlap = Number.isInteger(shiftCount) && shiftCount !== 0
+    ? resolveBestPathOverlap(nextPath, previousPath, minOverlap, shiftCount)
+    : null;
 
-      bestOverlap = overlap;
-      bestNextStart = nextStart;
-      bestPrevStart = prevStart;
-      bestHeadShiftAbs = headShiftAbs;
-      bestHeadCost = headCost;
-    }
+  // Fast multi-turn retract+advance can collapse strict overlap matching to 1 node.
+  // Keep this fallback constrained to head-changed transitions only.
+  if (!overlap) {
+    const nextHead = nextPath[0] || null;
+    const prevHead = previousPath[0] || null;
+    const headChanged = !(
+      nextHead
+      && prevHead
+      && pointsMatch(nextHead, prevHead)
+    );
+    if (!headChanged) return null;
+
+    const relaxedOverlap = resolveBestPathOverlap(nextPath, previousPath, 1);
+    if (!relaxedOverlap) return null;
+
+    const relaxedShift = relaxedOverlap.nextStart - relaxedOverlap.prevStart;
+    if (!Number.isInteger(relaxedShift) || relaxedShift === 0) return null;
+    shiftCount = relaxedShift;
+    overlap = relaxedOverlap;
   }
 
-  if (bestOverlap < minOverlap) return 0;
-  return bestNextStart - bestPrevStart;
+  const minLen = Math.min(nextLen, prevLen);
+  const isFullLengthOverlap = overlap.overlap >= minLen;
+  return {
+    shiftCount,
+    nextStart: overlap.nextStart,
+    prevStart: overlap.prevStart,
+    overlap: overlap.overlap,
+    isFullLengthOverlap,
+    isPureHeadShift: isFullLengthOverlap && (overlap.nextStart === 0 || overlap.prevStart === 0),
+  };
 };
 
 const isPathReversed = (nextPath, previousPath) => {

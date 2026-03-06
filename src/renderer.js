@@ -7,6 +7,7 @@ import { createPathWebglRenderer } from './renderer/path_webgl_renderer.js';
 import {
   createPathAnimationEngine,
   resolveHeadShiftStepCount,
+  resolveHeadShiftTransitionWindow,
   resolveTipArrivalSyntheticPrevPath,
 } from './renderer/path_animation_engine.js';
 import {
@@ -35,6 +36,9 @@ let latestCompletionModel = null;
 let latestTutorialFlags = null;
 let latestInteractionModel = null;
 let latestPathMainFlowTravel = 0;
+let pendingPathFlowOffsetShift = 0;
+let pendingPathFlowTransitionCount = 0;
+let pendingPathFlowTargetSignature = '';
 let colorParserCtx = null;
 let reusablePathPoints = [];
 let reusableTutorialBracketPoints = [];
@@ -275,6 +279,98 @@ const pathsMatch = (aPath, bPath) => {
     if (!pointsMatch(aPath[i], bPath[i])) return false;
   }
   return true;
+};
+
+const resolvePathSignature = (path) => {
+  if (!Array.isArray(path) || path.length <= 0) return '0|_|_';
+  const head = path[0] || null;
+  const tail = path[path.length - 1] || null;
+  const headSig = `${Number(head?.r)},${Number(head?.c)}`;
+  const tailSig = `${Number(tail?.r)},${Number(tail?.c)}`;
+  return `${path.length}|${headSig}|${tailSig}`;
+};
+
+const resolveSnapshotPath = (snapshotOrPath) => {
+  if (Array.isArray(snapshotOrPath)) return snapshotOrPath;
+  if (Array.isArray(snapshotOrPath?.path)) return snapshotOrPath.path;
+  return null;
+};
+
+export const clearPathTransitionCompensationBuffer = () => {
+  pendingPathFlowOffsetShift = 0;
+  pendingPathFlowTransitionCount = 0;
+  pendingPathFlowTargetSignature = '';
+};
+
+export const recordPathTransitionCompensation = (
+  previousSnapshot,
+  nextSnapshot,
+  refs = null,
+) => {
+  const previousPath = resolveSnapshotPath(previousSnapshot);
+  const nextPath = resolveSnapshotPath(nextSnapshot);
+  if (!Array.isArray(previousPath) || !Array.isArray(nextPath)) return 0;
+  if (pathsMatch(previousPath, nextPath)) return 0;
+
+  pendingPathFlowTransitionCount += 1;
+  pendingPathFlowTargetSignature = resolvePathSignature(nextPath);
+
+  const activeRefs = refs || latestPathRefs || null;
+  if (!pathLayoutMetrics.ready && !activeRefs?.gridEl) return 0;
+  const shift = getHeadShiftDelta(
+    nextPath,
+    previousPath,
+    activeRefs || {},
+    getGridCanvasOffset(activeRefs || {}, headOffsetScratch),
+  );
+  if (!Number.isFinite(shift) || shift === 0) return 0;
+
+  const compensatedShift = shift * PATH_FLOW_ANCHOR_RATIO;
+  pendingPathFlowOffsetShift += compensatedShift;
+  return compensatedShift;
+};
+
+export const consumePathTransitionCompensation = (
+  path,
+  flowCycle = PATH_FLOW_CYCLE,
+) => {
+  if (!(pendingPathFlowTransitionCount > 0)) {
+    return {
+      consumed: false,
+      stale: false,
+      appliedShift: 0,
+      transitionCount: 0,
+    };
+  }
+
+  const transitionCount = pendingPathFlowTransitionCount;
+  const nextSignature = resolvePathSignature(path);
+  if (pendingPathFlowTargetSignature !== nextSignature) {
+    clearPathTransitionCompensationBuffer();
+    return {
+      consumed: false,
+      stale: true,
+      appliedShift: 0,
+      transitionCount,
+    };
+  }
+
+  const appliedShift = Number.isFinite(pendingPathFlowOffsetShift)
+    ? pendingPathFlowOffsetShift
+    : 0;
+  if (appliedShift !== 0) {
+    pathAnimationOffset = normalizeFlowOffset(
+      pathAnimationOffset + appliedShift,
+      flowCycle,
+    );
+  }
+  clearPathTransitionCompensationBuffer();
+  return {
+    consumed: true,
+    stale: false,
+    appliedShift,
+    transitionCount,
+  };
 };
 
 const clearPathStartRetainedArcState = () => {
@@ -1280,113 +1376,6 @@ const getPathMainTravelFromPoints = (points, flowWidth, maxSegments = null) => {
   return flowTravel;
 };
 
-const getHeadShiftTravelDistance = (path, stepCount, safeCell) => {
-  if (!Array.isArray(path) || path.length < 2) return 0;
-  const maxSteps = Math.min(Math.max(0, stepCount), path.length - 1);
-  if (maxSteps <= 0) return 0;
-
-  let travel = 0;
-  for (let i = 0; i < maxSteps; i += 1) {
-    travel += Math.max(0, cellDistance(path[i], path[i + 1])) * safeCell;
-  }
-  return travel;
-};
-
-const resolveBestPathOverlap = (nextPath, previousPath) => {
-  if (!Array.isArray(nextPath) || !Array.isArray(previousPath)) return 0;
-  const nextLen = nextPath.length;
-  const prevLen = previousPath.length;
-  if (nextLen <= 0 || prevLen <= 0) return 0;
-
-  let bestNextStart = 0;
-  let bestPrevStart = 0;
-  let bestOverlap = 0;
-  let bestHeadShiftAbs = Infinity;
-  let bestHeadCost = Infinity;
-
-  for (let prevStart = 0; prevStart < prevLen; prevStart += 1) {
-    for (let nextStart = 0; nextStart < nextLen; nextStart += 1) {
-      let overlap = 0;
-      const maxCompare = Math.min(prevLen - prevStart, nextLen - nextStart);
-      while (overlap < maxCompare && pointsMatch(nextPath[nextStart + overlap], previousPath[prevStart + overlap])) {
-        overlap += 1;
-      }
-      if (overlap <= 0) continue;
-
-      const headShiftAbs = Math.abs(nextStart - prevStart);
-      const headCost = nextStart + prevStart;
-      const isBetter = (
-        overlap > bestOverlap
-        || (
-          overlap === bestOverlap
-          && (
-            headShiftAbs < bestHeadShiftAbs
-            || (headShiftAbs === bestHeadShiftAbs && headCost < bestHeadCost)
-          )
-        )
-      );
-      if (!isBetter) continue;
-
-      bestOverlap = overlap;
-      bestNextStart = nextStart;
-      bestPrevStart = prevStart;
-      bestHeadShiftAbs = headShiftAbs;
-      bestHeadCost = headCost;
-    }
-  }
-
-  return {
-    nextStart: bestNextStart,
-    prevStart: bestPrevStart,
-    overlap: bestOverlap,
-  };
-};
-
-const resolveBestPathOverlapForShift = (nextPath, previousPath, shiftCount) => {
-  if (!Array.isArray(nextPath) || !Array.isArray(previousPath)) return null;
-  if (!Number.isInteger(shiftCount)) return null;
-  const nextLen = nextPath.length;
-  const prevLen = previousPath.length;
-  if (nextLen <= 0 || prevLen <= 0) return null;
-
-  let bestNextStart = 0;
-  let bestPrevStart = 0;
-  let bestOverlap = 0;
-  let bestHeadCost = Infinity;
-
-  for (let prevStart = 0; prevStart < prevLen; prevStart += 1) {
-    for (let nextStart = 0; nextStart < nextLen; nextStart += 1) {
-      if ((nextStart - prevStart) !== shiftCount) continue;
-
-      let overlap = 0;
-      const maxCompare = Math.min(prevLen - prevStart, nextLen - nextStart);
-      while (overlap < maxCompare && pointsMatch(nextPath[nextStart + overlap], previousPath[prevStart + overlap])) {
-        overlap += 1;
-      }
-      if (overlap <= 0) continue;
-
-      const headCost = nextStart + prevStart;
-      const isBetter = (
-        overlap > bestOverlap
-        || (overlap === bestOverlap && headCost < bestHeadCost)
-      );
-      if (!isBetter) continue;
-
-      bestOverlap = overlap;
-      bestNextStart = nextStart;
-      bestPrevStart = prevStart;
-      bestHeadCost = headCost;
-    }
-  }
-
-  if (bestOverlap <= 0) return null;
-  return {
-    nextStart: bestNextStart,
-    prevStart: bestPrevStart,
-    overlap: bestOverlap,
-  };
-};
-
 const resolveCompensationFlowWidth = (gridEl = null, flowWidth = null) => {
   if (Number.isFinite(flowWidth) && flowWidth > 0) return flowWidth;
   const cell = pathLayoutMetrics.ready
@@ -1453,20 +1442,16 @@ const getHeadShiftDelta = (nextPath, previousPath, refs = {}, offset = { x: 0, y
   const { gridEl } = refs;
   if (!Array.isArray(nextPath) || !Array.isArray(previousPath)) return 0;
 
-  const headShiftStepCount = resolveHeadShiftStepCount(nextPath, previousPath);
-  if (!Number.isInteger(headShiftStepCount) || headShiftStepCount === 0) return 0;
-
-  const overlapInfo = resolveBestPathOverlapForShift(nextPath, previousPath, headShiftStepCount)
-    || resolveBestPathOverlap(nextPath, previousPath);
-  const overlap = Number(overlapInfo?.overlap) || 0;
-  const nextStart = Number(overlapInfo?.nextStart) || 0;
-  const prevStart = Number(overlapInfo?.prevStart) || 0;
-  const minOverlap = Math.min(nextPath.length, previousPath.length) <= 2 ? 1 : 2;
-  if (overlap < minOverlap) return 0;
-  if (nextStart === 0 && prevStart === 0) return 0;
-  if ((nextStart - prevStart) !== headShiftStepCount) return 0;
-  const isFullLengthOverlap = overlap >= Math.min(nextPath.length, previousPath.length);
-  const isPureHeadShift = isFullLengthOverlap && (nextStart === 0 || prevStart === 0);
+  const transitionWindow = resolveHeadShiftTransitionWindow(nextPath, previousPath);
+  if (!transitionWindow) return 0;
+  const {
+    shiftCount: headShiftStepCount,
+    nextStart,
+    prevStart,
+    overlap,
+    isFullLengthOverlap,
+    isPureHeadShift,
+  } = transitionWindow;
   const shouldUseSegmentStartAnchor = (
     overlap >= 2
     && !isFullLengthOverlap
@@ -2443,6 +2428,7 @@ export function cacheElements() {
   lastPathRendererRecoveryAttemptMs = 0;
   interactiveResizeActive = false;
   pendingInteractiveResizePayload = null;
+  clearPathTransitionCompensationBuffer();
   clearInteractiveResizeTimer();
   pathLayoutMetrics.ready = false;
   pathLayoutMetrics.version = 0;
@@ -2995,6 +2981,7 @@ function drawAllImpl(
   tutorialFlags = null,
 ) {
   const previousPath = latestPathSnapshot?.path || null;
+  const pathChanged = !pathsMatch(previousPath, snapshot.path);
   const layout = ensurePathLayoutMetrics(refs);
   const flow = getCachedPathFlowMetrics(refs, layout.cell);
   updatePathThemeCache(refs);
@@ -3017,6 +3004,7 @@ function drawAllImpl(
   updatePathFlowVisibilityState(previousPath, snapshot.path, nowMs);
   updatePathReverseTipSwapState(previousPath, snapshot.path, nowMs);
   if (isPathReversed(snapshot.path, previousPath)) {
+    clearPathTransitionCompensationBuffer();
     const reverseFromFlowOffset = pathAnimationOffset;
     const reverseTravel = latestPathMainFlowTravel;
     if (reverseTravel > 0) {
@@ -3038,19 +3026,27 @@ function drawAllImpl(
       flow.cycle,
       nowMs,
     );
-  } else {
-    const shift = getHeadShiftDelta(
+  } else if (pathChanged) {
+    const consumedCompensation = consumePathTransitionCompensation(
       snapshot.path,
-      previousPath,
-      refs,
-      getGridCanvasOffset(refs, headOffsetScratch),
+      flow.cycle,
     );
-    if (shift !== 0) {
-      pathAnimationOffset = normalizeFlowOffset(
-        pathAnimationOffset + (shift * PATH_FLOW_ANCHOR_RATIO),
-        flow.cycle,
+    if (!consumedCompensation.consumed) {
+      const shift = getHeadShiftDelta(
+        snapshot.path,
+        previousPath,
+        refs,
+        getGridCanvasOffset(refs, headOffsetScratch),
       );
+      if (shift !== 0) {
+        pathAnimationOffset = normalizeFlowOffset(
+          pathAnimationOffset + (shift * PATH_FLOW_ANCHOR_RATIO),
+          flow.cycle,
+        );
+      }
     }
+  } else if (pendingPathFlowTransitionCount > 0) {
+    clearPathTransitionCompensationBuffer();
   }
 
   latestPathSnapshot = snapshot;

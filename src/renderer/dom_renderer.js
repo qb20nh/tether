@@ -7,6 +7,8 @@ import {
   resizeCanvas,
   notifyInteractiveResize,
   setPathFlowFreezeImmediate as setPathFlowFreezeImmediateInternal,
+  recordPathTransitionCompensation as recordPathTransitionCompensationInternal,
+  clearPathTransitionCompensationBuffer as clearPathTransitionCompensationBufferInternal,
   setMessage,
   clearDropTarget,
   setDropTarget,
@@ -366,6 +368,16 @@ export function createDomRenderer(options = {}) {
 
     setPathFlowFreezeImmediate(isFrozen = false) {
       setPathFlowFreezeImmediateInternal(isFrozen);
+    },
+
+    recordPathTransition(previousSnapshot, nextSnapshot, interactionModel = null) {
+      if (!refs) return;
+      void interactionModel;
+      recordPathTransitionCompensationInternal(previousSnapshot, nextSnapshot, refs);
+    },
+
+    clearPathTransitionCompensation() {
+      clearPathTransitionCompensationBufferInternal();
     },
 
     updateInteraction(interactionModel = {}) {

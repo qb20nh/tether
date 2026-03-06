@@ -1032,6 +1032,8 @@ export function createRuntime(options) {
       syncMutableBoardStateFromSnapshot(state.getSnapshot());
     }
 
+    renderer.clearPathTransitionCompensation?.();
+
     const transition = state.dispatch({
       type: 'level/load',
       payload: { levelIndex: targetIndex },
@@ -1253,6 +1255,7 @@ export function createRuntime(options) {
 
     if (actionType === UI_ACTIONS.RESET_CLICK) {
       if (dailyBoardLocked) return;
+      renderer.clearPathTransitionCompensation?.();
       state.dispatch({ type: 'path/reset', payload: {} });
       const snapshot = state.getSnapshot();
       refresh(snapshot, false);
@@ -1420,6 +1423,11 @@ export function createRuntime(options) {
     });
 
     if (transition.changed && isPathStepCommand) {
+      renderer.recordPathTransition?.(
+        previousSnapshot,
+        transition.snapshot,
+        interactionState,
+      );
       interactionState.pathTipArrivalHint = buildPathTipArrivalHint(
         commandType,
         previousSnapshot,
@@ -1427,6 +1435,14 @@ export function createRuntime(options) {
       );
     } else if (!isPathStepCommand) {
       interactionState.pathTipArrivalHint = null;
+    }
+
+    if (
+      commandType === GAME_COMMANDS.RESET_PATH
+      || commandType === GAME_COMMANDS.LOAD_LEVEL
+      || (!isPathStepCommand && transition.rebuildGrid)
+    ) {
+      renderer.clearPathTransitionCompensation?.();
     }
 
     if (transition.rebuildGrid) {

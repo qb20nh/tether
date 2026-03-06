@@ -122,6 +122,8 @@
  *     uiModel?:Record<string, any>,
  *     interactionModel?:Record<string, any>,
  *   })=>void,
+ *   recordPathTransition?:(previousSnapshot:GameSnapshot, nextSnapshot:GameSnapshot, interactionModel?:Record<string, any>)=>void,
+ *   clearPathTransitionCompensation?:()=>void,
  *   resize:()=>void,
  *   unmount:()=>void,
  * }} RendererPort

@@ -26,6 +26,8 @@ test('default adapters expose required contract methods', () => {
   assert.equal(typeof adapters.renderer.mount, 'function');
   assert.equal(typeof adapters.renderer.renderFrame, 'function');
   assert.equal(typeof adapters.renderer.resize, 'function');
+  assert.equal(typeof adapters.renderer.recordPathTransition, 'function');
+  assert.equal(typeof adapters.renderer.clearPathTransitionCompensation, 'function');
 
   assert.equal(typeof adapters.input.bind, 'function');
   assert.equal(typeof adapters.input.unbind, 'function');
