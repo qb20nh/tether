@@ -17,13 +17,13 @@ import { DAILY_PAYLOAD_FILE } from './shared/paths.js';
 import { createUpdateFlow } from './app/update_flow.js';
 import { resolveLatestUpdateBuildNumber as resolveLatestUpdateBuildNumberCore } from './app/update_build_resolver.js';
 import {
-  HISTORY_DOT_COLORS,
-  formatHistoryAbsoluteTime,
-  formatHistoryRelativeTime,
-  hasUnreadSystemHistory,
-  historyEntryDotColor,
-  normalizeHistoryAction,
-} from './runtime/notification_history.js';
+  AUTO_UPDATE_ENABLED_KEY,
+  NOTIFICATION_AUTO_PROMPT_DECISIONS,
+  NOTIFICATION_ENABLED_KEY,
+  createNotificationPreferences,
+} from './app/notification_preferences.js';
+import { createDailyPayloadService } from './app/daily_payload_service.js';
+import { createNotificationCenter } from './app/notification_center.js';
 import {
   UPDATE_APPLY_STATUS,
   UPDATE_CHECK_DECISION,
@@ -46,10 +46,6 @@ const LAST_SEEN_BUILD_NUMBER_KEY = 'tetherLastSeenBuildNumber';
 const APP_TOAST_ID = 'appToast';
 const UPDATE_PROGRESS_OVERLAY_ID = 'updateProgressOverlay';
 const APP_TOAST_VISIBLE_MS = 3200;
-const HISTORY_RELATIVE_TIME_REFRESH_MS = 60 * 1000;
-const HISTORY_MAX_ENTRIES = 10;
-const HISTORY_DYING_START_INDEX = 5;
-const HISTORY_EMPTY_PLACEHOLDER_TEXT = 'No notifications yet.';
 const BUILD_LABEL_HASH_RE = /\b[0-9a-f]{7,40}\b/i;
 
 const SW_MESSAGE_TYPES = Object.freeze({
@@ -65,47 +61,13 @@ const SW_MESSAGE_TYPES = Object.freeze({
   HISTORY_UPDATE: 'SW_NOTIFICATION_HISTORY',
 });
 
-const NOTIFICATION_AUTO_PROMPT_KEY = 'tetherNotificationAutoPromptDecision';
-const NOTIFICATION_ENABLED_KEY = 'tetherNotificationsEnabled';
-const AUTO_UPDATE_ENABLED_KEY = 'tetherAutoUpdateEnabled';
-const LAST_NOTIFIED_REMOTE_BUILD_KEY = 'tetherLastNotifiedRemoteBuildNumber';
-const NOTIFICATION_AUTO_PROMPT_DECISIONS = Object.freeze({
-  UNSET: 'unset',
-  ACCEPTED: 'accepted',
-  DECLINED: 'declined',
-});
-
 let runtimeInstance = null;
 let runtimeStateAdapter = null;
 let runtimeCoreAdapter = null;
-let notificationsToggleEl = null;
-let notificationsToggleBound = false;
-let autoUpdateToggleEl = null;
-let autoUpdateToggleBound = false;
-let notificationHistoryToggleEl = null;
-let notificationHistoryBadgeEl = null;
-let notificationHistoryPanelEl = null;
-let notificationHistoryListEl = null;
-let notificationHistoryToggleBound = false;
-let notificationHistoryOpen = false;
-let notificationHistoryRefreshTimer = 0;
-let notificationHistoryReadAckInFlight = false;
-let notificationHistoryReadAckVersion = null;
-let notificationHistoryValidationFrame = 0;
-let updateApplyDialogEl = null;
-let updateApplyMessageEl = null;
-let updateApplyDialogBound = false;
 let updateProgressOverlayEl = null;
 let updateProgressOverlayLabelEl = null;
 let updateProgressOverlayActive = false;
-let moveDailyDialogEl = null;
-let moveDailyMessageEl = null;
-let moveDailyDialogBound = false;
-let moveDailyDialogResolver = null;
-const notificationHistoryState = {
-  historyVersion: 1,
-  entries: [],
-};
+let updateFlow = null;
 
 const readMetaContent = (metaName) => {
   const meta = document.querySelector(`meta[name="${metaName}"]`);
@@ -183,7 +145,6 @@ const teardownRuntime = () => {
   runtimeInstance = null;
   runtimeStateAdapter = null;
   runtimeCoreAdapter = null;
-  moveDailyDialogResolver = null;
 };
 
 const readLastSeenBuildNumber = () => {
@@ -307,120 +268,40 @@ const showInAppToast = (text, options = {}) => {
   }
 };
 
-const canUseServiceWorker = () => updateFlow.canUseServiceWorker();
+const canUseServiceWorker = () => updateFlow?.canUseServiceWorker?.() === true;
 
-const supportsNotifications = () => updateFlow.supportsNotifications();
+const supportsNotifications = () => updateFlow?.supportsNotifications?.() === true;
 
-const readAutoPromptDecision = () => {
-  try {
-    const value = window.localStorage.getItem(NOTIFICATION_AUTO_PROMPT_KEY);
-    if (
-      value === NOTIFICATION_AUTO_PROMPT_DECISIONS.ACCEPTED
-      || value === NOTIFICATION_AUTO_PROMPT_DECISIONS.DECLINED
-    ) {
-      return value;
-    }
-  } catch {
-    // localStorage can be unavailable in restricted browser contexts.
-  }
-  return NOTIFICATION_AUTO_PROMPT_DECISIONS.UNSET;
-};
+const notificationPreferences = createNotificationPreferences({
+  supportsNotifications,
+});
 
-const writeAutoPromptDecision = (decision) => {
-  if (
-    decision !== NOTIFICATION_AUTO_PROMPT_DECISIONS.ACCEPTED
-    && decision !== NOTIFICATION_AUTO_PROMPT_DECISIONS.DECLINED
-  ) {
-    return;
-  }
-  try {
-    window.localStorage.setItem(NOTIFICATION_AUTO_PROMPT_KEY, decision);
-  } catch {
-    // localStorage can be unavailable in restricted browser contexts.
-  }
-};
+const readAutoPromptDecision = () =>
+  notificationPreferences.readAutoPromptDecision();
 
-const readNotificationEnabledPreference = () => {
-  try {
-    const raw = window.localStorage.getItem(NOTIFICATION_ENABLED_KEY);
-    if (raw === 'false') return false;
-    if (raw === 'true') return true;
-  } catch {
-    // localStorage can be unavailable in restricted browser contexts.
-  }
-  return notificationPermissionState() === 'granted';
-};
+const writeAutoPromptDecision = (decision) =>
+  notificationPreferences.writeAutoPromptDecision(decision);
 
-const writeNotificationEnabledPreference = (enabled) => {
-  try {
-    window.localStorage.setItem(NOTIFICATION_ENABLED_KEY, enabled ? 'true' : 'false');
-  } catch {
-    // localStorage can be unavailable in restricted browser contexts.
-  }
-};
+const readNotificationEnabledPreference = () =>
+  notificationPreferences.readNotificationEnabledPreference();
 
-const readAutoUpdateEnabledPreference = () => {
-  try {
-    return window.localStorage.getItem(AUTO_UPDATE_ENABLED_KEY) === 'true';
-  } catch {
-    // localStorage can be unavailable in restricted browser contexts.
-  }
-  return false;
-};
+const writeNotificationEnabledPreference = (enabled) =>
+  notificationPreferences.writeNotificationEnabledPreference(enabled);
 
-const writeAutoUpdateEnabledPreference = (enabled) => {
-  try {
-    window.localStorage.setItem(AUTO_UPDATE_ENABLED_KEY, enabled ? 'true' : 'false');
-  } catch {
-    // localStorage can be unavailable in restricted browser contexts.
-  }
-};
+const readAutoUpdateEnabledPreference = () =>
+  notificationPreferences.readAutoUpdateEnabledPreference();
 
-const readLastNotifiedRemoteBuildNumber = () => {
-  try {
-    const parsed = Number.parseInt(window.localStorage.getItem(LAST_NOTIFIED_REMOTE_BUILD_KEY) || '', 10);
-    return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
-  } catch {
-    // localStorage can be unavailable in restricted browser contexts.
-  }
-  return null;
-};
+const writeAutoUpdateEnabledPreference = (enabled) =>
+  notificationPreferences.writeAutoUpdateEnabledPreference(enabled);
 
-const writeLastNotifiedRemoteBuildNumber = (buildNumber) => {
-  if (!Number.isInteger(buildNumber) || buildNumber <= 0) return;
-  try {
-    window.localStorage.setItem(LAST_NOTIFIED_REMOTE_BUILD_KEY, String(buildNumber));
-  } catch {
-    // localStorage can be unavailable in restricted browser contexts.
-  }
-};
+const readLastNotifiedRemoteBuildNumber = () =>
+  notificationPreferences.readLastNotifiedRemoteBuildNumber();
 
-const hasStoredNotificationEnabledPreference = () => {
-  try {
-    return window.localStorage.getItem(NOTIFICATION_ENABLED_KEY) !== null;
-  } catch {
-    // localStorage can be unavailable in restricted browser contexts.
-  }
-  return false;
-};
+const writeLastNotifiedRemoteBuildNumber = (buildNumber) =>
+  notificationPreferences.writeLastNotifiedRemoteBuildNumber(buildNumber);
 
-const notificationPermissionState = () => {
-  if (!supportsNotifications()) return 'unsupported';
-  return Notification.permission;
-};
-
-const refreshNotificationsToggleUi = () => {
-  if (!notificationsToggleEl) return;
-  const enabled = readNotificationEnabledPreference();
-  const permission = notificationPermissionState();
-  notificationsToggleEl.checked = enabled;
-  notificationsToggleEl.disabled = permission === 'unsupported';
-};
-
-const refreshAutoUpdateToggleUi = () => {
-  if (!autoUpdateToggleEl) return;
-  autoUpdateToggleEl.checked = readAutoUpdateEnabledPreference();
-};
+const hasStoredNotificationEnabledPreference = () =>
+  notificationPreferences.hasStoredNotificationEnabledPreference();
 
 const refreshSettingsVersionUi = () => {
   const versionEl = document.getElementById(ELEMENT_IDS.SETTINGS_VERSION);
@@ -481,174 +362,8 @@ const requestNotificationPermission = async () => {
   }
 };
 
-const enableNotificationsNow = async () => {
-  writeNotificationEnabledPreference(true);
-  const permission = await requestNotificationPermission();
-  if (permission !== 'granted') {
-    writeNotificationEnabledPreference(false);
-    if (permission === 'denied') {
-      const deniedText = translateNow('ui.notificationsBlockedToast');
-      if (deniedText !== 'ui.notificationsBlockedToast') {
-        showInAppToast(deniedText, { recordInHistory: false });
-      }
-    }
-    refreshNotificationsToggleUi();
-    await syncDailyStateToServiceWorker();
-    return false;
-  }
-
-  refreshNotificationsToggleUi();
-  await syncDailyStateToServiceWorker();
-  await registerBackgroundDailyCheck();
-  await requestServiceWorkerDailyCheck();
-  return true;
-};
-
-const disableNotificationsNow = async () => {
-  writeNotificationEnabledPreference(false);
-  refreshNotificationsToggleUi();
-  await syncDailyStateToServiceWorker();
-};
-
-const maybeAutoPromptForNotifications = async () => {
-  if (!supportsNotifications() || !canUseServiceWorker()) return;
-  if (hasStoredNotificationEnabledPreference() && !readNotificationEnabledPreference()) return;
-  if (notificationPermissionState() === 'granted') return;
-  if (readAutoPromptDecision() !== NOTIFICATION_AUTO_PROMPT_DECISIONS.UNSET) return;
-
-  const confirmed = window.confirm(translateNow('ui.notificationsAutoPromptConfirm'));
-  if (!confirmed) {
-    writeAutoPromptDecision(NOTIFICATION_AUTO_PROMPT_DECISIONS.DECLINED);
-    writeNotificationEnabledPreference(false);
-    refreshNotificationsToggleUi();
-    await syncDailyStateToServiceWorker();
-    return;
-  }
-
-  writeAutoPromptDecision(NOTIFICATION_AUTO_PROMPT_DECISIONS.ACCEPTED);
-  await enableNotificationsNow();
-};
-
-const bindNotificationsToggle = () => {
-  notificationsToggleEl = document.getElementById(ELEMENT_IDS.NOTIFICATIONS_TOGGLE);
-
-  if (!notificationsToggleEl || notificationsToggleBound) {
-    refreshNotificationsToggleUi();
-    return;
-  }
-  notificationsToggleEl.addEventListener('change', () => {
-    if (notificationsToggleEl.checked) {
-      void enableNotificationsNow();
-      return;
-    }
-    void disableNotificationsNow();
-  });
-
-  notificationsToggleBound = true;
-  refreshNotificationsToggleUi();
-};
-
-const bindAutoUpdateToggle = () => {
-  autoUpdateToggleEl = document.getElementById(ELEMENT_IDS.AUTO_UPDATE_TOGGLE);
-
-  if (!autoUpdateToggleEl || autoUpdateToggleBound) {
-    refreshAutoUpdateToggleUi();
-    return;
-  }
-
-  autoUpdateToggleEl.addEventListener('change', () => {
-    writeAutoUpdateEnabledPreference(autoUpdateToggleEl.checked);
-    refreshAutoUpdateToggleUi();
-    void syncUpdatePolicyToServiceWorker();
-  });
-
-  autoUpdateToggleBound = true;
-  refreshAutoUpdateToggleUi();
-};
-
-const normalizeHistoryEntry = (entry) => {
-  if (!entry || typeof entry !== 'object') return null;
-  const id = typeof entry.id === 'string' ? entry.id.trim() : '';
-  if (!id) return null;
-  const source = entry.source === 'system' ? 'system' : 'toast';
-  const kind = typeof entry.kind === 'string' ? entry.kind.trim() : (source === 'system' ? 'unsolved-warning' : 'toast');
-  const title = typeof entry.title === 'string' ? entry.title.trim() : '';
-  const body = typeof entry.body === 'string' ? entry.body.trim() : '';
-  const createdAtUtcMs = Number.parseInt(entry.createdAtUtcMs, 10);
-  const marker = entry.marker === 'unread' || entry.marker === 'just-read' || entry.marker === 'older'
-    ? entry.marker
-    : 'older';
-  const action = normalizeHistoryAction(entry.action);
-  return {
-    id,
-    source,
-    kind,
-    title,
-    body,
-    createdAtUtcMs: Number.isInteger(createdAtUtcMs) ? createdAtUtcMs : Date.now(),
-    marker,
-    action,
-  };
-};
-
-const applyNotificationHistoryPayload = (payload) => {
-  const prevVersion = notificationHistoryState.historyVersion;
-  const historyVersion = Number.parseInt(payload?.historyVersion, 10);
-  const entries = Array.isArray(payload?.entries)
-    ? payload.entries.map((entry) => normalizeHistoryEntry(entry)).filter(Boolean).slice(0, HISTORY_MAX_ENTRIES)
-    : [];
-  notificationHistoryState.historyVersion = Number.isInteger(historyVersion) ? historyVersion : 1;
-  notificationHistoryState.entries = entries;
-
-  if (notificationHistoryState.historyVersion !== prevVersion) {
-    notificationHistoryReadAckVersion = null;
-  }
-};
-
 const clearAppliedUpdateHistoryActions = async (appliedBuildNumber = localBuildNumber) =>
   updateFlow.clearAppliedUpdateHistoryActions(appliedBuildNumber);
-
-const refreshNotificationHistoryBadgeUi = () => {
-  if (!notificationHistoryToggleEl || !notificationHistoryBadgeEl) return;
-  const hasUnreadSystem = hasUnreadSystemHistory(notificationHistoryState.entries);
-  notificationHistoryBadgeEl.hidden = !hasUnreadSystem;
-  notificationHistoryToggleEl.classList.toggle('hasUnread', hasUnreadSystem);
-};
-
-const resolveNotificationHistoryEntryText = (entry) => {
-  let title = entry?.title || '-';
-  let body = entry?.body || '';
-
-  if (!entry || entry.source !== 'system') {
-    return { title, body };
-  }
-
-  if (entry.kind === 'unsolved-warning') {
-    const localizedTitle = translateNow('ui.notificationUnsolvedTitle');
-    const localizedBody = translateNow('ui.notificationUnsolvedBody');
-    if (localizedTitle !== 'ui.notificationUnsolvedTitle') title = localizedTitle;
-    if (localizedBody !== 'ui.notificationUnsolvedBody') body = localizedBody;
-    return { title, body };
-  }
-
-  if (entry.kind === 'new-level') {
-    const localizedTitle = translateNow('ui.notificationNewLevelTitle');
-    const localizedBody = translateNow('ui.notificationNewLevelBody');
-    if (localizedTitle !== 'ui.notificationNewLevelTitle') title = localizedTitle;
-    if (localizedBody !== 'ui.notificationNewLevelBody') body = localizedBody;
-    return { title, body };
-  }
-
-  if (entry.kind === 'new-version-available') {
-    const localizedTitle = translateNow('ui.newVersionAvailableTitle');
-    const localizedBody = translateNow('ui.newVersionAvailableBody');
-    if (localizedTitle !== 'ui.newVersionAvailableTitle') title = localizedTitle;
-    if (localizedBody !== 'ui.newVersionAvailableBody') body = localizedBody;
-    return { title, body };
-  }
-
-  return { title, body };
-};
 
 const isOpenDailyHistoryActionable = (entry) => {
   if (!entry || !entry.action || entry.action.type !== 'open-daily') return false;
@@ -657,297 +372,66 @@ const isOpenDailyHistoryActionable = (entry) => {
   return entry.action.dailyId === latestDailyState.dailyId;
 };
 
-const renderNotificationHistoryRelativeTimes = () => {
-  if (!notificationHistoryListEl) return;
-  const locale = getLocale();
-  const rows = notificationHistoryListEl.querySelectorAll('.notificationHistoryItem');
-  for (const row of rows) {
-    const tsRaw = row.getAttribute('data-created-at');
-    const createdAtUtcMs = Number.parseInt(tsRaw || '', 10);
-    const timeEl = row.querySelector('.notificationHistoryItem__time');
-    if (!timeEl || !Number.isInteger(createdAtUtcMs)) continue;
-    timeEl.textContent = formatHistoryRelativeTime(createdAtUtcMs, locale);
-    timeEl.setAttribute('title', formatHistoryAbsoluteTime(createdAtUtcMs, locale));
-  }
-};
-
-const renderNotificationHistoryList = () => {
-  if (!notificationHistoryListEl) return;
-  const entries = notificationHistoryState.entries;
-  notificationHistoryListEl.textContent = '';
-
-  if (entries.length === 0) {
-    const placeholder = document.createElement('div');
-    placeholder.className = 'notificationHistoryEmpty';
-    const localized = translateNow('ui.notificationHistoryEmpty');
-    placeholder.textContent = localized === 'ui.notificationHistoryEmpty'
-      ? HISTORY_EMPTY_PLACEHOLDER_TEXT
-      : localized;
-    notificationHistoryListEl.appendChild(placeholder);
-    return;
-  }
-
-  for (let i = 0; i < entries.length; i += 1) {
-    const entry = entries[i];
-    const row = document.createElement('div');
-    row.className = 'notificationHistoryItem';
-    row.setAttribute('data-entry-id', entry.id);
-    row.setAttribute('data-entry-kind', entry.kind);
-    row.setAttribute('data-created-at', String(entry.createdAtUtcMs));
-    row.removeAttribute('data-action-type');
-    row.removeAttribute('data-action-build-number');
-    row.removeAttribute('data-action-daily-id');
-
-    const actionableEntry = (
-      entry.action?.type === 'open-daily'
-        ? (isOpenDailyHistoryActionable(entry) ? entry.action : null)
-        : entry.action
-    );
-
-    if (actionableEntry) {
-      row.classList.add('isActionable');
-      row.setAttribute('data-action-type', actionableEntry.type);
-      if (actionableEntry.type === 'apply-update') {
-        row.setAttribute('data-action-build-number', String(actionableEntry.buildNumber));
-      } else if (actionableEntry.type === 'open-daily') {
-        row.setAttribute('data-action-daily-id', actionableEntry.dailyId);
-      }
-    }
-
-    const deathRank = (
-      entries.length > HISTORY_DYING_START_INDEX && i >= HISTORY_DYING_START_INDEX
-        ? (i - HISTORY_DYING_START_INDEX)
-        : -1
-    );
-    if (deathRank >= 0) {
-      row.classList.add('isDying');
-      row.style.setProperty('--death-rank', String(deathRank));
-    }
-
-    const dot = document.createElement('span');
-    dot.className = 'notificationHistoryItem__dot';
-    const dotColor = historyEntryDotColor(entry);
-    if (dotColor === HISTORY_DOT_COLORS.RED) {
-      dot.classList.add('isRed');
-    } else if (dotColor === HISTORY_DOT_COLORS.BLUE) {
-      dot.classList.add('isBlue');
-    }
-    if (entry.marker === 'older') {
-      dot.classList.add('isOlder');
-    }
-
-    const content = document.createElement('div');
-    content.className = 'notificationHistoryItem__content';
-
-    const localizedEntry = resolveNotificationHistoryEntryText(entry);
-
-    const title = document.createElement('div');
-    title.className = 'notificationHistoryItem__title';
-    title.textContent = localizedEntry.title;
-
-    const body = document.createElement('div');
-    body.className = 'notificationHistoryItem__body';
-    body.textContent = localizedEntry.body;
-
-    const time = document.createElement('div');
-    time.className = 'notificationHistoryItem__time';
-    time.textContent = formatHistoryRelativeTime(entry.createdAtUtcMs, getLocale());
-    time.setAttribute('title', formatHistoryAbsoluteTime(entry.createdAtUtcMs, getLocale()));
-
-    content.appendChild(title);
-    content.appendChild(body);
-    content.appendChild(time);
-    row.appendChild(dot);
-    row.appendChild(content);
-    notificationHistoryListEl.appendChild(row);
-  }
-};
-
-const stopNotificationHistoryRefreshTimer = () => {
-  if (!notificationHistoryRefreshTimer) return;
-  window.clearInterval(notificationHistoryRefreshTimer);
-  notificationHistoryRefreshTimer = 0;
-};
-
-const startNotificationHistoryRefreshTimer = () => {
-  stopNotificationHistoryRefreshTimer();
-  notificationHistoryRefreshTimer = window.setInterval(() => {
-    if (!notificationHistoryOpen) return;
-    renderNotificationHistoryRelativeTimes();
-    void validateAndMarkNotificationHistoryRead();
-  }, HISTORY_RELATIVE_TIME_REFRESH_MS);
-};
-
-const closeNotificationHistoryPanel = () => {
-  notificationHistoryOpen = false;
-  stopNotificationHistoryRefreshTimer();
-  if (!notificationHistoryPanelEl || !notificationHistoryToggleEl) return;
-  notificationHistoryPanelEl.hidden = true;
-  notificationHistoryToggleEl.classList.remove('isOpen');
-  notificationHistoryToggleEl.setAttribute('aria-expanded', 'false');
-};
-
-const openNotificationHistoryPanel = async () => {
-  notificationHistoryOpen = true;
-  if (notificationHistoryPanelEl && notificationHistoryToggleEl) {
-    notificationHistoryPanelEl.hidden = false;
-    notificationHistoryToggleEl.classList.add('isOpen');
-    notificationHistoryToggleEl.setAttribute('aria-expanded', 'true');
-  }
-  startNotificationHistoryRefreshTimer();
-  await postMessageToServiceWorker({ type: SW_MESSAGE_TYPES.GET_HISTORY }, { queueWhenUnavailable: true });
-  renderNotificationHistoryList();
-  refreshNotificationHistoryBadgeUi();
-  void validateAndMarkNotificationHistoryRead();
-};
-
-const toggleNotificationHistoryPanel = () => {
-  if (notificationHistoryOpen) {
-    closeNotificationHistoryPanel();
-    return;
-  }
-  void openNotificationHistoryPanel();
-};
-
-const validateAndMarkNotificationHistoryRead = async () => {
-  if (!notificationHistoryOpen || !notificationHistoryListEl) return;
-  if (notificationHistoryReadAckInFlight) return;
-  if (notificationHistoryReadAckVersion === notificationHistoryState.historyVersion) return;
-
-  const unreadEntries = notificationHistoryState.entries.filter((entry) => entry.marker === 'unread');
-  if (unreadEntries.length === 0) return;
-
-  const entryIds = [];
-  for (const entry of unreadEntries) {
-    const row = Array.from(notificationHistoryListEl.querySelectorAll('.notificationHistoryItem'))
-      .find((candidate) => candidate.getAttribute('data-entry-id') === entry.id);
-    if (!row || !row.isConnected) return;
-
-    const titleEl = row.querySelector('.notificationHistoryItem__title');
-    const bodyEl = row.querySelector('.notificationHistoryItem__body');
-    const timeEl = row.querySelector('.notificationHistoryItem__time');
-    if (!titleEl || !bodyEl || !timeEl) return;
-    const localizedEntry = resolveNotificationHistoryEntryText(entry);
-    if (titleEl.textContent !== localizedEntry.title) return;
-    if (bodyEl.textContent !== localizedEntry.body) return;
-    if (!timeEl.textContent || !timeEl.textContent.trim()) return;
-
-    const style = window.getComputedStyle(row);
-    if (style.display === 'none' || style.visibility === 'hidden' || Number.parseFloat(style.opacity || '1') === 0) {
-      return;
-    }
-
-    entryIds.push(entry.id);
-  }
-
-  notificationHistoryReadAckInFlight = true;
-  notificationHistoryReadAckVersion = notificationHistoryState.historyVersion;
-  const posted = await postMessageToServiceWorker({
-    type: SW_MESSAGE_TYPES.MARK_HISTORY_READ,
-    payload: {
-      historyVersion: notificationHistoryState.historyVersion,
-      entryIds,
-    },
-  }, { queueWhenUnavailable: true });
-  notificationHistoryReadAckInFlight = false;
-  if (!posted) {
-    notificationHistoryReadAckVersion = null;
-  }
-};
-
-const scheduleNotificationHistoryReadValidation = () => {
-  if (notificationHistoryValidationFrame) {
-    window.cancelAnimationFrame(notificationHistoryValidationFrame);
-    notificationHistoryValidationFrame = 0;
-  }
-  notificationHistoryValidationFrame = window.requestAnimationFrame(() => {
-    notificationHistoryValidationFrame = 0;
-    void validateAndMarkNotificationHistoryRead();
-  });
-};
-
-const refreshNotificationHistoryUi = () => {
-  renderNotificationHistoryList();
-  refreshNotificationHistoryBadgeUi();
-  if (notificationHistoryOpen) {
-    renderNotificationHistoryRelativeTimes();
-    scheduleNotificationHistoryReadValidation();
-  }
-};
-
-const resolveUpdateApplyDialogPromptText = (buildNumber = null) => {
-  const prompt = translateNow('ui.updateApplyDialogPrompt');
-  if (prompt !== 'ui.updateApplyDialogPrompt') return prompt;
-  if (Number.isInteger(buildNumber) && buildNumber > 0) {
-    return `Install build ${buildNumber}?`;
-  }
-  return 'Install the latest version now?';
-};
-
-let updateApplyDialogResolver = null;
-
-const requestUpdateApplyConfirmation = async (buildNumber) => {
-  if (!Number.isInteger(buildNumber) || buildNumber <= 0) return false;
-  if (!updateApplyDialogEl || typeof updateApplyDialogEl.showModal !== 'function') {
-    return window.confirm(resolveUpdateApplyDialogPromptText(buildNumber));
-  }
-  if (updateApplyDialogEl.open || updateApplyDialogResolver) return false;
-
-  updateApplyDialogEl.dataset.pendingBuildNumber = String(buildNumber);
-  if (updateApplyMessageEl) {
-    updateApplyMessageEl.textContent = resolveUpdateApplyDialogPromptText(buildNumber);
-  }
-
-  return new Promise((resolve) => {
-    updateApplyDialogResolver = resolve;
-    try {
-      updateApplyDialogEl.showModal();
-    } catch {
-      updateApplyDialogResolver = null;
-      delete updateApplyDialogEl.dataset.pendingBuildNumber;
-      resolve(window.confirm(resolveUpdateApplyDialogPromptText(buildNumber)));
-    }
-  });
-};
-
 const resolveLatestUpdateBuildNumber = async (hintBuildNumber = null) => {
   return resolveLatestUpdateBuildNumberCore({
     hintBuildNumber,
     readLastNotifiedRemoteBuildNumber,
-    notificationHistoryEntries: notificationHistoryState.entries,
+    notificationHistoryEntries: notificationCenter.getHistoryEntries(),
     fetchRemoteBuildNumber,
     resolveUpdatableRemoteBuildNumber,
     localBuildNumber,
   });
 };
 
-const resolveMoveDailyDialogPromptText = () => {
-  const localized = translateNow('ui.moveDailyDialogPrompt');
-  if (localized !== 'ui.moveDailyDialogPrompt') return localized;
-  return 'You have an unfinished level. Move to Daily level anyway?';
-};
-
-const requestMoveDailyConfirmation = async () => {
-  const promptText = resolveMoveDailyDialogPromptText();
-  if (!moveDailyDialogEl || typeof moveDailyDialogEl.showModal !== 'function') {
-    return window.confirm(promptText);
-  }
-  if (moveDailyDialogEl.open || moveDailyDialogResolver) return false;
-
-  if (moveDailyMessageEl) {
-    moveDailyMessageEl.textContent = promptText;
-  }
-
-  return new Promise((resolve) => {
-    moveDailyDialogResolver = resolve;
-    try {
-      moveDailyDialogEl.showModal();
-    } catch {
-      moveDailyDialogResolver = null;
-      resolve(window.confirm(promptText));
+const notificationCenter = createNotificationCenter({
+  elementIds: ELEMENT_IDS,
+  swMessageTypes: SW_MESSAGE_TYPES,
+  localBuildNumber,
+  notificationEnabledKey: NOTIFICATION_ENABLED_KEY,
+  autoUpdateEnabledKey: AUTO_UPDATE_ENABLED_KEY,
+  notificationAutoPromptDecisions: NOTIFICATION_AUTO_PROMPT_DECISIONS,
+  readAutoPromptDecision,
+  writeAutoPromptDecision,
+  readNotificationEnabledPreference,
+  writeNotificationEnabledPreference,
+  readAutoUpdateEnabledPreference,
+  writeAutoUpdateEnabledPreference,
+  hasStoredNotificationEnabledPreference,
+  notificationPermissionState: notificationPreferences.notificationPermissionState,
+  supportsNotifications,
+  canUseServiceWorker,
+  requestNotificationPermission,
+  syncDailyStateToServiceWorker,
+  syncUpdatePolicyToServiceWorker,
+  registerBackgroundDailyCheck,
+  requestServiceWorkerDailyCheck,
+  postMessageToServiceWorker,
+  clearAppliedUpdateHistoryActions,
+  translateNow,
+  getLocale,
+  showInAppToast,
+  isOpenDailyHistoryActionable,
+  onApplyUpdateRequested: async ({ buildNumber, requestUpdateApplyConfirmation, closeHistoryPanel }) => {
+    const latestBuildNumber = await resolveLatestUpdateBuildNumber(buildNumber);
+    if (!Number.isInteger(latestBuildNumber) || latestBuildNumber <= localBuildNumber) {
+      await clearAppliedUpdateHistoryActions(localBuildNumber);
+      return;
     }
-  });
-};
+    const confirmed = await requestUpdateApplyConfirmation(latestBuildNumber);
+    if (confirmed) {
+      closeHistoryPanel();
+      void applyLatestUpdateForAction(latestBuildNumber);
+    }
+  },
+  onOpenDailyRequested: async ({ dailyId, kind, requestMoveDailyConfirmation, closeHistoryPanel }) => {
+    const executed = await openDailyFromHistoryAction(dailyId, kind, requestMoveDailyConfirmation);
+    if (executed) {
+      closeHistoryPanel();
+    }
+  },
+});
+
+const maybeAutoPromptForNotifications = async () => notificationCenter.maybeAutoPromptForNotifications();
 
 const hasUnsolvedPath = (snapshot) => {
   if (!snapshot || !Array.isArray(snapshot.path)) return false;
@@ -958,7 +442,11 @@ const hasUnsolvedPath = (snapshot) => {
   return true;
 };
 
-const openDailyFromHistoryAction = async (dailyId = '', kind = '') => {
+const openDailyFromHistoryAction = async (
+  dailyId = '',
+  kind = '',
+  requestMoveDailyConfirmation = async () => true,
+) => {
   if (!runtimeInstance || !runtimeCoreAdapter || !runtimeStateAdapter) return false;
   if (!latestDailyState.dailyId) return false;
 
@@ -1002,330 +490,28 @@ const openDailyFromHistoryAction = async (dailyId = '', kind = '') => {
   return true;
 };
 
-const handleNotificationHistoryItemAction = (event) => {
-  const target = event.target;
-  if (!(target instanceof Element)) return;
-  const row = target.closest('.notificationHistoryItem');
-  if (!row || !notificationHistoryListEl?.contains(row)) return;
-  const actionType = row.getAttribute('data-action-type') || '';
-  if (actionType === 'apply-update') {
-    const buildNumber = Number.parseInt(row.getAttribute('data-action-build-number') || '', 10);
-    if (!Number.isInteger(buildNumber) || buildNumber <= 0) return;
-    void (async () => {
-      const latestBuildNumber = await resolveLatestUpdateBuildNumber(buildNumber);
-      if (!Number.isInteger(latestBuildNumber) || latestBuildNumber <= localBuildNumber) {
-        await clearAppliedUpdateHistoryActions(localBuildNumber);
-        return;
-      }
-      const confirmed = await requestUpdateApplyConfirmation(latestBuildNumber);
-      if (confirmed) {
-        closeNotificationHistoryPanel();
-        void applyLatestUpdateForAction(latestBuildNumber);
-      }
-    })();
-    return;
-  }
-  if (actionType === 'open-daily') {
-    const dailyId = row.getAttribute('data-action-daily-id') || '';
-    const kind = row.getAttribute('data-entry-kind') || '';
-    if (!isOpenDailyHistoryActionable({
-      kind,
-      action: { type: 'open-daily', dailyId },
-    })) {
-      return;
-    }
-    void (async () => {
-      const executed = await openDailyFromHistoryAction(dailyId, kind);
-      if (executed) {
-        closeNotificationHistoryPanel();
-      }
-    })();
-  }
-};
-
-const bindNotificationHistoryPanel = () => {
-  notificationHistoryToggleEl = document.getElementById(ELEMENT_IDS.NOTIFICATION_HISTORY_TOGGLE);
-  notificationHistoryBadgeEl = document.getElementById(ELEMENT_IDS.NOTIFICATION_HISTORY_BADGE);
-  notificationHistoryPanelEl = document.getElementById(ELEMENT_IDS.NOTIFICATION_HISTORY_PANEL);
-  notificationHistoryListEl = document.getElementById(ELEMENT_IDS.NOTIFICATION_HISTORY_LIST);
-
-  if (!notificationHistoryToggleEl || !notificationHistoryPanelEl || !notificationHistoryListEl || notificationHistoryToggleBound) {
-    refreshNotificationHistoryUi();
-    return;
-  }
-
-  notificationHistoryToggleEl.addEventListener('click', () => {
-    toggleNotificationHistoryPanel();
-  });
-  notificationHistoryListEl.addEventListener('click', handleNotificationHistoryItemAction);
-
-  const settingsToggle = document.getElementById(ELEMENT_IDS.SETTINGS_TOGGLE);
-  if (settingsToggle) {
-    settingsToggle.addEventListener('click', () => {
-      closeNotificationHistoryPanel();
-    });
-  }
-
-  document.addEventListener('click', (event) => {
-    if (!notificationHistoryOpen) return;
-    const target = event.target;
-    if (!(target instanceof Node)) return;
-    if (updateApplyDialogEl?.open && updateApplyDialogEl.contains(target)) return;
-    if (moveDailyDialogEl?.open && moveDailyDialogEl.contains(target)) return;
-    if (notificationHistoryToggleEl.contains(target) || notificationHistoryPanelEl.contains(target)) return;
-    closeNotificationHistoryPanel();
-  });
-
-  document.addEventListener('keydown', (event) => {
-    if (!notificationHistoryOpen) return;
-    if (event.key === 'Escape') {
-      closeNotificationHistoryPanel();
-    }
-  });
-
-  notificationHistoryToggleBound = true;
-  refreshNotificationHistoryUi();
-};
-
-const bindUpdateApplyDialog = () => {
-  updateApplyDialogEl = document.getElementById(ELEMENT_IDS.UPDATE_APPLY_DIALOG);
-  updateApplyMessageEl = document.getElementById(ELEMENT_IDS.UPDATE_APPLY_MESSAGE);
-
-  if (!updateApplyDialogEl || updateApplyDialogBound) return;
-
-  updateApplyDialogEl.addEventListener('close', () => {
-    const buildNumber = Number.parseInt(updateApplyDialogEl?.dataset?.pendingBuildNumber || '', 10);
-    const shouldApply = updateApplyDialogEl?.returnValue === 'confirm';
-    delete updateApplyDialogEl.dataset.pendingBuildNumber;
-    updateApplyDialogEl.returnValue = '';
-    const resolve = updateApplyDialogResolver;
-    updateApplyDialogResolver = null;
-    if (typeof resolve === 'function') {
-      resolve(shouldApply);
-    }
-  });
-
-  updateApplyDialogBound = true;
-};
-
-const bindMoveDailyDialog = () => {
-  moveDailyDialogEl = document.getElementById(ELEMENT_IDS.MOVE_DAILY_DIALOG);
-  moveDailyMessageEl = document.getElementById(ELEMENT_IDS.MOVE_DAILY_MESSAGE);
-
-  if (!moveDailyDialogEl || moveDailyDialogBound) return;
-
-  moveDailyDialogEl.addEventListener('close', () => {
-    const confirmed = moveDailyDialogEl?.returnValue === 'confirm';
-    moveDailyDialogEl.returnValue = '';
-    const resolve = moveDailyDialogResolver;
-    moveDailyDialogResolver = null;
-    if (typeof resolve === 'function') {
-      resolve(confirmed);
-    }
-  });
-
-  moveDailyDialogBound = true;
-};
-
 const bindServiceWorkerHistoryMessages = () => {
   updateFlow.bindServiceWorkerHistoryMessages({
     onPayload: (payload) => {
-      applyNotificationHistoryPayload(payload);
-      refreshNotificationHistoryUi();
+      notificationCenter.applyHistoryPayload(payload);
+      notificationCenter.refreshHistoryUi();
     },
   });
 };
 
-const utcDateIdFromMs = (ms) => {
-  const date = new Date(ms);
-  const y = date.getUTCFullYear();
-  const m = String(date.getUTCMonth() + 1).padStart(2, '0');
-  const d = String(date.getUTCDate()).padStart(2, '0');
-  return `${y}-${m}-${d}`;
-};
+const dailyPayloadService = createDailyPayloadService({
+  dailyPayloadUrl: DAILY_PAYLOAD_URL,
+  dailyHardInvalidateGraceMs: DAILY_HARD_INVALIDATE_GRACE_MS,
+});
 
-const normalizeGrid = (grid) => {
-  if (!Array.isArray(grid) || grid.length === 0) return null;
-  const out = [];
-  let cols = null;
-  for (const row of grid) {
-    if (typeof row !== 'string' || row.length === 0) return null;
-    if (cols === null) cols = row.length;
-    if (row.length !== cols) return null;
-    out.push(row);
-  }
-  return out;
-};
+const fetchDailyPayload = (options = {}) =>
+  dailyPayloadService.fetchDailyPayload(options);
 
-const normalizePairs = (value) => {
-  if (!Array.isArray(value)) return [];
-  const out = [];
-  for (const entry of value) {
-    if (!Array.isArray(entry) || entry.length < 2) return null;
-    const a = Number.parseInt(entry[0], 10);
-    const b = Number.parseInt(entry[1], 10);
-    if (!Number.isInteger(a) || !Number.isInteger(b)) return null;
-    out.push([a, b]);
-  }
-  return out;
-};
+const resolveDailyBootPayload = () =>
+  dailyPayloadService.resolveDailyBootPayload();
 
-const normalizeCornerCounts = (value) => {
-  if (!Array.isArray(value)) return [];
-  const out = [];
-  for (const entry of value) {
-    if (!Array.isArray(entry) || entry.length < 3) return null;
-    const a = Number.parseInt(entry[0], 10);
-    const b = Number.parseInt(entry[1], 10);
-    const c = Number.parseInt(entry[2], 10);
-    if (!Number.isInteger(a) || !Number.isInteger(b) || !Number.isInteger(c)) return null;
-    out.push([a, b, c]);
-  }
-  return out;
-};
-
-const normalizeDailyPayload = (raw) => {
-  if (!raw || typeof raw !== 'object') return null;
-
-  const dailyId = typeof raw.dailyId === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(raw.dailyId)
-    ? raw.dailyId
-    : null;
-  if (!dailyId) return null;
-
-  const hardInvalidateAtUtcMs = Number.parseInt(raw.hardInvalidateAtUtcMs, 10);
-  if (!Number.isInteger(hardInvalidateAtUtcMs) || hardInvalidateAtUtcMs <= 0) return null;
-
-  const levelRaw = raw.level;
-  if (!levelRaw || typeof levelRaw !== 'object') return null;
-  const grid = normalizeGrid(levelRaw.grid);
-  const stitches = normalizePairs(levelRaw.stitches);
-  const cornerCounts = normalizeCornerCounts(levelRaw.cornerCounts);
-  if (!grid || !stitches || !cornerCounts) return null;
-
-  const dailySlot = Number.parseInt(raw.dailySlot, 10);
-  const generatedAtUtcMs = Number.parseInt(raw.generatedAtUtcMs, 10);
-
-  return {
-    schemaVersion: Number.isInteger(raw.schemaVersion) ? raw.schemaVersion : 0,
-    poolVersion: typeof raw.poolVersion === 'string' ? raw.poolVersion : '',
-    dailyId,
-    dailySlot: Number.isInteger(dailySlot) ? dailySlot : null,
-    canonicalKey: typeof raw.canonicalKey === 'string' ? raw.canonicalKey : '',
-    generatedAtUtcMs: Number.isInteger(generatedAtUtcMs) ? generatedAtUtcMs : null,
-    hardInvalidateAtUtcMs,
-    level: {
-      name: typeof levelRaw.name === 'string' ? levelRaw.name : `Daily ${dailyId}`,
-      grid,
-      stitches,
-      cornerCounts,
-    },
-  };
-};
-
-const resolveDailyPayloadRequestUrl = ({ bypassCache = false } = {}) => {
-  const url = new URL(DAILY_PAYLOAD_URL);
-  url.searchParams.set('_daily', new Date().toISOString().slice(0, 10));
-  if (bypassCache) {
-    url.searchParams.set('_dailycb', String(Date.now()));
-  }
-  return url.toString();
-};
-
-const fetchDailyPayload = async ({ bypassCache = false } = {}) => {
-  try {
-    const response = await fetch(resolveDailyPayloadRequestUrl({ bypassCache }), {
-      cache: 'no-store',
-      headers: {
-        'x-bypass-cache': 'true',
-      },
-    });
-
-    if (!response.ok) return null;
-    const parsed = normalizeDailyPayload(await response.json());
-    return parsed;
-  } catch {
-    return null;
-  }
-};
-
-const resolveDailyBootPayload = async () => {
-  const nowMs = Date.now();
-  const todayId = utcDateIdFromMs(nowMs);
-
-  let payload = await fetchDailyPayload();
-  if (!payload) {
-    return {
-      dailyLevel: null,
-      dailyId: null,
-      hardInvalidateAtUtcMs: null,
-      stalePayload: null,
-    };
-  }
-
-  if (payload.dailyId > todayId) {
-    return {
-      dailyLevel: null,
-      dailyId: null,
-      hardInvalidateAtUtcMs: payload.hardInvalidateAtUtcMs,
-      stalePayload: payload,
-    };
-  }
-
-  if (payload.dailyId !== todayId && nowMs > (payload.hardInvalidateAtUtcMs + DAILY_HARD_INVALIDATE_GRACE_MS)) {
-    const bypassPayload = await fetchDailyPayload({ bypassCache: true });
-    if (bypassPayload) payload = bypassPayload;
-  }
-
-  if (payload.dailyId !== todayId) {
-    return {
-      dailyLevel: null,
-      dailyId: null,
-      hardInvalidateAtUtcMs: payload.hardInvalidateAtUtcMs,
-      stalePayload: payload,
-    };
-  }
-
-  return {
-    dailyLevel: payload.level,
-    dailyId: payload.dailyId,
-    hardInvalidateAtUtcMs: payload.hardInvalidateAtUtcMs,
-    stalePayload: null,
-  };
-};
-
-const setupDailyHardInvalidationWatcher = (bootDaily) => {
-  if (!bootDaily || !Number.isInteger(bootDaily.hardInvalidateAtUtcMs)) return;
-
-  const thresholdMs = bootDaily.hardInvalidateAtUtcMs + DAILY_HARD_INVALIDATE_GRACE_MS;
-  const shouldBypassNow = () => Date.now() > thresholdMs;
-
-  const maybeRefetch = async () => {
-    if (!shouldBypassNow()) return;
-
-    const nowMs = Date.now();
-    const todayId = utcDateIdFromMs(nowMs);
-    const bypassPayload = await fetchDailyPayload({ bypassCache: true });
-    if (!bypassPayload || bypassPayload.dailyId !== todayId) return;
-
-    if (bootDaily.dailyId !== bypassPayload.dailyId) {
-      window.location.reload();
-    }
-  };
-
-  const delay = thresholdMs - Date.now();
-  if (delay > 0) {
-    window.setTimeout(() => {
-      void maybeRefetch();
-    }, delay + 25);
-  } else {
-    void maybeRefetch();
-  }
-
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState !== 'visible') return;
-    void maybeRefetch();
-  });
-};
+const setupDailyHardInvalidationWatcher = (bootDaily) =>
+  dailyPayloadService.setupDailyHardInvalidationWatcher(bootDaily);
 
 const fetchRemoteBuildNumber = async () =>
   updateFlow.fetchRemoteBuildNumber();
@@ -1357,7 +543,7 @@ const resolveUpdateApplyFailureToastText = () => {
   return 'Could not apply update yet. Try again shortly.';
 };
 
-const updateFlow = createUpdateFlow({
+updateFlow = createUpdateFlow({
   swMessageTypes: SW_MESSAGE_TYPES,
   updateApplyStatus: UPDATE_APPLY_STATUS,
   updateCheckDecision: UPDATE_CHECK_DECISION,
@@ -1439,13 +625,7 @@ const wrapPersistenceForDailySideEffects = (persistence) => {
 
 const bindConfigSync = () => {
   window.addEventListener('storage', (event) => {
-    if (event.key === NOTIFICATION_ENABLED_KEY) {
-      refreshNotificationsToggleUi();
-      void syncDailyStateToServiceWorker();
-    } else if (event.key === AUTO_UPDATE_ENABLED_KEY) {
-      refreshAutoUpdateToggleUi();
-      void syncUpdatePolicyToServiceWorker();
-    }
+    notificationCenter.handleStorageEvent(event.key);
   });
 };
 
@@ -1484,12 +664,8 @@ export async function initTetherApp() {
   );
   refreshSettingsVersionUi();
 
-  bindNotificationsToggle();
-  bindAutoUpdateToggle();
+  notificationCenter.bind();
   bindConfigSync();
-  bindNotificationHistoryPanel();
-  bindUpdateApplyDialog();
-  bindMoveDailyDialog();
   bindServiceWorkerHistoryMessages();
   bindServiceWorkerRuntimeEvents();
   void clearAppliedUpdateHistoryActions(localBuildNumber);
@@ -1511,17 +687,8 @@ export async function initTetherApp() {
 
   const setLocaleWithEffects = (locale) => {
     const resolved = setLocaleCore(locale);
-    refreshNotificationsToggleUi();
-    refreshAutoUpdateToggleUi();
-    refreshNotificationHistoryUi();
-    if (updateApplyMessageEl) {
-      updateApplyMessageEl.textContent = resolveUpdateApplyDialogPromptText(
-        Number.parseInt(updateApplyDialogEl?.dataset?.pendingBuildNumber || '', 10),
-      );
-    }
-    if (moveDailyMessageEl) {
-      moveDailyMessageEl.textContent = resolveMoveDailyDialogPromptText();
-    }
+    notificationCenter.refreshToggleUi();
+    notificationCenter.refreshLocalizedUi();
     if (updateProgressOverlayActive && updateProgressOverlayLabelEl) {
       updateProgressOverlayLabelEl.textContent = resolveUpdateApplyingOverlayText();
     }
@@ -1553,9 +720,8 @@ export async function initTetherApp() {
   });
 
   runtimeInstance.start();
-  refreshNotificationsToggleUi();
-  refreshAutoUpdateToggleUi();
-  refreshNotificationHistoryUi();
+  notificationCenter.refreshToggleUi();
+  notificationCenter.refreshHistoryUi();
   void mountRuntimePlugins({
     isLocalhostHostname,
     canUseServiceWorker,
