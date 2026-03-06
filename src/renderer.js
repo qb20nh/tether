@@ -54,19 +54,8 @@ let cachedPathHeadC = NaN;
 let cachedPathTailR = NaN;
 let cachedPathTailC = NaN;
 let cachedPathLayoutVersion = -1;
-let pathStartArrivalState = null;
-let pathEndArrivalState = null;
-let pathStartPinPresenceState = null;
-let pathFlowVisibilityState = null;
-let pathFlowFreezeState = null;
-let pathFlowFreezeMix = 1;
-let lastPathFlowFrozen = false;
-let pathReverseTipSwapState = null;
-let pathReverseGradientBlendState = null;
 let pathStartRetainedArcState = null;
 let pathEndRetainedArcState = null;
-let pathEndArrowRotateState = null;
-let pathStartFlowRotateState = null;
 let pathRetainedArcTokenSeed = 0;
 let tutorialBracketSignature = '';
 let tutorialBracketGeometryToken = 0;
@@ -153,24 +142,14 @@ const PATH_FLOW_BASE_CELL = 56;
 const PATH_FLOW_ANCHOR_RATIO = 1;
 const PATH_FLOW_RISE = 0.82;
 const PATH_FLOW_DROP = 0.83;
-const PATH_FLOW_FREEZE_DURATION_MS = 2500;
 const PATH_FLOW_FREEZE_EPSILON = 1e-3;
 const PATH_TIP_ARRIVAL_DURATION_MS = 200;
 const PATH_RETAINED_ARC_SETTLE_DURATION_MS = 100;
-const PATH_REVERSE_TIP_SWAP_DURATION_MS = 200;
-const PATH_REVERSE_GRADIENT_BLEND_DURATION_MS = 200;
-const PATH_TIP_ARRIVAL_DISTANCE_CELL_FACTOR = 0.5;
 const TUTORIAL_BRACKET_PULSE_CYCLES = 3;
 const TAU = Math.PI * 2;
 const CANVAS_ALIGN_OFFSET_CSS_PX = 0;
 const PATH_RENDERER_RECOVERY_COOLDOWN_MS = 500;
 const INTERACTIVE_RESIZE_IDLE_MS = 200;
-const PATH_TIP_ARRIVAL_BEZIER_X1 = 0;
-const PATH_TIP_ARRIVAL_BEZIER_Y1 = 0.9;
-const PATH_TIP_ARRIVAL_BEZIER_X2 = 0.1;
-const PATH_TIP_ARRIVAL_BEZIER_Y2 = 1;
-const PATH_TIP_ARRIVAL_ADJACENT_MAX = Math.SQRT2 + 1e-3;
-const PATH_TIP_CENTER_SNAP_EPSILON_PX = 0.5;
 const PATH_TIP_HOVER_SCALE_DURATION_MS = 120;
 const PATH_TIP_HOVER_UP_SCALE = 1.15;
 const PATH_TIP_HOVER_SCALE_EPSILON = 1e-4;
@@ -250,45 +229,6 @@ const normalizeFlowOffset = (value, cycle = PATH_FLOW_CYCLE) => {
   return mod >= 0 ? mod : mod + cycle;
 };
 
-const cubicBezierAxisAt = (t, p1, p2) => {
-  const omt = 1 - t;
-  return (3 * p1 * omt * omt * t) + (3 * p2 * omt * t * t) + (t * t * t);
-};
-
-const cubicBezierAxisSlopeAt = (t, p1, p2) => {
-  const omt = 1 - t;
-  return (3 * p1 * omt * omt) + (6 * (p2 - p1) * omt * t) + (3 * (1 - p2) * t * t);
-};
-
-const sampleCubicBezierYAtX = (x, x1, y1, x2, y2) => {
-  const safeX = clampUnit(x);
-  if (safeX <= 0) return 0;
-  if (safeX >= 1) return 1;
-
-  let t = safeX;
-  for (let i = 0; i < 6; i++) {
-    const xAtT = cubicBezierAxisAt(t, x1, x2);
-    const slope = cubicBezierAxisSlopeAt(t, x1, x2);
-    const delta = xAtT - safeX;
-    if (Math.abs(delta) <= 1e-5 || Math.abs(slope) <= 1e-5) break;
-    const next = t - (delta / slope);
-    if (next <= 0 || next >= 1) break;
-    t = next;
-  }
-
-  let low = 0;
-  let high = 1;
-  for (let i = 0; i < 12; i++) {
-    const xAtT = cubicBezierAxisAt(t, x1, x2);
-    if (Math.abs(xAtT - safeX) <= 1e-6) break;
-    if (xAtT > safeX) high = t;
-    else low = t;
-    t = (low + high) * 0.5;
-  }
-
-  return cubicBezierAxisAt(t, y1, y2);
-};
-
 const easeOutCubic = (unit) => {
   const t = clampUnit(unit);
   const inv = 1 - t;
@@ -317,74 +257,16 @@ const getPathTipFromPath = (path, side) => {
   return path[path.length - 1] || null;
 };
 
-const clearPathTipArrivalStates = () => {
-  pathStartArrivalState = null;
-  pathEndArrivalState = null;
-};
-
-const clearSinglePathTipArrivalState = (side) => {
-  if (side === 'start') pathStartArrivalState = null;
-  else if (side === 'end') pathEndArrivalState = null;
-};
-
-const clearPathStartPinPresenceState = () => {
-  pathStartPinPresenceState = null;
-};
-
-const clearPathFlowVisibilityState = () => {
-  pathFlowVisibilityState = null;
-};
-
 const resolvePathFlowFreezeMix = (
   nowMs = getNowMs(),
   out = pathFlowFreezeMixScratch,
-) => {
-  out.mix = pathFlowFreezeMix;
-  out.active = false;
+) => pathAnimationEngine.resolvePathFlowFreezeMix(nowMs, out);
 
-  const state = pathFlowFreezeState;
-  if (!state) return out;
-
-  const elapsed = nowMs - state.startTimeMs;
-  if (elapsed >= PATH_FLOW_FREEZE_DURATION_MS) {
-    pathFlowFreezeMix = state.toMix;
-    pathFlowFreezeState = null;
-    out.mix = pathFlowFreezeMix;
-    return out;
-  }
-
-  const eased = easeOutCubic(clampUnit(elapsed / PATH_FLOW_FREEZE_DURATION_MS));
-  pathFlowFreezeMix = clampUnit(state.fromMix + ((state.toMix - state.fromMix) * eased));
-  out.mix = pathFlowFreezeMix;
-  out.active = true;
-  return out;
-};
-
-const syncPathFlowFreezeTarget = (isFrozen, nowMs = getNowMs()) => {
-  if (lastPathFlowFrozen === Boolean(isFrozen)) return;
-  lastPathFlowFrozen = Boolean(isFrozen);
-
-  const currentMix = resolvePathFlowFreezeMix(nowMs, pathFlowFreezeMixScratch).mix;
-  const targetMix = isFrozen ? 0 : 1;
-  if (Math.abs(currentMix - targetMix) <= PATH_FLOW_FREEZE_EPSILON) {
-    pathFlowFreezeMix = targetMix;
-    pathFlowFreezeState = null;
-    return;
-  }
-
-  pathFlowFreezeState = {
-    startTimeMs: nowMs,
-    fromMix: currentMix,
-    toMix: targetMix,
-  };
-};
+const syncPathFlowFreezeTarget = (isFrozen, nowMs = getNowMs()) => (
+  pathAnimationEngine.syncPathFlowFreezeTarget(isFrozen, nowMs)
+);
 
 const isPathFlowFrozen = () => Boolean(latestInteractionModel?.isDailyLocked);
-
-const getPathSegmentCount = (path) => {
-  const pathLength = Array.isArray(path) ? path.length : 0;
-  return pathLength > 1 ? pathLength - 1 : 0;
-};
 
 const pathsMatch = (aPath, bPath) => {
   if (!Array.isArray(aPath) || !Array.isArray(bPath)) return false;
@@ -393,14 +275,6 @@ const pathsMatch = (aPath, bPath) => {
     if (!pointsMatch(aPath[i], bPath[i])) return false;
   }
   return true;
-};
-
-const clearPathReverseTipSwapState = () => {
-  pathReverseTipSwapState = null;
-};
-
-const clearPathReverseGradientBlendState = () => {
-  pathReverseGradientBlendState = null;
 };
 
 const clearPathStartRetainedArcState = () => {
@@ -416,13 +290,6 @@ const clearPathRetainedArcStates = () => {
   clearPathEndRetainedArcState();
 };
 
-const clearPathEndArrowRotateState = () => {
-  pathEndArrowRotateState = null;
-};
-
-const clearPathStartFlowRotateState = () => {
-  pathStartFlowRotateState = null;
-};
 
 const clearPathTipHoverScaleStates = () => {
   pathStartTipHoverScaleState.fromScale = 1;
@@ -456,28 +323,6 @@ const isStartRetractTransition = (prevPath, nextPath) => {
   return true;
 };
 
-const isEndAdvanceTransition = (prevPath, nextPath) => {
-  if (!Array.isArray(prevPath) || !Array.isArray(nextPath)) return false;
-  const prevLen = prevPath.length;
-  const nextLen = nextPath.length;
-  if (nextLen !== prevLen + 1) return false;
-  for (let i = 0; i < prevLen; i++) {
-    if (!pointsMatch(nextPath[i], prevPath[i])) return false;
-  }
-  return true;
-};
-
-const isStartAdvanceTransition = (prevPath, nextPath) => {
-  if (!Array.isArray(prevPath) || !Array.isArray(nextPath)) return false;
-  const prevLen = prevPath.length;
-  const nextLen = nextPath.length;
-  if (nextLen !== prevLen + 1) return false;
-  for (let i = 0; i < prevLen; i++) {
-    if (!pointsMatch(nextPath[i + 1], prevPath[i])) return false;
-  }
-  return true;
-};
-
 const isRetractUnturnTransition = (side, retractedTip, nextTip, nextPath) => {
   if (!retractedTip || !nextTip || !Array.isArray(nextPath)) return false;
   let neighbor = null;
@@ -493,129 +338,22 @@ const isRetractUnturnTransition = (side, retractedTip, nextTip, nextPath) => {
   return ((inR * outC) - (inC * outR)) !== 0;
 };
 
-const normalizeDirectionInto = (dx, dy, out) => {
-  const len = Math.hypot(dx, dy);
-  if (!(len > 0)) return null;
-  out.x = dx / len;
-  out.y = dy / len;
-  return out;
-};
-
 const updatePathEndArrowRotateState = (
   prevPath,
   nextPath,
   nowMs = getNowMs(),
-) => {
-  if (isReducedMotionPreferred()) {
-    clearPathEndArrowRotateState();
-    return;
-  }
-  const pathChanged = !pathsMatch(prevPath, nextPath);
-  if (!pathChanged) return;
-
-  if (!isEndRetractTransition(prevPath, nextPath)) {
-    clearPathEndArrowRotateState();
-    return;
-  }
-
-  const retractedTip = prevPath[nextPath.length];
-  const nextTip = getPathTipFromPath(nextPath, 'end');
-  const neighbor = Array.isArray(nextPath) ? nextPath[nextPath.length - 2] : null;
-  if (!retractedTip || !nextTip || !neighbor) {
-    clearPathEndArrowRotateState();
-    return;
-  }
-  if (!isRetractUnturnTransition('end', retractedTip, nextTip, nextPath)) {
-    clearPathEndArrowRotateState();
-    return;
-  }
-
-  const fromDir = normalizeDirectionInto(
-    retractedTip.c - nextTip.c,
-    retractedTip.r - nextTip.r,
-    headPointScratchA,
-  );
-  const toDir = normalizeDirectionInto(
-    nextTip.c - neighbor.c,
-    nextTip.r - neighbor.r,
-    headPointScratchB,
-  );
-  if (!fromDir || !toDir) {
-    clearPathEndArrowRotateState();
-    return;
-  }
-
-  const fromAngle = Math.atan2(fromDir.y, fromDir.x);
-  const toAngle = Math.atan2(toDir.y, toDir.x);
-  pathEndArrowRotateState = {
-    startTimeMs: nowMs,
-    targetR: nextTip.r,
-    targetC: nextTip.c,
-    neighborR: neighbor.r,
-    neighborC: neighbor.c,
-    fromAngle,
-    deltaAngle: angleDeltaSigned(fromAngle, toAngle),
-    cutoffMs: PATH_TIP_ARRIVAL_DURATION_MS,
-  };
-};
+) => pathAnimationEngine.updatePathEndArrowRotateState(prevPath, nextPath, nowMs);
 
 const resolvePathEndArrowDirection = (
   path,
   nowMs = getNowMs(),
   out = endArrowDirectionScratch,
-) => {
-  out.x = NaN;
-  out.y = NaN;
-  out.active = false;
-
-  if (isReducedMotionPreferred()) {
-    clearPathEndArrowRotateState();
-    return out;
-  }
-
-  const state = pathEndArrowRotateState;
-  if (!state) return out;
-  const pathLength = Array.isArray(path) ? path.length : 0;
-  if (pathLength < 2) {
-    clearPathEndArrowRotateState();
-    return out;
-  }
-
-  const tail = path[pathLength - 1];
-  const neighbor = path[pathLength - 2];
-  if (
-    !tail
-    || !neighbor
-    || tail.r !== state.targetR
-    || tail.c !== state.targetC
-    || neighbor.r !== state.neighborR
-    || neighbor.c !== state.neighborC
-  ) {
-    clearPathEndArrowRotateState();
-    return out;
-  }
-
-  const elapsed = nowMs - state.startTimeMs;
-  const visibleDuration = Number.isFinite(state.cutoffMs) && state.cutoffMs > 0
-    ? state.cutoffMs
-    : PATH_TIP_ARRIVAL_DURATION_MS;
-  if (elapsed >= visibleDuration) {
-    clearPathEndArrowRotateState();
-    return out;
-  }
-  const linearProgress = clampUnit(elapsed / PATH_TIP_ARRIVAL_DURATION_MS);
-  const eased = easeOutCubic(linearProgress);
-  const angle = state.fromAngle + (state.deltaAngle * eased);
-  out.x = Math.cos(angle);
-  out.y = Math.sin(angle);
-  out.active = true;
-  return out;
-};
+) => pathAnimationEngine.resolvePathEndArrowDirection(path, nowMs, out);
 
 const hasActivePathEndArrowRotate = (
   path,
   nowMs = getNowMs(),
-) => resolvePathEndArrowDirection(path, nowMs, endArrowDirectionScratch).active;
+) => pathAnimationEngine.hasActivePathEndArrowRotate(path, nowMs);
 
 const applyPathEndArrowDirectionToPayload = (path, nowMs = getNowMs()) => {
   const direction = resolvePathEndArrowDirection(path, nowMs, endArrowDirectionScratch);
@@ -628,117 +366,18 @@ const updatePathStartFlowRotateState = (
   prevPath,
   nextPath,
   nowMs = getNowMs(),
-) => {
-  if (isReducedMotionPreferred()) {
-    clearPathStartFlowRotateState();
-    return;
-  }
-  const pathChanged = !pathsMatch(prevPath, nextPath);
-  if (!pathChanged) return;
-
-  if (!isStartRetractTransition(prevPath, nextPath)) {
-    clearPathStartFlowRotateState();
-    return;
-  }
-
-  const retractedTip = prevPath[prevPath.length - nextPath.length - 1];
-  const nextTip = getPathTipFromPath(nextPath, 'start');
-  const neighbor = Array.isArray(nextPath) ? nextPath[1] : null;
-  if (!retractedTip || !nextTip || !neighbor) {
-    clearPathStartFlowRotateState();
-    return;
-  }
-  if (!isRetractUnturnTransition('start', retractedTip, nextTip, nextPath)) {
-    clearPathStartFlowRotateState();
-    return;
-  }
-
-  const fromDir = normalizeDirectionInto(
-    nextTip.c - retractedTip.c,
-    nextTip.r - retractedTip.r,
-    headPointScratchA,
-  );
-  const toDir = normalizeDirectionInto(
-    neighbor.c - nextTip.c,
-    neighbor.r - nextTip.r,
-    headPointScratchB,
-  );
-  if (!fromDir || !toDir) {
-    clearPathStartFlowRotateState();
-    return;
-  }
-
-  const fromAngle = Math.atan2(fromDir.y, fromDir.x);
-  const toAngle = Math.atan2(toDir.y, toDir.x);
-  pathStartFlowRotateState = {
-    startTimeMs: nowMs,
-    targetR: nextTip.r,
-    targetC: nextTip.c,
-    neighborR: neighbor.r,
-    neighborC: neighbor.c,
-    fromAngle,
-    deltaAngle: angleDeltaSigned(fromAngle, toAngle),
-    cutoffMs: PATH_TIP_ARRIVAL_DURATION_MS,
-  };
-};
+) => pathAnimationEngine.updatePathStartFlowRotateState(prevPath, nextPath, nowMs);
 
 const resolvePathStartFlowDirection = (
   path,
   nowMs = getNowMs(),
   out = startFlowDirectionScratch,
-) => {
-  out.x = NaN;
-  out.y = NaN;
-  out.active = false;
-
-  if (isReducedMotionPreferred()) {
-    clearPathStartFlowRotateState();
-    return out;
-  }
-
-  const state = pathStartFlowRotateState;
-  if (!state) return out;
-  const pathLength = Array.isArray(path) ? path.length : 0;
-  if (pathLength < 2) {
-    clearPathStartFlowRotateState();
-    return out;
-  }
-
-  const head = path[0];
-  const neighbor = path[1];
-  if (
-    !head
-    || !neighbor
-    || head.r !== state.targetR
-    || head.c !== state.targetC
-    || neighbor.r !== state.neighborR
-    || neighbor.c !== state.neighborC
-  ) {
-    clearPathStartFlowRotateState();
-    return out;
-  }
-
-  const elapsed = nowMs - state.startTimeMs;
-  const visibleDuration = Number.isFinite(state.cutoffMs) && state.cutoffMs > 0
-    ? state.cutoffMs
-    : PATH_TIP_ARRIVAL_DURATION_MS;
-  if (elapsed >= visibleDuration) {
-    clearPathStartFlowRotateState();
-    return out;
-  }
-  const linearProgress = clampUnit(elapsed / PATH_TIP_ARRIVAL_DURATION_MS);
-  const eased = easeOutCubic(linearProgress);
-  const angle = state.fromAngle + (state.deltaAngle * eased);
-  out.x = Math.cos(angle);
-  out.y = Math.sin(angle);
-  out.active = true;
-  return out;
-};
+) => pathAnimationEngine.resolvePathStartFlowDirection(path, nowMs, out);
 
 const hasActivePathStartFlowRotate = (
   path,
   nowMs = getNowMs(),
-) => resolvePathStartFlowDirection(path, nowMs, startFlowDirectionScratch).active;
+) => pathAnimationEngine.hasActivePathStartFlowRotate(path, nowMs);
 
 const applyPathStartFlowDirectionToPayload = (path, nowMs = getNowMs()) => {
   const direction = resolvePathStartFlowDirection(path, nowMs, startFlowDirectionScratch);
@@ -1030,400 +669,59 @@ const hasActivePathRetainedArc = (path) => {
   return Boolean(pathStartRetainedArcState || pathEndRetainedArcState);
 };
 
-const updateSinglePathTipArrivalState = (
-  side,
-  prevPath,
-  nextPath,
-  cellSize,
-  cellStep,
-  nowMs,
-  pathChanged = true,
-) => {
-  if (side !== 'start' && side !== 'end') return;
-  const clearState = () => clearSinglePathTipArrivalState(side);
-  const prevTip = getPathTipFromPath(prevPath, side);
-  const nextTip = getPathTipFromPath(nextPath, side);
-
-  if (!nextTip) {
-    clearState();
-    return;
-  }
-  if (!prevTip) {
-    if (pathChanged) clearState();
-    return;
-  }
-  if (prevTip.r === nextTip.r && prevTip.c === nextTip.c) {
-    if (pathChanged) clearState();
-    return;
-  }
-
-  const moveDr = prevTip.r - nextTip.r;
-  const moveDc = prevTip.c - nextTip.c;
-  const moveLength = Math.hypot(moveDc, moveDr);
-  if (!(moveLength > 0) || moveLength > PATH_TIP_ARRIVAL_ADJACENT_MAX) {
-    clearState();
-    return;
-  }
-
-  const isRetract = side === 'start'
-    ? isStartRetractTransition(prevPath, nextPath)
-    : isEndRetractTransition(prevPath, nextPath);
-  if (isRetract) {
-    const step = Number.isFinite(cellStep) && cellStep > 0 ? cellStep : Number(cellSize) || 0;
-    const state = {
-      mode: 'retract',
-      startTimeMs: nowMs,
-      offsetX: moveDc * step,
-      offsetY: moveDr * step,
-      targetR: nextTip.r,
-      targetC: nextTip.c,
-      cutoffMs: PATH_TIP_ARRIVAL_DURATION_MS,
-    };
-    if (side === 'start') pathStartArrivalState = state;
-    else pathEndArrivalState = state;
-    return;
-  }
-
-  const isAdvance = side === 'start'
-    ? isStartAdvanceTransition(prevPath, nextPath)
-    : isEndAdvanceTransition(prevPath, nextPath);
-  if (!isAdvance) {
-    clearState();
-    return;
-  }
-
-  const distancePx = Math.max(0, (Number(cellSize) || 0) * PATH_TIP_ARRIVAL_DISTANCE_CELL_FACTOR);
-  const state = {
-    mode: 'arrive',
-    startTimeMs: nowMs,
-    offsetX: (moveDc / moveLength) * distancePx,
-    offsetY: (moveDr / moveLength) * distancePx,
-    targetR: nextTip.r,
-    targetC: nextTip.c,
-    cutoffMs: PATH_TIP_ARRIVAL_DURATION_MS,
-  };
-  if (side === 'start') pathStartArrivalState = state;
-  else pathEndArrivalState = state;
-};
-
 const updatePathTipArrivalStates = (
   prevPath,
   nextPath,
   cellSize,
   cellStep,
   nowMs = getNowMs(),
-) => {
-  if (isReducedMotionPreferred()) {
-    clearPathTipArrivalStates();
-    return;
-  }
-  const pathChanged = !pathsMatch(prevPath, nextPath);
-  if (!pathChanged) return;
-  if (isPathReversed(nextPath, prevPath)) {
-    const head = nextPath?.[0] || null;
-    const tail = nextPath?.[nextPath.length - 1] || null;
-    const tipsAdjacent = Boolean(
-      head
-      && tail
-      && cellDistance(head, tail) <= PATH_TIP_ARRIVAL_ADJACENT_MAX,
-    );
-    if (tipsAdjacent) {
-      clearPathTipArrivalStates();
-      return;
-    }
-  }
-  const tipArrivalHint = latestInteractionModel?.pathTipArrivalHint || null;
-  const startPrevPath = resolveTipArrivalSyntheticPrevPath(
-    'start',
-    prevPath,
-    nextPath,
-    tipArrivalHint,
-  ) || prevPath;
-  const endPrevPath = resolveTipArrivalSyntheticPrevPath(
-    'end',
-    prevPath,
-    nextPath,
-    tipArrivalHint,
-  ) || prevPath;
-  updateSinglePathTipArrivalState(
-    'start',
-    startPrevPath,
-    nextPath,
-    cellSize,
-    cellStep,
-    nowMs,
-    pathChanged,
-  );
-  updateSinglePathTipArrivalState(
-    'end',
-    endPrevPath,
-    nextPath,
-    cellSize,
-    cellStep,
-    nowMs,
-    pathChanged,
-  );
-};
+) => pathAnimationEngine.updatePathTipArrivalStates(
+  prevPath,
+  nextPath,
+  cellSize,
+  cellStep,
+  nowMs,
+  latestInteractionModel?.pathTipArrivalHint || null,
+);
 
-const resolvePathTipArrivalOffset = (side, tip, nowMs, out) => {
-  const state = side === 'start' ? pathStartArrivalState : pathEndArrivalState;
-  out.x = 0;
-  out.y = 0;
-  out.active = false;
-  out.mode = 'none';
-  out.remain = 1;
-  out.progress = 0;
-  out.linearRemain = 1;
-  out.linearProgress = 0;
+const resolvePathTipArrivalOffset = (side, tip, nowMs, out) => (
+  pathAnimationEngine.resolvePathTipArrivalOffset(side, tip, nowMs, out)
+);
 
-  if (!tip || !state) return out;
-  if (state.targetR !== tip.r || state.targetC !== tip.c) {
-    if (side === 'start') pathStartArrivalState = null;
-    else pathEndArrivalState = null;
-    return out;
-  }
-
-  const elapsed = nowMs - state.startTimeMs;
-  const visibleDuration = Number.isFinite(state.cutoffMs) && state.cutoffMs > 0
-    ? state.cutoffMs
-    : PATH_TIP_ARRIVAL_DURATION_MS;
-  if (elapsed >= visibleDuration) {
-    if (side === 'start') pathStartArrivalState = null;
-    else pathEndArrivalState = null;
-    return out;
-  }
-  const unit = elapsed / PATH_TIP_ARRIVAL_DURATION_MS;
-  const linearProgress = clampUnit(unit);
-  const linearRemain = 1 - linearProgress;
-
-  const eased = sampleCubicBezierYAtX(
-    linearProgress,
-    PATH_TIP_ARRIVAL_BEZIER_X1,
-    PATH_TIP_ARRIVAL_BEZIER_Y1,
-    PATH_TIP_ARRIVAL_BEZIER_X2,
-    PATH_TIP_ARRIVAL_BEZIER_Y2,
-  );
-  const remain = 1 - eased;
-  out.x = state.offsetX * remain;
-  out.y = state.offsetY * remain;
-  if (Math.abs(out.x) <= PATH_TIP_CENTER_SNAP_EPSILON_PX) out.x = 0;
-  if (Math.abs(out.y) <= PATH_TIP_CENTER_SNAP_EPSILON_PX) out.y = 0;
-  out.active = (out.x !== 0 || out.y !== 0);
-  out.mode = state.mode || 'arrive';
-  out.remain = remain;
-  out.progress = eased;
-  out.linearRemain = linearRemain;
-  out.linearProgress = linearProgress;
-  if (!out.active) {
-    if (side === 'start') pathStartArrivalState = null;
-    else pathEndArrivalState = null;
-  }
-  return out;
-};
-
-const hasActivePathTipArrivals = (nowMs = getNowMs()) => {
-  if (isReducedMotionPreferred()) {
-    clearPathTipArrivalStates();
-    return false;
-  }
-
-  if (
-    pathStartArrivalState
-    && nowMs - pathStartArrivalState.startTimeMs >= (
-      Number.isFinite(pathStartArrivalState.cutoffMs) && pathStartArrivalState.cutoffMs > 0
-        ? pathStartArrivalState.cutoffMs
-        : PATH_TIP_ARRIVAL_DURATION_MS
-    )
-  ) {
-    pathStartArrivalState = null;
-  }
-  if (
-    pathEndArrivalState
-    && nowMs - pathEndArrivalState.startTimeMs >= (
-      Number.isFinite(pathEndArrivalState.cutoffMs) && pathEndArrivalState.cutoffMs > 0
-        ? pathEndArrivalState.cutoffMs
-        : PATH_TIP_ARRIVAL_DURATION_MS
-    )
-  ) {
-    pathEndArrivalState = null;
-  }
-  return Boolean(pathStartArrivalState || pathEndArrivalState);
-};
+const hasActivePathTipArrivals = (nowMs = getNowMs()) => (
+  pathAnimationEngine.hasActivePathTipArrivals(nowMs)
+);
 
 const updatePathFlowVisibilityState = (
   prevPath,
   nextPath,
   nowMs = getNowMs(),
-) => {
-  if (isReducedMotionPreferred()) {
-    clearPathFlowVisibilityState();
-    return;
-  }
-
-  const pathChanged = !pathsMatch(prevPath, nextPath);
-  if (!pathChanged) return;
-  const prevSegmentCount = getPathSegmentCount(prevPath);
-  const nextSegmentCount = getPathSegmentCount(nextPath);
-  if (prevSegmentCount === 0 && nextSegmentCount === 1) {
-    pathFlowVisibilityState = {
-      mode: 'appear',
-      startTimeMs: nowMs,
-    };
-    return;
-  }
-  if (prevSegmentCount === 1 && nextSegmentCount === 0) {
-    pathFlowVisibilityState = {
-      mode: 'disappear',
-      startTimeMs: nowMs,
-    };
-    return;
-  }
-  clearPathFlowVisibilityState();
-};
+) => pathAnimationEngine.updatePathFlowVisibilityState(prevPath, nextPath, nowMs);
 
 const resolvePathFlowVisibilityMix = (
   path,
   nowMs = getNowMs(),
   out = flowVisibilityMixScratch,
-) => {
-  out.mix = 1;
-  out.active = false;
-
-  if (isReducedMotionPreferred()) {
-    clearPathFlowVisibilityState();
-    return out;
-  }
-
-  const state = pathFlowVisibilityState;
-  if (!state) return out;
-  const mode = state.mode === 'disappear' ? 'disappear' : 'appear';
-  const segmentCount = getPathSegmentCount(path);
-  if (mode === 'appear' && segmentCount !== 1) {
-    clearPathFlowVisibilityState();
-    return out;
-  }
-  if (mode === 'disappear' && segmentCount !== 0) {
-    clearPathFlowVisibilityState();
-    return out;
-  }
-
-  const elapsed = nowMs - state.startTimeMs;
-  if (elapsed >= PATH_TIP_ARRIVAL_DURATION_MS) {
-    clearPathFlowVisibilityState();
-    out.mix = mode === 'appear' ? 1 : 0;
-    return out;
-  }
-  const unit = clampUnit(elapsed / PATH_TIP_ARRIVAL_DURATION_MS);
-  out.mix = mode === 'appear' ? unit : (1 - unit);
-  out.active = true;
-  return out;
-};
+) => pathAnimationEngine.resolvePathFlowVisibilityMix(path, nowMs, out);
 
 const hasActivePathFlowVisibility = (path, nowMs = getNowMs()) => (
-  resolvePathFlowVisibilityMix(path, nowMs, flowVisibilityMixScratch).active
+  pathAnimationEngine.hasActivePathFlowVisibility(path, nowMs, flowVisibilityMixScratch)
 );
 
 const updatePathStartPinPresenceState = (
   prevPath,
   nextPath,
   nowMs = getNowMs(),
-) => {
-  if (isReducedMotionPreferred()) {
-    clearPathStartPinPresenceState();
-    return;
-  }
-
-  const pathChanged = !pathsMatch(prevPath, nextPath);
-  if (!pathChanged) return;
-  const prevLen = Array.isArray(prevPath) ? prevPath.length : 0;
-  const nextLen = Array.isArray(nextPath) ? nextPath.length : 0;
-
-  if (prevLen === 0 && nextLen === 1) {
-    const anchor = nextPath?.[0] || null;
-    if (!anchor) {
-      clearPathStartPinPresenceState();
-      return;
-    }
-    pathStartPinPresenceState = {
-      mode: 'appear',
-      startTimeMs: nowMs,
-      anchorR: anchor.r,
-      anchorC: anchor.c,
-    };
-    return;
-  }
-
-  if (prevLen === 1 && nextLen === 0) {
-    const anchor = prevPath?.[0] || null;
-    if (!anchor) {
-      clearPathStartPinPresenceState();
-      return;
-    }
-    pathStartPinPresenceState = {
-      mode: 'disappear',
-      startTimeMs: nowMs,
-      anchorR: anchor.r,
-      anchorC: anchor.c,
-    };
-    return;
-  }
-
-  clearPathStartPinPresenceState();
-};
+) => pathAnimationEngine.updatePathStartPinPresenceState(prevPath, nextPath, nowMs);
 
 const resolvePathStartPinPresenceScale = (
   path,
   nowMs = getNowMs(),
   out = startPinPresenceScaleScratch,
-) => {
-  out.scale = 1;
-  out.active = false;
-  out.mode = 'none';
-  out.anchorR = NaN;
-  out.anchorC = NaN;
-
-  if (isReducedMotionPreferred()) {
-    clearPathStartPinPresenceState();
-    return out;
-  }
-
-  const state = pathStartPinPresenceState;
-  if (!state) return out;
-  const mode = state.mode === 'disappear' ? 'disappear' : 'appear';
-  const pathLength = Array.isArray(path) ? path.length : 0;
-  if (mode === 'appear') {
-    const anchor = path?.[0] || null;
-    if (
-      pathLength !== 1
-      || !anchor
-      || anchor.r !== state.anchorR
-      || anchor.c !== state.anchorC
-    ) {
-      clearPathStartPinPresenceState();
-      return out;
-    }
-  } else if (pathLength !== 0) {
-    clearPathStartPinPresenceState();
-    return out;
-  }
-
-  const elapsed = nowMs - state.startTimeMs;
-  if (elapsed >= PATH_TIP_ARRIVAL_DURATION_MS) {
-    clearPathStartPinPresenceState();
-    return out;
-  }
-  const unit = clampUnit(elapsed / PATH_TIP_ARRIVAL_DURATION_MS);
-  const eased = easeOutCubic(unit);
-  out.scale = mode === 'appear' ? eased : (1 - eased);
-  out.mode = mode;
-  out.anchorR = state.anchorR;
-  out.anchorC = state.anchorC;
-  out.active = true;
-  return out;
-};
+) => pathAnimationEngine.resolvePathStartPinPresenceScale(path, nowMs, out);
 
 const hasActivePathStartPinPresence = (path, nowMs = getNowMs()) => (
-  resolvePathStartPinPresenceScale(path, nowMs, startPinPresenceScaleScratch).active
+  pathAnimationEngine.hasActivePathStartPinPresence(path, nowMs, startPinPresenceScaleScratch)
 );
 
 const applyPathStartPinPresenceToPayload = (path, nowMs = getNowMs()) => {
@@ -1528,7 +826,6 @@ const resolveStartPinDisappearRenderPoints = (
   if (!presence.active || presence.mode !== 'disappear') return null;
   if (!pathLayoutMetrics.ready) return null;
   if (!Number.isFinite(presence.anchorR) || !Number.isFinite(presence.anchorC)) {
-    clearPathStartPinPresenceState();
     return null;
   }
 
@@ -1552,88 +849,27 @@ const beginPathReverseGradientBlend = (
   toFlowOffset,
   cycle = PATH_FLOW_CYCLE,
   nowMs = getNowMs(),
-) => {
-  const pathLength = Array.isArray(path) ? path.length : 0;
-  if (isReducedMotionPreferred() || pathLength < 2) {
-    clearPathReverseGradientBlendState();
-    return;
-  }
-  const head = path[0];
-  const tail = path[pathLength - 1];
-  if (!head || !tail) {
-    clearPathReverseGradientBlendState();
-    return;
-  }
-  pathReverseGradientBlendState = {
-    startTimeMs: nowMs,
-    headR: head.r,
-    headC: head.c,
-    tailR: tail.r,
-    tailC: tail.c,
-    pathLength,
-    fromFlowOffset: normalizeFlowOffset(fromFlowOffset, cycle),
-    toFlowOffset: normalizeFlowOffset(toFlowOffset, cycle),
-    fromTravelSpan: Math.max(0, Number(fromTravelSpan) || 0),
-  };
-};
+) => pathAnimationEngine.beginPathReverseGradientBlend(
+  path,
+  fromFlowOffset,
+  fromTravelSpan,
+  toFlowOffset,
+  cycle,
+  nowMs,
+);
 
 const resolvePathReverseGradientBlend = (
   path,
   cycle = PATH_FLOW_CYCLE,
   nowMs = getNowMs(),
   out = reverseGradientBlendScratch,
-) => {
-  out.blend = 1;
-  out.fromFlowOffset = 0;
-  out.toFlowOffset = 0;
-  out.fromTravelSpan = 0;
-  out.active = false;
-
-  if (isReducedMotionPreferred()) {
-    clearPathReverseGradientBlendState();
-    return out;
-  }
-
-  const state = pathReverseGradientBlendState;
-  if (!state) return out;
-  const pathLength = Array.isArray(path) ? path.length : 0;
-  if (pathLength !== state.pathLength || pathLength < 2) {
-    clearPathReverseGradientBlendState();
-    return out;
-  }
-  const head = path[0];
-  const tail = path[pathLength - 1];
-  if (
-    !head
-    || !tail
-    || head.r !== state.headR
-    || head.c !== state.headC
-    || tail.r !== state.tailR
-    || tail.c !== state.tailC
-  ) {
-    clearPathReverseGradientBlendState();
-    return out;
-  }
-
-  const elapsed = nowMs - state.startTimeMs;
-  if (elapsed >= PATH_REVERSE_GRADIENT_BLEND_DURATION_MS) {
-    clearPathReverseGradientBlendState();
-    return out;
-  }
-
-  out.blend = easeOutCubic(clampUnit(elapsed / PATH_REVERSE_GRADIENT_BLEND_DURATION_MS));
-  out.fromFlowOffset = normalizeFlowOffset(state.fromFlowOffset, cycle);
-  out.toFlowOffset = normalizeFlowOffset(state.toFlowOffset, cycle);
-  out.fromTravelSpan = state.fromTravelSpan;
-  out.active = true;
-  return out;
-};
+) => pathAnimationEngine.resolvePathReverseGradientBlend(path, cycle, nowMs, out);
 
 const hasActivePathReverseGradientBlend = (
   path,
   cycle = PATH_FLOW_CYCLE,
   nowMs = getNowMs(),
-) => resolvePathReverseGradientBlend(path, cycle, nowMs, reverseGradientBlendScratch).active;
+) => pathAnimationEngine.hasActivePathReverseGradientBlend(path, cycle, nowMs);
 
 const applyPathReverseGradientBlendToPayload = (
   path,
@@ -1656,72 +892,16 @@ const applyPathReverseGradientBlendToPayload = (
   return reverseBlend.active;
 };
 
-const updatePathReverseTipSwapState = (prevPath, nextPath, nowMs = getNowMs()) => {
-  if (isReducedMotionPreferred()) {
-    clearPathReverseTipSwapState();
-    return;
-  }
-  if (!isPathReversed(nextPath, prevPath)) return;
-  if (!Array.isArray(nextPath) || nextPath.length < 2) return;
-  const head = nextPath[0];
-  const tail = nextPath[nextPath.length - 1];
-  if (!head || !tail) return;
-  pathReverseTipSwapState = {
-    startTimeMs: nowMs,
-    headR: head.r,
-    headC: head.c,
-    tailR: tail.r,
-    tailC: tail.c,
-  };
-};
+const updatePathReverseTipSwapState = (prevPath, nextPath, nowMs = getNowMs()) => (
+  pathAnimationEngine.updatePathReverseTipSwapState(prevPath, nextPath, nowMs)
+);
 
-const resolvePathReverseTipSwapScale = (path, nowMs = getNowMs(), out = reverseTipScaleScratch) => {
-  out.inScale = 1;
-  out.outScale = 0;
-  out.active = false;
-
-  if (isReducedMotionPreferred()) {
-    clearPathReverseTipSwapState();
-    return out;
-  }
-
-  const state = pathReverseTipSwapState;
-  if (!state) return out;
-  if (!Array.isArray(path) || path.length < 2) {
-    clearPathReverseTipSwapState();
-    return out;
-  }
-
-  const head = path[0];
-  const tail = path[path.length - 1];
-  if (
-    !head
-    || !tail
-    || head.r !== state.headR
-    || head.c !== state.headC
-    || tail.r !== state.tailR
-    || tail.c !== state.tailC
-  ) {
-    clearPathReverseTipSwapState();
-    return out;
-  }
-
-  const elapsed = nowMs - state.startTimeMs;
-  if (elapsed >= PATH_REVERSE_TIP_SWAP_DURATION_MS) {
-    clearPathReverseTipSwapState();
-    return out;
-  }
-
-  const unit = clampUnit(elapsed / PATH_REVERSE_TIP_SWAP_DURATION_MS);
-  const inScale = easeOutCubic(unit);
-  out.inScale = Math.max(0, Math.min(1, inScale));
-  out.outScale = 1 - out.inScale;
-  out.active = true;
-  return out;
-};
+const resolvePathReverseTipSwapScale = (path, nowMs = getNowMs(), out = reverseTipScaleScratch) => (
+  pathAnimationEngine.resolvePathReverseTipSwapScale(path, nowMs, out)
+);
 
 const hasActivePathReverseTipSwap = (path, nowMs = getNowMs()) => (
-  resolvePathReverseTipSwapScale(path, nowMs, reverseTipScaleScratch).active
+  pathAnimationEngine.hasActivePathReverseTipSwap(path, nowMs)
 );
 
 const applyPathReverseTipSwapToPayload = (path, nowMs = getNowMs()) => {
@@ -1748,12 +928,8 @@ const getPathRenderPointsForFrame = (
   endHalfWidth = pathFramePayload.endHalfWidth,
 ) => {
   if (isReducedMotionPreferred()) {
-    clearPathTipArrivalStates();
-    clearPathStartPinPresenceState();
-    clearPathFlowVisibilityState();
+    pathAnimationEngine.resetTransitionState({ preserveFlowFreeze: true });
     clearPathRetainedArcStates();
-    clearPathEndArrowRotateState();
-    clearPathStartFlowRotateState();
     return {
       points: reusablePathPoints,
       geometryToken: pathGeometryToken,
@@ -2020,7 +1196,7 @@ const getPathFlowMetrics = (refs = latestPathRefs, out = null, cellSize = null) 
   return { cycle, pulse, speed };
 };
 
-const getPathMainTravelFromPoints = (points, flowWidth) => {
+const getPathMainTravelFromPoints = (points, flowWidth, maxSegments = null) => {
   const pointCount = Array.isArray(points) ? points.length : 0;
   if (pointCount < 2) return 0;
 
@@ -2084,8 +1260,12 @@ const getPathMainTravelFromPoints = (points, flowWidth) => {
     cornerArcs[i] = effectiveRadius * absTurn;
   }
 
+  const segmentLimit = Number.isInteger(maxSegments)
+    ? Math.max(0, Math.min(segmentCount, maxSegments))
+    : segmentCount;
+
   let flowTravel = 0;
-  for (let i = 0; i < segmentCount; i++) {
+  for (let i = 0; i < segmentLimit; i++) {
     const len = segmentLengths[i];
     if (!(len > 0)) continue;
 
@@ -2100,26 +1280,173 @@ const getPathMainTravelFromPoints = (points, flowWidth) => {
   return flowTravel;
 };
 
-const getPathMainTravelFromCells = (
+const getHeadShiftTravelDistance = (path, stepCount, safeCell) => {
+  if (!Array.isArray(path) || path.length < 2) return 0;
+  const maxSteps = Math.min(Math.max(0, stepCount), path.length - 1);
+  if (maxSteps <= 0) return 0;
+
+  let travel = 0;
+  for (let i = 0; i < maxSteps; i += 1) {
+    travel += Math.max(0, cellDistance(path[i], path[i + 1])) * safeCell;
+  }
+  return travel;
+};
+
+const resolveBestPathOverlap = (nextPath, previousPath) => {
+  if (!Array.isArray(nextPath) || !Array.isArray(previousPath)) return 0;
+  const nextLen = nextPath.length;
+  const prevLen = previousPath.length;
+  if (nextLen <= 0 || prevLen <= 0) return 0;
+
+  let bestNextStart = 0;
+  let bestPrevStart = 0;
+  let bestOverlap = 0;
+  let bestHeadShiftAbs = Infinity;
+  let bestHeadCost = Infinity;
+
+  for (let prevStart = 0; prevStart < prevLen; prevStart += 1) {
+    for (let nextStart = 0; nextStart < nextLen; nextStart += 1) {
+      let overlap = 0;
+      const maxCompare = Math.min(prevLen - prevStart, nextLen - nextStart);
+      while (overlap < maxCompare && pointsMatch(nextPath[nextStart + overlap], previousPath[prevStart + overlap])) {
+        overlap += 1;
+      }
+      if (overlap <= 0) continue;
+
+      const headShiftAbs = Math.abs(nextStart - prevStart);
+      const headCost = nextStart + prevStart;
+      const isBetter = (
+        overlap > bestOverlap
+        || (
+          overlap === bestOverlap
+          && (
+            headShiftAbs < bestHeadShiftAbs
+            || (headShiftAbs === bestHeadShiftAbs && headCost < bestHeadCost)
+          )
+        )
+      );
+      if (!isBetter) continue;
+
+      bestOverlap = overlap;
+      bestNextStart = nextStart;
+      bestPrevStart = prevStart;
+      bestHeadShiftAbs = headShiftAbs;
+      bestHeadCost = headCost;
+    }
+  }
+
+  return {
+    nextStart: bestNextStart,
+    prevStart: bestPrevStart,
+    overlap: bestOverlap,
+  };
+};
+
+const resolveBestPathOverlapForShift = (nextPath, previousPath, shiftCount) => {
+  if (!Array.isArray(nextPath) || !Array.isArray(previousPath)) return null;
+  if (!Number.isInteger(shiftCount)) return null;
+  const nextLen = nextPath.length;
+  const prevLen = previousPath.length;
+  if (nextLen <= 0 || prevLen <= 0) return null;
+
+  let bestNextStart = 0;
+  let bestPrevStart = 0;
+  let bestOverlap = 0;
+  let bestHeadCost = Infinity;
+
+  for (let prevStart = 0; prevStart < prevLen; prevStart += 1) {
+    for (let nextStart = 0; nextStart < nextLen; nextStart += 1) {
+      if ((nextStart - prevStart) !== shiftCount) continue;
+
+      let overlap = 0;
+      const maxCompare = Math.min(prevLen - prevStart, nextLen - nextStart);
+      while (overlap < maxCompare && pointsMatch(nextPath[nextStart + overlap], previousPath[prevStart + overlap])) {
+        overlap += 1;
+      }
+      if (overlap <= 0) continue;
+
+      const headCost = nextStart + prevStart;
+      const isBetter = (
+        overlap > bestOverlap
+        || (overlap === bestOverlap && headCost < bestHeadCost)
+      );
+      if (!isBetter) continue;
+
+      bestOverlap = overlap;
+      bestNextStart = nextStart;
+      bestPrevStart = prevStart;
+      bestHeadCost = headCost;
+    }
+  }
+
+  if (bestOverlap <= 0) return null;
+  return {
+    nextStart: bestNextStart,
+    prevStart: bestPrevStart,
+    overlap: bestOverlap,
+  };
+};
+
+const resolveCompensationFlowWidth = (gridEl = null, flowWidth = null) => {
+  if (Number.isFinite(flowWidth) && flowWidth > 0) return flowWidth;
+  const cell = pathLayoutMetrics.ready
+    ? pathLayoutMetrics.cell
+    : getCellSize(gridEl);
+  const deviceScale = getDevicePixelScale();
+  return Math.max(7, snapCssToDevicePixel(Math.floor(cell * 0.15), deviceScale));
+};
+
+const getPathPrefixTravelFromCells = (
   path,
+  prefixLength,
   refs = {},
   offset = { x: 0, y: 0 },
   flowWidth = null,
 ) => {
   if (!Array.isArray(path) || path.length < 2) return 0;
+  const safePrefixLength = Math.min(path.length, Math.max(0, Number(prefixLength) || 0));
+  if (safePrefixLength < 2) return 0;
+
   const { gridEl } = refs;
-  if (!gridEl) return 0;
+  if (!gridEl && !pathLayoutMetrics.ready) return 0;
 
-  const resolvedWidth = Number.isFinite(flowWidth) && flowWidth > 0
-    ? flowWidth
-    : Math.max(7, Math.floor(getCellSize(gridEl) * 0.15));
+  const resolvedWidth = resolveCompensationFlowWidth(gridEl, flowWidth);
 
-  const points = new Array(path.length);
-  for (let i = 0; i < path.length; i++) {
-    const p = getCellPoint(path[i].r, path[i].c, { gridEl }, offset);
+  const points = new Array(safePrefixLength);
+  for (let i = 0; i < safePrefixLength; i += 1) {
+    const p = getCellPointFromLayout(path[i].r, path[i].c)
+      || getCellPoint(path[i].r, path[i].c, { gridEl }, offset);
     points[i] = { x: p.x, y: p.y };
   }
   return getPathMainTravelFromPoints(points, resolvedWidth);
+};
+
+const getPathTravelToSegmentStartFromCells = (
+  path,
+  segmentStartIndex,
+  refs = {},
+  offset = { x: 0, y: 0 },
+  flowWidth = null,
+) => {
+  if (!Array.isArray(path) || path.length < 2) return 0;
+  const safeSegmentStartIndex = Math.min(
+    path.length - 1,
+    Math.max(0, Number(segmentStartIndex) || 0),
+  );
+  if (safeSegmentStartIndex <= 0) return 0;
+
+  const { gridEl } = refs;
+  if (!gridEl && !pathLayoutMetrics.ready) return 0;
+
+  const resolvedWidth = resolveCompensationFlowWidth(gridEl, flowWidth);
+
+  const points = new Array(path.length);
+  for (let i = 0; i < path.length; i += 1) {
+    const p = getCellPointFromLayout(path[i].r, path[i].c)
+      || getCellPoint(path[i].r, path[i].c, { gridEl }, offset);
+    points[i] = { x: p.x, y: p.y };
+  }
+  return getPathMainTravelFromPoints(points, resolvedWidth, safeSegmentStartIndex);
 };
 
 const getHeadShiftDelta = (nextPath, previousPath, refs = {}, offset = { x: 0, y: 0 }) => {
@@ -2129,18 +1456,88 @@ const getHeadShiftDelta = (nextPath, previousPath, refs = {}, offset = { x: 0, y
   const headShiftStepCount = resolveHeadShiftStepCount(nextPath, previousPath);
   if (!Number.isInteger(headShiftStepCount) || headShiftStepCount === 0) return 0;
 
+  const overlapInfo = resolveBestPathOverlapForShift(nextPath, previousPath, headShiftStepCount)
+    || resolveBestPathOverlap(nextPath, previousPath);
+  const overlap = Number(overlapInfo?.overlap) || 0;
+  const nextStart = Number(overlapInfo?.nextStart) || 0;
+  const prevStart = Number(overlapInfo?.prevStart) || 0;
+  const minOverlap = Math.min(nextPath.length, previousPath.length) <= 2 ? 1 : 2;
+  if (overlap < minOverlap) return 0;
+  if (nextStart === 0 && prevStart === 0) return 0;
+  if ((nextStart - prevStart) !== headShiftStepCount) return 0;
+  const isFullLengthOverlap = overlap >= Math.min(nextPath.length, previousPath.length);
+  const isPureHeadShift = isFullLengthOverlap && (nextStart === 0 || prevStart === 0);
+  const shouldUseSegmentStartAnchor = (
+    overlap >= 2
+    && !isFullLengthOverlap
+    && nextStart > 0
+    && prevStart > 0
+  );
+
   const resolvedCell = getCellSize(gridEl);
   const safeCell = Number.isFinite(resolvedCell) && resolvedCell > 0
     ? resolvedCell
     : PATH_FLOW_BASE_CELL;
-  const flowWidth = Math.max(7, Math.floor(safeCell * 0.15));
-  const previousTravel = getPathMainTravelFromCells(previousPath, refs, offset, flowWidth);
-  const nextTravel = getPathMainTravelFromCells(nextPath, refs, offset, flowWidth);
-  const shift = previousTravel - nextTravel;
-  if (Number.isFinite(shift) && shift !== 0) return shift;
 
-  const fallbackStep = (path) =>
-    Math.max(1, cellDistance(path?.[0], path?.[1]) * safeCell);
+  const flowWidth = resolveCompensationFlowWidth(gridEl);
+  if (isPureHeadShift) {
+    const previousTravel = getPathPrefixTravelFromCells(
+      previousPath,
+      previousPath.length,
+      refs,
+      offset,
+      flowWidth,
+    );
+    const nextTravel = getPathPrefixTravelFromCells(
+      nextPath,
+      nextPath.length,
+      refs,
+      offset,
+      flowWidth,
+    );
+    const shift = previousTravel - nextTravel;
+    if (Number.isFinite(shift) && shift !== 0) return shift;
+  }
+
+  if (shouldUseSegmentStartAnchor) {
+    const previousSegmentStartTravel = getPathTravelToSegmentStartFromCells(
+      previousPath,
+      prevStart,
+      refs,
+      offset,
+      flowWidth,
+    );
+    const nextSegmentStartTravel = getPathTravelToSegmentStartFromCells(
+      nextPath,
+      nextStart,
+      refs,
+      offset,
+      flowWidth,
+    );
+    const shift = previousSegmentStartTravel - nextSegmentStartTravel;
+    if (Number.isFinite(shift) && shift !== 0) return shift;
+  }
+
+  if (overlap >= 1) {
+    const previousNodeTravel = getPathPrefixTravelFromCells(
+      previousPath,
+      prevStart + 1,
+      refs,
+      offset,
+      flowWidth,
+    );
+    const nextNodeTravel = getPathPrefixTravelFromCells(
+      nextPath,
+      nextStart + 1,
+      refs,
+      offset,
+      flowWidth,
+    );
+    const shift = previousNodeTravel - nextNodeTravel;
+    if (Number.isFinite(shift) && shift !== 0) return shift;
+  }
+
+  const fallbackStep = (path) => Math.max(1, cellDistance(path?.[0], path?.[1]) * safeCell);
   const stepCount = Math.abs(headShiftStepCount);
   return headShiftStepCount > 0
     ? -(fallbackStep(nextPath) * stepCount)
@@ -3050,17 +2447,8 @@ export function cacheElements() {
   pathLayoutMetrics.ready = false;
   pathLayoutMetrics.version = 0;
   reducedMotionQuery = null;
-  clearPathTipArrivalStates();
-  clearPathReverseTipSwapState();
-  clearPathReverseGradientBlendState();
-  clearPathStartPinPresenceState();
-  clearPathFlowVisibilityState();
-  pathFlowFreezeState = null;
-  pathFlowFreezeMix = 1;
-  lastPathFlowFrozen = false;
+  pathAnimationEngine.resetTransitionState();
   clearPathRetainedArcStates();
-  clearPathEndArrowRotateState();
-  clearPathStartFlowRotateState();
   clearPathTipHoverScaleStates();
   pathRetainedArcTokenSeed = 0;
   reusableArrivalPathPoints.length = 0;
@@ -3285,10 +2673,8 @@ export function buildGrid(snapshot, refs, icons, iconX) {
   cachedPathRef = null;
   cachedPathLength = -1;
   cachedPathLayoutVersion = -1;
-  clearPathTipArrivalStates();
+  pathAnimationEngine.resetTransitionState({ preserveFlowFreeze: true });
   clearPathRetainedArcStates();
-  clearPathEndArrowRotateState();
-  clearPathStartFlowRotateState();
   pathRetainedArcTokenSeed = 0;
   reusableArrivalPathPoints.length = 0;
   reusableStartRetainedArcPoints.length = 0;
@@ -4029,6 +3415,8 @@ function drawAnimatedPathImpl(
 }
 
 const pathAnimationEngine = createPathAnimationEngine({
+  nowFn: getNowMs,
+  isReducedMotionPreferred: () => isReducedMotionPreferred(),
   onSetInteractionModel: (interactionModel) => {
     latestInteractionModel = interactionModel;
   },
@@ -4036,11 +3424,6 @@ const pathAnimationEngine = createPathAnimationEngine({
     updatePathLayoutMetrics(offset, cell, gap, pad),
   onNotifyInteractiveResize: () => {
     interactiveResizeActive = true;
-  },
-  onSetPathFlowFreezeImmediate: (frozen) => {
-    lastPathFlowFrozen = frozen;
-    pathFlowFreezeMix = frozen ? 0 : 1;
-    pathFlowFreezeState = null;
   },
 });
 

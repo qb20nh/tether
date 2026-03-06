@@ -74,6 +74,92 @@ test('resolveHeadShiftStepCount does not treat tail growth as head shift', () =>
   assert.equal(resolveHeadShiftStepCount(nextPath, previousPath), 0);
 });
 
+test('resolveHeadShiftStepCount detects equal-length retract+advance shift toward tail', () => {
+  const previousPath = [
+    { r: 4, c: 1 },
+    { r: 4, c: 2 },
+    { r: 4, c: 3 },
+    { r: 4, c: 4 },
+  ];
+  const nextPath = [
+    { r: 4, c: 2 },
+    { r: 4, c: 3 },
+    { r: 4, c: 4 },
+    { r: 4, c: 5 },
+  ];
+
+  assert.equal(resolveHeadShiftStepCount(nextPath, previousPath), -1);
+});
+
+test('resolveHeadShiftStepCount detects equal-length retract+advance shift toward head', () => {
+  const previousPath = [
+    { r: 6, c: 2 },
+    { r: 6, c: 3 },
+    { r: 6, c: 4 },
+    { r: 6, c: 5 },
+  ];
+  const nextPath = [
+    { r: 6, c: 1 },
+    { r: 6, c: 2 },
+    { r: 6, c: 3 },
+    { r: 6, c: 4 },
+  ];
+
+  assert.equal(resolveHeadShiftStepCount(nextPath, previousPath), 1);
+});
+
+test('resolveHeadShiftStepCount detects non-equal mixed transition with head growth', () => {
+  const previousPath = [
+    { r: 8, c: 2 },
+    { r: 8, c: 3 },
+    { r: 8, c: 4 },
+    { r: 8, c: 5 },
+  ];
+  const nextPath = [
+    { r: 8, c: 1 },
+    { r: 8, c: 2 },
+    { r: 8, c: 3 },
+    { r: 8, c: 4 },
+    { r: 9, c: 4 },
+  ];
+
+  assert.equal(resolveHeadShiftStepCount(nextPath, previousPath), 1);
+});
+
+test('resolveHeadShiftStepCount detects non-equal mixed transition with head shrink', () => {
+  const previousPath = [
+    { r: 9, c: 1 },
+    { r: 9, c: 2 },
+    { r: 9, c: 3 },
+    { r: 9, c: 4 },
+    { r: 9, c: 5 },
+  ];
+  const nextPath = [
+    { r: 9, c: 2 },
+    { r: 9, c: 3 },
+    { r: 9, c: 4 },
+    { r: 10, c: 4 },
+  ];
+
+  assert.equal(resolveHeadShiftStepCount(nextPath, previousPath), -1);
+});
+
+test('resolveHeadShiftStepCount detects slippery mixed retract+advance example (d r u -> l u)', () => {
+  const previousPath = [
+    { r: 0, c: 0 },
+    { r: 1, c: 0 },
+    { r: 1, c: 1 },
+    { r: 0, c: 1 },
+  ];
+  const nextPath = [
+    { r: 1, c: 2 },
+    { r: 1, c: 1 },
+    { r: 0, c: 1 },
+  ];
+
+  assert.equal(resolveHeadShiftStepCount(nextPath, previousPath), -1);
+});
+
 test('resolveHeadShiftStepCount returns 0 when paths are not shifted prefixes', () => {
   const previousPath = [
     { r: 1, c: 1 },
