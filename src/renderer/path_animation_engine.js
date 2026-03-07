@@ -4,6 +4,17 @@ import {
   clampUnit,
   angleDeltaSigned,
 } from '../math.js';
+import {
+  getPathTipFromPath,
+  isEndAdvanceTransition,
+  isEndRetractTransition,
+  isPathReversed,
+  isRetractUnturnTransition,
+  isStartAdvanceTransition,
+  isStartRetractTransition,
+  normalizeFlowOffset,
+  pathsMatch,
+} from './path_transition_utils.js';
 
 const PATH_FLOW_CYCLE = 128;
 const PATH_FLOW_FREEZE_DURATION_MS = 2500;
@@ -270,23 +281,6 @@ export const resolveHeadShiftTransitionWindow = (nextPath, previousPath) => {
   };
 };
 
-const isPathReversed = (nextPath, previousPath) => {
-  if (!Array.isArray(nextPath) || !Array.isArray(previousPath)) return false;
-  if (nextPath.length !== previousPath.length || nextPath.length < 2) return false;
-
-  for (let i = 0; i < nextPath.length; i += 1) {
-    if (!pointsMatch(nextPath[i], previousPath[previousPath.length - 1 - i])) return false;
-  }
-  return true;
-};
-
-const normalizeFlowOffset = (value, cycle = PATH_FLOW_CYCLE) => {
-  if (!Number.isFinite(value)) return 0;
-  if (!Number.isFinite(cycle) || cycle <= 0) return 0;
-  const mod = value % cycle;
-  return mod >= 0 ? mod : mod + cycle;
-};
-
 const cubicBezierAxisAt = (t, p1, p2) => {
   const omt = 1 - t;
   return (3 * p1 * omt * omt * t) + (3 * p2 * omt * t * t) + (t * t * t);
@@ -368,85 +362,9 @@ const resolveDefaultReducedMotionQuery = () => {
   };
 };
 
-const getPathTipFromPath = (path, side) => {
-  if (!Array.isArray(path) || path.length <= 0) return null;
-  if (side === 'start') return path[0] || null;
-  if (path.length <= 1) return path[0] || null;
-  return path[path.length - 1] || null;
-};
-
 const getPathSegmentCount = (path) => {
   const pathLength = Array.isArray(path) ? path.length : 0;
   return pathLength > 1 ? pathLength - 1 : 0;
-};
-
-const pathsMatch = (aPath, bPath) => {
-  if (!Array.isArray(aPath) || !Array.isArray(bPath)) return false;
-  if (aPath.length !== bPath.length) return false;
-  for (let i = 0; i < aPath.length; i += 1) {
-    if (!pointsMatch(aPath[i], bPath[i])) return false;
-  }
-  return true;
-};
-
-const isEndRetractTransition = (prevPath, nextPath) => {
-  if (!Array.isArray(prevPath) || !Array.isArray(nextPath)) return false;
-  const prevLen = prevPath.length;
-  const nextLen = nextPath.length;
-  if (nextLen >= prevLen || nextLen < 1) return false;
-  for (let i = 0; i < nextLen; i += 1) {
-    if (!pointsMatch(nextPath[i], prevPath[i])) return false;
-  }
-  return true;
-};
-
-const isStartRetractTransition = (prevPath, nextPath) => {
-  if (!Array.isArray(prevPath) || !Array.isArray(nextPath)) return false;
-  const prevLen = prevPath.length;
-  const nextLen = nextPath.length;
-  if (nextLen >= prevLen || nextLen < 1) return false;
-  const diff = prevLen - nextLen;
-  for (let i = 0; i < nextLen; i += 1) {
-    if (!pointsMatch(nextPath[i], prevPath[i + diff])) return false;
-  }
-  return true;
-};
-
-const isEndAdvanceTransition = (prevPath, nextPath) => {
-  if (!Array.isArray(prevPath) || !Array.isArray(nextPath)) return false;
-  const prevLen = prevPath.length;
-  const nextLen = nextPath.length;
-  if (nextLen !== prevLen + 1) return false;
-  for (let i = 0; i < prevLen; i += 1) {
-    if (!pointsMatch(nextPath[i], prevPath[i])) return false;
-  }
-  return true;
-};
-
-const isStartAdvanceTransition = (prevPath, nextPath) => {
-  if (!Array.isArray(prevPath) || !Array.isArray(nextPath)) return false;
-  const prevLen = prevPath.length;
-  const nextLen = nextPath.length;
-  if (nextLen !== prevLen + 1) return false;
-  for (let i = 0; i < prevLen; i += 1) {
-    if (!pointsMatch(nextPath[i + 1], prevPath[i])) return false;
-  }
-  return true;
-};
-
-const isRetractUnturnTransition = (side, retractedTip, nextTip, nextPath) => {
-  if (!retractedTip || !nextTip || !Array.isArray(nextPath)) return false;
-  let neighbor = null;
-  if (side === 'start') neighbor = nextPath[1] || null;
-  else if (side === 'end') neighbor = nextPath[nextPath.length - 2] || null;
-  if (!neighbor) return false;
-
-  const inR = neighbor.r - nextTip.r;
-  const inC = neighbor.c - nextTip.c;
-  const outR = retractedTip.r - nextTip.r;
-  const outC = retractedTip.c - nextTip.c;
-  if ((inR === 0 && inC === 0) || (outR === 0 && outC === 0)) return false;
-  return ((inR * outC) - (inC * outR)) !== 0;
 };
 
 const normalizeDirectionInto = (dx, dy, out) => {

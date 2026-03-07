@@ -1,0 +1,521 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { createBoardRendererCore } from '../../src/renderer/board_renderer_core.js';
+
+class FakeStyle {
+  constructor() {
+    this.values = new Map();
+    this.width = '';
+    this.height = '';
+    this.display = '';
+    this.left = '';
+    this.top = '';
+  }
+
+  setProperty(name, value) {
+    this.values.set(name, String(value));
+  }
+
+  getPropertyValue(name) {
+    return this.values.get(name) || '';
+  }
+
+  removeProperty(name) {
+    this.values.delete(name);
+  }
+}
+
+class FakeClassList {
+  constructor(owner) {
+    this.owner = owner;
+    this.tokens = new Set();
+  }
+
+  setFromString(value) {
+    this.tokens = new Set(String(value || '').split(/\s+/).filter(Boolean));
+    this.owner._className = [...this.tokens].join(' ');
+  }
+
+  add(...values) {
+    values.forEach((value) => {
+      if (value) this.tokens.add(value);
+    });
+    this.owner._className = [...this.tokens].join(' ');
+  }
+
+  remove(...values) {
+    values.forEach((value) => this.tokens.delete(value));
+    this.owner._className = [...this.tokens].join(' ');
+  }
+
+  contains(value) {
+    return this.tokens.has(value);
+  }
+
+  toggle(value, force) {
+    const shouldHave = force === undefined ? !this.tokens.has(value) : Boolean(force);
+    if (shouldHave) this.tokens.add(value);
+    else this.tokens.delete(value);
+    this.owner._className = [...this.tokens].join(' ');
+    return shouldHave;
+  }
+}
+
+class FakeElement {
+  constructor(tagName = 'div') {
+    this.tagName = String(tagName).toUpperCase();
+    this.id = '';
+    this.dataset = {};
+    this.children = [];
+    this.parentElement = null;
+    this.style = new FakeStyle();
+    this._className = '';
+    this.classList = new FakeClassList(this);
+    this.hidden = false;
+    this.disabled = false;
+    this.value = '';
+    this.textContent = '';
+    this.innerHTML = '';
+    this.clientWidth = 240;
+    this.clientHeight = 240;
+    this.clientLeft = 0;
+    this.clientTop = 0;
+    this._rect = {
+      left: 0,
+      top: 0,
+      width: this.clientWidth,
+      height: this.clientHeight,
+    };
+    this._innerHTML = '';
+    this._context2d = null;
+  }
+
+  get className() {
+    return this._className;
+  }
+
+  set className(value) {
+    this.classList.setFromString(value);
+  }
+
+  get innerHTML() {
+    return this._innerHTML;
+  }
+
+  set innerHTML(value) {
+    this._innerHTML = String(value || '');
+    if (this._innerHTML === '') {
+      this.children = [];
+    }
+  }
+
+  get firstElementChild() {
+    return this.children[0] || null;
+  }
+
+  get nextElementSibling() {
+    if (!this.parentElement) return null;
+    const index = this.parentElement.children.indexOf(this);
+    return index >= 0 ? this.parentElement.children[index + 1] || null : null;
+  }
+
+  appendChild(child) {
+    child.parentElement = this;
+    this.children.push(child);
+    return child;
+  }
+
+  removeChild(child) {
+    const index = this.children.indexOf(child);
+    if (index >= 0) {
+      this.children.splice(index, 1);
+      child.parentElement = null;
+    }
+    return child;
+  }
+
+  remove() {
+    if (this.parentElement) this.parentElement.removeChild(this);
+  }
+
+  setBoundingClientRect(rect = {}) {
+    this._rect = {
+      left: Number(rect.left) || 0,
+      top: Number(rect.top) || 0,
+      width: Number(rect.width) || this.clientWidth,
+      height: Number(rect.height) || this.clientHeight,
+    };
+    this.clientWidth = this._rect.width;
+    this.clientHeight = this._rect.height;
+  }
+
+  getBoundingClientRect() {
+    return {
+      left: this._rect.left,
+      top: this._rect.top,
+      width: this._rect.width,
+      height: this._rect.height,
+      right: this._rect.left + this._rect.width,
+      bottom: this._rect.top + this._rect.height,
+    };
+  }
+
+  matches(selector) {
+    if (selector === ':active' || selector === ':hover') return false;
+    if (selector.startsWith('.')) return this.classList.contains(selector.slice(1));
+    if (selector.startsWith('#')) return this.id === selector.slice(1);
+    return false;
+  }
+
+  querySelector(selector) {
+    const stack = [...this.children];
+    while (stack.length > 0) {
+      const node = stack.shift();
+      if (node?.matches(selector)) return node;
+      if (Array.isArray(node?.children) && node.children.length > 0) {
+        stack.unshift(...node.children);
+      }
+    }
+    return null;
+  }
+
+  getContext(type) {
+    if (this.tagName !== 'CANVAS' || type !== '2d') return null;
+    if (!this._context2d) {
+      let fillStyle = '#000000';
+      this._context2d = {
+        get fillStyle() {
+          return fillStyle;
+        },
+        set fillStyle(value) {
+          fillStyle = String(value || '');
+        },
+      };
+    }
+    return this._context2d;
+  }
+}
+
+const createComputedStyle = (element) => ({
+  getPropertyValue(name) {
+    return element?.style?.getPropertyValue(name) || '';
+  },
+  get columnGap() {
+    return element?.style?.getPropertyValue('--gap') || '0px';
+  },
+  get gap() {
+    return element?.style?.getPropertyValue('--gap') || '0px';
+  },
+  get paddingLeft() {
+    return element?.style?.getPropertyValue('padding-left') || '0px';
+  },
+  get paddingRight() {
+    return element?.style?.getPropertyValue('padding-right') || '0px';
+  },
+  get paddingTop() {
+    return element?.style?.getPropertyValue('padding-top') || '0px';
+  },
+  get paddingBottom() {
+    return element?.style?.getPropertyValue('padding-bottom') || '0px';
+  },
+  get borderLeftWidth() {
+    return element?.style?.getPropertyValue('border-left-width') || '0px';
+  },
+  get borderRightWidth() {
+    return element?.style?.getPropertyValue('border-right-width') || '0px';
+  },
+});
+
+const installRendererEnv = (t) => {
+  const originalElement = globalThis.Element;
+  const originalDocument = globalThis.document;
+  const originalWindow = globalThis.window;
+  const originalGetComputedStyle = globalThis.getComputedStyle;
+  const originalPerformance = globalThis.performance;
+  const originalRaf = globalThis.requestAnimationFrame;
+  const originalCancelRaf = globalThis.cancelAnimationFrame;
+
+  const rafCallbacks = new Map();
+  let nextRafId = 1;
+
+  const documentElement = new FakeElement('html');
+  documentElement.clientWidth = 1280;
+  documentElement.clientHeight = 720;
+
+  globalThis.Element = FakeElement;
+  globalThis.document = {
+    body: new FakeElement('body'),
+    documentElement,
+    createElement(tagName) {
+      return new FakeElement(tagName);
+    },
+  };
+  globalThis.window = {
+    innerWidth: 1280,
+    innerHeight: 720,
+    devicePixelRatio: 1,
+    visualViewport: null,
+    matchMedia() {
+      return { matches: false };
+    },
+  };
+  globalThis.getComputedStyle = (element) => createComputedStyle(element);
+  globalThis.performance = {
+    now() {
+      return 100;
+    },
+  };
+  globalThis.requestAnimationFrame = (callback) => {
+    const id = nextRafId;
+    nextRafId += 1;
+    rafCallbacks.set(id, callback);
+    return id;
+  };
+  globalThis.cancelAnimationFrame = (id) => {
+    rafCallbacks.delete(id);
+  };
+
+  t.after(() => {
+    globalThis.Element = originalElement;
+    globalThis.document = originalDocument;
+    globalThis.window = originalWindow;
+    globalThis.getComputedStyle = originalGetComputedStyle;
+    globalThis.performance = originalPerformance;
+    globalThis.requestAnimationFrame = originalRaf;
+    globalThis.cancelAnimationFrame = originalCancelRaf;
+  });
+
+  return { rafCallbacks };
+};
+
+const createFakePathRenderer = () => ({
+  calls: [],
+  destroyed: false,
+  resizeCalls: [],
+  drawPathFrame(payload) {
+    this.calls.push({
+      flowOffset: payload.flowOffset,
+      geometryToken: payload.geometryToken,
+      pointCount: Array.isArray(payload.points) ? payload.points.length : 0,
+    });
+    return 64;
+  },
+  resize(width, height, dpr) {
+    this.resizeCalls.push({ width, height, dpr });
+  },
+  destroy() {
+    this.destroyed = true;
+  },
+});
+
+const createShellRefs = () => {
+  const app = new FakeElement('div');
+  app.clientWidth = 960;
+  app.style.setProperty('padding-left', '0px');
+  app.style.setProperty('padding-right', '0px');
+  app.style.setProperty('padding-top', '0px');
+  app.style.setProperty('padding-bottom', '0px');
+  app.style.setProperty('--ui-reserve', '0px');
+
+  const boardHost = new FakeElement('div');
+  boardHost.clientWidth = 960;
+  boardHost.style.setProperty('padding-left', '0px');
+  boardHost.style.setProperty('padding-right', '0px');
+
+  const boardWrap = new FakeElement('div');
+  boardWrap.clientWidth = 240;
+  boardWrap.clientHeight = 240;
+  boardWrap.style.setProperty('--gap', '0px');
+  boardWrap.setBoundingClientRect({ left: 10, top: 20, width: 240, height: 240 });
+  boardHost.appendChild(boardWrap);
+
+  const gridEl = new FakeElement('div');
+  gridEl.id = 'grid';
+  gridEl.clientWidth = 240;
+  gridEl.clientHeight = 240;
+  gridEl.style.setProperty('--gap', '0px');
+  gridEl.style.setProperty('padding-left', '0px');
+  gridEl.style.setProperty('padding-right', '0px');
+  gridEl.style.setProperty('padding-top', '0px');
+  gridEl.style.setProperty('padding-bottom', '0px');
+  gridEl.setBoundingClientRect({ left: 10, top: 20, width: 240, height: 240 });
+  boardWrap.appendChild(gridEl);
+
+  return {
+    app,
+    boardWrap,
+    gridEl,
+    msgEl: new FakeElement('div'),
+    legend: new FakeElement('div'),
+    pathRenderer: createFakePathRenderer(),
+  };
+};
+
+const createSnapshot = ({ gridData, path = [], levelIndex = 0 }) => {
+  const rows = gridData.length;
+  const cols = gridData[0].length;
+  const visited = new Set(path.map((point) => `${point.r},${point.c}`));
+  const idxByKey = new Map(path.map((point, index) => [`${point.r},${point.c}`, index]));
+  const totalUsable = gridData.flat().filter((cell) => cell !== '#' && cell !== 'm').length;
+  return {
+    levelIndex,
+    rows,
+    cols,
+    gridData,
+    path,
+    visited,
+    idxByKey,
+    totalUsable,
+  };
+};
+
+const getGridCell = (refs, r, c, cols) => refs.gridEl.children[(r * cols) + c] || null;
+
+test('createBoardRendererCore keeps refs, interaction state, and ghosts isolated per instance', (t) => {
+  installRendererEnv(t);
+  const gridData = [
+    ['.', '.'],
+    ['.', '.'],
+  ];
+  const snapshot = createSnapshot({ gridData });
+  const first = createBoardRendererCore();
+  const second = createBoardRendererCore();
+  const firstRefs = createShellRefs();
+  const secondRefs = createShellRefs();
+
+  first.mount(firstRefs);
+  second.mount(secondRefs);
+  first.rebuildGrid(snapshot);
+  second.rebuildGrid(snapshot);
+
+  first.updateInteraction({
+    dropTarget: { r: 1, c: 1 },
+    wallGhost: { visible: true, x: 80, y: 96 },
+    isPathDragging: true,
+    pathDragCursor: { r: 0, c: 1 },
+  });
+
+  second.updateInteraction({
+    dropTarget: { r: 0, c: 0 },
+    isPathDragging: true,
+    pathDragCursor: { r: 1, c: 0 },
+  });
+
+  const firstDropTarget = getGridCell(firstRefs, 1, 1, 2);
+  const secondDropTarget = getGridCell(secondRefs, 0, 0, 2);
+  const firstHover = getGridCell(firstRefs, 0, 1, 2);
+  const secondHover = getGridCell(secondRefs, 1, 0, 2);
+
+  assert.equal(first.getRefs(), firstRefs);
+  assert.equal(second.getRefs(), secondRefs);
+  assert.equal(firstDropTarget.classList.contains('dropTarget'), true);
+  assert.equal(secondDropTarget.classList.contains('dropTarget'), true);
+  assert.equal(getGridCell(firstRefs, 0, 0, 2).classList.contains('dropTarget'), false);
+  assert.equal(getGridCell(secondRefs, 1, 1, 2).classList.contains('dropTarget'), false);
+  assert.equal(firstHover.classList.contains('pathTipDragHover'), true);
+  assert.equal(secondHover.classList.contains('pathTipDragHover'), true);
+  assert.equal(firstRefs.boardWrap.querySelector('.wallDragGhost') !== null, true);
+  assert.equal(secondRefs.boardWrap.querySelector('.wallDragGhost'), null);
+});
+
+test('createBoardRendererCore does not share transition compensation state across instances', (t) => {
+  installRendererEnv(t);
+  const gridData = [['.', '.', '.', '.']];
+  const previousSnapshot = createSnapshot({
+    gridData,
+    path: [
+      { r: 0, c: 0 },
+      { r: 0, c: 1 },
+      { r: 0, c: 2 },
+    ],
+  });
+  const nextSnapshot = createSnapshot({
+    gridData,
+    path: [
+      { r: 0, c: 1 },
+      { r: 0, c: 2 },
+      { r: 0, c: 3 },
+    ],
+  });
+  const first = createBoardRendererCore();
+  const second = createBoardRendererCore();
+  const firstRefs = createShellRefs();
+  const secondRefs = createShellRefs();
+
+  first.mount(firstRefs);
+  second.mount(secondRefs);
+  first.rebuildGrid(previousSnapshot);
+  second.rebuildGrid(previousSnapshot);
+
+  first.recordPathTransition(previousSnapshot, nextSnapshot);
+  first.renderFrame({
+    snapshot: nextSnapshot,
+    evaluation: {},
+    completion: null,
+    uiModel: {},
+    interactionModel: {},
+  });
+  second.renderFrame({
+    snapshot: nextSnapshot,
+    evaluation: {},
+    completion: null,
+    uiModel: {},
+    interactionModel: {},
+  });
+
+  assert.equal(firstRefs.pathRenderer.calls.length > 0, true);
+  assert.equal(secondRefs.pathRenderer.calls.length > 0, true);
+  assert.notEqual(firstRefs.pathRenderer.calls.at(-1).flowOffset, 0);
+  assert.equal(secondRefs.pathRenderer.calls.at(-1).flowOffset, 0);
+});
+
+test('createBoardRendererCore destroy clears animation and remount starts clean', (t) => {
+  const env = installRendererEnv(t);
+  const gridData = [['.', '.']];
+  const snapshot = createSnapshot({
+    gridData,
+    path: [
+      { r: 0, c: 0 },
+      { r: 0, c: 1 },
+    ],
+  });
+  const core = createBoardRendererCore();
+  const firstRefs = createShellRefs();
+
+  core.mount(firstRefs);
+  core.rebuildGrid(snapshot);
+  core.renderFrame({
+    snapshot,
+    evaluation: {},
+    completion: null,
+    uiModel: {},
+    interactionModel: {},
+  });
+  core.updateInteraction({
+    dropTarget: { r: 0, c: 1 },
+    wallGhost: { visible: true, x: 30, y: 42 },
+    isPathDragging: true,
+    pathDragCursor: { r: 0, c: 0 },
+  });
+
+  assert.equal(env.rafCallbacks.size > 0, true);
+  assert.equal(firstRefs.boardWrap.querySelector('.wallDragGhost') !== null, true);
+
+  core.destroy();
+
+  assert.equal(env.rafCallbacks.size, 0);
+  assert.equal(core.getRefs(), null);
+  assert.equal(firstRefs.pathRenderer.destroyed, true);
+  assert.equal(firstRefs.boardWrap.querySelector('.wallDragGhost'), null);
+  assert.equal(getGridCell(firstRefs, 0, 1, 2).classList.contains('dropTarget'), false);
+  assert.equal(getGridCell(firstRefs, 0, 0, 2).classList.contains('pathTipDragHover'), false);
+
+  const secondRefs = createShellRefs();
+  core.mount(secondRefs);
+  core.rebuildGrid(snapshot);
+  core.updateInteraction({});
+
+  assert.equal(core.getRefs(), secondRefs);
+  assert.equal(getGridCell(secondRefs, 0, 0, 2).classList.contains('pathTipDragHover'), false);
+  assert.equal(getGridCell(secondRefs, 0, 1, 2).classList.contains('dropTarget'), false);
+});

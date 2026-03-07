@@ -138,6 +138,86 @@ test('score state falls back to defaults when payload is malformed', () => {
   });
 });
 
+test('campaign progress accepts legacy payloads without version', () => {
+  const storage = createFakeStorage();
+  const fakeWindow = {
+    localStorage: storage,
+    matchMedia: () => ({ matches: false }),
+    crypto: {
+      getRandomValues(bytes) {
+        for (let i = 0; i < bytes.length; i++) bytes[i] = i + 1;
+      },
+    },
+  };
+
+  storage.setItem(STORAGE_KEYS.LEVEL_PROGRESS_KEY, JSON.stringify({
+    latestLevel: 7,
+  }));
+
+  const persistence = createLocalStoragePersistence({
+    windowObj: fakeWindow,
+    campaignLevelCount: 10,
+    maxInfiniteIndex: 20,
+  });
+
+  const boot = persistence.readBootState();
+  assert.equal(boot.campaignProgress, 7);
+});
+
+test('campaign progress resets to default on version mismatch', () => {
+  const storage = createFakeStorage();
+  const fakeWindow = {
+    localStorage: storage,
+    matchMedia: () => ({ matches: false }),
+    crypto: {
+      getRandomValues(bytes) {
+        for (let i = 0; i < bytes.length; i++) bytes[i] = i + 1;
+      },
+    },
+  };
+
+  storage.setItem(STORAGE_KEYS.LEVEL_PROGRESS_KEY, JSON.stringify({
+    version: 999,
+    latestLevel: 7,
+  }));
+
+  const persistence = createLocalStoragePersistence({
+    windowObj: fakeWindow,
+    campaignLevelCount: 10,
+    maxInfiniteIndex: 20,
+  });
+
+  const boot = persistence.readBootState();
+  assert.equal(boot.campaignProgress, 0);
+});
+
+test('infinite progress resets to default on version mismatch', () => {
+  const storage = createFakeStorage();
+  const fakeWindow = {
+    localStorage: storage,
+    matchMedia: () => ({ matches: false }),
+    crypto: {
+      getRandomValues(bytes) {
+        for (let i = 0; i < bytes.length; i++) bytes[i] = i + 1;
+      },
+    },
+  };
+
+  storage.setItem(STORAGE_KEYS.INFINITE_PROGRESS_KEY, JSON.stringify({
+    version: 999,
+    latestLevel: 5,
+  }));
+
+  const persistence = createLocalStoragePersistence({
+    windowObj: fakeWindow,
+    campaignLevelCount: 10,
+    maxInfiniteIndex: 20,
+  });
+
+  const boot = persistence.readBootState();
+  assert.equal(boot.infiniteProgress, 0);
+});
+
 test('daily session save is rejected when saved dailyId does not match active daily', () => {
   const storage = createFakeStorage();
   const fakeWindow = {

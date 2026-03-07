@@ -245,46 +245,39 @@ export function createLocalStoragePersistence(options = {}) {
     return Math.min(Math.max(value, 0), maxIndex);
   };
 
+  const readVersionedLevelProgress = (key, version, clampValue) => {
+    try {
+      const raw = readStorage(key);
+      if (!raw) return 0;
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== 'object') return 0;
+      if (Object.prototype.hasOwnProperty.call(parsed, 'version') && parsed.version !== version) {
+        return 0;
+      }
+      return clampValue(parsed.latestLevel);
+    } catch {
+      return 0;
+    }
+  };
+
   const readCampaignProgress = () => {
     if (campaignProgressCache !== null) return campaignProgressCache;
-    try {
-      const raw = readStorage(LEVEL_PROGRESS_KEY);
-      if (!raw) {
-        campaignProgressCache = 0;
-        return campaignProgressCache;
-      }
-      const parsed = JSON.parse(raw);
-      if (!parsed || typeof parsed !== 'object') {
-        campaignProgressCache = 0;
-        return campaignProgressCache;
-      }
-      campaignProgressCache = clampCampaignProgress(parsed.latestLevel);
-      return campaignProgressCache;
-    } catch {
-      campaignProgressCache = 0;
-      return campaignProgressCache;
-    }
+    campaignProgressCache = readVersionedLevelProgress(
+      LEVEL_PROGRESS_KEY,
+      LEVEL_PROGRESS_VERSION,
+      clampCampaignProgress,
+    );
+    return campaignProgressCache;
   };
 
   const readInfiniteProgress = () => {
     if (infiniteProgressCache !== null) return infiniteProgressCache;
-    try {
-      const raw = readStorage(INFINITE_PROGRESS_KEY);
-      if (!raw) {
-        infiniteProgressCache = 0;
-        return infiniteProgressCache;
-      }
-      const parsed = JSON.parse(raw);
-      if (!parsed || typeof parsed !== 'object') {
-        infiniteProgressCache = 0;
-        return infiniteProgressCache;
-      }
-      infiniteProgressCache = clampInfiniteProgress(parsed.latestLevel);
-      return infiniteProgressCache;
-    } catch {
-      infiniteProgressCache = 0;
-      return infiniteProgressCache;
-    }
+    infiniteProgressCache = readVersionedLevelProgress(
+      INFINITE_PROGRESS_KEY,
+      INFINITE_PROGRESS_VERSION,
+      clampInfiniteProgress,
+    );
+    return infiniteProgressCache;
   };
 
   const readDailySolvedDate = () => {

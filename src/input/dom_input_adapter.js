@@ -10,6 +10,10 @@ import {
   chooseSlipperyPathDragStep,
 } from './pointer_intent_resolver.js';
 import {
+  canDropWall,
+  isUsableCell,
+} from '../state/snapshot_rules.js';
+import {
   INTENT_TYPES,
   GAME_COMMANDS,
   UI_ACTIONS,
@@ -163,22 +167,6 @@ export function createDomInputAdapter() {
     const direct = cellFromPoint(x, y);
     if (direct) return direct;
     return snapWallCellFromPoint(x, y, snapshot, metrics);
-  };
-
-  const isUsableCell = (snapshot, r, c) => {
-    const ch = snapshot.gridData[r]?.[c];
-    return ch && ch !== CELL_TYPES.WALL && ch !== CELL_TYPES.MOVABLE_WALL;
-  };
-
-  const canDropWall = (snapshot, from, to) => {
-    if (!snapshot || !from || !to) return false;
-    if (from.r === to.r && from.c === to.c) return false;
-    if (from.r < 0 || from.r >= snapshot.rows || from.c < 0 || from.c >= snapshot.cols) return false;
-    if (to.r < 0 || to.r >= snapshot.rows || to.c < 0 || to.c >= snapshot.cols) return false;
-    if (snapshot.gridData[from.r]?.[from.c] !== CELL_TYPES.MOVABLE_WALL) return false;
-    if (snapshot.gridData[to.r]?.[to.c] !== CELL_TYPES.EMPTY) return false;
-    if (snapshot.visited.has(`${to.r},${to.c}`)) return false;
-    return true;
   };
 
   const onPointerDown = (e) => {

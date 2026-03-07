@@ -1,13 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {
-  recordPathTransitionCompensation,
-  consumePathTransitionCompensation,
-  clearPathTransitionCompensationBuffer,
-} from '../../src/renderer.js';
+import { createPathTransitionCompensationBuffer } from '../../src/renderer/path_transition_compensation_buffer.js';
+
+const createBuffer = () => createPathTransitionCompensationBuffer({
+  resolveShift: () => 4,
+});
 
 test('path flow compensation buffer accumulates transitions and consumes once', () => {
-  clearPathTransitionCompensationBuffer();
+  const buffer = createBuffer();
   const snapshotA = {
     path: [
       { r: 0, c: 0 },
@@ -30,21 +30,22 @@ test('path flow compensation buffer accumulates transitions and consumes once', 
     ],
   };
 
-  recordPathTransitionCompensation(snapshotA, snapshotB);
-  recordPathTransitionCompensation(snapshotB, snapshotC);
+  buffer.record(snapshotA, snapshotB);
+  buffer.record(snapshotB, snapshotC);
 
-  const consumed = consumePathTransitionCompensation(snapshotC.path, 128);
+  const consumed = buffer.consume(snapshotC.path, 0, 128);
   assert.equal(consumed.consumed, true);
   assert.equal(consumed.stale, false);
   assert.equal(consumed.transitionCount, 2);
+  assert.equal(consumed.nextOffset, 8);
 
-  const secondConsume = consumePathTransitionCompensation(snapshotC.path, 128);
+  const secondConsume = buffer.consume(snapshotC.path, 0, 128);
   assert.equal(secondConsume.consumed, false);
   assert.equal(secondConsume.transitionCount, 0);
 });
 
 test('path flow compensation buffer clears stale signature mismatches', () => {
-  clearPathTransitionCompensationBuffer();
+  const buffer = createBuffer();
   const previousSnapshot = {
     path: [
       { r: 1, c: 1 },
@@ -64,19 +65,19 @@ test('path flow compensation buffer clears stale signature mismatches', () => {
     { r: 3, c: 4 },
   ];
 
-  recordPathTransitionCompensation(previousSnapshot, nextSnapshot);
-  const stale = consumePathTransitionCompensation(unrelatedPath, 128);
+  buffer.record(previousSnapshot, nextSnapshot);
+  const stale = buffer.consume(unrelatedPath, 0, 128);
   assert.equal(stale.consumed, false);
   assert.equal(stale.stale, true);
   assert.equal(stale.transitionCount, 1);
 
-  const afterStale = consumePathTransitionCompensation(nextSnapshot.path, 128);
+  const afterStale = buffer.consume(nextSnapshot.path, 0, 128);
   assert.equal(afterStale.consumed, false);
   assert.equal(afterStale.transitionCount, 0);
 });
 
 test('path flow compensation buffer can be cleared explicitly', () => {
-  clearPathTransitionCompensationBuffer();
+  const buffer = createBuffer();
   const previousSnapshot = {
     path: [
       { r: 2, c: 0 },
@@ -90,10 +91,10 @@ test('path flow compensation buffer can be cleared explicitly', () => {
     ],
   };
 
-  recordPathTransitionCompensation(previousSnapshot, nextSnapshot);
-  clearPathTransitionCompensationBuffer();
+  buffer.record(previousSnapshot, nextSnapshot);
+  buffer.clear();
 
-  const consumed = consumePathTransitionCompensation(nextSnapshot.path, 128);
+  const consumed = buffer.consume(nextSnapshot.path, 0, 128);
   assert.equal(consumed.consumed, false);
   assert.equal(consumed.transitionCount, 0);
 });

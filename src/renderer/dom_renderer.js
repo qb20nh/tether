@@ -1,21 +1,6 @@
 import {
-  cacheElements,
-  buildGrid,
-  updateCells,
-  syncPathTipDragHoverCell,
-  setLegendIcons,
-  resizeCanvas,
-  notifyInteractiveResize,
-  setPathFlowFreezeImmediate as setPathFlowFreezeImmediateInternal,
-  recordPathTransitionCompensation as recordPathTransitionCompensationInternal,
-  clearPathTransitionCompensationBuffer as clearPathTransitionCompensationBufferInternal,
-  setMessage,
-  clearDropTarget,
-  setDropTarget,
-  showWallDragGhost,
-  moveWallDragGhost,
-  hideWallDragGhost,
-} from '../renderer.js';
+  createBoardRendererCore,
+} from './board_renderer_core.js';
 
 export function createDomRenderer(options = {}) {
   const icons = options.icons || {};
@@ -27,6 +12,7 @@ export function createDomRenderer(options = {}) {
   const COMPLETE_PULSE_VAR = '--complete-done-pulse-ms';
   const COMPLETE_PULSE_STEP_VAR = '--complete-done-pulse-step-ms';
   const LATE_SOLVE_TRIGGER_GRACE_MS = 160;
+  const boardRendererCore = createBoardRendererCore({ icons, iconX });
 
   let refs = null;
   let lastBodyClassState = {
@@ -185,39 +171,18 @@ export function createDomRenderer(options = {}) {
     return allVisited && hintsOk && stitchesOk && rpsOk;
   };
 
-  const applyInteractionState = (interactionModel = {}) => {
-    if (!refs) return;
-    if (interactionModel.dropTarget && Number.isInteger(interactionModel.dropTarget.r) && Number.isInteger(interactionModel.dropTarget.c)) {
-      setDropTarget(interactionModel.dropTarget.r, interactionModel.dropTarget.c);
-    } else {
-      clearDropTarget();
-    }
-
-    const ghost = interactionModel.wallGhost;
-    if (ghost?.visible) {
-      showWallDragGhost(ghost.x || 0, ghost.y || 0);
-      moveWallDragGhost(ghost.x || 0, ghost.y || 0);
-    } else {
-      hideWallDragGhost();
-    }
-
-    syncPathTipDragHoverCell(interactionModel);
-    setDraggingBodyClasses(interactionModel);
-  };
-
   return {
     mount(shellRefs = null) {
-      refs = shellRefs || cacheElements();
-      setLegendIcons(icons, refs, iconX);
+      boardRendererCore.mount(shellRefs);
+      refs = boardRendererCore.getRefs();
     },
 
     getRefs() {
-      return refs;
+      return boardRendererCore.getRefs();
     },
 
     rebuildGrid(snapshot) {
-      if (!refs) return;
-      buildGrid(snapshot, refs, icons, iconX);
+      boardRendererCore.rebuildGrid(snapshot);
     },
 
     renderFrame({
@@ -332,20 +297,14 @@ export function createDomRenderer(options = {}) {
         }
         : null;
 
-      updateCells(
+      boardRendererCore.renderFrame({
         snapshot,
         evaluation,
-        refs,
-        completionModel,
+        completion: completionModel,
+        uiModel,
         interactionModel,
-        uiModel.tutorialFlags || null,
-      );
-
-      if (Object.prototype.hasOwnProperty.call(uiModel, 'messageHtml')) {
-        setMessage(refs.msgEl, uiModel.messageKind || null, uiModel.messageHtml || '');
-      }
-
-      applyInteractionState(interactionModel);
+      });
+      setDraggingBodyClasses(interactionModel);
 
       if (refs.boardWrap) {
         refs.boardWrap.classList.toggle('isComplete', solved);
@@ -358,38 +317,34 @@ export function createDomRenderer(options = {}) {
     },
 
     resize() {
-      if (!refs) return;
-      resizeCanvas(refs);
+      boardRendererCore.resize();
     },
 
     notifyResizeInteraction() {
-      notifyInteractiveResize();
+      boardRendererCore.notifyResizeInteraction();
     },
 
     setPathFlowFreezeImmediate(isFrozen = false) {
-      setPathFlowFreezeImmediateInternal(isFrozen);
+      boardRendererCore.setPathFlowFreezeImmediate(isFrozen);
     },
 
     recordPathTransition(previousSnapshot, nextSnapshot, interactionModel = null) {
-      if (!refs) return;
       void interactionModel;
-      recordPathTransitionCompensationInternal(previousSnapshot, nextSnapshot, refs);
+      boardRendererCore.recordPathTransition(previousSnapshot, nextSnapshot);
     },
 
     clearPathTransitionCompensation() {
-      clearPathTransitionCompensationBufferInternal();
+      boardRendererCore.clearPathTransitionCompensation();
     },
 
     updateInteraction(interactionModel = {}) {
-      if (!refs) return;
-      applyInteractionState(interactionModel);
+      boardRendererCore.updateInteraction(interactionModel);
+      setDraggingBodyClasses(interactionModel);
     },
 
     unmount() {
-      clearDropTarget();
-      hideWallDragGhost();
       setDraggingBodyClasses({ isWallDragging: false, isPathDragging: false });
-      refs?.pathRenderer?.destroy?.();
+      boardRendererCore.destroy();
       if (refs?.boardWrap) {
         refs.boardWrap.classList.remove('isComplete', 'isCompleting', 'isCompletePulse', 'tutorialBracketNormalBlend');
       }
@@ -403,6 +358,7 @@ export function createDomRenderer(options = {}) {
         startTimeMs: 0,
         durationMs: 0,
       };
+      refs = null;
     },
   };
 }

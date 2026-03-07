@@ -2,7 +2,12 @@ import { INTENT_TYPES, UI_ACTIONS, INTERACTION_UPDATES, GAME_COMMANDS } from './
 import { applyTheme as applyThemeCore, refreshThemeButton as refreshThemeButtonCore, requestLightThemeConfirmation as requestLightThemeConfirmationCore, setThemeSwitchPrompt as setThemeSwitchPromptCore, refreshSettingsToggle as refreshSettingsToggleCore, normalizeTheme } from './theme_manager.js';
 import { formatDailyDateLabel, formatDailyMonthDayLabel, formatCountdownHms, utcStartMsFromDateId } from './daily_timer.js';
 import { createProgressManager } from './progress_manager.js';
-import { SCORE_MODES, buildCanonicalSolutionSignature, createScoreManager } from './score_manager.js';
+import { SCORE_MODES, createScoreManager } from './score_manager.js';
+import {
+  buildSessionBoardFromSnapshot,
+  markClearedLevel,
+  registerSolvedSnapshot,
+} from './solve_progress_helpers.js';
 
 const PATH_BRACKET_TUTORIAL_LEVEL_INDEX = 0;
 const MOVABLE_BRACKET_TUTORIAL_LEVEL_INDEX = 7;
@@ -56,6 +61,7 @@ export function createRuntime(options) {
     i18n,
     ui,
     dailyHardInvalidateAtUtcMs = null,
+    effects = {},
   } = options;
 
   if (!appEl) throw new Error('createRuntime requires appEl');
@@ -109,6 +115,14 @@ export function createRuntime(options) {
   let currentBoardSolved = false;
   let hasLoadedLevel = false;
   let sessionSaveQueued = false;
+  let started = false;
+  let destroyed = false;
+  let layoutRafId = 0;
+  let sessionSaveTimerId = 0;
+  let boardResizeObserver = null;
+  let windowResizeHandler = null;
+  let beforeUnloadPersistHandler = null;
+  let beforeUnloadObserverCleanupHandler = null;
 
   const interactionState = {
     isPathDragging: false,
@@ -376,22 +390,6 @@ export function createRuntime(options) {
     return { tutorialIndices, practiceIndices };
   };
 
-  const resolveScoreContext = (levelIndex) => {
-    if (isDailyLevelIndex(levelIndex)) {
-      if (!activeDailyId) return null;
-      return {
-        mode: SCORE_MODES.DAILY,
-        levelKey: activeDailyId,
-      };
-    }
-
-    if (!core.isInfiniteAbsIndex(levelIndex)) return null;
-    return {
-      mode: SCORE_MODES.INFINITE,
-      levelKey: String(core.clampInfiniteIndex(core.toInfiniteIndex(levelIndex))),
-    };
-  };
-
   const renderScoreMeta = () => {
     const refs = renderer.getRefs();
     if (!refs?.scoreMeta || !refs?.infiniteScoreValue || !refs?.dailyScoreValue) return;
@@ -441,16 +439,10 @@ export function createRuntime(options) {
   };
 
   const registerSolvedScore = (snapshot) => {
-    const context = resolveScoreContext(snapshot.levelIndex);
-    if (!context) return null;
-
-    const signature = buildCanonicalSolutionSignature(snapshot);
-    if (!signature) return null;
-
-    const result = scoreManager.registerSolved({
-      mode: context.mode,
-      levelKey: context.levelKey,
-      signature,
+    const result = registerSolvedSnapshot({
+      snapshot,
+      core,
+      scoreManager,
     });
     renderScoreMeta();
     return result;
@@ -509,37 +501,17 @@ export function createRuntime(options) {
     dailyId: typeof stateValue.dailyId === 'string' ? stateValue.dailyId : null,
   });
 
-  const serializeMutableBoardState = (snapshot) => {
-    if (!snapshot || !Number.isInteger(snapshot.levelIndex)) return null;
+  const syncMutableBoardStateFromSnapshot = (snapshot) => {
+    if (!snapshot || !Number.isInteger(snapshot.levelIndex)) return false;
 
     const level = core.getLevel(snapshot.levelIndex);
-    if (!level || !Array.isArray(level.grid)) return null;
+    if (!level || !Array.isArray(level.grid)) return false;
 
-    const path = snapshot.path.map((point) => [point.r, point.c]);
-
-    const collectMovableWalls = (gridRows) => {
-      const walls = [];
-      for (let r = 0; r < gridRows.length; r++) {
-        const row = gridRows[r];
-        for (let c = 0; c < row.length; c++) {
-          if (row[c] === 'm') walls.push([r, c]);
-        }
-      }
-      return walls;
-    };
-
-    const currentMovableWalls = collectMovableWalls(snapshot.gridData);
-
-    return {
-      levelIndex: snapshot.levelIndex,
-      path,
-      movableWalls: currentMovableWalls,
-      dailyId: isDailyLevelIndex(snapshot.levelIndex) ? activeDailyId : null,
-    };
-  };
-
-  const syncMutableBoardStateFromSnapshot = (snapshot) => {
-    const serialized = serializeMutableBoardState(snapshot);
+    const serialized = buildSessionBoardFromSnapshot({
+      snapshot,
+      activeDailyId,
+      isDailyLevelIndex,
+    });
     if (!serialized) return false;
     mutableBoardState = serialized;
     return true;
@@ -566,10 +538,14 @@ export function createRuntime(options) {
   };
 
   const queueSessionSave = () => {
-    if (sessionSaveQueued) return;
+    if (destroyed || sessionSaveQueued) return;
     sessionSaveQueued = true;
-
-    window.setTimeout(() => {
+    sessionSaveTimerId = globalThis.setTimeout(() => {
+      sessionSaveTimerId = 0;
+      if (destroyed) {
+        sessionSaveQueued = false;
+        return;
+      }
       sessionSaveQueued = false;
       persistSessionSave();
     }, 150);
@@ -619,15 +595,24 @@ export function createRuntime(options) {
   };
 
   const onLevelCleared = (levelIndex) => {
-    if (isDailyLevelIndex(levelIndex)) {
-      if (activeDailyId) {
-        dailySolvedDate = activeDailyId;
-        persistence.writeDailySolvedDate(activeDailyId);
-      }
-    } else if (core.isInfiniteAbsIndex(levelIndex)) {
-      markInfiniteLevelCleared(core.toInfiniteIndex(levelIndex));
-    } else {
-      markCampaignLevelCleared(levelIndex);
+    const { nextDailySolvedDate, changedDailySolvedDate } = markClearedLevel({
+      levelIndex,
+      core,
+      activeDailyId,
+      dailySolvedDate,
+      onCampaignCleared: (campaignLevelIndex) => {
+        markCampaignLevelCleared(campaignLevelIndex);
+      },
+      onInfiniteCleared: (infiniteLevelIndex) => {
+        markInfiniteLevelCleared(infiniteLevelIndex);
+      },
+      onDailyCleared: (dailyId) => {
+        persistence.writeDailySolvedDate(dailyId);
+      },
+    });
+    dailySolvedDate = nextDailySolvedDate;
+    if (changedDailySolvedDate) {
+      effects.onDailySolvedDateChanged?.(nextDailySolvedDate);
     }
     currentBoardSolved = true;
     mutableBoardState = null;
@@ -971,6 +956,7 @@ export function createRuntime(options) {
   };
 
   const runBoardLayout = (validate = false, options = {}) => {
+    if (destroyed) return;
     const snapshot = state.getSnapshot();
     renderer.resize();
     refresh(snapshot, validate, options);
@@ -978,6 +964,7 @@ export function createRuntime(options) {
   };
 
   const queueBoardLayout = (validate = false, optionsForInteraction = {}) => {
+    if (destroyed) return;
     queuedLayoutOptions = {
       ...queuedLayoutOptions,
       ...optionsForInteraction,
@@ -999,8 +986,15 @@ export function createRuntime(options) {
     pendingValidate = pendingValidate || Boolean(validate);
     if (layoutQueued) return;
     layoutQueued = true;
-
-    requestAnimationFrame(() => {
+    layoutRafId = requestAnimationFrame(() => {
+      layoutRafId = 0;
+      if (destroyed) {
+        layoutQueued = false;
+        pendingValidate = false;
+        pendingValidateSource = null;
+        queuedLayoutOptions = {};
+        return;
+      }
       layoutQueued = false;
       const shouldValidate = pendingValidate;
       const validationSource = pendingValidateSource;
@@ -1487,6 +1481,9 @@ export function createRuntime(options) {
   };
 
   const start = () => {
+    if (started) return;
+    started = true;
+    destroyed = false;
     applyTheme(activeTheme);
     document.documentElement.lang = activeLocale;
     applyTextDirection(activeLocale);
@@ -1517,25 +1514,34 @@ export function createRuntime(options) {
     });
 
     if (typeof ResizeObserver !== 'undefined' && refs.boardWrap) {
-      const boardResizeObserver = new ResizeObserver(() => {
+      boardResizeObserver = new ResizeObserver(() => {
         renderer.notifyResizeInteraction?.();
         queueBoardLayout(false);
       });
       boardResizeObserver.observe(refs.boardWrap);
-
-      window.addEventListener('beforeunload', () => {
-        boardResizeObserver.disconnect();
-      }, { once: true });
     }
 
-    window.addEventListener('beforeunload', () => {
-      persistSessionSave();
-    });
-
-    window.addEventListener('resize', () => {
-      renderer.notifyResizeInteraction?.();
-      queueBoardLayout(false);
-    });
+    if (!beforeUnloadObserverCleanupHandler) {
+      beforeUnloadObserverCleanupHandler = () => {
+        boardResizeObserver?.disconnect();
+      };
+    }
+    if (!beforeUnloadPersistHandler) {
+      beforeUnloadPersistHandler = () => {
+        persistSessionSave();
+      };
+    }
+    if (!windowResizeHandler) {
+      windowResizeHandler = () => {
+        renderer.notifyResizeInteraction?.();
+        queueBoardLayout(false);
+      };
+    }
+    if (typeof window !== 'undefined') {
+      window.addEventListener('beforeunload', beforeUnloadObserverCleanupHandler, { once: true });
+      window.addEventListener('beforeunload', beforeUnloadPersistHandler);
+      window.addEventListener('resize', windowResizeHandler);
+    }
 
     refreshStaticUiText({ locale: i18n.getLocale() });
     startDailyCountdown();
@@ -1554,6 +1560,37 @@ export function createRuntime(options) {
   };
 
   const destroy = () => {
+    destroyed = true;
+    started = false;
+    if (layoutRafId) {
+      cancelAnimationFrame(layoutRafId);
+      layoutRafId = 0;
+    }
+    if (sessionSaveTimerId) {
+      clearTimeout(sessionSaveTimerId);
+      sessionSaveTimerId = 0;
+    }
+    sessionSaveQueued = false;
+    layoutQueued = false;
+    pendingValidate = false;
+    pendingValidateSource = null;
+    queuedLayoutOptions = {};
+    boardResizeObserver?.disconnect();
+    boardResizeObserver = null;
+    if (typeof window !== 'undefined') {
+      if (beforeUnloadObserverCleanupHandler) {
+        window.removeEventListener('beforeunload', beforeUnloadObserverCleanupHandler);
+      }
+      if (beforeUnloadPersistHandler) {
+        window.removeEventListener('beforeunload', beforeUnloadPersistHandler);
+      }
+      if (windowResizeHandler) {
+        window.removeEventListener('resize', windowResizeHandler);
+      }
+    }
+    beforeUnloadObserverCleanupHandler = null;
+    beforeUnloadPersistHandler = null;
+    windowResizeHandler = null;
     clearDailyCountdownTimer();
     input.unbind();
     renderer.unmount();
@@ -1574,6 +1611,7 @@ export function createHeadlessRuntime(options) {
     core,
     state,
     persistence,
+    effects = {},
   } = options;
 
   if (!core || !state || !persistence) {
@@ -1585,61 +1623,38 @@ export function createHeadlessRuntime(options) {
   let infiniteProgress = Number.isInteger(bootState.infiniteProgress) ? bootState.infiniteProgress : 0;
   let dailySolvedDate = typeof bootState.dailySolvedDate === 'string' ? bootState.dailySolvedDate : null;
   const scoreManager = createScoreManager(bootState.scoreState, persistence);
-
-  const resolveScoreContext = (levelIndex) => {
-    if (typeof core.isDailyAbsIndex === 'function' && core.isDailyAbsIndex(levelIndex)) {
-      const dailyId = typeof core.getDailyId === 'function' ? core.getDailyId() : null;
-      if (!dailyId) return null;
-      return {
-        mode: SCORE_MODES.DAILY,
-        levelKey: dailyId,
-      };
-    }
-    if (!core.isInfiniteAbsIndex(levelIndex)) return null;
-    return {
-      mode: SCORE_MODES.INFINITE,
-      levelKey: String(core.clampInfiniteIndex(core.toInfiniteIndex(levelIndex))),
-    };
-  };
-
-  const markCleared = (levelIndex) => {
-    if (typeof core.isDailyAbsIndex === 'function' && core.isDailyAbsIndex(levelIndex)) {
-      const dailyId = typeof core.getDailyId === 'function' ? core.getDailyId() : null;
-      if (dailyId) {
-        dailySolvedDate = dailyId;
-        persistence.writeDailySolvedDate(dailyId);
-      }
-      return;
-    }
-
-    if (core.isInfiniteAbsIndex(levelIndex)) {
-      const next = Math.max(infiniteProgress, core.toInfiniteIndex(levelIndex) + 1);
-      infiniteProgress = Math.min(core.getInfiniteMaxIndex(), next);
-      persistence.writeInfiniteProgress(infiniteProgress);
-      return;
-    }
-    const next = Math.max(campaignProgress, levelIndex + 1);
-    campaignProgress = Math.min(core.getCampaignLevelCount(), next);
-    persistence.writeCampaignProgress(campaignProgress);
-  };
+  void effects;
 
   const evaluate = (validate = false) => {
     const snapshot = state.getSnapshot();
     const result = core.evaluate(snapshot, {});
     const completion = validate ? core.checkCompletion(snapshot, result, (k) => k) : null;
     if (completion?.kind === 'good') {
-      const scoreContext = resolveScoreContext(snapshot.levelIndex);
-      if (scoreContext) {
-        const signature = buildCanonicalSolutionSignature(snapshot);
-        if (signature) {
-          scoreManager.registerSolved({
-            mode: scoreContext.mode,
-            levelKey: scoreContext.levelKey,
-            signature,
-          });
-        }
-      }
-      markCleared(snapshot.levelIndex);
+      registerSolvedSnapshot({
+        snapshot,
+        core,
+        scoreManager,
+      });
+      const { nextDailySolvedDate } = markClearedLevel({
+        levelIndex: snapshot.levelIndex,
+        core,
+        activeDailyId: typeof core.getDailyId === 'function' ? core.getDailyId() : null,
+        dailySolvedDate,
+        onCampaignCleared: (campaignLevelIndex) => {
+          const next = Math.max(campaignProgress, campaignLevelIndex + 1);
+          campaignProgress = Math.min(core.getCampaignLevelCount(), next);
+          persistence.writeCampaignProgress(campaignProgress);
+        },
+        onInfiniteCleared: (infiniteLevelIndex) => {
+          const next = Math.max(infiniteProgress, infiniteLevelIndex + 1);
+          infiniteProgress = Math.min(core.getInfiniteMaxIndex(), next);
+          persistence.writeInfiniteProgress(infiniteProgress);
+        },
+        onDailyCleared: (dailyId) => {
+          persistence.writeDailySolvedDate(dailyId);
+        },
+      });
+      dailySolvedDate = nextDailySolvedDate;
       persistence.clearSessionBoard();
     }
     return { snapshot, result, completion };
@@ -1658,13 +1673,13 @@ export function createHeadlessRuntime(options) {
       const transition = state.dispatch({ type: commandType, payload });
       const out = evaluate(Boolean(transition.validate));
       if (out.snapshot.path.length > 0) {
-        const board = {
-          levelIndex: out.snapshot.levelIndex,
-          path: out.snapshot.path.map((p) => [p.r, p.c]),
-          movableWalls: out.snapshot.gridData
-            .flatMap((row, r) => row.map((cell, c) => (cell === 'm' ? [r, c] : null)))
-            .filter(Boolean),
-        };
+        const board = buildSessionBoardFromSnapshot({
+          snapshot: out.snapshot,
+          activeDailyId: typeof core.getDailyId === 'function' ? core.getDailyId() : null,
+          isDailyLevelIndex: (levelIndex) => (
+            typeof core.isDailyAbsIndex === 'function' && core.isDailyAbsIndex(levelIndex)
+          ),
+        });
         persistence.writeSessionBoard(board);
       }
       return { ...transition, ...out };

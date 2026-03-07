@@ -602,27 +602,6 @@ const registerServiceWorker = async () =>
 const bindServiceWorkerRuntimeEvents = () =>
   updateFlow.bindServiceWorkerRuntimeEvents();
 
-const wrapPersistenceForDailySideEffects = (persistence) => {
-  if (!persistence || typeof persistence.writeDailySolvedDate !== 'function') return;
-
-  const originalWriteDailySolvedDate = persistence.writeDailySolvedDate.bind(persistence);
-  persistence.writeDailySolvedDate = (dailyId) => {
-    const previous = latestDailyState.dailySolvedDate;
-    originalWriteDailySolvedDate(dailyId);
-    if (typeof dailyId === 'string' && dailyId.length > 0) {
-      latestDailyState.dailySolvedDate = dailyId;
-    }
-
-    const changed = previous !== latestDailyState.dailySolvedDate;
-    if (changed) {
-      void syncDailyStateToServiceWorker();
-      if (readAutoPromptDecision() === NOTIFICATION_AUTO_PROMPT_DECISIONS.UNSET) {
-        void maybeAutoPromptForNotifications();
-      }
-    }
-  };
-};
-
 const bindConfigSync = () => {
   window.addEventListener('storage', (event) => {
     notificationCenter.handleStorageEvent(event.key);
@@ -683,7 +662,6 @@ export async function initTetherApp() {
   latestDailyState.dailySolvedDate = typeof bootState.dailySolvedDate === 'string'
     ? bootState.dailySolvedDate
     : null;
-  wrapPersistenceForDailySideEffects(adapters.persistence);
 
   const setLocaleWithEffects = (locale) => {
     const resolved = setLocaleCore(locale);
@@ -717,6 +695,15 @@ export async function initTetherApp() {
       iconX: ICON_X,
     },
     dailyHardInvalidateAtUtcMs: bootDaily.hardInvalidateAtUtcMs,
+    effects: {
+      onDailySolvedDateChanged: (dailyId) => {
+        latestDailyState.dailySolvedDate = dailyId;
+        void syncDailyStateToServiceWorker();
+        if (readAutoPromptDecision() === NOTIFICATION_AUTO_PROMPT_DECISIONS.UNSET) {
+          void maybeAutoPromptForNotifications();
+        }
+      },
+    },
   });
 
   runtimeInstance.start();

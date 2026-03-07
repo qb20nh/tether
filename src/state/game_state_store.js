@@ -1,5 +1,6 @@
 import { CELL_TYPES, HINT_CODES } from '../config.js';
 import { inBounds, isAdjacentMove, keyOf, parseLevel } from '../utils.js';
+import { canDropWall as canDropWallOnSnapshot } from './snapshot_rules.js';
 
 export function createGameStateStore(levelSource) {
   const getLevelByIndex = typeof levelSource === 'function'
@@ -306,13 +307,12 @@ export function createGameStateStore(levelSource) {
   };
 
   const canDropWall = (from, to) => {
-    if (!from || !to) return false;
-    if (!inBounds(rows, cols, from.r, from.c) || !inBounds(rows, cols, to.r, to.c)) return false;
-    if (gridData[from.r][from.c] !== CELL_TYPES.MOVABLE_WALL) return false;
-    if (from.r === to.r && from.c === to.c) return false;
-    if (gridData[to.r][to.c] !== CELL_TYPES.EMPTY) return false;
-    if (visited.has(keyOf(to.r, to.c))) return false;
-    return true;
+    return canDropWallOnSnapshot({
+      rows,
+      cols,
+      gridData,
+      visited,
+    }, from, to);
   };
 
   const moveWall = (from, to) => {
