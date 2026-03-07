@@ -65,6 +65,18 @@ test('shouldResyncManualUpdatePolicy returns false when manual mode already matc
   }), false);
 });
 
+test('shouldResyncManualUpdatePolicy returns false when cache usability is not provided', () => {
+  assert.equal(shouldResyncManualUpdatePolicy({
+    localAutoUpdateEnabled: false,
+    localBuildNumber: 100,
+    swPolicy: {
+      autoUpdateEnabled: false,
+      pinnedBuildNumber: 100,
+      servingBuildNumber: 100,
+    },
+  }), false);
+});
+
 test('shouldResyncManualUpdatePolicy returns true when service worker policy drifts', () => {
   assert.equal(shouldResyncManualUpdatePolicy({
     localAutoUpdateEnabled: false,
@@ -103,5 +115,5 @@ test('shouldResyncManualUpdatePolicy returns true when service worker policy dri
       servingBuildNumber: 100,
       pinnedCacheUsable: false,
     },
-  }), false);
+  }), true);
 });

@@ -717,6 +717,19 @@ const resolveServingBuildPlan = async () => {
   }
 
   const pinnedUsable = await isPinnedBuildCacheUsable(servingBuildNumber);
+  if (!pinnedUsable) {
+    await writeUpdatePolicyState({
+      ...policy,
+      pinnedBuildNumber: BUILD_NUMBER,
+    });
+    return {
+      servingBuildNumber: BUILD_NUMBER,
+      appCacheName: APP_CACHE,
+      pinned: false,
+      pinnedCacheUsable: true,
+    };
+  }
+
   return {
     servingBuildNumber,
     appCacheName: appCacheNameForBuild(servingBuildNumber),

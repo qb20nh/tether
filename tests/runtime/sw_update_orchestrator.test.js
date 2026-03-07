@@ -259,6 +259,35 @@ test('ensureServiceWorkerUpdatePolicyConsistency resyncs only when policy drift 
   assert.equal(policyPosts.length, 1);
 });
 
+test('ensureServiceWorkerUpdatePolicyConsistency resyncs when pinned cache is unavailable', async () => {
+  const target = { postMessage() { } };
+  const messengerHarness = createMessengerStub({
+    registration: {},
+    policyTargets: [target],
+    postReply: async () => ({
+      ok: true,
+      autoUpdateEnabled: false,
+      pinnedBuildNumber: 100,
+      servingBuildNumber: 100,
+      swBuildNumber: 100,
+      pinnedCacheUsable: false,
+    }),
+  });
+
+  const orchestrator = createOrchestrator({
+    messenger: messengerHarness.messenger,
+    readAutoUpdateEnabledPreference: () => false,
+    shouldResyncManualUpdatePolicy: ({ swPolicy }) => swPolicy?.pinnedCacheUsable === false,
+  });
+
+  await orchestrator.ensureServiceWorkerUpdatePolicyConsistency();
+
+  const policyPosts = messengerHarness.postedMessages.filter(
+    ({ message }) => message.type === SW_MESSAGE_TYPES.SYNC_UPDATE_POLICY,
+  );
+  assert.equal(policyPosts.length, 1);
+});
+
 test('registerServiceWorker runs sync flow and requests history', async () => {
   const registration = {
     waiting: null,
