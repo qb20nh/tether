@@ -320,6 +320,10 @@ export function createDomRenderer(options = {}) {
       boardRendererCore.resize();
     },
 
+    getLayoutMetrics() {
+      return boardRendererCore.getLayoutMetrics();
+    },
+
     notifyResizeInteraction() {
       boardRendererCore.notifyResizeInteraction();
     },

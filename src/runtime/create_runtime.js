@@ -141,6 +141,7 @@ export function createRuntime(options) {
   let layoutQueued = false;
   let queuedLayoutOptions = {};
   let pendingValidate = false;
+  let pendingResize = false;
   let pendingValidateSource = null;
   let settingsMenuOpen = false;
   let dailyCountdownTimer = 0;
@@ -860,12 +861,7 @@ export function createRuntime(options) {
     const suppressEndpointKey = typeof evaluateOptions.suppressEndpointKey === 'string'
       ? evaluateOptions.suppressEndpointKey
       : '';
-    let pathKey = '';
-    for (let i = 0; i < snapshot.path.length; i++) {
-      const point = snapshot.path[i];
-      pathKey += `${point.r},${point.c};`;
-    }
-    return `${evaluateCacheBoardVersion}|${suppressEndpointRequirement}|${suppressEndpointKey}|${pathKey}`;
+    return `${evaluateCacheBoardVersion}|${suppressEndpointRequirement}|${suppressEndpointKey}|${snapshot.pathKey || ''}`;
   };
 
   const evaluateSnapshot = (snapshot, evaluateOptions = {}, useCache = false) => {
@@ -958,7 +954,7 @@ export function createRuntime(options) {
   const runBoardLayout = (validate = false, options = {}) => {
     if (destroyed) return;
     const snapshot = state.getSnapshot();
-    renderer.resize();
+    if (options.needsResize) renderer.resize();
     refresh(snapshot, validate, options);
     interactionState.pathTipArrivalHint = null;
   };
@@ -984,6 +980,7 @@ export function createRuntime(options) {
       pendingValidateSource = optionsForInteraction.validationSource || null;
     }
     pendingValidate = pendingValidate || Boolean(validate);
+    pendingResize = pendingResize || Boolean(optionsForInteraction.needsResize);
     if (layoutQueued) return;
     layoutQueued = true;
     layoutRafId = requestAnimationFrame(() => {
@@ -991,17 +988,20 @@ export function createRuntime(options) {
       if (destroyed) {
         layoutQueued = false;
         pendingValidate = false;
+        pendingResize = false;
         pendingValidateSource = null;
         queuedLayoutOptions = {};
         return;
       }
       layoutQueued = false;
       const shouldValidate = pendingValidate;
+      const needsResize = pendingResize;
       const validationSource = pendingValidateSource;
       pendingValidate = false;
+      pendingResize = false;
       pendingValidateSource = null;
       queuedLayoutOptions = {};
-      runBoardLayout(shouldValidate, { validationSource });
+      runBoardLayout(shouldValidate, { validationSource, needsResize });
     });
   };
 
@@ -1059,7 +1059,7 @@ export function createRuntime(options) {
     refreshLevelOptions();
     renderScoreMeta();
     renderDailyMeta();
-    queueBoardLayout(false);
+    queueBoardLayout(false, { needsResize: true });
     queueSessionSave();
     hasLoadedLevel = true;
   };
@@ -1117,7 +1117,7 @@ export function createRuntime(options) {
   const applyThemeState = (nextTheme) => {
     applyTheme(nextTheme);
     refreshThemeButton();
-    queueBoardLayout(false);
+    queueBoardLayout(false, { needsResize: true });
   };
 
   const handleSecondaryLevelSelect = (selectedValue) => {
@@ -1200,7 +1200,12 @@ export function createRuntime(options) {
       setSettingsMenuOpen(false);
       const nextLocale = i18n.setLocale(payload.value);
       refreshStaticUiText({ locale: nextLocale });
-      refresh(state.getSnapshot(), true);
+      queueBoardLayout(true, {
+        isPathDragging: interactionState.isPathDragging,
+        pathDragSide: interactionState.pathDragSide,
+        pathDragCursor: interactionState.pathDragCursor,
+        needsResize: true,
+      });
       return;
     }
 
@@ -1238,11 +1243,11 @@ export function createRuntime(options) {
       if (payload.panel === 'guide') {
         const hidden = !refs.guidePanel.classList.contains('is-hidden');
         applyPanelVisibility(refs.guidePanel, refs.guideToggleBtn, 'guide', hidden);
-        queueBoardLayout(false);
+        queueBoardLayout(false, { needsResize: true });
       } else if (payload.panel === 'legend') {
         const hidden = !refs.legendPanel.classList.contains('is-hidden');
         applyPanelVisibility(refs.legendPanel, refs.legendToggleBtn, 'legend', hidden);
-        queueBoardLayout(false);
+        queueBoardLayout(false, { needsResize: true });
       }
       return;
     }
@@ -1456,6 +1461,7 @@ export function createRuntime(options) {
       pathDragSide: interactionState.pathDragSide,
       pathDragCursor: interactionState.pathDragCursor,
       validationSource: transition.validate ? commandType : null,
+      needsResize: transition.rebuildGrid,
     });
 
     const shouldPersistInputState = Boolean(transition.validate) && !interactionState.isPathDragging;
@@ -1510,13 +1516,14 @@ export function createRuntime(options) {
     input.bind({
       refs,
       readSnapshot: () => state.getSnapshot(),
+      readLayoutMetrics: () => renderer.getLayoutMetrics?.() || null,
       emitIntent,
     });
 
     if (typeof ResizeObserver !== 'undefined' && refs.boardWrap) {
       boardResizeObserver = new ResizeObserver(() => {
         renderer.notifyResizeInteraction?.();
-        queueBoardLayout(false);
+        queueBoardLayout(false, { needsResize: true });
       });
       boardResizeObserver.observe(refs.boardWrap);
     }
@@ -1534,7 +1541,7 @@ export function createRuntime(options) {
     if (!windowResizeHandler) {
       windowResizeHandler = () => {
         renderer.notifyResizeInteraction?.();
-        queueBoardLayout(false);
+        queueBoardLayout(false, { needsResize: true });
       };
     }
     if (typeof window !== 'undefined') {
@@ -1573,6 +1580,7 @@ export function createRuntime(options) {
     sessionSaveQueued = false;
     layoutQueued = false;
     pendingValidate = false;
+    pendingResize = false;
     pendingValidateSource = null;
     queuedLayoutOptions = {};
     boardResizeObserver?.disconnect();

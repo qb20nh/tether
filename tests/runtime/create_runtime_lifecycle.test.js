@@ -228,9 +228,12 @@ const createRuntimeHarness = ({
   });
   const refs = createRefs();
   let renderCount = 0;
+  let resizeCount = 0;
+  let rebuildGridCount = 0;
   let unmountCount = 0;
   let bindCount = 0;
   let unbindCount = 0;
+  let lastBindPayload = null;
 
   const persistence = {
     ...basePersistence,
@@ -242,16 +245,35 @@ const createRuntimeHarness = ({
   const renderer = {
     mount: () => {},
     getRefs: () => refs,
-    rebuildGrid: () => {},
+    rebuildGrid: (...args) => {
+      rebuildGridCount += 1;
+      rendererOverrides.rebuildGrid?.(...args);
+    },
     renderFrame: () => {
       renderCount += 1;
     },
-    resize: () => {},
+    resize: () => {
+      resizeCount += 1;
+      rendererOverrides.resize?.();
+    },
     unmount: () => {
       unmountCount += 1;
     },
-    ...rendererOverrides,
   };
+  if (rendererOverrides.mount) renderer.mount = rendererOverrides.mount;
+  if (rendererOverrides.getRefs) renderer.getRefs = rendererOverrides.getRefs;
+  if (rendererOverrides.renderFrame) renderer.renderFrame = rendererOverrides.renderFrame;
+  if (rendererOverrides.unmount) renderer.unmount = rendererOverrides.unmount;
+  if (rendererOverrides.getLayoutMetrics) renderer.getLayoutMetrics = rendererOverrides.getLayoutMetrics;
+  if (rendererOverrides.notifyResizeInteraction) renderer.notifyResizeInteraction = rendererOverrides.notifyResizeInteraction;
+  if (rendererOverrides.clearPathTransitionCompensation) {
+    renderer.clearPathTransitionCompensation = rendererOverrides.clearPathTransitionCompensation;
+  }
+  if (rendererOverrides.recordPathTransition) renderer.recordPathTransition = rendererOverrides.recordPathTransition;
+  if (rendererOverrides.updateInteraction) renderer.updateInteraction = rendererOverrides.updateInteraction;
+  if (rendererOverrides.setPathFlowFreezeImmediate) {
+    renderer.setPathFlowFreezeImmediate = rendererOverrides.setPathFlowFreezeImmediate;
+  }
 
   const runtime = createRuntime({
     appEl: {
@@ -262,8 +284,9 @@ const createRuntimeHarness = ({
     persistence,
     renderer,
     input: {
-      bind: () => {
+      bind: (payload) => {
         bindCount += 1;
+        lastBindPayload = payload;
       },
       unbind: () => {
         unbindCount += 1;
@@ -297,9 +320,12 @@ const createRuntimeHarness = ({
     renderer,
     refs,
     getRenderCount: () => renderCount,
+    getResizeCount: () => resizeCount,
+    getRebuildGridCount: () => rebuildGridCount,
     getUnmountCount: () => unmountCount,
     getBindCount: () => bindCount,
     getUnbindCount: () => unbindCount,
+    getLastBindPayload: () => lastBindPayload,
   };
 };
 
@@ -426,5 +452,66 @@ test('createRuntime does not fire onDailySolvedDateChanged for campaign or infin
   [...env.rafCallbacks.values()][0]?.(32);
 
   assert.deepEqual(calls, []);
+  harness.runtime.destroy();
+});
+
+test('createRuntime only resizes on layout-invalidating board updates', (t) => {
+  const env = installBrowserEnv(t);
+  const harness = createRuntimeHarness({
+    rendererOverrides: {
+      getLayoutMetrics: () => ({
+        version: 1,
+        rows: 2,
+        cols: 2,
+        left: 0,
+        top: 0,
+        right: 40,
+        bottom: 40,
+        size: 20,
+        gap: 0,
+        pad: 0,
+        step: 20,
+      }),
+    },
+  });
+
+  const flushNextRaf = (ts) => {
+    const callback = [...env.rafCallbacks.values()][0];
+    callback?.(ts);
+  };
+
+  harness.runtime.start();
+  assert.equal(typeof harness.getLastBindPayload()?.readLayoutMetrics, 'function');
+  flushNextRaf(16);
+
+  assert.equal(harness.getResizeCount(), 1);
+  assert.equal(harness.getRebuildGridCount(), 1);
+
+  harness.runtime.emitIntent({
+    type: INTENT_TYPES.GAME_COMMAND,
+    payload: {
+      commandType: GAME_COMMANDS.START_OR_STEP,
+      r: 0,
+      c: 0,
+    },
+  });
+  flushNextRaf(32);
+  assert.equal(harness.getResizeCount(), 1);
+
+  harness.runtime.emitIntent({
+    type: INTENT_TYPES.GAME_COMMAND,
+    payload: {
+      commandType: GAME_COMMANDS.LOAD_LEVEL,
+      levelIndex: harness.core.ensureInfiniteAbsIndex(0),
+    },
+  });
+  flushNextRaf(48);
+  assert.equal(harness.getResizeCount(), 2);
+  assert.equal(harness.getRebuildGridCount(), 2);
+
+  env.resizeObservers[0].callback();
+  flushNextRaf(64);
+  assert.equal(harness.getResizeCount(), 3);
+
   harness.runtime.destroy();
 });

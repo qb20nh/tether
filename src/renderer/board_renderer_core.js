@@ -102,6 +102,22 @@ const pathLayoutMetrics = {
   gap: 0,
   pad: 0,
 };
+const boardLayoutMetrics = {
+  ready: false,
+  version: 0,
+  rows: 0,
+  cols: 0,
+  left: 0,
+  top: 0,
+  right: 0,
+  bottom: 0,
+  size: 56,
+  gap: 0,
+  pad: 0,
+  step: 56,
+  scrollX: 0,
+  scrollY: 0,
+};
 const pathFramePayload = {
   points: [],
   geometryToken: 0,
@@ -1756,6 +1772,72 @@ const updatePathLayoutMetrics = (offset, cell, gap, pad) => {
   return pathLayoutMetrics;
 };
 
+const updateBoardLayoutMetrics = (metrics = {}) => {
+  const nextRows = Number.isInteger(metrics.rows) ? metrics.rows : activeBoardSize.rows;
+  const nextCols = Number.isInteger(metrics.cols) ? metrics.cols : activeBoardSize.cols;
+  const nextLeft = Number(metrics.left) || 0;
+  const nextTop = Number(metrics.top) || 0;
+  const nextRight = Number(metrics.right) || nextLeft;
+  const nextBottom = Number(metrics.bottom) || nextTop;
+  const nextSize = Number.isFinite(metrics.size) && metrics.size > 0
+    ? metrics.size
+    : boardLayoutMetrics.size;
+  const nextGap = Number.isFinite(metrics.gap) ? metrics.gap : boardLayoutMetrics.gap;
+  const nextPad = Number.isFinite(metrics.pad) ? metrics.pad : boardLayoutMetrics.pad;
+  const nextStep = Number.isFinite(metrics.step) && metrics.step > 0
+    ? metrics.step
+    : (nextSize + nextGap);
+  const nextScrollX = Number.isFinite(metrics.scrollX) ? metrics.scrollX : boardLayoutMetrics.scrollX;
+  const nextScrollY = Number.isFinite(metrics.scrollY) ? metrics.scrollY : boardLayoutMetrics.scrollY;
+  const changed = (
+    !boardLayoutMetrics.ready
+    || boardLayoutMetrics.rows !== nextRows
+    || boardLayoutMetrics.cols !== nextCols
+    || boardLayoutMetrics.left !== nextLeft
+    || boardLayoutMetrics.top !== nextTop
+    || boardLayoutMetrics.right !== nextRight
+    || boardLayoutMetrics.bottom !== nextBottom
+    || boardLayoutMetrics.size !== nextSize
+    || boardLayoutMetrics.gap !== nextGap
+    || boardLayoutMetrics.pad !== nextPad
+    || boardLayoutMetrics.step !== nextStep
+  );
+  if (changed) {
+    boardLayoutMetrics.rows = nextRows;
+    boardLayoutMetrics.cols = nextCols;
+    boardLayoutMetrics.left = nextLeft;
+    boardLayoutMetrics.top = nextTop;
+    boardLayoutMetrics.right = nextRight;
+    boardLayoutMetrics.bottom = nextBottom;
+    boardLayoutMetrics.size = nextSize;
+    boardLayoutMetrics.gap = nextGap;
+    boardLayoutMetrics.pad = nextPad;
+    boardLayoutMetrics.step = nextStep;
+    boardLayoutMetrics.version += 1;
+  }
+  boardLayoutMetrics.scrollX = nextScrollX;
+  boardLayoutMetrics.scrollY = nextScrollY;
+  boardLayoutMetrics.ready = true;
+  return boardLayoutMetrics;
+};
+
+const clearBoardLayoutMetrics = () => {
+  boardLayoutMetrics.ready = false;
+  boardLayoutMetrics.version = 0;
+  boardLayoutMetrics.rows = 0;
+  boardLayoutMetrics.cols = 0;
+  boardLayoutMetrics.left = 0;
+  boardLayoutMetrics.top = 0;
+  boardLayoutMetrics.right = 0;
+  boardLayoutMetrics.bottom = 0;
+  boardLayoutMetrics.size = 56;
+  boardLayoutMetrics.gap = 0;
+  boardLayoutMetrics.pad = 0;
+  boardLayoutMetrics.step = 56;
+  boardLayoutMetrics.scrollX = 0;
+  boardLayoutMetrics.scrollY = 0;
+};
+
 const ensurePathLayoutMetrics = (refs) => {
   if (pathLayoutMetrics.ready) return pathLayoutMetrics;
   const offset = getGridCanvasOffset(refs, gridOffsetScratch);
@@ -2547,6 +2629,7 @@ function buildGrid(snapshot, refs, icons, iconX) {
   reusableEndRetainedArcPoints.length = 0;
   clearPathTipDragHoverCell();
   clearPathTipHoverScaleStates();
+  resizeCanvas(refs);
 }
 
 const parseGridKey = (value, out = keyParseScratch) => {
@@ -3488,6 +3571,8 @@ function resizeCanvas(refs) {
   const dpr = window.devicePixelRatio || 1;
   const viewportWidth = window.visualViewport?.width || window.innerWidth || 0;
   const viewportHeight = window.visualViewport?.height || window.innerHeight || 0;
+  const wrapRect = boardWrap.getBoundingClientRect();
+  const gridRect = refs.gridEl.getBoundingClientRect();
   const nextSignature = [
     activeBoardSize.rows,
     activeBoardSize.cols,
@@ -3495,6 +3580,14 @@ function resizeCanvas(refs) {
     boardWrap.clientHeight,
     boardWrap.offsetWidth,
     boardWrap.offsetHeight,
+    wrapRect.left,
+    wrapRect.top,
+    wrapRect.width,
+    wrapRect.height,
+    gridRect.left,
+    gridRect.top,
+    gridRect.width,
+    gridRect.height,
     dpr,
     viewportWidth,
     viewportHeight,
@@ -3504,7 +3597,6 @@ function resizeCanvas(refs) {
 
   syncBoardCellSize(refs);
 
-  const wrapRect = boardWrap.getBoundingClientRect();
   const styles = getComputedStyle(boardWrap);
   const borderLeft = parseFloat(styles.borderLeftWidth || '0') || 0;
   const borderRight = parseFloat(styles.borderRightWidth || '0') || 0;
@@ -3512,7 +3604,6 @@ function resizeCanvas(refs) {
   const borderBottom = parseFloat(styles.borderBottomWidth || '0') || 0;
   const cw = Math.max(0, wrapRect.width - borderLeft - borderRight);
   const ch = Math.max(0, wrapRect.height - borderTop - borderBottom);
-  const gridRect = refs.gridEl.getBoundingClientRect();
   const innerLeft = wrapRect.left + boardWrap.clientLeft;
   const innerTop = wrapRect.top + boardWrap.clientTop;
   const offset = {
@@ -3528,6 +3619,20 @@ function resizeCanvas(refs) {
     || styles.getPropertyValue('--cell'),
   );
   const cell = cellFromStyle > 0 ? cellFromStyle : getCellSize(refs.gridEl);
+  updateBoardLayoutMetrics({
+    rows: activeBoardSize.rows,
+    cols: activeBoardSize.cols,
+    left: gridRect.left,
+    top: gridRect.top,
+    right: gridRect.right,
+    bottom: gridRect.bottom,
+    size: cell,
+    gap,
+    pad,
+    step: cell + gap,
+    scrollX: window.scrollX || window.pageXOffset || 0,
+    scrollY: window.scrollY || window.pageYOffset || 0,
+  });
 
   if (interactiveResizeActive) {
     applyCanvasCssSize(canvas, cw, ch);
@@ -3635,6 +3740,7 @@ const resetCoreState = () => {
   reusableArrivalPathPoints = [];
   reusableStartRetainedArcPoints = [];
   reusableEndRetainedArcPoints = [];
+  clearBoardLayoutMetrics();
   clearPathRetainedArcStates();
   clearPathTipHoverScaleStates();
   transitionCompensationBuffer.clear();
@@ -3653,6 +3759,10 @@ return {
 
   getRefs() {
     return refs;
+  },
+
+  getLayoutMetrics() {
+    return boardLayoutMetrics.ready ? boardLayoutMetrics : null;
   },
 
   rebuildGrid(snapshot) {

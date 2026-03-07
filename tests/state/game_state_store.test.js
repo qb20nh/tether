@@ -38,3 +38,32 @@ test('game state store supports command dispatch semantics', () => {
   assert.equal(store.getSnapshot().gridData[0][0], 'm');
   assert.equal(store.getSnapshot().gridData[1][1], '.');
 });
+
+test('game state store caches snapshots and preserves prior path-derived data', () => {
+  const store = createGameStateStore(() => LEVEL);
+  const loadTransition = store.dispatch({ type: 'level/load', payload: { levelIndex: 0 } });
+  const initialSnapshot = store.getSnapshot();
+  const repeatedInitialSnapshot = store.getSnapshot();
+
+  assert.equal(loadTransition.snapshot, initialSnapshot);
+  assert.equal(initialSnapshot, repeatedInitialSnapshot);
+  assert.equal(typeof initialSnapshot.version, 'number');
+  assert.equal(initialSnapshot.pathKey, '');
+
+  store.dispatch({ type: 'path/start-or-step', payload: { r: 0, c: 0 } });
+  const firstPathSnapshot = store.getSnapshot();
+  assert.notEqual(firstPathSnapshot, initialSnapshot);
+  assert.equal(firstPathSnapshot.pathKey, '0,0;');
+  assert.equal(firstPathSnapshot.version > initialSnapshot.version, true);
+  assert.equal(store.getSnapshot(), firstPathSnapshot);
+
+  store.dispatch({ type: 'path/start-or-step', payload: { r: 0, c: 1 } });
+  const secondPathSnapshot = store.getSnapshot();
+  assert.notEqual(secondPathSnapshot, firstPathSnapshot);
+  assert.equal(secondPathSnapshot.pathKey, '0,0;0,1;');
+  assert.equal(secondPathSnapshot.version > firstPathSnapshot.version, true);
+  assert.deepEqual(firstPathSnapshot.path, [{ r: 0, c: 0 }]);
+  assert.equal(firstPathSnapshot.idxByKey.get('0,0'), 0);
+  assert.equal(firstPathSnapshot.idxByKey.has('0,1'), false);
+  assert.deepEqual(secondPathSnapshot.path, [{ r: 0, c: 0 }, { r: 0, c: 1 }]);
+});

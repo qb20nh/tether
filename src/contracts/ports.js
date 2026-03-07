@@ -9,10 +9,12 @@
 
 /**
  * @typedef {{
+ *   version:number,
  *   levelIndex:number,
  *   rows:number,
  *   cols:number,
  *   totalUsable:number,
+ *   pathKey:string,
  *   path:Array<GridPoint>,
  *   visited:Set<string>,
  *   gridData:Array<Array<string>>,
@@ -22,6 +24,22 @@
  *   stitchReq:Map<string, {nw:GridPoint,ne:GridPoint,sw:GridPoint,se:GridPoint}>,
  *   idxByKey:Map<string, number>,
  * }} GameSnapshot
+ */
+
+/**
+ * @typedef {{
+ *   version:number,
+ *   rows:number,
+ *   cols:number,
+ *   left:number,
+ *   top:number,
+ *   right:number,
+ *   bottom:number,
+ *   size:number,
+ *   gap:number,
+ *   pad:number,
+ *   step:number,
+ * }} BoardLayoutMetrics
  */
 
 /**
@@ -125,6 +143,7 @@
  *   recordPathTransition?:(previousSnapshot:GameSnapshot, nextSnapshot:GameSnapshot, interactionModel?:Record<string, any>)=>void,
  *   clearPathTransitionCompensation?:()=>void,
  *   resize:()=>void,
+ *   getLayoutMetrics?:()=>BoardLayoutMetrics|null,
  *   unmount:()=>void,
  * }} RendererPort
  */
@@ -134,6 +153,7 @@
  *   bind:(payload:{
  *     refs:Record<string, any>,
  *     readSnapshot:()=>GameSnapshot,
+ *     readLayoutMetrics?:()=>BoardLayoutMetrics|null,
  *     emitIntent:(intent:{type:string,payload?:Record<string, any>})=>void,
  *   })=>void,
  *   unbind:()=>void,

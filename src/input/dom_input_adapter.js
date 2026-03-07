@@ -23,6 +23,7 @@ import {
 export function createDomInputAdapter() {
   let refs = null;
   let readSnapshot = () => null;
+  let readLayoutMetrics = () => null;
   let emitIntent = () => { };
   let listeners = [];
 
@@ -93,6 +94,14 @@ export function createDomInputAdapter() {
     wallDragFrame = 0;
   };
 
+  const getViewportScroll = () => {
+    if (typeof window === 'undefined') return { x: 0, y: 0 };
+    return {
+      x: window.scrollX || window.pageXOffset || 0,
+      y: window.scrollY || window.pageYOffset || 0,
+    };
+  };
+
   const captureGridMetrics = (snapshot = null) => {
     if (!refs?.gridEl || !snapshot) return null;
     const rows = Number.isInteger(snapshot.rows) ? snapshot.rows : 0;
@@ -105,8 +114,10 @@ export function createDomInputAdapter() {
     const pad = getGridPadding(refs.gridEl);
     const step = size + gap;
     if (!(step > 0)) return null;
+    const viewportScroll = getViewportScroll();
 
     return {
+      version: 0,
       rows,
       cols,
       left: rect.left,
@@ -114,9 +125,69 @@ export function createDomInputAdapter() {
       right: rect.right,
       bottom: rect.bottom,
       size,
+      gap,
       step,
       pad,
+      scrollX: viewportScroll.x,
+      scrollY: viewportScroll.y,
     };
+  };
+
+  const isUsableGridMetrics = (metrics, snapshot = null) => {
+    if (!metrics || !snapshot) return false;
+    const rows = Number.isInteger(snapshot.rows) ? snapshot.rows : 0;
+    const cols = Number.isInteger(snapshot.cols) ? snapshot.cols : 0;
+    if (rows <= 0 || cols <= 0) return false;
+    return (
+      metrics.rows === rows
+      && metrics.cols === cols
+      && Number.isFinite(metrics.left)
+      && Number.isFinite(metrics.top)
+      && Number.isFinite(metrics.right)
+      && Number.isFinite(metrics.bottom)
+      && Number.isFinite(metrics.size)
+      && Number.isFinite(metrics.step)
+      && Number.isFinite(metrics.pad)
+      && metrics.step > 0
+    );
+  };
+
+  const readCachedGridMetrics = (snapshot = null) => {
+    const metrics = readLayoutMetrics();
+    if (!isUsableGridMetrics(metrics, snapshot)) return null;
+
+    const currentScroll = getViewportScroll();
+    const sourceScrollX = Number.isFinite(metrics.scrollX) ? metrics.scrollX : currentScroll.x;
+    const sourceScrollY = Number.isFinite(metrics.scrollY) ? metrics.scrollY : currentScroll.y;
+    const scrollDx = currentScroll.x - sourceScrollX;
+    const scrollDy = currentScroll.y - sourceScrollY;
+    if (!(scrollDx || scrollDy)) return metrics;
+
+    return {
+      ...metrics,
+      left: metrics.left - scrollDx,
+      right: metrics.right - scrollDx,
+      top: metrics.top - scrollDy,
+      bottom: metrics.bottom - scrollDy,
+      scrollX: currentScroll.x,
+      scrollY: currentScroll.y,
+    };
+  };
+
+  const refreshDragGridMetrics = (snapshot = null, forceMeasure = false) => {
+    const cachedMetrics = readCachedGridMetrics(snapshot);
+    if (cachedMetrics) {
+      dragGridMetrics = cachedMetrics;
+      return dragGridMetrics;
+    }
+    if (!snapshot) {
+      dragGridMetrics = null;
+      return null;
+    }
+    if (forceMeasure || !isUsableGridMetrics(dragGridMetrics, snapshot)) {
+      dragGridMetrics = captureGridMetrics(snapshot);
+    }
+    return dragGridMetrics;
   };
 
   const clampToRange = (value, lo, hi) => Math.max(lo, Math.min(hi, value));
@@ -163,7 +234,27 @@ export function createDomInputAdapter() {
     return snapCellFromMetrics(x, y, resolved);
   };
 
+  const pathCellFromPoint = (x, y, snapshot, metrics = null) => {
+    const resolved = metrics || readCachedGridMetrics(snapshot);
+    if (resolved) {
+      if (
+        x < resolved.left
+        || x > resolved.right
+        || y < resolved.top
+        || y > resolved.bottom
+      ) {
+        return null;
+      }
+      return snapCellFromMetrics(x, y, resolved);
+    }
+    return cellFromPoint(x, y);
+  };
+
   const wallCellFromPoint = (x, y, snapshot, metrics = null) => {
+    if (metrics) {
+      const snapped = snapWallCellFromPoint(x, y, snapshot, metrics);
+      if (snapped) return snapped;
+    }
     const direct = cellFromPoint(x, y);
     if (direct) return direct;
     return snapWallCellFromPoint(x, y, snapshot, metrics);
@@ -171,7 +262,8 @@ export function createDomInputAdapter() {
 
   const onPointerDown = (e) => {
     const snapshot = readSnapshot();
-    const cell = cellFromPoint(e.clientX, e.clientY);
+    const metrics = refreshDragGridMetrics(snapshot, true);
+    const cell = pathCellFromPoint(e.clientX, e.clientY, snapshot, metrics);
     if (!cell) return;
 
     const ch = snapshot.gridData?.[cell.r]?.[cell.c];
@@ -183,7 +275,7 @@ export function createDomInputAdapter() {
         from: { r: cell.r, c: cell.c },
         hover: null,
       };
-      dragGridMetrics = captureGridMetrics(snapshot);
+      dragGridMetrics = metrics;
       refs.gridEl.setPointerCapture(e.pointerId);
       sendInteractionUpdate(INTERACTION_UPDATES.WALL_DRAG, {
         visible: true,
@@ -212,7 +304,7 @@ export function createDomInputAdapter() {
         lastCursorKey: `${cell.r},${cell.c}`,
         lastHoverKey: `${cell.r},${cell.c}`,
       };
-      dragGridMetrics = captureGridMetrics(nextSnapshot);
+      dragGridMetrics = refreshDragGridMetrics(nextSnapshot, true);
       activePointerId = e.pointerId;
       refs.gridEl.setPointerCapture(e.pointerId);
       sendInteractionUpdate(INTERACTION_UPDATES.PATH_DRAG, {
@@ -237,7 +329,7 @@ export function createDomInputAdapter() {
         lastCursorKey: `${cell.r},${cell.c}`,
         lastHoverKey: `${cell.r},${cell.c}`,
       };
-      dragGridMetrics = captureGridMetrics(snapshot);
+      dragGridMetrics = metrics;
       dragMode = 'path';
       activePointerId = e.pointerId;
       refs.gridEl.setPointerCapture(e.pointerId);
@@ -258,7 +350,7 @@ export function createDomInputAdapter() {
       lastCursorKey: `${cell.r},${cell.c}`,
       lastHoverKey: `${cell.r},${cell.c}`,
     };
-    dragGridMetrics = captureGridMetrics(snapshot);
+    dragGridMetrics = metrics;
 
     dragMode = 'path';
     activePointerId = e.pointerId;
@@ -274,14 +366,6 @@ export function createDomInputAdapter() {
   const onPointerMove = (e) => {
     if (activePointerId === null || e.pointerId !== activePointerId) return;
 
-    if (dragGridMetrics && refs?.gridEl) {
-      const rect = refs.gridEl.getBoundingClientRect();
-      dragGridMetrics.left = rect.left;
-      dragGridMetrics.top = rect.top;
-      dragGridMetrics.right = rect.right;
-      dragGridMetrics.bottom = rect.bottom;
-    }
-
     if (dragMode === 'path') {
       if (e.cancelable) e.preventDefault();
       const pointerClientX = e.clientX;
@@ -289,8 +373,7 @@ export function createDomInputAdapter() {
       const snapshotForInput = pathDrag ? readSnapshot() : null;
 
       if (pathDrag) {
-        const hoverMetrics = dragGridMetrics || captureGridMetrics(snapshotForInput);
-        if (hoverMetrics) dragGridMetrics = hoverMetrics;
+        const hoverMetrics = refreshDragGridMetrics(snapshotForInput, true);
         const hoverCell = snapPathCellFromPoint(e.clientX, e.clientY, snapshotForInput, hoverMetrics);
         const hoverKey = hoverCell ? `${hoverCell.r},${hoverCell.c}` : '';
         if (pathDrag.lastHoverKey !== hoverKey) {
@@ -306,8 +389,7 @@ export function createDomInputAdapter() {
       if (pathDrag && !pathDrag.applyPathCommands) return;
 
       if (pathDrag && snapshotForInput) {
-        const metrics = dragGridMetrics || captureGridMetrics(snapshotForInput);
-        if (metrics) dragGridMetrics = metrics;
+        const metrics = refreshDragGridMetrics(snapshotForInput, true);
         const rect = metrics
           ? null
           : refs.gridEl.getBoundingClientRect();
@@ -412,8 +494,7 @@ export function createDomInputAdapter() {
       queueWallDragGhostUpdate(e.clientX, e.clientY);
 
       const snapshot = readSnapshot();
-      const metrics = dragGridMetrics || captureGridMetrics(snapshot);
-      if (metrics) dragGridMetrics = metrics;
+      const metrics = refreshDragGridMetrics(snapshot, true);
       const cell = wallCellFromPoint(e.clientX, e.clientY, snapshot, metrics);
       const previousHover = wallDrag.hover;
       if (!cell) {
@@ -479,9 +560,15 @@ export function createDomInputAdapter() {
   };
 
   return {
-    bind({ refs: nextRefs, readSnapshot: nextReadSnapshot, emitIntent: nextEmitIntent }) {
+    bind({
+      refs: nextRefs,
+      readSnapshot: nextReadSnapshot,
+      readLayoutMetrics: nextReadLayoutMetrics = () => null,
+      emitIntent: nextEmitIntent,
+    }) {
       refs = nextRefs;
       readSnapshot = nextReadSnapshot;
+      readLayoutMetrics = nextReadLayoutMetrics;
       emitIntent = nextEmitIntent;
 
       if (!refs?.gridEl) {
@@ -570,6 +657,7 @@ export function createDomInputAdapter() {
       wallDrag = null;
       pathDrag = null;
       dragGridMetrics = null;
+      readLayoutMetrics = () => null;
     },
   };
 }

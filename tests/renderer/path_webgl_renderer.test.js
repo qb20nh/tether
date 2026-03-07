@@ -416,6 +416,17 @@ test('buildTutorialBracketMesh handles empty and finite points', () => {
   assertIndexBounds(mesh);
 });
 
+test('buildTutorialBracketMesh caps geometry to the uint16 vertex budget', () => {
+  const maxBracketCount = Math.floor(65535 / 4);
+  const mesh = buildTutorialBracketMesh(
+    Array.from({ length: maxBracketCount + 8 }, (_, index) => ({ x: index, y: index })),
+  );
+
+  assert.equal(mesh.vertexCount, maxBracketCount * 4);
+  assert.equal(mesh.indexCount, maxBracketCount * 6);
+  assertIndexBounds(mesh);
+});
+
 test('createPathWebglRenderer throws when WebGL2 is unavailable', () => {
   const fakeCanvas = {
     getContext(kind) {

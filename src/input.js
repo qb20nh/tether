@@ -32,6 +32,9 @@ export function bindInputHandlers(refs, state, onStateChange = () => { }) {
   adapter.bind({
     refs,
     readSnapshot: () => state.getSnapshot(),
+    readLayoutMetrics: typeof refs?.readLayoutMetrics === 'function'
+      ? () => refs.readLayoutMetrics()
+      : () => null,
     emitIntent: (intent) => {
       if (!intent || !intent.type) return;
 

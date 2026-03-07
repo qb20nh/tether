@@ -21,6 +21,9 @@ export function createGameStateStore(levelSource) {
   let stitchSet = new Set();
   let stitchReq = new Map();
   let cornerCounts = [];
+  let stateVersion = 0;
+  let cachedSnapshot = null;
+  let cachedSnapshotVersion = -1;
 
   const isWall = (r, c) => {
     const ch = gridData[r][c];
@@ -47,6 +50,12 @@ export function createGameStateStore(levelSource) {
     }
   };
 
+  const invalidateSnapshotCache = () => {
+    stateVersion += 1;
+    cachedSnapshot = null;
+    cachedSnapshotVersion = -1;
+  };
+
   const loadLevel = (index) => {
     const level = getLevelByIndex(index);
     if (!level) throw new Error(`Missing level at index ${index}`);
@@ -63,6 +72,7 @@ export function createGameStateStore(levelSource) {
     buildStitches();
     path = [];
     visited = new Set();
+    invalidateSnapshotCache();
   };
 
   const restoreMutableState = (saved) => {
@@ -193,21 +203,33 @@ export function createGameStateStore(levelSource) {
     gridData = nextGrid;
     path = nextPath;
     visited = nextVisited;
+    invalidateSnapshotCache();
     return true;
   };
 
   const toSnapshot = () => {
-    const idxByKey = new Map();
-    for (let i = 0; i < path.length; i++) {
-      idxByKey.set(keyOf(path[i].r, path[i].c), i);
+    if (cachedSnapshot && cachedSnapshotVersion === stateVersion) {
+      return cachedSnapshot;
     }
 
-    return {
+    const idxByKey = new Map();
+    const snapshotPath = path.slice();
+    let pathKey = '';
+    for (let i = 0; i < snapshotPath.length; i++) {
+      const point = snapshotPath[i];
+      const key = keyOf(point.r, point.c);
+      idxByKey.set(key, i);
+      pathKey += `${key};`;
+    }
+
+    cachedSnapshot = {
+      version: stateVersion,
       levelIndex,
       rows,
       cols,
       totalUsable,
-      path: path.slice(),
+      pathKey,
+      path: snapshotPath,
       visited,
       gridData,
       stitches,
@@ -216,17 +238,21 @@ export function createGameStateStore(levelSource) {
       stitchReq,
       idxByKey,
     };
+    cachedSnapshotVersion = stateVersion;
+    return cachedSnapshot;
   };
 
   const resetPath = () => {
     path = [];
     visited = new Set();
+    invalidateSnapshotCache();
   };
 
   const undo = () => {
     if (path.length === 0) return false;
     const last = path.pop();
     visited.delete(keyOf(last.r, last.c));
+    invalidateSnapshotCache();
     return true;
   };
 
@@ -239,6 +265,7 @@ export function createGameStateStore(levelSource) {
     if (path.length === 0) {
       path = [next];
       visited = new Set([nextKey]);
+      invalidateSnapshotCache();
       return true;
     }
 
@@ -256,6 +283,7 @@ export function createGameStateStore(levelSource) {
 
     path.push(next);
     visited.add(nextKey);
+    invalidateSnapshotCache();
     return true;
   };
 
@@ -268,6 +296,7 @@ export function createGameStateStore(levelSource) {
     if (path.length === 0) {
       path = [next];
       visited = new Set([nextKey]);
+      invalidateSnapshotCache();
       return true;
     }
 
@@ -277,6 +306,7 @@ export function createGameStateStore(levelSource) {
       if (next.r === nextFromStart.r && next.c === nextFromStart.c) {
         path.shift();
         visited.delete(keyOf(head.r, head.c));
+        invalidateSnapshotCache();
         return true;
       }
     }
@@ -286,6 +316,7 @@ export function createGameStateStore(levelSource) {
 
     path.unshift(next);
     visited.add(nextKey);
+    invalidateSnapshotCache();
     return true;
   };
 
@@ -303,6 +334,7 @@ export function createGameStateStore(levelSource) {
   const reversePath = () => {
     if (path.length < 2) return false;
     path = [...path].reverse();
+    invalidateSnapshotCache();
     return true;
   };
 
@@ -317,8 +349,11 @@ export function createGameStateStore(levelSource) {
 
   const moveWall = (from, to) => {
     if (!canDropWall(from, to)) return false;
-    gridData[from.r][from.c] = CELL_TYPES.EMPTY;
-    gridData[to.r][to.c] = CELL_TYPES.MOVABLE_WALL;
+    const nextGrid = gridData.map((row) => row.slice());
+    nextGrid[from.r][from.c] = CELL_TYPES.EMPTY;
+    nextGrid[to.r][to.c] = CELL_TYPES.MOVABLE_WALL;
+    gridData = nextGrid;
+    invalidateSnapshotCache();
     return true;
   };
 

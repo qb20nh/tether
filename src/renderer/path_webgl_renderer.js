@@ -164,8 +164,8 @@ const buildFlowPrimitives = (points, segmentLengths, cornerTurns) => {
   };
 };
 
-export function buildUnifiedPathMesh(points, options = {}) {
-  if (!Array.isArray(points) || points.length === 0) return createEmptyMesh();
+const createUnifiedPathMeshBuildState = (points, options = {}) => {
+  if (!Array.isArray(points) || points.length === 0) return null;
 
   const maxPathPoints = Number.isInteger(options.maxPathPoints) && options.maxPathPoints > 0
     ? options.maxPathPoints
@@ -174,7 +174,7 @@ export function buildUnifiedPathMesh(points, options = {}) {
     .slice(0, maxPathPoints)
     .map(toFinitePoint)
     .filter(Boolean);
-  if (safePoints.length === 0) return createEmptyMesh();
+  if (safePoints.length === 0) return null;
 
   const width = Math.max(1, Number(options.width) || 1);
   const halfWidth = width * 0.5;
@@ -226,40 +226,59 @@ export function buildUnifiedPathMesh(points, options = {}) {
     segmentUy,
     halfWidth,
   );
-  const flow = buildFlowPrimitives(safePoints, segmentLengths, cornerTurns);
 
-  const positions = [];
-  const travels = [];
-  const cornerFlags = [];
-  const cornerCenters = [];
-  const cornerAngles = [];
-  const cornerTravels = [];
-  const indices = [];
-
-  const addVertex = (
-    x,
-    y,
-    travel,
-    cornerFlag = 0,
-    cornerCx = 0,
-    cornerCy = 0,
-    cornerAngleIn = 0,
-    cornerSweep = 0,
-    cornerTravelStart = 0,
-    cornerTravelSpan = 0,
-  ) => {
-    positions.push(x, y);
-    travels.push(travel);
-    cornerFlags.push(cornerFlag);
-    cornerCenters.push(cornerCx, cornerCy);
-    cornerAngles.push(cornerAngleIn, cornerSweep);
-    cornerTravels.push(cornerTravelStart, cornerTravelSpan);
-    return (travels.length - 1);
+  return {
+    safePoints,
+    halfWidth,
+    startRadius,
+    arrowLength,
+    endHalfWidth,
+    startFlowDirX,
+    startFlowDirY,
+    hasStartFlowOverride,
+    endArrowDirX,
+    endArrowDirY,
+    hasEndArrowOverride,
+    reverseHeadArrowLength,
+    reverseHeadArrowHalfWidth,
+    reverseTailCircleRadius,
+    renderStartCap,
+    renderEndCap,
+    firstSegmentIndex,
+    lastSegmentIndex,
+    segmentUx,
+    segmentUy,
+    cornerTurns,
+    flow: buildFlowPrimitives(safePoints, segmentLengths, cornerTurns),
   };
+};
 
-  const addTriangle = (a, b, c) => {
-    indices.push(a, b, c);
-  };
+const buildUnifiedPathMeshGeometry = (build, writer) => {
+  const {
+    safePoints,
+    halfWidth,
+    startRadius,
+    arrowLength,
+    endHalfWidth,
+    startFlowDirX,
+    startFlowDirY,
+    hasStartFlowOverride,
+    endArrowDirX,
+    endArrowDirY,
+    hasEndArrowOverride,
+    reverseHeadArrowLength,
+    reverseHeadArrowHalfWidth,
+    reverseTailCircleRadius,
+    renderStartCap,
+    renderEndCap,
+    firstSegmentIndex,
+    lastSegmentIndex,
+    segmentUx,
+    segmentUy,
+    cornerTurns,
+    flow,
+  } = build;
+  const { addVertex, addTriangle } = writer;
 
   const addQuad = (
     x1,
@@ -355,26 +374,21 @@ export function buildUnifiedPathMesh(points, options = {}) {
       const angle = unit * TAU;
       const x = cx + Math.cos(angle) * radius;
       const y = cy + Math.sin(angle) * radius;
-      const rimIndex = addVertex(
-        x,
-        y,
-        resolveTravel(x, y),
-      );
-      if (i > 0) {
-        addTriangle(centerIndex, previousRimIndex, rimIndex);
-      }
+      const rimIndex = addVertex(x, y, resolveTravel(x, y));
+      if (i > 0) addTriangle(centerIndex, previousRimIndex, rimIndex);
       previousRimIndex = rimIndex;
     }
   };
 
   const head = safePoints[0];
+  const headTravelNorm = hasStartFlowOverride ? Math.hypot(startFlowDirX, startFlowDirY) : 0;
   const headTravelUx = (() => {
-    if (hasStartFlowOverride) return startFlowDirX / Math.hypot(startFlowDirX, startFlowDirY);
+    if (hasStartFlowOverride) return startFlowDirX / headTravelNorm;
     if (firstSegmentIndex >= 0) return segmentUx[firstSegmentIndex];
     return 0;
   })();
   const headTravelUy = (() => {
-    if (hasStartFlowOverride) return startFlowDirY / Math.hypot(startFlowDirX, startFlowDirY);
+    if (hasStartFlowOverride) return startFlowDirY / headTravelNorm;
     if (firstSegmentIndex >= 0) return segmentUy[firstSegmentIndex];
     return 0;
   })();
@@ -382,10 +396,9 @@ export function buildUnifiedPathMesh(points, options = {}) {
     ((x - head.x) * headTravelUx)
     + ((y - head.y) * headTravelUy)
   );
+
   const addStartTipPrimitives = () => {
-    if (renderStartCap) {
-      addCircle(head.x, head.y, startRadius, 18, headTravelAt);
-    }
+    if (renderStartCap) addCircle(head.x, head.y, startRadius, 18, headTravelAt);
     if (reverseHeadArrowLength > 0 && reverseHeadArrowHalfWidth > 0 && firstSegmentIndex >= 0) {
       const ux = -segmentUx[firstSegmentIndex];
       const uy = -segmentUy[firstSegmentIndex];
@@ -396,7 +409,6 @@ export function buildUnifiedPathMesh(points, options = {}) {
       const baseCenterY = head.y - (uy * baseCenterShift);
       const baseTravel = -baseCenterShift;
       const apexTravel = baseTravel + reverseHeadArrowLength;
-
       const left = addVertex(
         baseCenterX - perpX * reverseHeadArrowHalfWidth,
         baseCenterY - perpY * reverseHeadArrowHalfWidth,
@@ -508,11 +520,15 @@ export function buildUnifiedPathMesh(points, options = {}) {
     const start = safePoints[i];
     const ux = segmentUx[i];
     const uy = segmentUy[i];
-    const x1 = start.x + ux * primitive.localStart;
-    const y1 = start.y + uy * primitive.localStart;
-    const x2 = start.x + ux * primitive.localEnd;
-    const y2 = start.y + uy * primitive.localEnd;
-    addQuad(x1, y1, x2, y2, halfWidth, primitive.travelStart, primitive.travelEnd);
+    addQuad(
+      start.x + ux * primitive.localStart,
+      start.y + uy * primitive.localStart,
+      start.x + ux * primitive.localEnd,
+      start.y + uy * primitive.localEnd,
+      halfWidth,
+      primitive.travelStart,
+      primitive.travelEnd,
+    );
   }
   for (const cornerPrimitive of flow.cornerPrimitives) {
     addCornerPrimitive(cornerPrimitive.cornerIndex, cornerPrimitive);
@@ -521,11 +537,12 @@ export function buildUnifiedPathMesh(points, options = {}) {
 
   if (lastSegmentIndex >= 0) {
     const tail = safePoints[safePoints.length - 1];
+    const tailTravelNorm = hasEndArrowOverride ? Math.hypot(endArrowDirX, endArrowDirY) : 0;
     const tailTravelUx = hasEndArrowOverride
-      ? (endArrowDirX / Math.hypot(endArrowDirX, endArrowDirY))
+      ? (endArrowDirX / tailTravelNorm)
       : segmentUx[lastSegmentIndex];
     const tailTravelUy = hasEndArrowOverride
-      ? (endArrowDirY / Math.hypot(endArrowDirX, endArrowDirY))
+      ? (endArrowDirY / tailTravelNorm)
       : segmentUy[lastSegmentIndex];
     const tailTravelAt = (x, y) => (
       flow.mainTravel
@@ -552,7 +569,6 @@ export function buildUnifiedPathMesh(points, options = {}) {
     const baseCenterY = tail.y - (uy * baseCenterShift);
     const baseTravel = flow.mainTravel - baseCenterShift;
     const apexTravel = baseTravel + arrowLength;
-
     const left = addVertex(
       baseCenterX - perpX * endHalfWidth,
       baseCenterY - perpY * endHalfWidth,
@@ -570,19 +586,105 @@ export function buildUnifiedPathMesh(points, options = {}) {
     );
     addTriangle(apex, left, right);
   }
+};
 
+const createMeshCountWriter = () => {
+  let vertexCount = 0;
+  let indexCount = 0;
   return {
-    positions: new Float32Array(positions),
-    travels: new Float32Array(travels),
-    cornerFlags: new Float32Array(cornerFlags),
-    cornerCenters: new Float32Array(cornerCenters),
-    cornerAngles: new Float32Array(cornerAngles),
-    cornerTravels: new Float32Array(cornerTravels),
-    indices: new Uint16Array(indices),
-    vertexCount: travels.length,
-    indexCount: indices.length,
-    mainTravel: flow.mainTravel,
+    addVertex() {
+      const index = vertexCount;
+      vertexCount += 1;
+      return index;
+    },
+    addTriangle() {
+      indexCount += 3;
+    },
+    finish() {
+      return { vertexCount, indexCount };
+    },
   };
+};
+
+const createFixedMeshStorage = (vertexCount, indexCount) => ({
+  positions: new Float32Array(vertexCount * 2),
+  travels: new Float32Array(vertexCount),
+  cornerFlags: new Float32Array(vertexCount),
+  cornerCenters: new Float32Array(vertexCount * 2),
+  cornerAngles: new Float32Array(vertexCount * 2),
+  cornerTravels: new Float32Array(vertexCount * 2),
+  indices: new Uint16Array(indexCount),
+  vertexCount: 0,
+  indexCount: 0,
+  mainTravel: 0,
+});
+
+const createMeshFillWriter = (target) => {
+  let vertexCount = 0;
+  let indexCount = 0;
+  return {
+    addVertex(
+      x,
+      y,
+      travel,
+      cornerFlag = 0,
+      cornerCx = 0,
+      cornerCy = 0,
+      cornerAngleIn = 0,
+      cornerSweep = 0,
+      cornerTravelStart = 0,
+      cornerTravelSpan = 0,
+    ) {
+      const index = vertexCount;
+      const vectorOffset = index * 2;
+      target.positions[vectorOffset] = x;
+      target.positions[vectorOffset + 1] = y;
+      target.travels[index] = travel;
+      target.cornerFlags[index] = cornerFlag;
+      target.cornerCenters[vectorOffset] = cornerCx;
+      target.cornerCenters[vectorOffset + 1] = cornerCy;
+      target.cornerAngles[vectorOffset] = cornerAngleIn;
+      target.cornerAngles[vectorOffset + 1] = cornerSweep;
+      target.cornerTravels[vectorOffset] = cornerTravelStart;
+      target.cornerTravels[vectorOffset + 1] = cornerTravelSpan;
+      vertexCount += 1;
+      return index;
+    },
+    addTriangle(a, b, c) {
+      target.indices[indexCount] = a;
+      target.indices[indexCount + 1] = b;
+      target.indices[indexCount + 2] = c;
+      indexCount += 3;
+    },
+    finish(mainTravel) {
+      target.vertexCount = vertexCount;
+      target.indexCount = indexCount;
+      target.mainTravel = Number(mainTravel) || 0;
+      return target;
+    },
+  };
+};
+
+const countUnifiedPathMeshGeometry = (build) => {
+  const writer = createMeshCountWriter();
+  buildUnifiedPathMeshGeometry(build, writer);
+  return writer.finish();
+};
+
+const fillUnifiedPathMeshStorage = (build, target) => {
+  const writer = createMeshFillWriter(target);
+  buildUnifiedPathMeshGeometry(build, writer);
+  return writer.finish(build.flow.mainTravel);
+};
+
+export function buildUnifiedPathMesh(points, options = {}) {
+  const build = createUnifiedPathMeshBuildState(points, options);
+  if (!build) return createEmptyMesh();
+  const counts = countUnifiedPathMeshGeometry(build);
+  return fillUnifiedPathMeshStorage(
+    build,
+    createFixedMeshStorage(counts.vertexCount, counts.indexCount),
+  );
 }
 
 const nextPowerOfTwo = (value) => {
@@ -615,40 +717,27 @@ const createMutableMeshStorage = () => ({
   mainTravel: 0,
 });
 
-const copyIntoMutableMeshStorage = (mesh, out) => {
+const resetMutableMeshStorage = (out) => {
   const target = out || createMutableMeshStorage();
-  const vertexCount = Number(mesh?.vertexCount) || 0;
-  const indexCount = Number(mesh?.indexCount) || 0;
-
-  target.positions = ensureFloatCapacity(target.positions, vertexCount * 2);
-  target.travels = ensureFloatCapacity(target.travels, vertexCount);
-  target.cornerFlags = ensureFloatCapacity(target.cornerFlags, vertexCount);
-  target.cornerCenters = ensureFloatCapacity(target.cornerCenters, vertexCount * 2);
-  target.cornerAngles = ensureFloatCapacity(target.cornerAngles, vertexCount * 2);
-  target.cornerTravels = ensureFloatCapacity(target.cornerTravels, vertexCount * 2);
-  target.indices = ensureIndexCapacity(target.indices, indexCount);
-
-  if (vertexCount > 0) {
-    target.positions.set(mesh.positions, 0);
-    target.travels.set(mesh.travels, 0);
-    target.cornerFlags.set(mesh.cornerFlags, 0);
-    target.cornerCenters.set(mesh.cornerCenters, 0);
-    target.cornerAngles.set(mesh.cornerAngles, 0);
-    target.cornerTravels.set(mesh.cornerTravels, 0);
-  }
-  if (indexCount > 0) {
-    target.indices.set(mesh.indices, 0);
-  }
-
-  target.vertexCount = vertexCount;
-  target.indexCount = indexCount;
-  target.mainTravel = Number(mesh?.mainTravel) || 0;
+  target.vertexCount = 0;
+  target.indexCount = 0;
+  target.mainTravel = 0;
   return target;
 };
 
 const buildUnifiedPathMeshInto = (points, options = {}, out) => {
-  const mesh = buildUnifiedPathMesh(points, options);
-  return copyIntoMutableMeshStorage(mesh, out);
+  const build = createUnifiedPathMeshBuildState(points, options);
+  if (!build) return resetMutableMeshStorage(out);
+  const counts = countUnifiedPathMeshGeometry(build);
+  const target = out || createMutableMeshStorage();
+  target.positions = ensureFloatCapacity(target.positions, counts.vertexCount * 2);
+  target.travels = ensureFloatCapacity(target.travels, counts.vertexCount);
+  target.cornerFlags = ensureFloatCapacity(target.cornerFlags, counts.vertexCount);
+  target.cornerCenters = ensureFloatCapacity(target.cornerCenters, counts.vertexCount * 2);
+  target.cornerAngles = ensureFloatCapacity(target.cornerAngles, counts.vertexCount * 2);
+  target.cornerTravels = ensureFloatCapacity(target.cornerTravels, counts.vertexCount * 2);
+  target.indices = ensureIndexCapacity(target.indices, counts.indexCount);
+  return fillUnifiedPathMeshStorage(build, target);
 };
 
 const toFiniteCenter = (point) => {
@@ -666,85 +755,84 @@ const createMutableBracketStorage = () => ({
   indexCount: 0,
 });
 
-const copyIntoMutableBracketStorage = (mesh, out) => {
+const resetMutableBracketStorage = (out) => {
   const target = out || createMutableBracketStorage();
-  const vertexCount = Number(mesh?.vertexCount) || 0;
-  const indexCount = Number(mesh?.indexCount) || 0;
-  target.centers = ensureFloatCapacity(target.centers, vertexCount * 2);
-  target.corners = ensureFloatCapacity(target.corners, vertexCount * 2);
-  target.indices = ensureIndexCapacity(target.indices, indexCount);
-
-  if (vertexCount > 0) {
-    target.centers.set(mesh.centers, 0);
-    target.corners.set(mesh.corners, 0);
-  }
-  if (indexCount > 0) {
-    target.indices.set(mesh.indices, 0);
-  }
-
-  target.vertexCount = vertexCount;
-  target.indexCount = indexCount;
+  target.vertexCount = 0;
+  target.indexCount = 0;
   return target;
 };
 
-export const buildTutorialBracketMesh = (centers) => {
-  if (!Array.isArray(centers) || centers.length === 0) return createEmptyBracketMesh();
-  const safeCenters = centers
+const getSafeBracketCenters = (centers) => {
+  if (!Array.isArray(centers) || centers.length === 0) return [];
+  return centers
     .map(toFiniteCenter)
     .filter(Boolean);
-  if (safeCenters.length === 0) return createEmptyBracketMesh();
+};
 
+const fillTutorialBracketMeshStorage = (safeCenters, target) => {
   const maxBracketCount = Math.floor(65535 / 4);
   const bracketCount = Math.min(safeCenters.length, maxBracketCount);
-  const positions = new Float32Array(bracketCount * 8);
-  const corners = new Float32Array(bracketCount * 8);
-  const indices = new Uint16Array(bracketCount * 6);
   let vertexBase = 0;
   let indexBase = 0;
 
   for (let i = 0; i < bracketCount; i++) {
     const center = safeCenters[i];
     const vertexOffset = i * 8;
-    positions[vertexOffset] = center.x;
-    positions[vertexOffset + 1] = center.y;
-    positions[vertexOffset + 2] = center.x;
-    positions[vertexOffset + 3] = center.y;
-    positions[vertexOffset + 4] = center.x;
-    positions[vertexOffset + 5] = center.y;
-    positions[vertexOffset + 6] = center.x;
-    positions[vertexOffset + 7] = center.y;
+    target.centers[vertexOffset] = center.x;
+    target.centers[vertexOffset + 1] = center.y;
+    target.centers[vertexOffset + 2] = center.x;
+    target.centers[vertexOffset + 3] = center.y;
+    target.centers[vertexOffset + 4] = center.x;
+    target.centers[vertexOffset + 5] = center.y;
+    target.centers[vertexOffset + 6] = center.x;
+    target.centers[vertexOffset + 7] = center.y;
 
-    corners[vertexOffset] = -1;
-    corners[vertexOffset + 1] = -1;
-    corners[vertexOffset + 2] = -1;
-    corners[vertexOffset + 3] = 1;
-    corners[vertexOffset + 4] = 1;
-    corners[vertexOffset + 5] = -1;
-    corners[vertexOffset + 6] = 1;
-    corners[vertexOffset + 7] = 1;
+    target.corners[vertexOffset] = -1;
+    target.corners[vertexOffset + 1] = -1;
+    target.corners[vertexOffset + 2] = -1;
+    target.corners[vertexOffset + 3] = 1;
+    target.corners[vertexOffset + 4] = 1;
+    target.corners[vertexOffset + 5] = -1;
+    target.corners[vertexOffset + 6] = 1;
+    target.corners[vertexOffset + 7] = 1;
 
-    indices[indexBase] = vertexBase;
-    indices[indexBase + 1] = vertexBase + 1;
-    indices[indexBase + 2] = vertexBase + 2;
-    indices[indexBase + 3] = vertexBase + 2;
-    indices[indexBase + 4] = vertexBase + 1;
-    indices[indexBase + 5] = vertexBase + 3;
+    target.indices[indexBase] = vertexBase;
+    target.indices[indexBase + 1] = vertexBase + 1;
+    target.indices[indexBase + 2] = vertexBase + 2;
+    target.indices[indexBase + 3] = vertexBase + 2;
+    target.indices[indexBase + 4] = vertexBase + 1;
+    target.indices[indexBase + 5] = vertexBase + 3;
     vertexBase += 4;
     indexBase += 6;
   }
 
-  return {
-    centers: positions,
-    corners,
-    indices,
-    vertexCount: bracketCount * 4,
-    indexCount: bracketCount * 6,
-  };
+  target.vertexCount = bracketCount * 4;
+  target.indexCount = bracketCount * 6;
+  return target;
+};
+
+export const buildTutorialBracketMesh = (centers) => {
+  const safeCenters = getSafeBracketCenters(centers);
+  if (safeCenters.length === 0) return createEmptyBracketMesh();
+  const bracketCount = Math.min(safeCenters.length, Math.floor(65535 / 4));
+  return fillTutorialBracketMeshStorage(safeCenters, {
+    centers: new Float32Array(bracketCount * 8),
+    corners: new Float32Array(bracketCount * 8),
+    indices: new Uint16Array(bracketCount * 6),
+    vertexCount: 0,
+    indexCount: 0,
+  });
 };
 
 const buildTutorialBracketMeshInto = (centers, out) => {
-  const mesh = buildTutorialBracketMesh(centers);
-  return copyIntoMutableBracketStorage(mesh, out);
+  const safeCenters = getSafeBracketCenters(centers);
+  if (safeCenters.length === 0) return resetMutableBracketStorage(out);
+  const bracketCount = Math.min(safeCenters.length, Math.floor(65535 / 4));
+  const target = out || createMutableBracketStorage();
+  target.centers = ensureFloatCapacity(target.centers, bracketCount * 8);
+  target.corners = ensureFloatCapacity(target.corners, bracketCount * 8);
+  target.indices = ensureIndexCapacity(target.indices, bracketCount * 6);
+  return fillTutorialBracketMeshStorage(safeCenters, target);
 };
 
 const createShader = (gl, type, source) => {
