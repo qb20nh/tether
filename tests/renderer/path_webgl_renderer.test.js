@@ -440,6 +440,36 @@ test('createPathWebglRenderer throws when WebGL2 is unavailable', () => {
   }, /WebGL2 is required for path rendering/);
 });
 
+test('createPathWebglRenderer forwards the antialias option to WebGL2 context creation', () => {
+  const originalWindow = globalThis.window;
+  globalThis.window = { devicePixelRatio: 1 };
+  try {
+    const fake = createFakeWebgl2();
+    const contextOptions = [];
+    const fakeCanvas = {
+      width: 0,
+      height: 0,
+      clientWidth: 100,
+      clientHeight: 100,
+      style: {},
+      getContext(kind, options) {
+        if (kind === 'webgl2') {
+          contextOptions.push(options);
+          return fake.gl;
+        }
+        return null;
+      },
+    };
+
+    const renderer = createPathWebglRenderer(fakeCanvas, { antialias: false });
+    assert.equal(contextOptions.at(-1)?.antialias, false);
+    assert.equal(renderer.antialiasEnabled, false);
+    renderer.destroy();
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
 test('createPathWebglRenderer skips geometry uploads when geometry is unchanged', () => {
   const originalWindow = globalThis.window;
   globalThis.window = { devicePixelRatio: 1 };

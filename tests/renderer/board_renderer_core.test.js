@@ -138,6 +138,15 @@ class FakeElement {
     if (this.parentElement) this.parentElement.removeChild(this);
   }
 
+  replaceWith(replacement) {
+    if (!this.parentElement) return;
+    const index = this.parentElement.children.indexOf(this);
+    if (index < 0) return;
+    replacement.parentElement = this.parentElement;
+    this.parentElement.children[index] = replacement;
+    this.parentElement = null;
+  }
+
   setBoundingClientRect(rect = {}) {
     this._rect = {
       left: Number(rect.left) || 0,
@@ -424,6 +433,64 @@ const flushNextTimeout = (env) => {
   return true;
 };
 
+const createFakeWebgl2 = () => {
+  let nextId = 1;
+  return {
+    gl: {
+      VERTEX_SHADER: 0x8b31,
+      FRAGMENT_SHADER: 0x8b30,
+      COMPILE_STATUS: 0x8b81,
+      LINK_STATUS: 0x8b82,
+      ARRAY_BUFFER: 0x8892,
+      ELEMENT_ARRAY_BUFFER: 0x8893,
+      DYNAMIC_DRAW: 0x88e8,
+      DEPTH_TEST: 0x0b71,
+      CULL_FACE: 0x0b44,
+      BLEND: 0x0be2,
+      SRC_ALPHA: 0x0302,
+      ONE_MINUS_SRC_ALPHA: 0x0303,
+      COLOR_BUFFER_BIT: 0x4000,
+      TRIANGLES: 0x0004,
+      UNSIGNED_SHORT: 0x1403,
+      FLOAT: 0x1406,
+      createShader() { return { id: nextId++ }; },
+      shaderSource() {},
+      compileShader() {},
+      getShaderParameter() { return true; },
+      getShaderInfoLog() { return ''; },
+      deleteShader() {},
+      createProgram() { return { id: nextId++ }; },
+      attachShader() {},
+      linkProgram() {},
+      getProgramParameter() { return true; },
+      getProgramInfoLog() { return ''; },
+      deleteProgram() {},
+      createVertexArray() { return { id: nextId++ }; },
+      createBuffer() { return { id: nextId++ }; },
+      bindVertexArray() {},
+      bindBuffer() {},
+      enableVertexAttribArray() {},
+      vertexAttribPointer() {},
+      disable() {},
+      enable() {},
+      blendFunc() {},
+      clearColor() {},
+      clear() {},
+      viewport() {},
+      useProgram() {},
+      bufferData() {},
+      bufferSubData() {},
+      uniform2f() {},
+      uniform1f() {},
+      uniform3f() {},
+      drawElements() {},
+      deleteBuffer() {},
+      deleteVertexArray() {},
+      getUniformLocation() { return { id: nextId++ }; },
+    },
+  };
+};
+
 const createFakePathRenderer = () => ({
   calls: [],
   destroyed: false,
@@ -497,6 +564,42 @@ const createShellRefs = () => {
     msgEl: new FakeElement('div'),
     legend: new FakeElement('div'),
     pathRenderer: createFakePathRenderer(),
+  };
+};
+
+const createShellRefsWithWebglCanvas = () => {
+  const refs = createShellRefs();
+  const contextOptions = [];
+  const installWebglContext = (canvas) => {
+    const fallbackGetContext = canvas.getContext.bind(canvas);
+    canvas.getContext = (kind, options) => {
+      if (kind === 'webgl2') {
+        contextOptions.push({ canvas, options });
+        return createFakeWebgl2().gl;
+      }
+      return fallbackGetContext(kind, options);
+    };
+    return canvas;
+  };
+  refs.pathRenderer = null;
+  installWebglContext(refs.canvas);
+
+  const documentRef = globalThis.document;
+  const originalCreateElement = documentRef.createElement;
+  documentRef.createElement = (tagName) => {
+    const element = originalCreateElement.call(documentRef, tagName);
+    if (String(tagName).toLowerCase() === 'canvas') {
+      return installWebglContext(element);
+    }
+    return element;
+  };
+
+  return {
+    refs,
+    contextOptions,
+    restore() {
+      documentRef.createElement = originalCreateElement;
+    },
   };
 };
 
@@ -975,6 +1078,37 @@ test('createBoardRendererCore low power mode halves effective DPR, suppresses an
 
   assert.equal(counters.heavyFrameRenders, 2);
   assert.equal(refs.pathRenderer.calls.at(-1)?.pointCount, 3);
+});
+
+test('createBoardRendererCore recreates the WebGL path renderer without antialiasing in low power mode', (t) => {
+  const env = installRendererEnv(t);
+  env.setNowMs(1000);
+
+  const snapshot = createSnapshot({
+    gridData: [['.', '.', '.']],
+    path: [
+      { r: 0, c: 0 },
+      { r: 0, c: 1 },
+    ],
+  });
+  const core = createBoardRendererCore();
+  const { refs, contextOptions, restore } = createShellRefsWithWebglCanvas();
+  t.after(restore);
+  const initialCanvas = refs.canvas;
+
+  core.mount(refs);
+  core.rebuildGrid(snapshot);
+  core.resize();
+  assert.equal(contextOptions.at(-1)?.options?.antialias, true);
+
+  core.setLowPowerMode(true);
+  assert.notEqual(refs.canvas, initialCanvas);
+  assert.equal(contextOptions.at(-1)?.options?.antialias, false);
+  const lowPowerCanvas = refs.canvas;
+
+  core.setLowPowerMode(false);
+  assert.notEqual(refs.canvas, lowPowerCanvas);
+  assert.equal(contextOptions.at(-1)?.options?.antialias, true);
 });
 
 test('createBoardRendererCore does not rewrite message DOM when message content is unchanged', (t) => {

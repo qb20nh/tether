@@ -2380,6 +2380,17 @@ const createReplacementPathCanvas = (canvas) => {
   return replacement;
 };
 
+const shouldPathRendererUseAntialias = () => !lowPowerModeEnabled;
+
+const createPathRenderer = (canvas) => createPathWebglRenderer(canvas, {
+  antialias: shouldPathRendererUseAntialias(),
+});
+
+const pathRendererAntialiasMismatch = (renderer) => (
+  typeof renderer?.antialiasEnabled === 'boolean'
+  && renderer.antialiasEnabled !== shouldPathRendererUseAntialias()
+);
+
 const ensurePathRenderer = (refs) => {
   const allowRecovery = refs?.allowRecovery !== false;
   const targetRefs = refs?.refs || refs;
@@ -2389,13 +2400,28 @@ const ensurePathRenderer = (refs) => {
   if (!currentCanvas) return currentRenderer;
 
   const rendererLost = Boolean(currentRenderer?.isContextLost?.());
-  if (currentRenderer && !rendererLost) return currentRenderer;
+  const antialiasMismatch = !rendererLost && pathRendererAntialiasMismatch(currentRenderer);
+  if (currentRenderer && !rendererLost && !antialiasMismatch) return currentRenderer;
+  if (antialiasMismatch && !allowRecovery) return currentRenderer;
   if (!allowRecovery) return null;
+  if (antialiasMismatch && (!currentCanvas.parentElement || typeof currentCanvas.replaceWith !== 'function')) {
+    return currentRenderer;
+  }
 
-  const currentNow = nowMs();
-  const elapsedMs = currentNow - lastPathRendererRecoveryAttemptMs;
-  if (elapsedMs < PATH_RENDERER_RECOVERY_COOLDOWN_MS) return null;
-  lastPathRendererRecoveryAttemptMs = currentNow;
+  if (!antialiasMismatch) {
+    const currentNow = nowMs();
+    const elapsedMs = currentNow - lastPathRendererRecoveryAttemptMs;
+    if (elapsedMs < PATH_RENDERER_RECOVERY_COOLDOWN_MS) return null;
+    lastPathRendererRecoveryAttemptMs = currentNow;
+  }
+
+  let nextCanvas = currentCanvas;
+  if ((rendererLost || antialiasMismatch) && currentCanvas.parentElement && typeof currentCanvas.replaceWith === 'function') {
+    const replacement = createReplacementPathCanvas(currentCanvas);
+    currentCanvas.replaceWith(replacement);
+    targetRefs.canvas = replacement;
+    nextCanvas = replacement;
+  }
 
   if (currentRenderer) {
     try {
@@ -2406,16 +2432,8 @@ const ensurePathRenderer = (refs) => {
     targetRefs.pathRenderer = null;
   }
 
-  let nextCanvas = currentCanvas;
-  if (rendererLost && currentCanvas.isConnected && typeof currentCanvas.replaceWith === 'function') {
-    const replacement = createReplacementPathCanvas(currentCanvas);
-    currentCanvas.replaceWith(replacement);
-    targetRefs.canvas = replacement;
-    nextCanvas = replacement;
-  }
-
   try {
-    targetRefs.pathRenderer = createPathWebglRenderer(nextCanvas);
+    targetRefs.pathRenderer = createPathRenderer(nextCanvas);
     resizeCanvasSignature = '';
     return targetRefs.pathRenderer;
   } catch {
@@ -2526,7 +2544,7 @@ function cacheElements() {
 
   if (result.canvas) {
     try {
-      result.pathRenderer = createPathWebglRenderer(result.canvas);
+      result.pathRenderer = createPathRenderer(result.canvas);
     } catch {
       result.pathRenderer = null;
     }

@@ -1120,11 +1120,12 @@ const toRgb01Into = (color, out) => {
   return out;
 };
 
-export function createPathWebglRenderer(canvas) {
+export function createPathWebglRenderer(canvas, options = {}) {
   if (!canvas) throw new Error('Path canvas is required');
+  const antialiasEnabled = options.antialias !== false;
   const gl = canvas.getContext('webgl2', {
     alpha: true,
-    antialias: true,
+    antialias: antialiasEnabled,
     depth: false,
     stencil: false,
     premultipliedAlpha: true,
@@ -2043,6 +2044,7 @@ export function createPathWebglRenderer(canvas) {
   resize(canvas.clientWidth || 1, canvas.clientHeight || 1, window.devicePixelRatio || 1);
 
   return {
+    antialiasEnabled,
     resize,
     clear,
     drawPathFrame,
