@@ -32,6 +32,7 @@ import { createPathTransitionCompensationBuffer } from './path_transition_compen
 export function createBoardRendererCore(options = {}) {
 const icons = options.icons || {};
 const iconX = options.iconX || '';
+const debugCounters = options.debugCounters || null;
 let refs = null;
 let gridCells = [];
 let lastDropTargetKey = null;
@@ -45,9 +46,18 @@ let pathAnimationLastTs = 0;
 let latestPathSnapshot = null;
 let latestPathRefs = null;
 let latestPathStatuses = null;
+let latestPathStatusSets = null;
 let latestCompletionModel = null;
 let latestTutorialFlags = null;
 let latestInteractionModel = null;
+let pendingRenderState = null;
+const pendingRenderDirty = {
+  cells: false,
+  path: false,
+  symbols: false,
+  message: false,
+  interaction: false,
+};
 let latestPathMainFlowTravel = 0;
 let colorParserCtx = null;
 let reusablePathPoints = [];
@@ -60,6 +70,10 @@ let pathThemeLineRaw = '';
 let pathThemeGoodRaw = '';
 let pathThemeMainRgb = { r: 255, g: 255, b: 255 };
 let pathThemeCompleteRgb = { r: 34, g: 197, b: 94 };
+let pathThemeBadRaw = '#e85c5c';
+let pathThemeStitchShadowRaw = '#0a111b';
+let pathThemeCornerPending = '#ffffff';
+let pathThemeCornerFill = 'rgb(11, 15, 20)';
 let pathGeometryToken = 0;
 let cachedPathRef = null;
 let cachedPathLength = -1;
@@ -241,6 +255,20 @@ let reusableStartRetainedArcPoints = [];
 let reusableEndRetainedArcPoints = [];
 const pathStartTipHoverScaleState = { fromScale: 1, toScale: 1, startTimeMs: NaN };
 const pathEndTipHoverScaleState = { fromScale: 1, toScale: 1, startTimeMs: NaN };
+
+const incrementDebugCounter = (name, amount = 1) => {
+  if (!debugCounters || typeof name !== 'string') return;
+  const previous = Number(debugCounters[name]) || 0;
+  debugCounters[name] = previous + amount;
+};
+
+const clearPendingRenderDirty = () => {
+  pendingRenderDirty.cells = false;
+  pendingRenderDirty.path = false;
+  pendingRenderDirty.symbols = false;
+  pendingRenderDirty.message = false;
+  pendingRenderDirty.interaction = false;
+};
 
 const easeOutCubic = (unit) => {
   const t = clampUnit(unit);
@@ -1443,13 +1471,88 @@ const stopPathAnimation = () => {
   pathAnimationLastTs = 0;
 };
 
-const animatePathFlow = (timestamp) => {
-  pathAnimationFrame = 0;
+const advancePathFlowOffset = (timestamp, flowMix, shouldAnimateFlow) => {
+  if (!shouldAnimateFlow || flowMix <= PATH_FLOW_FREEZE_EPSILON || pathAnimationLastTs <= 0) return;
+  const dt = Math.max(0, (timestamp - pathAnimationLastTs) / 1000);
+  if (!Number.isFinite(dt)) return;
+  const baseFlowSpeed = Number.isFinite(pathFramePayload.flowBaseSpeed)
+    ? pathFramePayload.flowBaseSpeed
+    : PATH_FLOW_SPEED;
+  const flowSpeed = baseFlowSpeed * clampUnit(flowMix);
+  pathFramePayload.flowSpeed = flowSpeed;
+  const flowCycle = Number.isFinite(pathFramePayload.flowCycle) && pathFramePayload.flowCycle > 0
+    ? pathFramePayload.flowCycle
+    : PATH_FLOW_CYCLE;
+  pathAnimationOffset = normalizeFlowOffset(
+    pathAnimationOffset + (dt * flowSpeed),
+    flowCycle,
+  );
+};
+
+const flushPendingRenderFrame = (timestamp) => {
+  const frame = pendingRenderState;
+  pendingRenderState = null;
+  if (!frame || !refs) {
+    clearPendingRenderDirty();
+    return false;
+  }
+
+  const tutorialFlags = frame.uiModel?.tutorialFlags || null;
+  const interactionModel = latestInteractionModel || {};
+
+  if (pendingRenderDirty.cells) {
+    updateCells(
+      frame.snapshot,
+      frame.evaluation,
+      refs,
+      frame.completion,
+      interactionModel,
+      tutorialFlags,
+    );
+  } else {
+    syncPathTipDragHoverCell(interactionModel);
+    pathAnimationEngine.setInteractionModel(interactionModel);
+  }
+
+  if (
+    pendingRenderDirty.message
+    && Object.prototype.hasOwnProperty.call(frame.uiModel || {}, 'messageHtml')
+  ) {
+    setMessage(refs.msgEl, frame.uiModel.messageKind || null, frame.uiModel.messageHtml || '');
+  }
+
+  if (pendingRenderDirty.interaction || pendingRenderDirty.cells) {
+    applyInteractionState(interactionModel);
+  }
+
+  const nowMs = getNowMs();
+  syncPathFlowFreezeTarget(isPathFlowFrozen(), nowMs);
+  const flowFreeze = resolvePathFlowFreezeMix(nowMs, pathFlowFreezeMixScratch);
+  advancePathFlowOffset(
+    timestamp,
+    flowFreeze.mix,
+    shouldAnimatePathFlow(frame.snapshot, frame.completion, tutorialFlags),
+  );
+
+  clearPendingRenderDirty();
+  incrementDebugCounter('heavyFrameRenders');
+  const shouldContinue = drawAllImpl(
+    frame.snapshot,
+    refs,
+    frame.evaluation,
+    frame.completion,
+    tutorialFlags,
+  );
+  pathAnimationLastTs = shouldContinue ? timestamp : 0;
+  return shouldContinue;
+};
+
+const runAnimationOnlyFrame = (timestamp) => {
   const nowMs = getNowMs();
 
   if (!latestPathSnapshot || !latestPathRefs) {
-    stopPathAnimation();
-    return;
+    pathAnimationLastTs = 0;
+    return false;
   }
 
   syncPathFlowFreezeTarget(isPathFlowFrozen(), nowMs);
@@ -1480,55 +1583,61 @@ const animatePathFlow = (timestamp) => {
     pathFramePayload.flowCycle,
     nowMs,
   );
-  if (
-    !animateFlow
-    && !animateFlowVisibility
-    && !flowFreeze.active
-    && !animateTipArrivals
-    && !animateRetainedArc
-    && !animateEndArrowRotate
-    && !animateStartFlowRotate
-    && !animateStartPinPresence
-    && !animateTipHoverScale
-    && !animateReverseTipSwap
-    && !animateReverseGradientBlend
-  ) {
-    stopPathAnimation();
-    drawAllInternal(latestPathSnapshot, latestPathRefs, latestPathStatuses, 0, latestCompletionModel);
-    return;
+  const shouldContinue = (
+    flowFreeze.active
+    || animateFlow
+    || animateFlowVisibility
+    || animateTipArrivals
+    || animateRetainedArc
+    || animateEndArrowRotate
+    || animateStartFlowRotate
+    || animateStartPinPresence
+    || animateTipHoverScale
+    || animateReverseTipSwap
+    || animateReverseGradientBlend
+  );
+
+  if (!shouldContinue) {
+    pathAnimationLastTs = 0;
+    drawAllInternal(
+      latestPathSnapshot,
+      latestPathRefs,
+      latestPathStatuses,
+      0,
+      latestCompletionModel,
+      latestTutorialFlags,
+    );
+    return false;
   }
 
-  if ((animateFlow || animateFlowVisibility) && pathAnimationLastTs > 0) {
-    const dt = Math.max(0, (timestamp - pathAnimationLastTs) / 1000);
-    if (Number.isFinite(dt)) {
-      const baseFlowSpeed = Number.isFinite(pathFramePayload.flowBaseSpeed)
-        ? pathFramePayload.flowBaseSpeed
-        : PATH_FLOW_SPEED;
-      const flowSpeed = baseFlowSpeed * clampUnit(flowFreeze.mix);
-      pathFramePayload.flowSpeed = flowSpeed;
-      const flowCycle = Number.isFinite(pathFramePayload.flowCycle) && pathFramePayload.flowCycle > 0
-        ? pathFramePayload.flowCycle
-        : PATH_FLOW_CYCLE;
-      pathAnimationOffset = normalizeFlowOffset(
-        pathAnimationOffset + dt * flowSpeed,
-        flowCycle,
-      );
-    }
-  }
+  advancePathFlowOffset(timestamp, flowFreeze.mix, animateFlow || animateFlowVisibility);
 
   pathAnimationLastTs = timestamp;
-  if (latestPathSnapshot && latestPathRefs) {
-    const flowOffset = (animateFlow || animateFlowVisibility || flowFreeze.active) ? pathAnimationOffset : 0;
-    drawIdleAnimatedPath(flowOffset, latestCompletionModel, nowMs);
-  }
-
-  pathAnimationFrame = requestAnimationFrame(animatePathFlow);
+  const flowOffset = (animateFlow || animateFlowVisibility || flowFreeze.active) ? pathAnimationOffset : 0;
+  drawIdleAnimatedPath(flowOffset, latestCompletionModel, nowMs);
+  return true;
 };
 
-const schedulePathAnimation = () => {
+const runRendererFrame = (timestamp) => {
+  pathAnimationFrame = 0;
+  let shouldContinue = false;
+  if (pendingRenderState) {
+    shouldContinue = flushPendingRenderFrame(timestamp);
+  } else {
+    if (pendingRenderDirty.interaction) {
+      applyInteractionState(latestInteractionModel || {});
+      pendingRenderDirty.interaction = false;
+    }
+    shouldContinue = runAnimationOnlyFrame(timestamp);
+  }
+  if (pendingRenderState || pendingRenderDirty.interaction || shouldContinue) {
+    pathAnimationFrame = requestAnimationFrame(runRendererFrame);
+  }
+};
+
+const scheduleRendererFrame = () => {
   if (pathAnimationFrame) return;
-  pathAnimationLastTs = 0;
-  pathAnimationFrame = requestAnimationFrame(animatePathFlow);
+  pathAnimationFrame = requestAnimationFrame(runRendererFrame);
 };
 
 
@@ -1700,6 +1809,9 @@ const updatePathThemeCache = (refs = latestPathRefs) => {
   const styles = getComputedStyle(styleTarget);
   const nextLineRaw = forceOpaqueColor(styles.getPropertyValue('--line').trim());
   const nextGoodRaw = resolveThemeGoodColor(styles, '#16a34a');
+  const nextBadRaw = forceOpaqueColor(styles.getPropertyValue('--bad').trim() || '#e85c5c');
+  const nextStitchShadowRaw = forceOpaqueColor(styles.getPropertyValue('--stitchShadow').trim() || '#0a111b');
+  const isLightTheme = Boolean(document?.documentElement?.classList?.contains('theme-light'));
 
   if (!pathThemeCacheInitialized || pathThemeLineRaw !== nextLineRaw) {
     const parsed = parseColorToRgb(nextLineRaw, pathThemeMainRgb);
@@ -1711,6 +1823,10 @@ const updatePathThemeCache = (refs = latestPathRefs) => {
     if (parsed) pathThemeCompleteRgb = parsed;
     pathThemeGoodRaw = nextGoodRaw;
   }
+  pathThemeBadRaw = nextBadRaw;
+  pathThemeStitchShadowRaw = nextStitchShadowRaw;
+  pathThemeCornerPending = isLightTheme ? '#0f172a' : '#ffffff';
+  pathThemeCornerFill = isLightTheme ? 'rgb(248, 251, 255)' : 'rgb(11, 15, 20)';
   pathThemeCacheInitialized = true;
 };
 
@@ -1972,6 +2088,7 @@ const drawIdleAnimatedPath = (
   }
   pathFramePayload.isCompletionSolved = Boolean(completionModel?.isSolved);
   pathFramePayload.completionProgress = getCompletionProgress(completionModel);
+  incrementDebugCounter('pathDraws');
   latestPathMainFlowTravel = pathRenderer.drawPathFrame(pathFramePayload);
 
   if (latestTutorialFlags?.path || latestTutorialFlags?.movable) {
@@ -2465,6 +2582,11 @@ const createGhost = () => {
 
 const getGridCanvasOffset = (refs, out = null) => {
   const target = out || { x: 0, y: 0 };
+  if (pathLayoutMetrics.ready) {
+    target.x = pathLayoutMetrics.offsetX;
+    target.y = pathLayoutMetrics.offsetY;
+    return target;
+  }
   if (!refs.gridEl || !refs.boardWrap) {
     target.x = 0;
     target.y = 0;
@@ -2480,16 +2602,28 @@ const getGridCanvasOffset = (refs, out = null) => {
 };
 
 const getCellPoint = (r, c, refs, offset = { x: 0, y: 0 }, out = null) => {
-  const p = cellCenter(r, c, refs.gridEl);
   const target = out || { x: 0, y: 0 };
+  if (pathLayoutMetrics.ready) {
+    const step = pathLayoutMetrics.cell + pathLayoutMetrics.gap;
+    target.x = pathLayoutMetrics.pad + (c * step) + (pathLayoutMetrics.cell * 0.5) + offset.x;
+    target.y = pathLayoutMetrics.pad + (r * step) + (pathLayoutMetrics.cell * 0.5) + offset.y;
+    return target;
+  }
+  const p = cellCenter(r, c, refs.gridEl);
   target.x = p.x + offset.x;
   target.y = p.y + offset.y;
   return target;
 };
 
 const getVertexPoint = (r, c, refs, offset = { x: 0, y: 0 }, out = null) => {
-  const p = vertexPos(r, c, refs.gridEl);
   const target = out || { x: 0, y: 0 };
+  if (pathLayoutMetrics.ready) {
+    const step = pathLayoutMetrics.cell + pathLayoutMetrics.gap;
+    target.x = pathLayoutMetrics.pad + (c * step) - (pathLayoutMetrics.gap * 0.5) + offset.x;
+    target.y = pathLayoutMetrics.pad + (r * step) - (pathLayoutMetrics.gap * 0.5) + offset.y;
+    return target;
+  }
+  const p = vertexPos(r, c, refs.gridEl);
   target.x = p.x + offset.x;
   target.y = p.y + offset.y;
   return target;
@@ -2699,33 +2833,68 @@ const addStatusDeltaKeys = (nextSet, prevSet, out) => {
   });
 };
 
-const hasSamePrefixPath = (nextPath, prevPath, length) => {
-  for (let i = 0; i < length; i++) {
-    const next = nextPath[i];
-    const prev = prevPath[i];
-    if (!next || !prev || next.r !== prev.r || next.c !== prev.c) return false;
+const buildStatusSets = (results = {}) => ({
+  badHint: statusKeySet(results.hintStatus?.badKeys),
+  goodHint: statusKeySet(results.hintStatus?.goodKeys),
+  badRps: statusKeySet(results.rpsStatus?.badKeys),
+  goodRps: statusKeySet(results.rpsStatus?.goodKeys),
+  badBlocked: statusKeySet(results.blockedStatus?.badKeys),
+});
+
+const addPathKeys = (path, out) => {
+  if (!Array.isArray(path)) return;
+  for (let i = 0; i < path.length; i++) {
+    const point = path[i];
+    if (!point) continue;
+    out.add(keyOf(point.r, point.c));
   }
-  return true;
 };
 
-const resolveTailPathDelta = (prevPath, nextPath) => {
+const resolveEndpointPathDelta = (prevPath, nextPath) => {
   if (!Array.isArray(prevPath) || !Array.isArray(nextPath)) return null;
   const prevLen = prevPath.length;
   const nextLen = nextPath.length;
-  if (nextLen === prevLen + 1) {
-    if (!hasSamePrefixPath(nextPath, prevPath, prevLen)) return null;
+  const shared = Math.min(prevLen, nextLen);
+
+  let prefixLength = 0;
+  while (prefixLength < shared && pointsMatch(prevPath[prefixLength], nextPath[prefixLength])) {
+    prefixLength += 1;
+  }
+  if (prefixLength === shared) {
     return {
-      prevTail: prevLen > 0 ? prevPath[prevLen - 1] : null,
-      nextTail: nextPath[nextLen - 1] || null,
+      side: 'end',
+      prevChanged: prevPath.slice(prefixLength),
+      nextChanged: nextPath.slice(prefixLength),
     };
   }
-  if (nextLen === prevLen - 1) {
-    if (!hasSamePrefixPath(nextPath, prevPath, nextLen)) return null;
+
+  let suffixLength = 0;
+  while (
+    suffixLength < shared
+    && pointsMatch(
+      prevPath[prevLen - 1 - suffixLength],
+      nextPath[nextLen - 1 - suffixLength],
+    )
+  ) {
+    suffixLength += 1;
+  }
+
+  if (suffixLength === 0 && prefixLength > 0) {
     return {
-      prevTail: prevLen > 0 ? prevPath[prevLen - 1] : null,
-      nextTail: nextLen > 0 ? nextPath[nextLen - 1] : null,
+      side: 'end',
+      prevChanged: prevPath.slice(prefixLength),
+      nextChanged: nextPath.slice(prefixLength),
     };
   }
+
+  if (prefixLength === 0 && suffixLength > 0) {
+    return {
+      side: 'start',
+      prevChanged: prevPath.slice(0, prevLen - suffixLength),
+      nextChanged: nextPath.slice(0, nextLen - suffixLength),
+    };
+  }
+
   return null;
 };
 
@@ -2797,54 +2966,56 @@ const clearPathTipDragHoverCell = () => {
 };
 
 const syncPathTipDragHoverCell = (interactionModel = null, cells = gridCells) => {
-  clearPathTipDragHoverCell();
-  if (!interactionModel?.isPathDragging) return;
+  let nextCell = null;
+  if (interactionModel?.isPathDragging) {
   const cursor = interactionModel.pathDragCursor;
   const cursorR = Number(cursor?.r);
   const cursorC = Number(cursor?.c);
-  if (!Number.isInteger(cursorR) || !Number.isInteger(cursorC)) return;
+    if (Number.isInteger(cursorR) && Number.isInteger(cursorC)) {
+      const cell = cells[cursorR]?.[cursorC];
+      if (cell && !cell.classList.contains('wall')) {
+        nextCell = cell;
+      }
+    }
+  }
 
-  const cell = cells[cursorR]?.[cursorC];
-  if (!cell) return;
-  if (cell.classList.contains('wall')) return;
-  cell.classList.add('pathTipDragHover');
-  lastPathTipDragHoverCell = cell;
+  if (nextCell === lastPathTipDragHoverCell) return;
+  clearPathTipDragHoverCell();
+  if (!nextCell) return;
+  nextCell.classList.add('pathTipDragHover');
+  lastPathTipDragHoverCell = nextCell;
 };
 
-const tryApplyIncrementalEndDragUpdate = (snapshot, results, interactionModel = null) => {
-  if (!interactionModel?.isPathDragging || interactionModel.pathDragSide !== 'end') return false;
+const tryApplyIncrementalPathUpdate = (snapshot, results) => {
   const prevSnapshot = latestPathSnapshot;
   if (!prevSnapshot) return false;
   if (snapshot.rows !== prevSnapshot.rows || snapshot.cols !== prevSnapshot.cols) return false;
   if (snapshot.gridData !== prevSnapshot.gridData) return false;
 
-  const delta = resolveTailPathDelta(prevSnapshot.path, snapshot.path);
+  const delta = resolveEndpointPathDelta(prevSnapshot.path, snapshot.path);
   if (!delta) return false;
 
-  const hintStatus = results.hintStatus || {};
-  const rpsStatus = results.rpsStatus || {};
-  const blockedStatus = results.blockedStatus || {};
-  const prevHintStatus = latestPathStatuses?.hintStatus || {};
-  const prevRpsStatus = latestPathStatuses?.rpsStatus || {};
-  const prevBlockedStatus = latestPathStatuses?.blockedStatus || {};
-  const statusSets = {
-    badHint: statusKeySet(hintStatus.badKeys),
-    goodHint: statusKeySet(hintStatus.goodKeys),
-    badRps: statusKeySet(rpsStatus.badKeys),
-    goodRps: statusKeySet(rpsStatus.goodKeys),
-    badBlocked: statusKeySet(blockedStatus.badKeys),
-  };
-  const prevSets = {
-    badHint: statusKeySet(prevHintStatus.badKeys),
-    goodHint: statusKeySet(prevHintStatus.goodKeys),
-    badRps: statusKeySet(prevRpsStatus.badKeys),
-    goodRps: statusKeySet(prevRpsStatus.goodKeys),
-    badBlocked: statusKeySet(prevBlockedStatus.badKeys),
-  };
+  const statusSets = buildStatusSets(results);
+  const prevSets = latestPathStatusSets || buildStatusSets(latestPathStatuses || {});
 
   const touchedKeys = new Set();
-  if (delta.prevTail) touchedKeys.add(keyOf(delta.prevTail.r, delta.prevTail.c));
-  if (delta.nextTail) touchedKeys.add(keyOf(delta.nextTail.r, delta.nextTail.c));
+  if (delta.side === 'start') {
+    const preservesSharedSuffixOrder = delta.prevChanged.length === delta.nextChanged.length;
+    if (preservesSharedSuffixOrder) {
+      addPathKeys(delta.prevChanged, touchedKeys);
+      addPathKeys(delta.nextChanged, touchedKeys);
+      addPathKeys(prevSnapshot.path.length > 0 ? [prevSnapshot.path[0], prevSnapshot.path[prevSnapshot.path.length - 1]] : [], touchedKeys);
+      addPathKeys(snapshot.path.length > 0 ? [snapshot.path[0], snapshot.path[snapshot.path.length - 1]] : [], touchedKeys);
+    } else {
+      addPathKeys(prevSnapshot.path, touchedKeys);
+      addPathKeys(snapshot.path, touchedKeys);
+    }
+  } else {
+    addPathKeys(delta.prevChanged, touchedKeys);
+    addPathKeys(delta.nextChanged, touchedKeys);
+    addPathKeys(prevSnapshot.path.length > 0 ? [prevSnapshot.path[0], prevSnapshot.path[prevSnapshot.path.length - 1]] : [], touchedKeys);
+    addPathKeys(snapshot.path.length > 0 ? [snapshot.path[0], snapshot.path[snapshot.path.length - 1]] : [], touchedKeys);
+  }
   addStatusDeltaKeys(statusSets.badHint, prevSets.badHint, touchedKeys);
   addStatusDeltaKeys(statusSets.goodHint, prevSets.goodHint, touchedKeys);
   addStatusDeltaKeys(statusSets.badRps, prevSets.badRps, touchedKeys);
@@ -2860,6 +3031,7 @@ const tryApplyIncrementalEndDragUpdate = (snapshot, results, interactionModel = 
     applyCellSnapshotState(snapshot, r, c, statusSets);
   });
 
+  incrementDebugCounter('incrementalCellPatches');
   return true;
 };
 
@@ -2872,12 +3044,12 @@ function updateCells(
   tutorialFlags = null,
 ) {
   const { hintStatus, stitchStatus, rpsStatus, blockedStatus } = results;
-  const usedIncremental = tryApplyIncrementalEndDragUpdate(
+  const usedIncremental = tryApplyIncrementalPathUpdate(
     snapshot,
     { hintStatus, rpsStatus, blockedStatus },
-    interactionModel,
   );
   if (!usedIncremental) {
+    incrementDebugCounter('fullCellRebuilds');
     reusableCellViewModel = buildBoardCellViewModel(
       snapshot,
       { hintStatus, rpsStatus, blockedStatus },
@@ -2926,14 +3098,6 @@ function updateCells(
   }
   syncPathTipDragHoverCell(interactionModel);
   pathAnimationEngine.setInteractionModel(interactionModel);
-
-  drawAll(
-    snapshot,
-    refs,
-    { hintStatus, stitchStatus, rpsStatus, blockedStatus },
-    completionModel,
-    tutorialFlags,
-  );
 }
 
 function drawAllImpl(
@@ -2947,7 +3111,7 @@ function drawAllImpl(
   const pathChanged = !pathsMatch(previousPath, snapshot.path);
   const layout = ensurePathLayoutMetrics(refs);
   const flow = getCachedPathFlowMetrics(refs, layout.cell);
-  updatePathThemeCache(refs);
+  if (!pathThemeCacheInitialized) updatePathThemeCache(refs);
   const nowMs = getNowMs();
   syncPathFlowFreezeTarget(isPathFlowFrozen(), nowMs);
   const flowFreeze = resolvePathFlowFreezeMix(nowMs, pathFlowFreezeMixScratch);
@@ -3015,6 +3179,7 @@ function drawAllImpl(
   latestPathSnapshot = snapshot;
   latestPathRefs = refs;
   latestPathStatuses = statuses;
+  latestPathStatusSets = buildStatusSets(statuses || {});
   latestCompletionModel = completionModel;
   latestTutorialFlags = tutorialFlags;
 
@@ -3041,7 +3206,7 @@ function drawAllImpl(
     flow.cycle,
     nowMs,
   );
-  if (
+  return (
     flowFreeze.active
     || animateFlow
     || animateFlowVisibility
@@ -3053,27 +3218,6 @@ function drawAllImpl(
     || animateTipHoverScale
     || animateReverseTipSwap
     || animateReverseGradientBlend
-  ) {
-    schedulePathAnimation();
-  } else {
-    stopPathAnimation();
-  }
-}
-
-function drawAll(
-  snapshot,
-  refs,
-  statuses,
-  completionModel = null,
-  tutorialFlags = null,
-) {
-  return pathAnimationEngine.drawAll(
-    snapshot,
-    refs,
-    statuses,
-    completionModel,
-    tutorialFlags,
-    drawAllImpl,
   );
 }
 
@@ -3081,6 +3225,7 @@ function drawStaticSymbols(snapshot, refs, statuses) {
   const { symbolCtx, symbolCanvas } = refs;
   if (!symbolCtx || !symbolCanvas) return;
 
+  incrementDebugCounter('symbolRedraws');
   clearCanvas(symbolCtx, symbolCanvas);
 
   drawCornerCounts(snapshot, refs, symbolCtx, statuses?.hintStatus?.cornerVertexStatus);
@@ -3370,6 +3515,7 @@ function drawAnimatedPathImpl(
   pathFramePayload.flowRise = PATH_FLOW_RISE;
   pathFramePayload.flowDrop = PATH_FLOW_DROP;
   pathFramePayload.drawTutorialBracketsInPathLayer = false;
+  incrementDebugCounter('pathDraws');
   latestPathMainFlowTravel = pathRenderer.drawPathFrame(pathFramePayload);
 }
 
@@ -3422,18 +3568,17 @@ function drawCrossStitches(snapshot, refs, ctx, vertexStatus = EMPTY_MAP) {
   ctx.save();
   ctx.globalAlpha = 1;
 
+  const layout = ensurePathLayoutMetrics(refs);
   const offset = getGridCanvasOffset(refs, gridOffsetScratch);
-  const cell = getCellSize(refs.gridEl);
+  const cell = layout.cell;
   const canvasScale = getCanvasScale(ctx);
   const stitchLineHalf = snapCanvasLength(Math.max(2, cell * 0.18), canvasScale.min);
   const stitchWidth = snapCanvasLength(Math.max(1, cell * 0.06), canvasScale.min);
-  const styleDeclaration = getComputedStyle(document.documentElement);
-  const colorGood = resolveThemeGoodColor(styleDeclaration, '#16a34a');
-  const colorBad = forceOpaqueColor(styleDeclaration.getPropertyValue('--bad').trim() || '#e85c5c');
+  if (!pathThemeCacheInitialized) updatePathThemeCache(refs);
+  const colorGood = pathThemeGoodRaw || '#16a34a';
+  const colorBad = pathThemeBadRaw || '#e85c5c';
   const colorPending = '#ffffff';
-
-  const shadowColor = styleDeclaration.getPropertyValue('--stitchShadow').trim();
-  const shadowOpaque = forceOpaqueColor(shadowColor || '#0a111b');
+  const shadowOpaque = pathThemeStitchShadowRaw || '#0a111b';
 
   const resolveDiagStatus = (entry, key) => {
     if (typeof entry === 'string') return entry;
@@ -3518,8 +3663,9 @@ function drawCrossStitches(snapshot, refs, ctx, vertexStatus = EMPTY_MAP) {
 function drawCornerCounts(snapshot, refs, ctx, cornerVertexStatus = EMPTY_MAP) {
   if (!snapshot.cornerCounts || snapshot.cornerCounts.length === 0) return;
 
+  const layout = ensurePathLayoutMetrics(refs);
   const offset = getGridCanvasOffset(refs, gridOffsetScratch);
-  const cell = getCellSize(refs.gridEl);
+  const cell = layout.cell;
   const canvasScale = getCanvasScale(ctx);
   const cornerRadius = snapCanvasLength(Math.max(6, cell * 0.17), canvasScale.min);
   const cornerLineWidth = snapCanvasLength(Math.max(1, cell * 0.04), canvasScale.min);
@@ -3531,12 +3677,11 @@ function drawCornerCounts(snapshot, refs, ctx, cornerVertexStatus = EMPTY_MAP) {
   ctx.textBaseline = 'middle';
   ctx.font = `700 ${cornerFontSize}px Inter, ui-sans-serif, system-ui, sans-serif`;
 
-  const styleDeclaration = getComputedStyle(document.documentElement);
-  const isLightTheme = document.documentElement.classList.contains('theme-light');
-  const colorGood = resolveThemeGoodColor(styleDeclaration, '#16a34a');
-  const colorBad = forceOpaqueColor(styleDeclaration.getPropertyValue('--bad').trim() || '#e85c5c');
-  const colorPending = isLightTheme ? '#0f172a' : '#ffffff';
-  const cornerFillColor = isLightTheme ? 'rgb(248, 251, 255)' : 'rgb(11, 15, 20)';
+  if (!pathThemeCacheInitialized) updatePathThemeCache(refs);
+  const colorGood = pathThemeGoodRaw || '#16a34a';
+  const colorBad = pathThemeBadRaw || '#e85c5c';
+  const colorPending = pathThemeCornerPending;
+  const cornerFillColor = pathThemeCornerFill;
 
   for (const [vr, vc, target] of snapshot.cornerCounts) {
     const vk = keyOf(vr, vc);
@@ -3668,7 +3813,7 @@ const setPathFlowFreezeImmediate = (isFrozen = false) => {
   pathAnimationEngine.setPathFlowFreezeImmediate(isFrozen);
 };
 
-const applyInteractionState = (interactionModel = {}) => {
+const applyImmediateInteractionState = (interactionModel = {}) => {
   if (!refs) return;
   if (interactionModel.dropTarget && Number.isInteger(interactionModel.dropTarget.r) && Number.isInteger(interactionModel.dropTarget.c)) {
     setDropTarget(interactionModel.dropTarget.r, interactionModel.dropTarget.c);
@@ -3683,7 +3828,11 @@ const applyInteractionState = (interactionModel = {}) => {
   } else {
     hideWallDragGhost();
   }
+};
 
+const applyInteractionState = (interactionModel = {}) => {
+  if (!refs) return;
+  applyImmediateInteractionState(interactionModel);
   syncPathTipDragHoverCell(interactionModel);
 };
 
@@ -3700,9 +3849,12 @@ const resetCoreState = () => {
   latestPathSnapshot = null;
   latestPathRefs = null;
   latestPathStatuses = null;
+  latestPathStatusSets = null;
   latestCompletionModel = null;
   latestTutorialFlags = null;
   latestInteractionModel = null;
+  pendingRenderState = null;
+  clearPendingRenderDirty();
   latestPathMainFlowTravel = 0;
   colorParserCtx = null;
   reusablePathPoints = [];
@@ -3778,26 +3930,34 @@ return {
     interactionModel = {},
   }) {
     if (!refs) return;
-    updateCells(
+    latestInteractionModel = interactionModel;
+    pendingRenderState = {
       snapshot,
       evaluation,
-      refs,
       completion,
-      interactionModel,
-      uiModel.tutorialFlags || null,
-    );
+      uiModel,
+    };
+    pendingRenderDirty.cells = true;
+    pendingRenderDirty.path = true;
+    pendingRenderDirty.symbols = true;
+    pendingRenderDirty.interaction = true;
     if (Object.prototype.hasOwnProperty.call(uiModel, 'messageHtml')) {
-      setMessage(refs.msgEl, uiModel.messageKind || null, uiModel.messageHtml || '');
+      pendingRenderDirty.message = true;
     }
-    applyInteractionState(interactionModel);
+    scheduleRendererFrame();
   },
 
   updateInteraction(interactionModel = {}) {
-    applyInteractionState(interactionModel);
+    latestInteractionModel = interactionModel;
+    pathAnimationEngine.setInteractionModel(interactionModel);
+    applyImmediateInteractionState(interactionModel);
+    pendingRenderDirty.interaction = true;
+    scheduleRendererFrame();
   },
 
   resize() {
     if (!refs) return;
+    pathThemeCacheInitialized = false;
     resizeCanvas(refs);
   },
 

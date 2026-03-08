@@ -89,6 +89,15 @@ const installDomGlobals = (t, metrics, elementFromPoint, windowState = null) => 
     pageXOffset: 0,
     pageYOffset: 0,
   };
+  if (typeof windowTarget.addEventListener !== 'function') {
+    windowTarget.addEventListener = () => {};
+  }
+  if (typeof windowTarget.removeEventListener !== 'function') {
+    windowTarget.removeEventListener = () => {};
+  }
+  if (!windowTarget.visualViewport) {
+    windowTarget.visualViewport = null;
+  }
 
   globalThis.document = documentTarget;
   globalThis.Element = FakeElement;
@@ -167,8 +176,10 @@ const createGridHarness = (t, options = {}) => {
     elementFromPoint,
     options.windowState,
   );
-  const store = createGameStateStore(() => LEVEL);
+  const level = options.level || LEVEL;
+  const store = createGameStateStore(() => level);
   store.dispatch({ type: GAME_COMMANDS.LOAD_LEVEL, payload: { levelIndex: 0 } });
+  const emittedIntents = [];
 
   const adapter = createDomInputAdapter();
   adapter.bind({
@@ -176,6 +187,11 @@ const createGridHarness = (t, options = {}) => {
     readSnapshot: () => store.getSnapshot(),
     readLayoutMetrics: options.readLayoutMetrics || (() => null),
     emitIntent: (intent) => {
+      emittedIntents.push(intent);
+      if (typeof options.emitIntent === 'function') {
+        options.emitIntent(intent, store);
+        return;
+      }
       if (intent?.type !== INTENT_TYPES.GAME_COMMAND) return;
       store.dispatch({
         type: intent.payload.commandType,
@@ -195,6 +211,7 @@ const createGridHarness = (t, options = {}) => {
     gridEl,
     metrics,
     windowTarget,
+    emittedIntents,
     getRectReads: () => rectReads,
   };
 };
@@ -269,4 +286,141 @@ test('dom input adapter adjusts cached metrics when the page scrolls', (t) => {
 
   assert.deepEqual(harness.store.getSnapshot().path, [{ r: 0, c: 0 }]);
   assert.equal(harness.getRectReads(), 0);
+});
+
+test('dom input adapter does not read window scroll during pointermove when metrics are cached', (t) => {
+  let scrollReads = 0;
+  const windowState = {
+    get scrollX() {
+      scrollReads += 1;
+      return 0;
+    },
+    get scrollY() {
+      scrollReads += 1;
+      return 0;
+    },
+    get pageXOffset() {
+      scrollReads += 1;
+      return 0;
+    },
+    get pageYOffset() {
+      scrollReads += 1;
+      return 0;
+    },
+    addEventListener() {},
+    removeEventListener() {},
+    visualViewport: null,
+  };
+  const harness = createGridHarness(t, {
+    windowState,
+    readLayoutMetrics: () => ({
+      version: 12,
+      rows: 2,
+      cols: 2,
+      left: 0,
+      top: 0,
+      right: 40,
+      bottom: 40,
+      size: 20,
+      gap: 0,
+      pad: 0,
+      step: 20,
+      scrollX: 0,
+      scrollY: 0,
+    }),
+  });
+
+  scrollReads = 0;
+  harness.gridEl.dispatch('pointerdown', createPointerEvent(1, 10, 10));
+  harness.gridEl.dispatch('pointermove', createPointerEvent(1, 30, 10));
+  harness.gridEl.dispatch('pointermove', createPointerEvent(1, 30, 30));
+
+  assert.equal(scrollReads, 0);
+  assert.equal(harness.getRectReads(), 0);
+});
+
+test('dom input adapter batches multi-cell drag moves into one sequence command', (t) => {
+  const harness = createGridHarness(t, {
+    level: {
+      name: 'Line',
+      grid: ['....'],
+      stitches: [],
+      cornerCounts: [],
+    },
+    metrics: {
+      rows: 1,
+      cols: 4,
+      left: 0,
+      top: 0,
+      right: 80,
+      bottom: 20,
+      size: 20,
+      gap: 0,
+      pad: 0,
+      step: 20,
+    },
+    readLayoutMetrics: () => ({
+      version: 3,
+      rows: 1,
+      cols: 4,
+      left: 0,
+      top: 0,
+      right: 80,
+      bottom: 20,
+      size: 20,
+      gap: 0,
+      pad: 0,
+      step: 20,
+    }),
+  });
+
+  harness.gridEl.dispatch('pointerdown', createPointerEvent(1, 10, 10));
+  harness.gridEl.dispatch('pointermove', createPointerEvent(1, 78, 10));
+
+  const gameIntents = harness.emittedIntents.filter((intent) => intent?.type === INTENT_TYPES.GAME_COMMAND);
+  assert.equal(gameIntents.length, 2);
+  assert.equal(gameIntents[0].payload.commandType, GAME_COMMANDS.START_OR_STEP);
+  assert.equal(gameIntents[1].payload.commandType, GAME_COMMANDS.APPLY_PATH_DRAG_SEQUENCE);
+  assert.equal(gameIntents[1].payload.side, 'end');
+  assert.deepEqual(gameIntents[1].payload.steps, [
+    { r: 0, c: 1 },
+    { r: 0, c: 2 },
+    { r: 0, c: 3 },
+  ]);
+  assert.deepEqual(harness.store.getSnapshot().path, [
+    { r: 0, c: 0 },
+    { r: 0, c: 1 },
+    { r: 0, c: 2 },
+    { r: 0, c: 3 },
+  ]);
+});
+
+test('dom input adapter uses a one-step sequence command for single-cell drags', (t) => {
+  const harness = createGridHarness(t, {
+    readLayoutMetrics: () => ({
+      version: 4,
+      rows: 2,
+      cols: 2,
+      left: 0,
+      top: 0,
+      right: 40,
+      bottom: 40,
+      size: 20,
+      gap: 0,
+      pad: 0,
+      step: 20,
+    }),
+  });
+
+  harness.gridEl.dispatch('pointerdown', createPointerEvent(1, 10, 10));
+  harness.gridEl.dispatch('pointermove', createPointerEvent(1, 30, 10));
+
+  const gameIntents = harness.emittedIntents.filter((intent) => intent?.type === INTENT_TYPES.GAME_COMMAND);
+  assert.equal(gameIntents.length, 2);
+  assert.equal(gameIntents[1].payload.commandType, GAME_COMMANDS.APPLY_PATH_DRAG_SEQUENCE);
+  assert.deepEqual(gameIntents[1].payload.steps, [{ r: 0, c: 1 }]);
+  assert.deepEqual(harness.store.getSnapshot().path, [
+    { r: 0, c: 0 },
+    { r: 0, c: 1 },
+  ]);
 });

@@ -129,6 +129,54 @@ test('runtime records each path-step transition before RAF-batched render flush'
   assert.equal(clearCalls.length, 2);
 });
 
+test('runtime records one transition per batched drag command before RAF-batched render flush', (t) => {
+  const rafQueue = installRafQueue(t);
+  const recordCalls = [];
+  let renderCount = 0;
+
+  const runtime = createRuntimeHarness({
+    mount: () => { },
+    getRefs: () => ({}),
+    rebuildGrid: () => { },
+    renderFrame: () => {
+      renderCount += 1;
+    },
+    resize: () => { },
+    unmount: () => { },
+    recordPathTransition: (previousSnapshot, nextSnapshot) => {
+      recordCalls.push({
+        previousPath: previousSnapshot.path.map((point) => `${point.r},${point.c}`).join('|'),
+        nextPath: nextSnapshot.path.map((point) => `${point.r},${point.c}`).join('|'),
+      });
+    },
+  });
+
+  runtime.emitIntent({
+    type: INTENT_TYPES.GAME_COMMAND,
+    payload: {
+      commandType: GAME_COMMANDS.APPLY_PATH_DRAG_SEQUENCE,
+      side: 'end',
+      steps: [
+        { r: 0, c: 0 },
+        { r: 0, c: 1 },
+        { r: 1, c: 1 },
+      ],
+    },
+  });
+
+  assert.deepEqual(recordCalls, [
+    {
+      previousPath: '',
+      nextPath: '0,0|0,1|1,1',
+    },
+  ]);
+  assert.equal(rafQueue.length, 1);
+
+  const rafFlush = rafQueue.shift();
+  rafFlush(16);
+  assert.equal(renderCount, 1);
+});
+
 test('runtime treats transition-compensation renderer methods as optional', (t) => {
   const rafQueue = installRafQueue(t);
   let renderCount = 0;

@@ -8,6 +8,7 @@ import {
   markClearedLevel,
   registerSolvedSnapshot,
 } from './solve_progress_helpers.js';
+import { pointsMatch } from '../math.js';
 
 const PATH_BRACKET_TUTORIAL_LEVEL_INDEX = 0;
 const MOVABLE_BRACKET_TUTORIAL_LEVEL_INDEX = 7;
@@ -825,11 +826,95 @@ export function createRuntime(options) {
     return Boolean(endpoint);
   };
 
-  const buildPathTipArrivalHint = (commandType, prevSnapshot, nextSnapshot) => {
-    const side = commandType === GAME_COMMANDS.START_OR_STEP_FROM_START
-      ? 'start'
-      : (commandType === GAME_COMMANDS.START_OR_STEP ? 'end' : null);
+  const resolvePathStepCommandSide = (commandType, payload = null) => {
+    if (commandType === GAME_COMMANDS.START_OR_STEP_FROM_START) return 'start';
+    if (commandType === GAME_COMMANDS.START_OR_STEP) return 'end';
+    if (commandType === GAME_COMMANDS.APPLY_PATH_DRAG_SEQUENCE) {
+      return payload?.side === 'start' ? 'start' : (payload?.side === 'end' ? 'end' : null);
+    }
+    return null;
+  };
+
+  const clonePathPoint = (point) => ({ r: point.r, c: point.c });
+
+  const pathsMatchForHint = (leftPath, rightPath) => {
+    if (!Array.isArray(leftPath) || !Array.isArray(rightPath)) return false;
+    if (leftPath.length !== rightPath.length) return false;
+    for (let i = 0; i < leftPath.length; i += 1) {
+      if (!pointsMatch(leftPath[i], rightPath[i])) return false;
+    }
+    return true;
+  };
+
+  const resolveDragSequenceTipArrivalHint = (side, prevSnapshot, nextSnapshot, payload) => {
+    if (side !== 'start' && side !== 'end') return null;
+    const steps = Array.isArray(payload?.steps) ? payload.steps : [];
+    if (steps.length <= 0) return null;
+
+    const prevPath = Array.isArray(prevSnapshot?.path) ? prevSnapshot.path : [];
+    const nextPath = Array.isArray(nextSnapshot?.path) ? nextSnapshot.path : [];
+    const workingPath = prevPath.map(clonePathPoint);
+    let lastAdvanceHint = null;
+
+    for (let i = 0; i < steps.length; i += 1) {
+      const step = steps[i];
+      if (!Number.isInteger(step?.r) || !Number.isInteger(step?.c)) return null;
+
+      if (side === 'start') {
+        const currentTip = workingPath[0] || null;
+        const retractNeighbor = workingPath[1] || null;
+        const isRetract = Boolean(retractNeighbor && pointsMatch(retractNeighbor, step));
+        if (isRetract) {
+          workingPath.shift();
+          lastAdvanceHint = null;
+          continue;
+        }
+        if (currentTip) {
+          lastAdvanceHint = {
+            side,
+            from: clonePathPoint(currentTip),
+            to: { r: step.r, c: step.c },
+          };
+        } else {
+          lastAdvanceHint = null;
+        }
+        workingPath.unshift({ r: step.r, c: step.c });
+        continue;
+      }
+
+      const currentTip = workingPath[workingPath.length - 1] || null;
+      const retractNeighbor = workingPath.length > 1
+        ? workingPath[workingPath.length - 2]
+        : null;
+      const isRetract = Boolean(retractNeighbor && pointsMatch(retractNeighbor, step));
+      if (isRetract) {
+        workingPath.pop();
+        lastAdvanceHint = null;
+        continue;
+      }
+      if (currentTip) {
+        lastAdvanceHint = {
+          side,
+          from: clonePathPoint(currentTip),
+          to: { r: step.r, c: step.c },
+        };
+      } else {
+        lastAdvanceHint = null;
+      }
+      workingPath.push({ r: step.r, c: step.c });
+    }
+
+    if (!pathsMatchForHint(workingPath, nextPath)) return null;
+    return lastAdvanceHint;
+  };
+
+  const buildPathTipArrivalHint = (commandType, payload, prevSnapshot, nextSnapshot) => {
+    const side = resolvePathStepCommandSide(commandType, payload);
     if (!side || !prevSnapshot || !nextSnapshot) return null;
+
+    if (commandType === GAME_COMMANDS.APPLY_PATH_DRAG_SEQUENCE) {
+      return resolveDragSequenceTipArrivalHint(side, prevSnapshot, nextSnapshot, payload);
+    }
 
     const prevPath = Array.isArray(prevSnapshot.path) ? prevSnapshot.path : [];
     const nextPath = Array.isArray(nextSnapshot.path) ? nextSnapshot.path : [];
@@ -1410,10 +1495,8 @@ export function createRuntime(options) {
     if (dailyBoardLocked) return;
     if (!payload?.commandType) return;
     const commandType = payload.commandType;
-    const isPathStepCommand = (
-      commandType === GAME_COMMANDS.START_OR_STEP
-      || commandType === GAME_COMMANDS.START_OR_STEP_FROM_START
-    );
+    const pathStepSide = resolvePathStepCommandSide(commandType, payload);
+    const isPathStepCommand = pathStepSide === 'start' || pathStepSide === 'end';
     const previousSnapshot = isPathStepCommand ? state.getSnapshot() : null;
 
     const transition = state.dispatch({
@@ -1429,6 +1512,7 @@ export function createRuntime(options) {
       );
       interactionState.pathTipArrivalHint = buildPathTipArrivalHint(
         commandType,
+        payload,
         previousSnapshot,
         transition.snapshot,
       );

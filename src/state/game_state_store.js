@@ -248,15 +248,16 @@ export function createGameStateStore(levelSource) {
     invalidateSnapshotCache();
   };
 
-  const undo = () => {
+  const undo = (deferInvalidate = false) => {
     if (path.length === 0) return false;
     const last = path.pop();
     visited.delete(keyOf(last.r, last.c));
-    invalidateSnapshotCache();
+    if (!deferInvalidate) invalidateSnapshotCache();
     return true;
   };
 
-  const startOrTryStep = (r, c) => {
+  const startOrTryStep = (r, c, options = {}) => {
+    const deferInvalidate = Boolean(options.deferInvalidate);
     if (!isUsable(r, c)) return false;
 
     const next = { r, c };
@@ -265,7 +266,7 @@ export function createGameStateStore(levelSource) {
     if (path.length === 0) {
       path = [next];
       visited = new Set([nextKey]);
-      invalidateSnapshotCache();
+      if (!deferInvalidate) invalidateSnapshotCache();
       return true;
     }
 
@@ -273,7 +274,7 @@ export function createGameStateStore(levelSource) {
     if (path.length >= 2) {
       const prev = path[path.length - 2];
       if (next.r === prev.r && next.c === prev.c) {
-        undo();
+        undo(deferInvalidate);
         return true;
       }
     }
@@ -283,11 +284,12 @@ export function createGameStateStore(levelSource) {
 
     path.push(next);
     visited.add(nextKey);
-    invalidateSnapshotCache();
+    if (!deferInvalidate) invalidateSnapshotCache();
     return true;
   };
 
-  const startOrTryStepFromStart = (r, c) => {
+  const startOrTryStepFromStart = (r, c, options = {}) => {
+    const deferInvalidate = Boolean(options.deferInvalidate);
     if (!isUsable(r, c)) return false;
 
     const next = { r, c };
@@ -296,7 +298,7 @@ export function createGameStateStore(levelSource) {
     if (path.length === 0) {
       path = [next];
       visited = new Set([nextKey]);
-      invalidateSnapshotCache();
+      if (!deferInvalidate) invalidateSnapshotCache();
       return true;
     }
 
@@ -306,7 +308,7 @@ export function createGameStateStore(levelSource) {
       if (next.r === nextFromStart.r && next.c === nextFromStart.c) {
         path.shift();
         visited.delete(keyOf(head.r, head.c));
-        invalidateSnapshotCache();
+        if (!deferInvalidate) invalidateSnapshotCache();
         return true;
       }
     }
@@ -316,8 +318,27 @@ export function createGameStateStore(levelSource) {
 
     path.unshift(next);
     visited.add(nextKey);
-    invalidateSnapshotCache();
+    if (!deferInvalidate) invalidateSnapshotCache();
     return true;
+  };
+
+  const applyPathDragSequence = (side, steps = []) => {
+    const applyStep = side === 'start'
+      ? startOrTryStepFromStart
+      : (side === 'end' ? startOrTryStep : null);
+    if (!applyStep || !Array.isArray(steps) || steps.length === 0) return false;
+
+    let changed = false;
+    for (let i = 0; i < steps.length; i++) {
+      const step = steps[i];
+      if (!Number.isInteger(step?.r) || !Number.isInteger(step?.c)) break;
+      const didChange = applyStep(step.r, step.c, { deferInvalidate: true });
+      if (!didChange) break;
+      changed = true;
+    }
+
+    if (changed) invalidateSnapshotCache();
+    return changed;
   };
 
   const finalizePathAfterPointerUp = () => {
@@ -386,6 +407,11 @@ export function createGameStateStore(levelSource) {
       return makeTransition(type, changed, false, false);
     }
 
+    if (type === 'path/apply-drag-sequence') {
+      const changed = applyPathDragSequence(payload.side, payload.steps);
+      return makeTransition(type, changed, false, false);
+    }
+
     if (type === 'path/finalize-after-pointer') {
       const changed = finalizePathAfterPointerUp();
       return makeTransition(type, changed, false, true);
@@ -418,6 +444,7 @@ export function createGameStateStore(levelSource) {
     undo,
     startOrTryStep,
     startOrTryStepFromStart,
+    applyPathDragSequence,
     finalizePathAfterPointerUp,
     reversePath,
     canDropWall,

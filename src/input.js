@@ -15,6 +15,29 @@ export function bindInputHandlers(refs, state, onStateChange = () => { }) {
     if (commandType === GAME_COMMANDS.START_OR_STEP_FROM_START) {
       return { changed: state.startOrTryStepFromStart(payload.r, payload.c), validate: false, rebuildGrid: false };
     }
+    if (commandType === GAME_COMMANDS.APPLY_PATH_DRAG_SEQUENCE) {
+      if (typeof state.applyPathDragSequence === 'function') {
+        return {
+          changed: state.applyPathDragSequence(payload.side, payload.steps),
+          validate: false,
+          rebuildGrid: false,
+        };
+      }
+
+      const steps = Array.isArray(payload.steps) ? payload.steps : [];
+      const runLegacyStep = payload.side === 'start'
+        ? (step) => state.startOrTryStepFromStart(step.r, step.c)
+        : (step) => state.startOrTryStep(step.r, step.c);
+      let changed = false;
+      for (let i = 0; i < steps.length; i += 1) {
+        const step = steps[i];
+        if (!Number.isInteger(step?.r) || !Number.isInteger(step?.c)) break;
+        const didChange = runLegacyStep(step);
+        if (!didChange) break;
+        changed = true;
+      }
+      return { changed, validate: false, rebuildGrid: false };
+    }
     if (commandType === GAME_COMMANDS.FINALIZE_PATH) {
       return {
         changed: Boolean(state.finalizePathAfterPointerUp?.()),

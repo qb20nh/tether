@@ -67,3 +67,105 @@ test('game state store caches snapshots and preserves prior path-derived data', 
   assert.equal(firstPathSnapshot.idxByKey.has('0,1'), false);
   assert.deepEqual(secondPathSnapshot.path, [{ r: 0, c: 0 }, { r: 0, c: 1 }]);
 });
+
+test('game state store applies end drag batches in one state version', () => {
+  const store = createGameStateStore(() => LEVEL);
+  store.dispatch({ type: 'level/load', payload: { levelIndex: 0 } });
+  const initialSnapshot = store.getSnapshot();
+
+  const transition = store.dispatch({
+    type: 'path/apply-drag-sequence',
+    payload: {
+      side: 'end',
+      steps: [
+        { r: 0, c: 0 },
+        { r: 0, c: 1 },
+        { r: 0, c: 2 },
+      ],
+    },
+  });
+
+  assert.equal(transition.changed, true);
+  assert.deepEqual(transition.snapshot.path, [
+    { r: 0, c: 0 },
+    { r: 0, c: 1 },
+    { r: 0, c: 2 },
+  ]);
+  assert.equal(transition.snapshot.version, initialSnapshot.version + 1);
+  assert.equal(transition.snapshot.pathKey, '0,0;0,1;0,2;');
+});
+
+test('game state store applies start drag batches with legacy parity', () => {
+  const store = createGameStateStore(() => LEVEL);
+  const legacyStore = createGameStateStore(() => LEVEL);
+  store.dispatch({ type: 'level/load', payload: { levelIndex: 0 } });
+  legacyStore.dispatch({ type: 'level/load', payload: { levelIndex: 0 } });
+
+  store.dispatch({
+    type: 'path/apply-drag-sequence',
+    payload: {
+      side: 'end',
+      steps: [
+        { r: 2, c: 1 },
+        { r: 2, c: 2 },
+      ],
+    },
+  });
+  legacyStore.dispatch({ type: 'path/start-or-step', payload: { r: 2, c: 1 } });
+  legacyStore.dispatch({ type: 'path/start-or-step', payload: { r: 2, c: 2 } });
+
+  const previousSnapshot = store.getSnapshot();
+  const transition = store.dispatch({
+    type: 'path/apply-drag-sequence',
+    payload: {
+      side: 'start',
+      steps: [
+        { r: 2, c: 0 },
+        { r: 1, c: 0 },
+      ],
+    },
+  });
+
+  legacyStore.dispatch({ type: 'path/start-or-step-from-start', payload: { r: 2, c: 0 } });
+  legacyStore.dispatch({ type: 'path/start-or-step-from-start', payload: { r: 1, c: 0 } });
+
+  assert.equal(transition.changed, true);
+  assert.deepEqual(store.getSnapshot().path, legacyStore.getSnapshot().path);
+  assert.equal(store.getSnapshot().pathKey, legacyStore.getSnapshot().pathKey);
+  assert.equal(store.getSnapshot().version, previousSnapshot.version + 1);
+});
+
+test('game state store batched retract matches repeated single-step dispatch', () => {
+  const store = createGameStateStore(() => LEVEL);
+  const legacyStore = createGameStateStore(() => LEVEL);
+  store.dispatch({ type: 'level/load', payload: { levelIndex: 0 } });
+  legacyStore.dispatch({ type: 'level/load', payload: { levelIndex: 0 } });
+
+  const seedSteps = [
+    { r: 0, c: 0 },
+    { r: 0, c: 1 },
+    { r: 0, c: 2 },
+    { r: 1, c: 2 },
+  ];
+  store.dispatch({ type: 'path/apply-drag-sequence', payload: { side: 'end', steps: seedSteps } });
+  legacyStore.dispatch({ type: 'path/apply-drag-sequence', payload: { side: 'end', steps: seedSteps } });
+
+  const previousSnapshot = store.getSnapshot();
+  const transition = store.dispatch({
+    type: 'path/apply-drag-sequence',
+    payload: {
+      side: 'end',
+      steps: [
+        { r: 0, c: 2 },
+        { r: 0, c: 1 },
+      ],
+    },
+  });
+
+  legacyStore.dispatch({ type: 'path/start-or-step', payload: { r: 0, c: 2 } });
+  legacyStore.dispatch({ type: 'path/start-or-step', payload: { r: 0, c: 1 } });
+
+  assert.equal(transition.changed, true);
+  assert.deepEqual(store.getSnapshot().path, legacyStore.getSnapshot().path);
+  assert.equal(store.getSnapshot().version, previousSnapshot.version + 1);
+});

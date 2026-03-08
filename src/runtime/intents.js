@@ -32,6 +32,7 @@ export const GAME_COMMANDS = Object.freeze({
   LOAD_LEVEL: 'level/load',
   START_OR_STEP: 'path/start-or-step',
   START_OR_STEP_FROM_START: 'path/start-or-step-from-start',
+  APPLY_PATH_DRAG_SEQUENCE: 'path/apply-drag-sequence',
   FINALIZE_PATH: 'path/finalize-after-pointer',
   RESET_PATH: 'path/reset',
   REVERSE_PATH: 'path/reverse',

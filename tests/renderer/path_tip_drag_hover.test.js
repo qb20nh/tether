@@ -21,6 +21,27 @@ const createCell = (classes = []) => ({
   classList: createClassList(classes),
 });
 
+const createTrackedCell = (classes = []) => {
+  const cell = createCell(classes);
+  const add = cell.classList.add;
+  const remove = cell.classList.remove;
+  let addCount = 0;
+  let removeCount = 0;
+  cell.classList.add = (...values) => {
+    addCount += 1;
+    add(...values);
+  };
+  cell.classList.remove = (...values) => {
+    removeCount += 1;
+    remove(...values);
+  };
+  return {
+    cell,
+    getAddCount: () => addCount,
+    getRemoveCount: () => removeCount,
+  };
+};
+
 const hasDragHover = (cell) => cell.classList.contains('pathTipDragHover');
 
 const resetPathTipDragHover = () => {
@@ -105,5 +126,25 @@ test('syncPathTipDragHoverCell ignores wall cells and clears previous hover', { 
 
   assert.equal(hasDragHover(nonWall), false);
   assert.equal(hasDragHover(wall), false);
+  resetPathTipDragHover();
+});
+
+test('syncPathTipDragHoverCell does not churn class updates when cursor cell is unchanged', { concurrency: false }, () => {
+  resetPathTipDragHover();
+  const tracked = createTrackedCell();
+  const cells = [[tracked.cell]];
+
+  syncPathTipDragHoverCell({
+    isPathDragging: true,
+    pathDragCursor: { r: 0, c: 0 },
+  }, cells);
+  syncPathTipDragHoverCell({
+    isPathDragging: true,
+    pathDragCursor: { r: 0, c: 0 },
+  }, cells);
+
+  assert.equal(hasDragHover(tracked.cell), true);
+  assert.equal(tracked.getAddCount(), 1);
+  assert.equal(tracked.getRemoveCount(), 0);
   resetPathTipDragHover();
 });

@@ -208,15 +208,16 @@ const installBrowserEnv = (t) => {
 };
 
 const createRuntimeHarness = ({
+  levels = [LEVEL],
   dailyLevel = null,
   effects = {},
   rendererOverrides = {},
   persistenceOverrides = {},
 } = {}) => {
   const levelProvider = createLevelProvider({
-    levels: [LEVEL],
+    levels,
     infiniteMaxLevels: 4,
-    generateInfiniteLevel: () => LEVEL,
+    generateInfiniteLevel: () => levels[0],
     dailyLevel,
     dailyId: dailyLevel ? '2026-03-08' : null,
   });
@@ -512,6 +513,162 @@ test('createRuntime only resizes on layout-invalidating board updates', (t) => {
   env.resizeObservers[0].callback();
   flushNextRaf(64);
   assert.equal(harness.getResizeCount(), 3);
+
+  harness.runtime.destroy();
+});
+
+test('createRuntime coalesces batched drag commands and records one transition per batch', (t) => {
+  const env = installBrowserEnv(t);
+  const transitionCalls = [];
+  const harness = createRuntimeHarness({
+    rendererOverrides: {
+      recordPathTransition: (previousSnapshot, nextSnapshot) => {
+        transitionCalls.push({
+          previousLength: previousSnapshot.path.length,
+          nextLength: nextSnapshot.path.length,
+        });
+      },
+    },
+  });
+
+  const flushNextRaf = (ts) => {
+    const callback = [...env.rafCallbacks.values()][0];
+    callback?.(ts);
+  };
+
+  harness.runtime.start();
+  flushNextRaf(16);
+
+  harness.runtime.emitIntent({
+    type: INTENT_TYPES.GAME_COMMAND,
+    payload: {
+      commandType: GAME_COMMANDS.APPLY_PATH_DRAG_SEQUENCE,
+      side: 'end',
+      steps: [
+        { r: 0, c: 0 },
+        { r: 0, c: 1 },
+      ],
+    },
+  });
+
+  assert.deepEqual(transitionCalls, [
+    { previousLength: 0, nextLength: 2 },
+  ]);
+  assert.equal(env.rafCallbacks.size, 1);
+  flushNextRaf(32);
+  assert.equal(harness.getRenderCount(), 2);
+
+  harness.runtime.emitIntent({
+    type: INTENT_TYPES.GAME_COMMAND,
+    payload: {
+      commandType: GAME_COMMANDS.APPLY_PATH_DRAG_SEQUENCE,
+      side: 'end',
+      steps: [{ r: 1, c: 1 }],
+    },
+  });
+  harness.runtime.emitIntent({
+    type: INTENT_TYPES.GAME_COMMAND,
+    payload: {
+      commandType: GAME_COMMANDS.APPLY_PATH_DRAG_SEQUENCE,
+      side: 'end',
+      steps: [{ r: 1, c: 0 }],
+    },
+  });
+
+  assert.deepEqual(transitionCalls, [
+    { previousLength: 0, nextLength: 2 },
+    { previousLength: 2, nextLength: 3 },
+    { previousLength: 3, nextLength: 4 },
+  ]);
+  assert.equal(env.rafCallbacks.size, 1);
+  flushNextRaf(48);
+  assert.equal(harness.getRenderCount(), 3);
+
+  harness.runtime.destroy();
+});
+
+test('createRuntime builds drag-sequence tip-arrival hint from the final applied step', (t) => {
+  const env = installBrowserEnv(t);
+  const renderCalls = [];
+  const mixedTurnLevel = {
+    name: 'Mixed Turn Hint',
+    grid: [
+      '...',
+      '...',
+      '...',
+    ],
+    stitches: [],
+    cornerCounts: [],
+  };
+  const harness = createRuntimeHarness({
+    levels: [mixedTurnLevel],
+    rendererOverrides: {
+      renderFrame: (payload) => {
+        renderCalls.push(payload);
+      },
+    },
+  });
+
+  const flushNextRaf = (ts) => {
+    const callback = [...env.rafCallbacks.values()][0];
+    callback?.(ts);
+  };
+
+  harness.runtime.start();
+  flushNextRaf(16);
+
+  harness.runtime.emitIntent({
+    type: INTENT_TYPES.GAME_COMMAND,
+    payload: {
+      commandType: GAME_COMMANDS.START_OR_STEP,
+      r: 0,
+      c: 0,
+    },
+  });
+  harness.runtime.emitIntent({
+    type: INTENT_TYPES.GAME_COMMAND,
+    payload: {
+      commandType: GAME_COMMANDS.START_OR_STEP,
+      r: 0,
+      c: 1,
+    },
+  });
+  harness.runtime.emitIntent({
+    type: INTENT_TYPES.GAME_COMMAND,
+    payload: {
+      commandType: GAME_COMMANDS.START_OR_STEP,
+      r: 1,
+      c: 1,
+    },
+  });
+  harness.runtime.emitIntent({
+    type: INTENT_TYPES.GAME_COMMAND,
+    payload: {
+      commandType: GAME_COMMANDS.START_OR_STEP,
+      r: 1,
+      c: 2,
+    },
+  });
+  flushNextRaf(32);
+
+  harness.runtime.emitIntent({
+    type: INTENT_TYPES.GAME_COMMAND,
+    payload: {
+      commandType: GAME_COMMANDS.APPLY_PATH_DRAG_SEQUENCE,
+      side: 'end',
+      steps: [
+        { r: 1, c: 1 },
+        { r: 2, c: 1 },
+      ],
+    },
+  });
+  flushNextRaf(48);
+
+  assert.deepEqual(renderCalls.at(-1)?.interactionModel?.pathTipArrivalHint, {
+    side: 'end',
+    from: { r: 1, c: 1 },
+    to: { r: 2, c: 1 },
+  });
 
   harness.runtime.destroy();
 });

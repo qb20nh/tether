@@ -183,6 +183,17 @@ class FakeElement {
     if (this.tagName !== 'CANVAS' || type !== '2d') return null;
     if (!this._context2d) {
       let fillStyle = '#000000';
+      let strokeStyle = '#000000';
+      let lineWidth = 1;
+      let font = '';
+      let textAlign = 'left';
+      let textBaseline = 'alphabetic';
+      let globalAlpha = 1;
+      let imageSmoothingEnabled = true;
+      let shadowColor = '';
+      let shadowBlur = 0;
+      let lineCap = 'butt';
+      let lineJoin = 'miter';
       this._context2d = {
         get fillStyle() {
           return fillStyle;
@@ -190,6 +201,86 @@ class FakeElement {
         set fillStyle(value) {
           fillStyle = String(value || '');
         },
+        get strokeStyle() {
+          return strokeStyle;
+        },
+        set strokeStyle(value) {
+          strokeStyle = String(value || '');
+        },
+        get lineWidth() {
+          return lineWidth;
+        },
+        set lineWidth(value) {
+          lineWidth = Number(value) || 0;
+        },
+        get font() {
+          return font;
+        },
+        set font(value) {
+          font = String(value || '');
+        },
+        get textAlign() {
+          return textAlign;
+        },
+        set textAlign(value) {
+          textAlign = String(value || '');
+        },
+        get textBaseline() {
+          return textBaseline;
+        },
+        set textBaseline(value) {
+          textBaseline = String(value || '');
+        },
+        get globalAlpha() {
+          return globalAlpha;
+        },
+        set globalAlpha(value) {
+          globalAlpha = Number(value) || 0;
+        },
+        get imageSmoothingEnabled() {
+          return imageSmoothingEnabled;
+        },
+        set imageSmoothingEnabled(value) {
+          imageSmoothingEnabled = Boolean(value);
+        },
+        get shadowColor() {
+          return shadowColor;
+        },
+        set shadowColor(value) {
+          shadowColor = String(value || '');
+        },
+        get shadowBlur() {
+          return shadowBlur;
+        },
+        set shadowBlur(value) {
+          shadowBlur = Number(value) || 0;
+        },
+        get lineCap() {
+          return lineCap;
+        },
+        set lineCap(value) {
+          lineCap = String(value || '');
+        },
+        get lineJoin() {
+          return lineJoin;
+        },
+        set lineJoin(value) {
+          lineJoin = String(value || '');
+        },
+        save() {},
+        restore() {},
+        setTransform() {},
+        getTransform() {
+          return { a: 1, d: 1 };
+        },
+        clearRect() {},
+        beginPath() {},
+        arc() {},
+        stroke() {},
+        fill() {},
+        moveTo() {},
+        lineTo() {},
+        fillText() {},
       };
     }
     return this._context2d;
@@ -288,6 +379,15 @@ const installRendererEnv = (t) => {
   return { rafCallbacks };
 };
 
+const flushNextRaf = (env, timestamp = 16) => {
+  const nextEntry = env.rafCallbacks.entries().next().value;
+  if (!nextEntry) return false;
+  const [id, callback] = nextEntry;
+  env.rafCallbacks.delete(id);
+  callback(timestamp);
+  return true;
+};
+
 const createFakePathRenderer = () => ({
   calls: [],
   destroyed: false,
@@ -341,10 +441,23 @@ const createShellRefs = () => {
   gridEl.setBoundingClientRect({ left: 10, top: 20, width: 240, height: 240 });
   boardWrap.appendChild(gridEl);
 
+  const canvas = new FakeElement('canvas');
+  canvas.clientWidth = 240;
+  canvas.clientHeight = 240;
+  boardWrap.appendChild(canvas);
+
+  const symbolCanvas = new FakeElement('canvas');
+  symbolCanvas.clientWidth = 240;
+  symbolCanvas.clientHeight = 240;
+  boardWrap.appendChild(symbolCanvas);
+
   return {
     app,
     boardWrap,
+    canvas,
     gridEl,
+    symbolCanvas,
+    symbolCtx: symbolCanvas.getContext('2d'),
     msgEl: new FakeElement('div'),
     legend: new FakeElement('div'),
     pathRenderer: createFakePathRenderer(),
@@ -365,6 +478,8 @@ const createSnapshot = ({ gridData, path = [], levelIndex = 0 }) => {
     path,
     visited,
     idxByKey,
+    stitches: [],
+    cornerCounts: [],
     totalUsable,
   };
 };
@@ -372,7 +487,7 @@ const createSnapshot = ({ gridData, path = [], levelIndex = 0 }) => {
 const getGridCell = (refs, r, c, cols) => refs.gridEl.children[(r * cols) + c] || null;
 
 test('createBoardRendererCore keeps refs, interaction state, and ghosts isolated per instance', (t) => {
-  installRendererEnv(t);
+  const env = installRendererEnv(t);
   const gridData = [
     ['.', '.'],
     ['.', '.'],
@@ -400,6 +515,8 @@ test('createBoardRendererCore keeps refs, interaction state, and ghosts isolated
     isPathDragging: true,
     pathDragCursor: { r: 1, c: 0 },
   });
+  flushNextRaf(env, 16);
+  flushNextRaf(env, 16);
 
   const firstDropTarget = getGridCell(firstRefs, 1, 1, 2);
   const secondDropTarget = getGridCell(secondRefs, 0, 0, 2);
@@ -419,7 +536,7 @@ test('createBoardRendererCore keeps refs, interaction state, and ghosts isolated
 });
 
 test('createBoardRendererCore does not share transition compensation state across instances', (t) => {
-  installRendererEnv(t);
+  const env = installRendererEnv(t);
   const gridData = [['.', '.', '.', '.']];
   const previousSnapshot = createSnapshot({
     gridData,
@@ -462,6 +579,8 @@ test('createBoardRendererCore does not share transition compensation state acros
     uiModel: {},
     interactionModel: {},
   });
+  flushNextRaf(env, 16);
+  flushNextRaf(env, 16);
 
   assert.equal(firstRefs.pathRenderer.calls.length > 0, true);
   assert.equal(secondRefs.pathRenderer.calls.length > 0, true);
@@ -518,4 +637,285 @@ test('createBoardRendererCore destroy clears animation and remount starts clean'
   assert.equal(core.getRefs(), secondRefs);
   assert.equal(getGridCell(secondRefs, 0, 0, 2).classList.contains('pathTipDragHover'), false);
   assert.equal(getGridCell(secondRefs, 0, 1, 2).classList.contains('dropTarget'), false);
+});
+
+test('createBoardRendererCore applies incremental path patches for end/start batches and mixed endpoint turns', (t) => {
+  const env = installRendererEnv(t);
+  const counters = {};
+  const gridData = [['.', '.', '.', '.'], ['.', '.', '.', '.']];
+  const core = createBoardRendererCore({ debugCounters: counters });
+  const refs = createShellRefs();
+  const baseSnapshot = createSnapshot({
+    gridData,
+    path: [
+      { r: 0, c: 1 },
+      { r: 0, c: 2 },
+    ],
+  });
+  const endExtendedSnapshot = createSnapshot({
+    gridData,
+    path: [
+      { r: 0, c: 1 },
+      { r: 0, c: 2 },
+      { r: 0, c: 3 },
+    ],
+  });
+  const startExtendedSnapshot = createSnapshot({
+    gridData,
+    path: [
+      { r: 0, c: 0 },
+      { r: 0, c: 1 },
+      { r: 0, c: 2 },
+      { r: 0, c: 3 },
+    ],
+  });
+  const endTurnedSnapshot = createSnapshot({
+    gridData,
+    path: [
+      { r: 0, c: 0 },
+      { r: 0, c: 1 },
+      { r: 1, c: 1 },
+    ],
+  });
+  const endUnturnedTurnedSnapshot = createSnapshot({
+    gridData,
+    path: [
+      { r: 0, c: 0 },
+      { r: 0, c: 1 },
+      { r: 0, c: 2 },
+    ],
+  });
+  const startTurnedSnapshot = createSnapshot({
+    gridData,
+    path: [
+      { r: 1, c: 1 },
+      { r: 0, c: 1 },
+      { r: 0, c: 2 },
+    ],
+  });
+  const startUnturnedTurnedSnapshot = createSnapshot({
+    gridData,
+    path: [
+      { r: 0, c: 0 },
+      { r: 0, c: 1 },
+      { r: 0, c: 2 },
+    ],
+  });
+
+  core.mount(refs);
+  core.rebuildGrid(baseSnapshot);
+  core.renderFrame({
+    snapshot: baseSnapshot,
+    evaluation: {},
+    completion: null,
+    uiModel: {},
+    interactionModel: {
+      isPathDragging: true,
+      pathDragSide: 'end',
+      pathDragCursor: { r: 0, c: 2 },
+    },
+  });
+  flushNextRaf(env, 16);
+
+  const initialFullRebuilds = counters.fullCellRebuilds || 0;
+  assert.equal(initialFullRebuilds > 0, true);
+
+  core.renderFrame({
+    snapshot: endExtendedSnapshot,
+    evaluation: {},
+    completion: null,
+    uiModel: {},
+    interactionModel: {
+      isPathDragging: true,
+      pathDragSide: 'end',
+      pathDragCursor: { r: 0, c: 3 },
+    },
+  });
+  flushNextRaf(env, 32);
+
+  assert.equal(counters.fullCellRebuilds, initialFullRebuilds);
+  assert.equal((counters.incrementalCellPatches || 0) >= 1, true);
+  assert.equal(getGridCell(refs, 0, 3, 4).classList.contains('pathEnd'), true);
+  assert.equal(getGridCell(refs, 0, 3, 4).firstElementChild.textContent, '3');
+
+  core.renderFrame({
+    snapshot: startExtendedSnapshot,
+    evaluation: {},
+    completion: null,
+    uiModel: {},
+    interactionModel: {
+      isPathDragging: true,
+      pathDragSide: 'start',
+      pathDragCursor: { r: 0, c: 0 },
+    },
+  });
+  flushNextRaf(env, 48);
+
+  assert.equal(counters.fullCellRebuilds, initialFullRebuilds);
+  assert.equal((counters.incrementalCellPatches || 0) >= 2, true);
+  assert.equal(getGridCell(refs, 0, 0, 4).classList.contains('pathStart'), true);
+  assert.equal(getGridCell(refs, 0, 3, 4).classList.contains('pathEnd'), true);
+  assert.equal(getGridCell(refs, 0, 1, 4).firstElementChild.textContent, '2');
+
+  core.renderFrame({
+    snapshot: endTurnedSnapshot,
+    evaluation: {},
+    completion: null,
+    uiModel: {},
+    interactionModel: {
+      isPathDragging: true,
+      pathDragSide: 'end',
+      pathDragCursor: { r: 1, c: 1 },
+    },
+  });
+  flushNextRaf(env, 64);
+
+  const mixedFullRebuilds = counters.fullCellRebuilds;
+
+  core.renderFrame({
+    snapshot: endUnturnedTurnedSnapshot,
+    evaluation: {},
+    completion: null,
+    uiModel: {},
+    interactionModel: {
+      isPathDragging: true,
+      pathDragSide: 'end',
+      pathDragCursor: { r: 0, c: 2 },
+    },
+  });
+  flushNextRaf(env, 80);
+
+  assert.equal(counters.fullCellRebuilds, mixedFullRebuilds);
+  assert.equal((counters.incrementalCellPatches || 0) >= 3, true);
+  assert.equal(getGridCell(refs, 0, 2, 4).classList.contains('pathEnd'), true);
+
+  core.renderFrame({
+    snapshot: startTurnedSnapshot,
+    evaluation: {},
+    completion: null,
+    uiModel: {},
+    interactionModel: {
+      isPathDragging: true,
+      pathDragSide: 'start',
+      pathDragCursor: { r: 1, c: 1 },
+    },
+  });
+  flushNextRaf(env, 96);
+
+  const mixedStartFullRebuilds = counters.fullCellRebuilds;
+
+  core.renderFrame({
+    snapshot: startUnturnedTurnedSnapshot,
+    evaluation: {},
+    completion: null,
+    uiModel: {},
+    interactionModel: {
+      isPathDragging: true,
+      pathDragSide: 'start',
+      pathDragCursor: { r: 0, c: 0 },
+    },
+  });
+  flushNextRaf(env, 112);
+
+  assert.equal(counters.fullCellRebuilds, mixedStartFullRebuilds);
+  assert.equal((counters.incrementalCellPatches || 0) >= 4, true);
+  assert.equal(getGridCell(refs, 0, 0, 4).classList.contains('pathStart'), true);
+});
+
+test('createBoardRendererCore performs one heavy render per RAF and skips symbol redraws on animation-only frames', (t) => {
+  const env = installRendererEnv(t);
+  const counters = {};
+  const gridData = [['.', '.']];
+  const snapshot = createSnapshot({
+    gridData,
+    path: [
+      { r: 0, c: 0 },
+      { r: 0, c: 1 },
+    ],
+  });
+  const core = createBoardRendererCore({ debugCounters: counters });
+  const refs = createShellRefs();
+
+  core.mount(refs);
+  core.rebuildGrid(snapshot);
+  core.renderFrame({
+    snapshot,
+    evaluation: {},
+    completion: null,
+    uiModel: {},
+    interactionModel: {},
+  });
+  core.renderFrame({
+    snapshot,
+    evaluation: {},
+    completion: null,
+    uiModel: {},
+    interactionModel: {},
+  });
+  core.renderFrame({
+    snapshot,
+    evaluation: {},
+    completion: null,
+    uiModel: {},
+    interactionModel: {},
+  });
+
+  assert.equal(env.rafCallbacks.size, 1);
+  flushNextRaf(env, 16);
+  assert.equal(counters.heavyFrameRenders, 1);
+  assert.equal(counters.symbolRedraws, 1);
+  assert.equal((counters.pathDraws || 0) >= 1, true);
+
+  flushNextRaf(env, 32);
+  assert.equal(counters.heavyFrameRenders, 1);
+  assert.equal(counters.symbolRedraws, 1);
+  assert.equal((counters.pathDraws || 0) >= 2, true);
+});
+
+test('createBoardRendererCore keeps path flow moving across consecutive state render frames', (t) => {
+  const env = installRendererEnv(t);
+  const gridData = [['.', '.']];
+  const snapshot = createSnapshot({
+    gridData,
+    path: [
+      { r: 0, c: 0 },
+      { r: 0, c: 1 },
+    ],
+  });
+  const core = createBoardRendererCore();
+  const refs = createShellRefs();
+
+  core.mount(refs);
+  core.rebuildGrid(snapshot);
+
+  core.renderFrame({
+    snapshot,
+    evaluation: {},
+    completion: null,
+    uiModel: {},
+    interactionModel: {
+      isPathDragging: true,
+      pathDragSide: 'end',
+      pathDragCursor: { r: 0, c: 1 },
+    },
+  });
+  flushNextRaf(env, 16);
+  const firstFlowOffset = refs.pathRenderer.calls.at(-1)?.flowOffset ?? 0;
+
+  core.renderFrame({
+    snapshot,
+    evaluation: {},
+    completion: null,
+    uiModel: {},
+    interactionModel: {
+      isPathDragging: true,
+      pathDragSide: 'end',
+      pathDragCursor: { r: 0, c: 1 },
+    },
+  });
+  flushNextRaf(env, 32);
+  const secondFlowOffset = refs.pathRenderer.calls.at(-1)?.flowOffset ?? 0;
+
+  assert.equal(firstFlowOffset, 0);
+  assert.equal(secondFlowOffset > firstFlowOffset, true);
 });

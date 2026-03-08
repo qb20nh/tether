@@ -34,6 +34,7 @@ export function createDomInputAdapter() {
   let dragGridMetrics = null;
   let wallDragFrame = 0;
   let wallDragQueuedPoint = null;
+  const viewportScroll = { x: 0, y: 0 };
 
   const addListener = (target, event, handler, options) => {
     if (!target?.addEventListener) return;
@@ -94,13 +95,22 @@ export function createDomInputAdapter() {
     wallDragFrame = 0;
   };
 
-  const getViewportScroll = () => {
+  const readViewportScroll = () => {
     if (typeof window === 'undefined') return { x: 0, y: 0 };
     return {
       x: window.scrollX || window.pageXOffset || 0,
       y: window.scrollY || window.pageYOffset || 0,
     };
   };
+
+  const syncViewportScroll = () => {
+    const next = readViewportScroll();
+    viewportScroll.x = next.x;
+    viewportScroll.y = next.y;
+    return viewportScroll;
+  };
+
+  const getViewportScroll = () => viewportScroll;
 
   const captureGridMetrics = (snapshot = null) => {
     if (!refs?.gridEl || !snapshot) return null;
@@ -191,6 +201,52 @@ export function createDomInputAdapter() {
   };
 
   const clampToRange = (value, lo, hi) => Math.max(lo, Math.min(hi, value));
+
+  const createPathDragSimulation = (snapshot) => {
+    if (!snapshot) return null;
+    return {
+      rows: snapshot.rows,
+      cols: snapshot.cols,
+      gridData: snapshot.gridData,
+      stitchSet: snapshot.stitchSet,
+      path: Array.isArray(snapshot.path) ? snapshot.path.slice() : [],
+      visited: new Set(snapshot.visited || []),
+    };
+  };
+
+  const applyPathStepToSimulation = (snapshot, side, nextStep) => {
+    if (!snapshot || !nextStep) return snapshot;
+    const nextKey = `${nextStep.r},${nextStep.c}`;
+    const nextVisited = snapshot.visited;
+    const nextPath = snapshot.path;
+
+    if (nextPath.length === 0) {
+      nextPath.push({ r: nextStep.r, c: nextStep.c });
+      nextVisited.add(nextKey);
+    } else if (side === 'start') {
+      const backtrackNode = nextPath[1];
+      if (backtrackNode && backtrackNode.r === nextStep.r && backtrackNode.c === nextStep.c) {
+        const removedHead = nextPath[0];
+        nextPath.shift();
+        if (removedHead) nextVisited.delete(`${removedHead.r},${removedHead.c}`);
+      } else {
+        nextPath.unshift({ r: nextStep.r, c: nextStep.c });
+        nextVisited.add(nextKey);
+      }
+    } else {
+      const backtrackNode = nextPath[nextPath.length - 2];
+      if (backtrackNode && backtrackNode.r === nextStep.r && backtrackNode.c === nextStep.c) {
+        const removedTail = nextPath[nextPath.length - 1];
+        nextPath.pop();
+        if (removedTail) nextVisited.delete(`${removedTail.r},${removedTail.c}`);
+      } else {
+        nextPath.push({ r: nextStep.r, c: nextStep.c });
+        nextVisited.add(nextKey);
+      }
+    }
+
+    return snapshot;
+  };
 
   const snapCellFromMetrics = (x, y, resolved) => {
     if (!resolved) return null;
@@ -408,13 +464,12 @@ export function createDomInputAdapter() {
           snapshotForInput,
           metrics,
         );
-        const commandType = pathDrag.side === 'start'
-          ? GAME_COMMANDS.START_OR_STEP_FROM_START
-          : GAME_COMMANDS.START_OR_STEP;
+        const dragCommandSide = pathDrag.side === 'start' ? 'start' : 'end';
 
-        let stepSnapshot = snapshotForInput;
+        let stepSnapshot = createPathDragSimulation(snapshotForInput);
         let stepCount = 0;
         const maxStepCount = Math.max(1, (stepSnapshot.rows * stepSnapshot.cols) + 1);
+        const queuedSteps = [];
 
         while (stepCount < maxStepCount) {
           const headNode = pathDrag.side === 'start'
@@ -439,11 +494,10 @@ export function createDomInputAdapter() {
           if (!nextStep) break;
 
           pathDrag.moved = true;
-          sendGameCommand(commandType, { r: nextStep.r, c: nextStep.c });
           pathDrag.lastCursorKey = `${nextStep.r},${nextStep.c}`;
+          queuedSteps.push({ r: nextStep.r, c: nextStep.c });
           stepCount += 1;
-
-          const nextSnapshot = readSnapshot();
+          const nextSnapshot = applyPathStepToSimulation(stepSnapshot, pathDrag.side, nextStep);
           const nextHeadNode = pathDrag.side === 'start'
             ? nextSnapshot?.path?.[0]
             : nextSnapshot?.path?.[nextSnapshot?.path?.length - 1];
@@ -462,6 +516,13 @@ export function createDomInputAdapter() {
           ) {
             break;
           }
+        }
+
+        if (queuedSteps.length > 0) {
+          sendGameCommand(GAME_COMMANDS.APPLY_PATH_DRAG_SEQUENCE, {
+            side: dragCommandSide,
+            steps: queuedSteps,
+          });
         }
 
         return;
@@ -570,6 +631,7 @@ export function createDomInputAdapter() {
       readSnapshot = nextReadSnapshot;
       readLayoutMetrics = nextReadLayoutMetrics;
       emitIntent = nextEmitIntent;
+      syncViewportScroll();
 
       if (!refs?.gridEl) {
         throw new Error('createDomInputAdapter.bind requires refs.gridEl');
@@ -579,6 +641,9 @@ export function createDomInputAdapter() {
       addListener(refs.gridEl, 'pointermove', onPointerMove, { passive: false });
       addListener(refs.gridEl, 'pointerup', onPointerUp, { passive: false });
       addListener(refs.gridEl, 'pointercancel', onPointerUp, { passive: false });
+      addListener(window, 'scroll', syncViewportScroll, { passive: true });
+      addListener(window?.visualViewport, 'scroll', syncViewportScroll, { passive: true });
+      addListener(window?.visualViewport, 'resize', syncViewportScroll, { passive: true });
 
       addListener(refs.levelSel, 'change', (e) => {
         const value = parseInt(e.target.value, 10);

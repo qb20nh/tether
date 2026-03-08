@@ -5,137 +5,13 @@ const STITCH_BRIDGE_MIN_WIDTH_PX = 1;
 const STITCH_BRIDGE_WIDTH_CELL_RATIO = 0.06;
 const DEFAULT_CELL_SIZE_PX = 56;
 
-const isDiagonalNeighbor = (a, b) =>
-  Math.abs((a?.r ?? 0) - (b?.r ?? 0)) === 1 && Math.abs((a?.c ?? 0) - (b?.c ?? 0)) === 1;
-
 const sameCell = (a, b) =>
   Boolean(a && b && a.r === b.r && a.c === b.c);
-
-const pointSideOfLine = (point, a, b) => (
-  ((Number(point?.x) || 0) - (Number(a?.x) || 0)) * ((Number(b?.y) || 0) - (Number(a?.y) || 0))
-  - ((Number(point?.y) || 0) - (Number(a?.y) || 0)) * ((Number(b?.x) || 0) - (Number(a?.x) || 0))
-);
 
 const resolveCellSize = (cellSize) => {
   const value = Number(cellSize);
   if (Number.isFinite(value) && value > 0) return value;
   return DEFAULT_CELL_SIZE_PX;
-};
-
-const resolveStitchBridgeCrossingStep = ({
-  snapshot,
-  headNode,
-  headCenter,
-  candidates,
-  pointer,
-  rawPointer,
-  cellCenter,
-  cellSize,
-}) => {
-  if (!snapshot?.stitchSet || !headNode || !headCenter || !pointer) return null;
-  if (!Array.isArray(candidates) || candidates.length <= 0) return null;
-
-  const resolvedCellSize = resolveCellSize(cellSize);
-  const halfLen = Math.max(STITCH_BRIDGE_MIN_HALF_LEN_PX, resolvedCellSize * STITCH_BRIDGE_HALF_LEN_CELL_RATIO);
-  const symbolStrokeWidth = Math.max(STITCH_BRIDGE_MIN_WIDTH_PX, resolvedCellSize * STITCH_BRIDGE_WIDTH_CELL_RATIO);
-  const symbolRadius = Math.max(
-    STITCH_BRIDGE_MIN_RADIUS_PX,
-    (halfLen * Math.SQRT2) + (symbolStrokeWidth * 0.5),
-  );
-  const bridgePointer = (
-    Number.isFinite(rawPointer?.x) && Number.isFinite(rawPointer?.y)
-      ? rawPointer
-      : pointer
-  );
-  let shouldHold = false;
-
-  for (let i = 0; i < candidates.length; i += 1) {
-    const candidate = candidates[i];
-    if (!isDiagonalNeighbor(headNode, candidate)) continue;
-
-    const stitchKey = `${Math.max(headNode.r, candidate.r)},${Math.max(headNode.c, candidate.c)}`;
-    if (!snapshot.stitchSet.has(stitchKey)) continue;
-
-    const candidateCenter = cellCenter(candidate.r, candidate.c);
-    const centerX = (headCenter.x + candidateCenter.x) * 0.5;
-    const centerY = (headCenter.y + candidateCenter.y) * 0.5;
-    const diagAStart = { x: centerX - halfLen, y: centerY - halfLen };
-    const diagAEnd = { x: centerX + halfLen, y: centerY + halfLen };
-    const diagBStart = { x: centerX + halfLen, y: centerY - halfLen };
-    const diagBEnd = { x: centerX - halfLen, y: centerY + halfLen };
-    if (Math.hypot(bridgePointer.x - centerX, bridgePointer.y - centerY) > symbolRadius) continue;
-
-    shouldHold = true;
-    const dr = candidate.r - headNode.r;
-    const dc = candidate.c - headNode.c;
-    const usesDiagA = dr === dc;
-    const bridgeStart = usesDiagA ? diagBStart : diagAStart;
-    const bridgeEnd = usesDiagA ? diagBEnd : diagAEnd;
-
-    const headSide = pointSideOfLine(headCenter, bridgeStart, bridgeEnd);
-    if (Math.abs(headSide) <= 1e-6) continue;
-    const pointerSide = pointSideOfLine(bridgePointer, bridgeStart, bridgeEnd);
-    if ((headSide * pointerSide) <= 0) {
-      return {
-        step: { r: candidate.r, c: candidate.c },
-        hold: false,
-      };
-    }
-  }
-
-  return shouldHold ? { step: null, hold: true } : null;
-};
-
-const resolveBestMoveCandidate = ({
-  candidates,
-  pointer,
-  pointerCell,
-  headNode,
-  headCenter,
-  cellCenter,
-}) => {
-  if (!Array.isArray(candidates) || candidates.length <= 0) return null;
-  if (!pointer || !headNode || !headCenter || typeof cellCenter !== 'function') return null;
-
-  const holdDistance = Math.hypot(pointer.x - headCenter.x, pointer.y - headCenter.y);
-  const holdIsPointerCell = sameCell(pointerCell, headNode);
-  const rankedCandidates = [];
-
-  for (let i = 0; i < candidates.length; i += 1) {
-    const candidate = candidates[i];
-    const center = cellCenter(candidate.r, candidate.c);
-    rankedCandidates.push({
-      candidate,
-      center,
-      distance: Math.hypot(pointer.x - center.x, pointer.y - center.y),
-      isPointerCell: sameCell(pointerCell, candidate),
-    });
-  }
-
-  rankedCandidates.sort((a, b) => {
-    if (Math.abs(a.distance - b.distance) > 1e-6) {
-      return a.distance - b.distance;
-    }
-    if (a.isPointerCell !== b.isPointerCell) {
-      return a.isPointerCell ? -1 : 1;
-    }
-    return 0;
-  });
-
-  for (let i = 0; i < rankedCandidates.length; i += 1) {
-    const ranked = rankedCandidates[i];
-    const equalToHold = Math.abs(ranked.distance - holdDistance) <= 1e-6;
-    const improves = ranked.distance < holdDistance - 1e-6
-      || (equalToHold && ranked.isPointerCell && !holdIsPointerCell);
-    if (!improves) continue;
-    return {
-      ...ranked,
-      holdDistance,
-      marginPx: holdDistance - ranked.distance,
-    };
-  }
-
-  return null;
 };
 
 export function buildPathDragCandidates({
@@ -216,6 +92,7 @@ export function chooseSlipperyPathDragStep({
   headNode,
   backtrackNode,
   pointer,
+  rawPointer,
   pointerCell,
   isUsableCell,
   isAdjacentMove,
@@ -224,40 +101,102 @@ export function chooseSlipperyPathDragStep({
 }) {
   if (!snapshot || !headNode || !pointer || typeof cellCenter !== 'function') return null;
 
-  const candidates = buildPathDragCandidates({
-    snapshot,
-    headNode,
-    backtrackNode,
-    isUsableCell,
-    isAdjacentMove,
-  });
-
   const headCenter = cellCenter(headNode.r, headNode.c);
-  const stitchBridgeCrossingStep = resolveStitchBridgeCrossingStep({
-    snapshot,
-    headNode,
-    headCenter,
-    candidates,
-    pointer,
-    rawPointer: pointer,
-    cellCenter,
-    cellSize,
-  });
-  if (stitchBridgeCrossingStep?.step) {
-    return stitchBridgeCrossingStep.step;
-  }
-  if (stitchBridgeCrossingStep?.hold) {
-    return null;
+  const holdDistance = Math.hypot(pointer.x - headCenter.x, pointer.y - headCenter.y);
+  const holdIsPointerCell = sameCell(pointerCell, headNode);
+  const resolvedCellSize = resolveCellSize(cellSize);
+  const halfLen = Math.max(
+    STITCH_BRIDGE_MIN_HALF_LEN_PX,
+    resolvedCellSize * STITCH_BRIDGE_HALF_LEN_CELL_RATIO,
+  );
+  const symbolStrokeWidth = Math.max(
+    STITCH_BRIDGE_MIN_WIDTH_PX,
+    resolvedCellSize * STITCH_BRIDGE_WIDTH_CELL_RATIO,
+  );
+  const symbolRadius = Math.max(
+    STITCH_BRIDGE_MIN_RADIUS_PX,
+    (halfLen * Math.SQRT2) + (symbolStrokeWidth * 0.5),
+  );
+  const bridgePointer = (
+    Number.isFinite(rawPointer?.x) && Number.isFinite(rawPointer?.y)
+      ? rawPointer
+      : pointer
+  );
+  const candidate = { r: 0, c: 0 };
+  let shouldHold = false;
+  let bestR = NaN;
+  let bestC = NaN;
+  let bestDistance = Infinity;
+  let bestIsPointerCell = false;
+
+  for (let dr = -1; dr <= 1; dr += 1) {
+    for (let dc = -1; dc <= 1; dc += 1) {
+      if (dr === 0 && dc === 0) continue;
+      const nr = headNode.r + dr;
+      const nc = headNode.c + dc;
+      if (nr < 0 || nr >= snapshot.rows || nc < 0 || nc >= snapshot.cols) continue;
+
+      candidate.r = nr;
+      candidate.c = nc;
+      if (!isAdjacentMove(snapshot, headNode, candidate)) continue;
+      if (!isUsableCell(snapshot, nr, nc)) continue;
+
+      const isBacktrack = Boolean(backtrackNode)
+        && nr === backtrackNode.r
+        && nc === backtrackNode.c;
+      if (!isBacktrack && snapshot.visited?.has?.(`${nr},${nc}`)) continue;
+
+      const isDiagonal = Math.abs(dr) === 1 && Math.abs(dc) === 1;
+      const candidateCenter = cellCenter(nr, nc);
+      const candidateCenterX = candidateCenter.x;
+      const candidateCenterY = candidateCenter.y;
+
+      if (isDiagonal && snapshot?.stitchSet?.size > 0) {
+        const stitchKey = `${Math.max(headNode.r, nr)},${Math.max(headNode.c, nc)}`;
+        if (snapshot.stitchSet.has(stitchKey)) {
+          const centerX = (headCenter.x + candidateCenterX) * 0.5;
+          const centerY = (headCenter.y + candidateCenterY) * 0.5;
+          if (Math.hypot(bridgePointer.x - centerX, bridgePointer.y - centerY) <= symbolRadius) {
+            shouldHold = true;
+            const usesDiagA = dr === dc;
+            const bridgeStartX = usesDiagA ? (centerX + halfLen) : (centerX - halfLen);
+            const bridgeStartY = centerY - halfLen;
+            const bridgeEndX = usesDiagA ? (centerX - halfLen) : (centerX + halfLen);
+            const bridgeEndY = centerY + halfLen;
+            const headSide = (
+              (headCenter.x - bridgeStartX) * (bridgeEndY - bridgeStartY)
+              - (headCenter.y - bridgeStartY) * (bridgeEndX - bridgeStartX)
+            );
+            if (Math.abs(headSide) > 1e-6) {
+              const pointerSide = (
+                (bridgePointer.x - bridgeStartX) * (bridgeEndY - bridgeStartY)
+                - (bridgePointer.y - bridgeStartY) * (bridgeEndX - bridgeStartX)
+              );
+              if ((headSide * pointerSide) <= 0) {
+                return { r: nr, c: nc };
+              }
+            }
+          }
+        }
+      }
+
+      const distance = Math.hypot(pointer.x - candidateCenterX, pointer.y - candidateCenterY);
+      const isPointer = sameCell(pointerCell, candidate);
+      const betterDistance = distance < bestDistance - 1e-6;
+      const equalDistance = Math.abs(distance - bestDistance) <= 1e-6;
+      if (!betterDistance && !(equalDistance && isPointer && !bestIsPointerCell)) continue;
+
+      bestR = nr;
+      bestC = nc;
+      bestDistance = distance;
+      bestIsPointerCell = isPointer;
+    }
   }
 
-  const bestMove = resolveBestMoveCandidate({
-    candidates,
-    pointer,
-    pointerCell,
-    headNode,
-    headCenter,
-    cellCenter,
-  });
-  if (!bestMove) return null;
-  return { r: bestMove.candidate.r, c: bestMove.candidate.c };
+  if (shouldHold || !Number.isInteger(bestR) || !Number.isInteger(bestC)) return null;
+  const equalToHold = Math.abs(bestDistance - holdDistance) <= 1e-6;
+  const improves = bestDistance < holdDistance - 1e-6
+    || (equalToHold && bestIsPointerCell && !holdIsPointerCell);
+  if (!improves) return null;
+  return { r: bestR, c: bestC };
 }

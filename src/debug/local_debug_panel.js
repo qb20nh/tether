@@ -151,7 +151,7 @@ const setPanelVisible = (panelEl, visible) => {
   panelEl.setAttribute('aria-hidden', visible ? 'false' : 'true');
 };
 
-const bindLogoToggle = (panelEl) => {
+const bindLogoToggle = (panelEl, onToggle = () => {}) => {
   if (!panelEl) return;
   const logoTextEl = document.querySelector(LOGO_TEXT_SELECTOR) || document.querySelector('.brandTitle');
   if (!logoTextEl) return;
@@ -165,7 +165,9 @@ const bindLogoToggle = (panelEl) => {
 
     const clickAt = typeof event.timeStamp === 'number' ? event.timeStamp : Date.now();
     if (clickAt - lastMiddleClickAt <= MIDDLE_DOUBLE_CLICK_WINDOW_MS) {
-      setPanelVisible(panelEl, panelEl.hidden);
+      const nextVisible = panelEl.hidden;
+      setPanelVisible(panelEl, nextVisible);
+      onToggle(nextVisible);
       lastMiddleClickAt = 0;
       return;
     }
@@ -379,31 +381,63 @@ export const mountLocalDebugPanel = (callbacks = {}) => {
   }
   const animationButtons = document.createElement('div');
   animationButtons.className = 'debugGrid';
+  let activeTabKey = DEBUG_TAB_NOTIFICATION;
   animationButtons.appendChild(mkButton('Speed: 1x', () => {
     window.TETHER_DEBUG_ANIM_SPEED = 1;
+    refreshAnimationSync();
   }));
   animationButtons.appendChild(mkButton('Speed: 0.25x (4x slower)', () => {
     window.TETHER_DEBUG_ANIM_SPEED = 4;
+    refreshAnimationSync();
   }));
   animationButtons.appendChild(mkButton('Speed: 0.1x (10x slower)', () => {
     window.TETHER_DEBUG_ANIM_SPEED = 10;
+    refreshAnimationSync();
   }));
   animationTab.appendChild(animationButtons);
 
-  let animationRafId;
-  const syncAnimationsSpeed = () => {
-    const currentSpeed = typeof window.TETHER_DEBUG_ANIM_SPEED === 'number' ? window.TETHER_DEBUG_ANIM_SPEED : 1;
+  let animationRafId = 0;
+  const resolveAnimationSpeed = () => (
+    typeof window.TETHER_DEBUG_ANIM_SPEED === 'number' ? window.TETHER_DEBUG_ANIM_SPEED : 1
+  );
+  const shouldSyncAnimations = () => (
+    resolveAnimationSpeed() !== 1 || (activeTabKey === 'animation' && !root.hidden)
+  );
+  const stopAnimationSync = () => {
+    if (!animationRafId) return;
+    cancelAnimationFrame(animationRafId);
+    animationRafId = 0;
+  };
+  const applyAnimationsSpeed = () => {
+    const currentSpeed = resolveAnimationSpeed();
     const targetPlaybackRate = 1 / Math.max(0.1, currentSpeed);
     document.getAnimations().forEach((anim) => {
       if (anim.playbackRate !== targetPlaybackRate) {
         anim.playbackRate = targetPlaybackRate;
       }
     });
+  };
+  const syncAnimationsSpeed = () => {
+    applyAnimationsSpeed();
+    if (!shouldSyncAnimations()) {
+      animationRafId = 0;
+      return;
+    }
     animationRafId = requestAnimationFrame(syncAnimationsSpeed);
   };
-  syncAnimationsSpeed();
+  const refreshAnimationSync = () => {
+    applyAnimationsSpeed();
+    if (shouldSyncAnimations()) {
+      if (!animationRafId) {
+        animationRafId = requestAnimationFrame(syncAnimationsSpeed);
+      }
+      return;
+    }
+    stopAnimationSync();
+  };
 
   const setActiveTab = (tabKey) => {
+    activeTabKey = tabKey;
     const useNotification = tabKey === DEBUG_TAB_NOTIFICATION;
     const useDaily = tabKey === DEBUG_TAB_DAILY;
     const useAnimation = tabKey === 'animation';
@@ -419,6 +453,7 @@ export const mountLocalDebugPanel = (callbacks = {}) => {
     notificationTabBtn.tabIndex = useNotification ? 0 : -1;
     dailyTabBtn.tabIndex = useDaily ? 0 : -1;
     animationTabBtn.tabIndex = useAnimation ? 0 : -1;
+    refreshAnimationSync();
   };
   const tabButtons = [notificationTabBtn, dailyTabBtn, animationTabBtn];
   tabButtons.forEach((button, index) => {
@@ -442,5 +477,7 @@ export const mountLocalDebugPanel = (callbacks = {}) => {
   root.appendChild(dailyTab);
   root.appendChild(animationTab);
   document.body.appendChild(root);
-  bindLogoToggle(root);
+  bindLogoToggle(root, () => {
+    refreshAnimationSync();
+  });
 };
