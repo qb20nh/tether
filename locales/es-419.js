@@ -56,6 +56,7 @@ export default {
     "autoUpdateEnable": "Activar actualización automática",
     "lowPowerMode": "Modo de bajo consumo",
     "lowPowerModeEnable": "Activar modo de bajo consumo",
+    "lowPowerModeHintToast": "Si al arrastrar la ruta notas tirones, prueba activar el modo de bajo consumo en Configuración.",
     "newVersionAvailableTitle": "Nueva versión disponible",
     "newVersionAvailableBody": "Toca para actualizar a la versión más reciente.",
     "newVersionAvailableToast": "Hay una nueva versión disponible.",

@@ -56,6 +56,7 @@ export default {
     "autoUpdateEnable": "تفعيل التحديث التلقائي",
     "lowPowerMode": "وضع الطاقة المنخفضة",
     "lowPowerModeEnable": "تفعيل وضع الطاقة المنخفضة",
+    "lowPowerModeHintToast": "إذا أصبح سحب المسار متقطعًا، فجرّب تفعيل وضع الطاقة المنخفضة من الإعدادات.",
     "newVersionAvailableTitle": "يتوفر إصدار جديد",
     "newVersionAvailableBody": "اضغط للتحديث إلى أحدث إصدار.",
     "newVersionAvailableToast": "يتوفر إصدار جديد.",

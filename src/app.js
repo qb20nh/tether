@@ -43,6 +43,7 @@ const DAILY_NOTIFICATION_WARNING_HOURS = 8;
 const DAILY_CHECK_TAG = 'tether-daily-check';
 const SW_BUILD_NUMBER_RE = /BUILD_NUMBER\s*=\s*Number\.parseInt\(\s*['"](\d+)['"]\s*,\s*10\)/;
 const LAST_SEEN_BUILD_NUMBER_KEY = 'tetherLastSeenBuildNumber';
+const LOW_POWER_HINT_SHOWN_KEY = 'tetherLowPowerHintShown';
 const APP_TOAST_ID = 'appToast';
 const UPDATE_PROGRESS_OVERLAY_ID = 'updateProgressOverlay';
 const APP_TOAST_VISIBLE_MS = 3200;
@@ -162,6 +163,23 @@ const writeLastSeenBuildNumber = (buildNumber) => {
   if (!Number.isInteger(buildNumber) || buildNumber <= 0) return;
   try {
     window.localStorage.setItem(LAST_SEEN_BUILD_NUMBER_KEY, String(buildNumber));
+  } catch {
+    // localStorage can be unavailable in restricted browser contexts.
+  }
+};
+
+const readLowPowerHintShown = () => {
+  try {
+    return window.localStorage.getItem(LOW_POWER_HINT_SHOWN_KEY) === '1';
+  } catch {
+    // localStorage can be unavailable in restricted browser contexts.
+  }
+  return false;
+};
+
+const writeLowPowerHintShown = () => {
+  try {
+    window.localStorage.setItem(LOW_POWER_HINT_SHOWN_KEY, '1');
   } catch {
     // localStorage can be unavailable in restricted browser contexts.
   }
@@ -543,6 +561,12 @@ const resolveUpdateApplyFailureToastText = () => {
   return 'Could not apply update yet. Try again shortly.';
 };
 
+const resolveLowPowerHintToastText = () => {
+  const localized = translateNow('ui.lowPowerModeHintToast');
+  if (localized !== 'ui.lowPowerModeHintToast') return localized;
+  return 'Dragging looks slow. You can enable Low Power Mode in Settings for smoother play.';
+};
+
 updateFlow = createUpdateFlow({
   swMessageTypes: SW_MESSAGE_TYPES,
   updateApplyStatus: UPDATE_APPLY_STATUS,
@@ -702,6 +726,12 @@ export async function initTetherApp() {
         if (readAutoPromptDecision() === NOTIFICATION_AUTO_PROMPT_DECISIONS.UNSET) {
           void maybeAutoPromptForNotifications();
         }
+      },
+      shouldSuggestLowPowerMode: () => !readLowPowerHintShown(),
+      onLowPowerModeSuggestion: () => {
+        if (readLowPowerHintShown()) return;
+        writeLowPowerHintShown();
+        showInAppToast(resolveLowPowerHintToastText());
       },
     },
   });

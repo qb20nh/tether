@@ -56,6 +56,7 @@ export default {
     "autoUpdateEnable": "Attiva aggiornamento automatico",
     "lowPowerMode": "Modalità risparmio energetico",
     "lowPowerModeEnable": "Attiva modalità risparmio energetico",
+    "lowPowerModeHintToast": "Se il percorso scatta mentre lo trascini, prova ad attivare la modalità risparmio energetico nelle impostazioni.",
     "newVersionAvailableTitle": "Nuova versione disponibile",
     "newVersionAvailableBody": "Tocca per aggiornare all'ultima versione.",
     "newVersionAvailableToast": "È disponibile una nuova versione.",

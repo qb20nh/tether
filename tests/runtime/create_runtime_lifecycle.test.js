@@ -5,7 +5,7 @@ import { createDefaultCore } from '../../src/core/default_core.js';
 import { createGameStateStore } from '../../src/state/game_state_store.js';
 import { createMemoryPersistence } from '../../src/persistence/memory_persistence.js';
 import { createRuntime } from '../../src/runtime/create_runtime.js';
-import { GAME_COMMANDS, INTENT_TYPES, UI_ACTIONS } from '../../src/runtime/intents.js';
+import { GAME_COMMANDS, INTENT_TYPES, INTERACTION_UPDATES, UI_ACTIONS } from '../../src/runtime/intents.js';
 
 const LEVEL = {
   name: 'Runtime Lifecycle',
@@ -572,6 +572,104 @@ test('createRuntime toggles low power mode through runtime-owned state and queue
   flushNextRaf(32);
   assert.equal(harness.getResizeCount(), 2);
 
+  harness.runtime.destroy();
+});
+
+test('createRuntime suggests low power mode once after sustained low drag fps', (t) => {
+  const env = installBrowserEnv(t);
+  const lowFpsHintCalls = [];
+  const harness = createRuntimeHarness({
+    effects: {
+      shouldSuggestLowPowerMode: () => true,
+      onLowPowerModeSuggestion: () => {
+        lowFpsHintCalls.push('hint');
+      },
+    },
+  });
+
+  const flushAllRafs = (ts) => {
+    const callbacks = [...env.rafCallbacks.values()];
+    env.rafCallbacks.clear();
+    for (let i = 0; i < callbacks.length; i += 1) {
+      callbacks[i]?.(ts);
+    }
+  };
+
+  harness.runtime.start();
+  flushAllRafs(16);
+
+  for (let i = 1; i <= 120; i += 1) {
+    flushAllRafs(16 + (i * 16));
+  }
+
+  harness.runtime.emitIntent({
+    type: INTENT_TYPES.INTERACTION_UPDATE,
+    payload: {
+      updateType: INTERACTION_UPDATES.PATH_DRAG,
+      isPathDragging: true,
+      pathDragSide: 'end',
+      pathDragCursor: { r: 0, c: 0 },
+    },
+  });
+  flushAllRafs(2000);
+
+  for (let i = 1; i <= 60; i += 1) {
+    flushAllRafs(2000 + (i * 40));
+  }
+
+  assert.equal(lowFpsHintCalls.length, 1);
+
+  for (let i = 61; i <= 66; i += 1) {
+    flushAllRafs(2000 + (i * 40));
+  }
+
+  assert.equal(lowFpsHintCalls.length, 1);
+  harness.runtime.destroy();
+});
+
+test('createRuntime low power suggestion compares idle and drag fps before showing', (t) => {
+  const env = installBrowserEnv(t);
+  const lowFpsHintCalls = [];
+  const harness = createRuntimeHarness({
+    effects: {
+      shouldSuggestLowPowerMode: () => true,
+      onLowPowerModeSuggestion: () => {
+        lowFpsHintCalls.push('hint');
+      },
+    },
+  });
+
+  const flushAllRafs = (ts) => {
+    const callbacks = [...env.rafCallbacks.values()];
+    env.rafCallbacks.clear();
+    for (let i = 0; i < callbacks.length; i += 1) {
+      callbacks[i]?.(ts);
+    }
+  };
+
+  harness.runtime.start();
+  flushAllRafs(16);
+
+  for (let i = 1; i <= 120; i += 1) {
+    flushAllRafs(16 + (i * 40));
+  }
+
+  harness.runtime.emitIntent({
+    type: INTENT_TYPES.INTERACTION_UPDATE,
+    payload: {
+      updateType: INTERACTION_UPDATES.PATH_DRAG,
+      isPathDragging: true,
+      pathDragSide: 'end',
+      pathDragCursor: { r: 0, c: 0 },
+    },
+  });
+  flushAllRafs(6000);
+
+  for (let i = 1; i <= 60; i += 1) {
+    flushAllRafs(6000 + (i * 40));
+  }
+
+  assert.equal(lowFpsHintCalls.length, 0);
   harness.runtime.destroy();
 });
 

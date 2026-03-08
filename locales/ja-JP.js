@@ -56,6 +56,7 @@ export default {
     "autoUpdateEnable": "自動更新を有効にする",
     "lowPowerMode": "低電力モード",
     "lowPowerModeEnable": "低電力モードを有効にする",
+    "lowPowerModeHintToast": "経路をドラッグしたときにカクつく場合は、設定で低電力モードを有効にしてみてください。",
     "newVersionAvailableTitle": "新しいバージョンがあります",
     "newVersionAvailableBody": "タップして最新バージョンに更新できます。",
     "newVersionAvailableToast": "新しいバージョンがあります。",

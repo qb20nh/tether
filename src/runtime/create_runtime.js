@@ -24,6 +24,18 @@ const isRtlLocale = (locale) => /^ar/i.test(locale || '');
 const DAY_MS = 24 * 60 * 60 * 1000;
 const EVALUATE_CACHE_LIMIT = 24;
 const TUTORIAL_PRACTICE_NAME_PREFIX_RE = /^\s*.+?\d+\s*[)）]\s*/u;
+const LOW_POWER_HINT_MIN_IDLE_SAMPLES = 90;
+const LOW_POWER_HINT_MIN_DRAG_SAMPLES = 45;
+const LOW_POWER_HINT_MAX_FRAME_SAMPLES = 180;
+const LOW_POWER_HINT_MAX_FRAME_DELTA_MS = 250;
+const LOW_POWER_HINT_MIN_IDLE_AVG_FPS = 50;
+const LOW_POWER_HINT_MIN_IDLE_P99_FPS = 40;
+const LOW_POWER_HINT_MAX_DRAG_AVG_FPS = 42;
+const LOW_POWER_HINT_MAX_DRAG_P99_FPS = 30;
+const LOW_POWER_HINT_AVG_DROP_RATIO = 0.72;
+const LOW_POWER_HINT_P99_DROP_RATIO = 0.6;
+const LOW_POWER_HINT_MIN_AVG_DROP_FPS = 10;
+const LOW_POWER_HINT_MIN_P99_DROP_FPS = 12;
 
 const applyTextDirection = (locale) => {
   const direction = isRtlLocale(locale) ? 'rtl' : 'ltr';
@@ -120,6 +132,7 @@ export function createRuntime(options) {
   let started = false;
   let destroyed = false;
   let layoutRafId = 0;
+  let lowPowerHintRafId = 0;
   let sessionSaveTimerId = 0;
   let boardResizeObserver = null;
   let windowResizeHandler = null;
@@ -151,6 +164,19 @@ export function createRuntime(options) {
   let debugForceDailyFrozen = false;
   let evaluateCacheBoardVersion = 0;
   const evaluateCache = new Map();
+  const lowPowerHintDetector = {
+    active: (
+      !lowPowerModeEnabled
+      && (
+        typeof effects.shouldSuggestLowPowerMode === 'function'
+        && effects.shouldSuggestLowPowerMode() === true
+      )
+    ),
+    lastFrameTimestamp: 0,
+    lastMode: null,
+    idleFrameDurationsMs: [],
+    dragFrameDurationsMs: [],
+  };
 
   const sessionSaveData = {
     board: bootState.sessionBoard
@@ -182,6 +208,147 @@ export function createRuntime(options) {
 
   const applyTheme = (theme) => {
     activeTheme = applyThemeCore(theme, persistence);
+  };
+
+  const resetLowPowerHintDetectorWindow = () => {
+    lowPowerHintDetector.lastFrameTimestamp = 0;
+    lowPowerHintDetector.lastMode = null;
+  };
+
+  const clearLowPowerHintDragSamples = () => {
+    lowPowerHintDetector.dragFrameDurationsMs.length = 0;
+  };
+
+  const disableLowPowerHintDetector = () => {
+    lowPowerHintDetector.active = false;
+    if (lowPowerHintRafId) {
+      cancelAnimationFrame(lowPowerHintRafId);
+      lowPowerHintRafId = 0;
+    }
+    resetLowPowerHintDetectorWindow();
+    lowPowerHintDetector.idleFrameDurationsMs.length = 0;
+    clearLowPowerHintDragSamples();
+  };
+
+  const pushLowPowerHintFrameSample = (samples, frameDurationMs) => {
+    samples.push(frameDurationMs);
+    if (samples.length > LOW_POWER_HINT_MAX_FRAME_SAMPLES) {
+      samples.shift();
+    }
+  };
+
+  const summarizeFpsWindow = (frameDurationsMs) => {
+    if (!Array.isArray(frameDurationsMs) || frameDurationsMs.length <= 0) return null;
+    let totalFrameTimeMs = 0;
+    for (let i = 0; i < frameDurationsMs.length; i += 1) {
+      totalFrameTimeMs += frameDurationsMs[i];
+    }
+    const avgFrameTimeMs = totalFrameTimeMs / frameDurationsMs.length;
+    if (!(avgFrameTimeMs > 0)) return null;
+    const sortedFrameDurations = [...frameDurationsMs].sort((a, b) => a - b);
+    const p99Index = Math.min(
+      sortedFrameDurations.length - 1,
+      Math.max(0, Math.ceil(sortedFrameDurations.length * 0.99) - 1),
+    );
+    const p99FrameTimeMs = sortedFrameDurations[p99Index];
+    if (!(p99FrameTimeMs > 0)) return null;
+    return {
+      avgFrameTimeMs,
+      p99FrameTimeMs,
+      avgFps: 1000 / avgFrameTimeMs,
+      p99Fps: 1000 / p99FrameTimeMs,
+    };
+  };
+
+  const shouldSuggestLowPowerModeForFps = (idleStats, dragStats) => {
+    if (!idleStats || !dragStats) return false;
+
+    const idleHealthy = (
+      idleStats.avgFps >= LOW_POWER_HINT_MIN_IDLE_AVG_FPS
+      && idleStats.p99Fps >= LOW_POWER_HINT_MIN_IDLE_P99_FPS
+    );
+    if (!idleHealthy) return false;
+
+    const dragAvgThreshold = Math.min(
+      idleStats.avgFps * LOW_POWER_HINT_AVG_DROP_RATIO,
+      LOW_POWER_HINT_MAX_DRAG_AVG_FPS,
+    );
+    const dragP99Threshold = Math.min(
+      idleStats.p99Fps * LOW_POWER_HINT_P99_DROP_RATIO,
+      LOW_POWER_HINT_MAX_DRAG_P99_FPS,
+    );
+
+    return (
+      dragStats.avgFps <= dragAvgThreshold
+      && dragStats.p99Fps <= dragP99Threshold
+      && (idleStats.avgFps - dragStats.avgFps) >= LOW_POWER_HINT_MIN_AVG_DROP_FPS
+      && (idleStats.p99Fps - dragStats.p99Fps) >= LOW_POWER_HINT_MIN_P99_DROP_FPS
+    );
+  };
+
+  const recordLowPowerHintFrame = (frameTimestamp) => {
+    if (!lowPowerHintDetector.active || lowPowerModeEnabled) {
+      resetLowPowerHintDetectorWindow();
+      return;
+    }
+    if (!Number.isFinite(frameTimestamp) || frameTimestamp <= 0) return;
+
+    const mode = interactionState.isPathDragging ? 'drag' : 'idle';
+    if (lowPowerHintDetector.lastMode !== mode) {
+      lowPowerHintDetector.lastMode = mode;
+      lowPowerHintDetector.lastFrameTimestamp = frameTimestamp;
+      if (mode === 'drag') clearLowPowerHintDragSamples();
+      return;
+    }
+    if (lowPowerHintDetector.lastFrameTimestamp <= 0) {
+      lowPowerHintDetector.lastFrameTimestamp = frameTimestamp;
+      return;
+    }
+
+    const frameDurationMs = frameTimestamp - lowPowerHintDetector.lastFrameTimestamp;
+    lowPowerHintDetector.lastFrameTimestamp = frameTimestamp;
+    if (
+      !Number.isFinite(frameDurationMs)
+      || frameDurationMs <= 0
+      || frameDurationMs > LOW_POWER_HINT_MAX_FRAME_DELTA_MS
+    ) {
+      return;
+    }
+
+    if (mode === 'drag') {
+      pushLowPowerHintFrameSample(lowPowerHintDetector.dragFrameDurationsMs, frameDurationMs);
+      if (lowPowerHintDetector.idleFrameDurationsMs.length < LOW_POWER_HINT_MIN_IDLE_SAMPLES) return;
+      if (lowPowerHintDetector.dragFrameDurationsMs.length < LOW_POWER_HINT_MIN_DRAG_SAMPLES) return;
+
+      const idleStats = summarizeFpsWindow(lowPowerHintDetector.idleFrameDurationsMs);
+      const dragStats = summarizeFpsWindow(lowPowerHintDetector.dragFrameDurationsMs);
+      if (!shouldSuggestLowPowerModeForFps(idleStats, dragStats)) return;
+
+      effects.onLowPowerModeSuggestion?.({
+        idle: idleStats,
+        drag: dragStats,
+      });
+      disableLowPowerHintDetector();
+      return;
+    }
+
+    pushLowPowerHintFrameSample(lowPowerHintDetector.idleFrameDurationsMs, frameDurationMs);
+  };
+
+  const runLowPowerHintDetector = (frameTimestamp) => {
+    lowPowerHintRafId = 0;
+    if (!started || destroyed || !lowPowerHintDetector.active || lowPowerModeEnabled) {
+      return;
+    }
+    recordLowPowerHintFrame(frameTimestamp);
+    if (!destroyed && lowPowerHintDetector.active && !lowPowerModeEnabled) {
+      lowPowerHintRafId = requestAnimationFrame(runLowPowerHintDetector);
+    }
+  };
+
+  const startLowPowerHintDetector = () => {
+    if (!lowPowerHintDetector.active || lowPowerHintRafId || destroyed) return;
+    lowPowerHintRafId = requestAnimationFrame(runLowPowerHintDetector);
   };
 
   const setUiMessage = (kind, html) => {
@@ -246,6 +413,7 @@ export function createRuntime(options) {
     const force = Boolean(options.force);
     if (!force && nextEnabled === lowPowerModeEnabled) return;
     lowPowerModeEnabled = nextEnabled;
+    if (lowPowerModeEnabled) disableLowPowerHintDetector();
     persistence.writeLowPowerModeEnabled?.(lowPowerModeEnabled);
     syncLowPowerToggle();
     renderer.setLowPowerMode?.(lowPowerModeEnabled);
@@ -1468,6 +1636,9 @@ export function createRuntime(options) {
       interactionState.pathDragSide = nextPathDragSide;
       interactionState.pathDragCursor = nextPathDragCursor;
       if (endedPathDrag) evaluateCache.clear();
+      if (!interactionState.isPathDragging) {
+        resetLowPowerHintDetectorWindow();
+      }
       renderer.updateInteraction?.(interactionState);
       if (shouldQueueLayout) {
         queueBoardLayout(false, {
@@ -1674,6 +1845,7 @@ export function createRuntime(options) {
     const initialLevelIndex = savedInitialLevelIndex ?? fallbackInitialLevelIndex;
 
     loadLevel(initialLevelIndex);
+    startLowPowerHintDetector();
   };
 
   const destroy = () => {
@@ -1682,6 +1854,10 @@ export function createRuntime(options) {
     if (layoutRafId) {
       cancelAnimationFrame(layoutRafId);
       layoutRafId = 0;
+    }
+    if (lowPowerHintRafId) {
+      cancelAnimationFrame(lowPowerHintRafId);
+      lowPowerHintRafId = 0;
     }
     if (sessionSaveTimerId) {
       clearTimeout(sessionSaveTimerId);

@@ -56,6 +56,7 @@ export default {
     "autoUpdateEnable": "Automatisches Update aktivieren",
     "lowPowerMode": "Energiesparmodus",
     "lowPowerModeEnable": "Energiesparmodus aktivieren",
+    "lowPowerModeHintToast": "Wenn das Ziehen des Pfads ruckelt, versuchen Sie, in den Einstellungen den Energiesparmodus zu aktivieren.",
     "newVersionAvailableTitle": "Neue Version verfügbar",
     "newVersionAvailableBody": "Tippe, um auf die neueste Version zu aktualisieren.",
     "newVersionAvailableToast": "Eine neue Version ist verfügbar.",
