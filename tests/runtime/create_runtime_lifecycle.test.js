@@ -575,7 +575,7 @@ test('createRuntime toggles low power mode through runtime-owned state and queue
   harness.runtime.destroy();
 });
 
-test('createRuntime suggests low power mode once after sustained low drag fps', (t) => {
+test('createRuntime suggests low power mode for ordinary single-step drag stutter', (t) => {
   const env = installBrowserEnv(t);
   const lowFpsHintCalls = [];
   const harness = createRuntimeHarness({
@@ -598,7 +598,7 @@ test('createRuntime suggests low power mode once after sustained low drag fps', 
   harness.runtime.start();
   flushAllRafs(16);
 
-  for (let i = 1; i <= 120; i += 1) {
+  for (let i = 1; i <= 80; i += 1) {
     flushAllRafs(16 + (i * 16));
   }
 
@@ -611,16 +611,32 @@ test('createRuntime suggests low power mode once after sustained low drag fps', 
       pathDragCursor: { r: 0, c: 0 },
     },
   });
-  flushAllRafs(2000);
+  let ts = 2000;
+  flushAllRafs(ts);
 
-  for (let i = 1; i <= 60; i += 1) {
-    flushAllRafs(2000 + (i * 40));
+  for (let i = 0; i < 12; i += 1) {
+    harness.runtime.emitIntent({
+      type: INTENT_TYPES.INTERACTION_UPDATE,
+      payload: {
+        updateType: INTERACTION_UPDATES.PATH_DRAG,
+        isPathDragging: true,
+        pathDragSide: 'end',
+        pathDragCursor: { r: 0, c: (i + 1) % 2 },
+      },
+    });
+    ts += 40;
+    flushAllRafs(ts);
+    ts += 16;
+    flushAllRafs(ts);
+    ts += 16;
+    flushAllRafs(ts);
   }
 
   assert.equal(lowFpsHintCalls.length, 1);
 
-  for (let i = 61; i <= 66; i += 1) {
-    flushAllRafs(2000 + (i * 40));
+  for (let i = 0; i < 4; i += 1) {
+    ts += 40;
+    flushAllRafs(ts);
   }
 
   assert.equal(lowFpsHintCalls.length, 1);
@@ -650,7 +666,7 @@ test('createRuntime low power suggestion compares idle and drag fps before showi
   harness.runtime.start();
   flushAllRafs(16);
 
-  for (let i = 1; i <= 120; i += 1) {
+  for (let i = 1; i <= 80; i += 1) {
     flushAllRafs(16 + (i * 40));
   }
 
@@ -663,10 +679,25 @@ test('createRuntime low power suggestion compares idle and drag fps before showi
       pathDragCursor: { r: 0, c: 0 },
     },
   });
-  flushAllRafs(6000);
+  let ts = 6000;
+  flushAllRafs(ts);
 
-  for (let i = 1; i <= 60; i += 1) {
-    flushAllRafs(6000 + (i * 40));
+  for (let i = 0; i < 12; i += 1) {
+    harness.runtime.emitIntent({
+      type: INTENT_TYPES.INTERACTION_UPDATE,
+      payload: {
+        updateType: INTERACTION_UPDATES.PATH_DRAG,
+        isPathDragging: true,
+        pathDragSide: 'end',
+        pathDragCursor: { r: 0, c: (i + 1) % 2 },
+      },
+    });
+    ts += 40;
+    flushAllRafs(ts);
+    ts += 16;
+    flushAllRafs(ts);
+    ts += 16;
+    flushAllRafs(ts);
   }
 
   assert.equal(lowFpsHintCalls.length, 0);

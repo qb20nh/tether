@@ -43,7 +43,7 @@ const DAILY_NOTIFICATION_WARNING_HOURS = 8;
 const DAILY_CHECK_TAG = 'tether-daily-check';
 const SW_BUILD_NUMBER_RE = /BUILD_NUMBER\s*=\s*Number\.parseInt\(\s*['"](\d+)['"]\s*,\s*10\)/;
 const LAST_SEEN_BUILD_NUMBER_KEY = 'tetherLastSeenBuildNumber';
-const LOW_POWER_HINT_SHOWN_KEY = 'tetherLowPowerHintShown';
+const LOW_POWER_HINT_SESSION_KEY = 'tetherLowPowerHintShown';
 const APP_TOAST_ID = 'appToast';
 const UPDATE_PROGRESS_OVERLAY_ID = 'updateProgressOverlay';
 const APP_TOAST_VISIBLE_MS = 3200;
@@ -170,18 +170,18 @@ const writeLastSeenBuildNumber = (buildNumber) => {
 
 const readLowPowerHintShown = () => {
   try {
-    return window.localStorage.getItem(LOW_POWER_HINT_SHOWN_KEY) === '1';
+    return window.sessionStorage.getItem(LOW_POWER_HINT_SESSION_KEY) === '1';
   } catch {
-    // localStorage can be unavailable in restricted browser contexts.
+    // sessionStorage can be unavailable in restricted browser contexts.
   }
   return false;
 };
 
 const writeLowPowerHintShown = () => {
   try {
-    window.localStorage.setItem(LOW_POWER_HINT_SHOWN_KEY, '1');
+    window.sessionStorage.setItem(LOW_POWER_HINT_SESSION_KEY, '1');
   } catch {
-    // localStorage can be unavailable in restricted browser contexts.
+    // sessionStorage can be unavailable in restricted browser contexts.
   }
 };
 

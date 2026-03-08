@@ -24,18 +24,19 @@ const isRtlLocale = (locale) => /^ar/i.test(locale || '');
 const DAY_MS = 24 * 60 * 60 * 1000;
 const EVALUATE_CACHE_LIMIT = 24;
 const TUTORIAL_PRACTICE_NAME_PREFIX_RE = /^\s*.+?\d+\s*[)）]\s*/u;
-const LOW_POWER_HINT_MIN_IDLE_SAMPLES = 90;
-const LOW_POWER_HINT_MIN_DRAG_SAMPLES = 45;
+const LOW_POWER_HINT_MIN_IDLE_SAMPLES = 60;
+const LOW_POWER_HINT_MIN_DRAG_SAMPLES = 30;
 const LOW_POWER_HINT_MAX_FRAME_SAMPLES = 180;
 const LOW_POWER_HINT_MAX_FRAME_DELTA_MS = 250;
-const LOW_POWER_HINT_MIN_IDLE_AVG_FPS = 50;
-const LOW_POWER_HINT_MIN_IDLE_P99_FPS = 40;
-const LOW_POWER_HINT_MAX_DRAG_AVG_FPS = 42;
-const LOW_POWER_HINT_MAX_DRAG_P99_FPS = 30;
-const LOW_POWER_HINT_AVG_DROP_RATIO = 0.72;
-const LOW_POWER_HINT_P99_DROP_RATIO = 0.6;
-const LOW_POWER_HINT_MIN_AVG_DROP_FPS = 10;
-const LOW_POWER_HINT_MIN_P99_DROP_FPS = 12;
+const LOW_POWER_HINT_DRAG_ACTIVITY_FRAME_BUDGET = 3;
+const LOW_POWER_HINT_MIN_IDLE_AVG_FPS = 42;
+const LOW_POWER_HINT_MIN_IDLE_P99_FPS = 30;
+const LOW_POWER_HINT_MAX_DRAG_AVG_FPS = 48;
+const LOW_POWER_HINT_MAX_DRAG_P99_FPS = 34;
+const LOW_POWER_HINT_AVG_DROP_RATIO = 0.8;
+const LOW_POWER_HINT_P99_DROP_RATIO = 0.72;
+const LOW_POWER_HINT_MIN_AVG_DROP_FPS = 8;
+const LOW_POWER_HINT_MIN_P99_DROP_FPS = 8;
 
 const applyTextDirection = (locale) => {
   const direction = isRtlLocale(locale) ? 'rtl' : 'ltr';
@@ -173,9 +174,9 @@ export function createRuntime(options) {
       )
     ),
     lastFrameTimestamp: 0,
-    lastMode: null,
     idleFrameDurationsMs: [],
     dragFrameDurationsMs: [],
+    dragActivityFramesRemaining: 0,
   };
 
   const sessionSaveData = {
@@ -212,7 +213,6 @@ export function createRuntime(options) {
 
   const resetLowPowerHintDetectorWindow = () => {
     lowPowerHintDetector.lastFrameTimestamp = 0;
-    lowPowerHintDetector.lastMode = null;
   };
 
   const clearLowPowerHintDragSamples = () => {
@@ -228,6 +228,7 @@ export function createRuntime(options) {
     resetLowPowerHintDetectorWindow();
     lowPowerHintDetector.idleFrameDurationsMs.length = 0;
     clearLowPowerHintDragSamples();
+    lowPowerHintDetector.dragActivityFramesRemaining = 0;
   };
 
   const pushLowPowerHintFrameSample = (samples, frameDurationMs) => {
@@ -278,12 +279,27 @@ export function createRuntime(options) {
       LOW_POWER_HINT_MAX_DRAG_P99_FPS,
     );
 
-    return (
+    const avgDropFps = idleStats.avgFps - dragStats.avgFps;
+    const p99DropFps = idleStats.p99Fps - dragStats.p99Fps;
+    const avgDegraded = (
       dragStats.avgFps <= dragAvgThreshold
-      && dragStats.p99Fps <= dragP99Threshold
-      && (idleStats.avgFps - dragStats.avgFps) >= LOW_POWER_HINT_MIN_AVG_DROP_FPS
-      && (idleStats.p99Fps - dragStats.p99Fps) >= LOW_POWER_HINT_MIN_P99_DROP_FPS
+      && avgDropFps >= LOW_POWER_HINT_MIN_AVG_DROP_FPS
     );
+    const p99Degraded = (
+      dragStats.p99Fps <= dragP99Threshold
+      && p99DropFps >= LOW_POWER_HINT_MIN_P99_DROP_FPS
+    );
+
+    return avgDegraded && p99Degraded;
+  };
+
+  const markLowPowerHintDragActivity = () => {
+    if (!lowPowerHintDetector.active || lowPowerModeEnabled) return;
+    lowPowerHintDetector.dragActivityFramesRemaining = Math.max(
+      lowPowerHintDetector.dragActivityFramesRemaining,
+      LOW_POWER_HINT_DRAG_ACTIVITY_FRAME_BUDGET,
+    );
+    startLowPowerHintDetector();
   };
 
   const recordLowPowerHintFrame = (frameTimestamp) => {
@@ -292,14 +308,6 @@ export function createRuntime(options) {
       return;
     }
     if (!Number.isFinite(frameTimestamp) || frameTimestamp <= 0) return;
-
-    const mode = interactionState.isPathDragging ? 'drag' : 'idle';
-    if (lowPowerHintDetector.lastMode !== mode) {
-      lowPowerHintDetector.lastMode = mode;
-      lowPowerHintDetector.lastFrameTimestamp = frameTimestamp;
-      if (mode === 'drag') clearLowPowerHintDragSamples();
-      return;
-    }
     if (lowPowerHintDetector.lastFrameTimestamp <= 0) {
       lowPowerHintDetector.lastFrameTimestamp = frameTimestamp;
       return;
@@ -315,7 +323,8 @@ export function createRuntime(options) {
       return;
     }
 
-    if (mode === 'drag') {
+    if (lowPowerHintDetector.dragActivityFramesRemaining > 0) {
+      lowPowerHintDetector.dragActivityFramesRemaining -= 1;
       pushLowPowerHintFrameSample(lowPowerHintDetector.dragFrameDurationsMs, frameDurationMs);
       if (lowPowerHintDetector.idleFrameDurationsMs.length < LOW_POWER_HINT_MIN_IDLE_SAMPLES) return;
       if (lowPowerHintDetector.dragFrameDurationsMs.length < LOW_POWER_HINT_MIN_DRAG_SAMPLES) return;
@@ -1631,6 +1640,11 @@ export function createRuntime(options) {
         || prevSuppressEndpoint !== nextSuppressEndpoint
       );
       const endedPathDrag = interactionState.isPathDragging && !nextIsPathDragging;
+      const dragActivityChanged = nextIsPathDragging && (
+        interactionState.isPathDragging !== nextIsPathDragging
+        || interactionState.pathDragSide !== nextPathDragSide
+        || cursorChanged
+      );
 
       interactionState.isPathDragging = nextIsPathDragging;
       interactionState.pathDragSide = nextPathDragSide;
@@ -1638,6 +1652,8 @@ export function createRuntime(options) {
       if (endedPathDrag) evaluateCache.clear();
       if (!interactionState.isPathDragging) {
         resetLowPowerHintDetectorWindow();
+      } else if (dragActivityChanged) {
+        markLowPowerHintDragActivity();
       }
       renderer.updateInteraction?.(interactionState);
       if (shouldQueueLayout) {
@@ -1706,6 +1722,9 @@ export function createRuntime(options) {
         transition.snapshot,
         interactionState,
       );
+      if (interactionState.isPathDragging) {
+        markLowPowerHintDragActivity();
+      }
       interactionState.pathTipArrivalHint = buildPathTipArrivalHint(
         commandType,
         payload,
