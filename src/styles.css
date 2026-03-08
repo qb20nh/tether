@@ -1454,15 +1454,15 @@ body:not(.isPathDragging) .cell:active {
 
 body.isPathDragging .cell.pathTipDragHover,
 body.isPathDragging .cell:not(.wall):hover {
-  transform: scale(0.95);
+  transform: scale(0.95) !important;
   transform-origin: center;
   transition: transform 120ms ease-out;
   box-shadow: 0 0 0 var(--cell-shadow-2) rgba(255, 255, 255, 0.14) inset;
 }
 
-body.isPathDragging .cell.pathTipDragHover.pathStart:active,
-body.isPathDragging .cell.pathTipDragHover.pathEnd:active {
-  transform: scale(0.95);
+body.isPathDragging .cell.pathStart:active,
+body.isPathDragging .cell.pathEnd:active {
+  transform: scale(0.95) !important;
 }
 
 body:not(.isPathDragging) .cell.pathStart:active,

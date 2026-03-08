@@ -2350,12 +2350,15 @@ const applyCanvasCssSize = (canvas, cssWidth, cssHeight) => {
 
 const applyScaledSymbolCanvasTransform = (canvas, ctx, cssWidth, cssHeight) => {
   if (!canvas || !ctx) return;
-  const safeCssWidth = Math.max(1, Number(cssWidth) || 1);
-  const safeCssHeight = Math.max(1, Number(cssHeight) || 1);
-  const pixelWidth = Math.max(1, canvas.width || 1);
-  const pixelHeight = Math.max(1, canvas.height || 1);
+  const dpr = getDevicePixelScale();
+  const safeDpr = Number.isFinite(dpr) && dpr > 0 ? dpr : 1;
+  const safeCssWidth = Math.max(1, cssWidth);
+  const safeCssHeight = Math.max(1, cssHeight);
+  const pixelWidth = Math.max(1, Math.round(safeCssWidth * safeDpr));
+  const pixelHeight = Math.max(1, Math.round(safeCssHeight * safeDpr));
   const scaleX = pixelWidth / safeCssWidth;
   const scaleY = pixelHeight / safeCssHeight;
+  
   ctx.setTransform(
     scaleX,
     0,
@@ -2657,12 +2660,22 @@ const getCellPoint = (r, c, refs, offset = { x: 0, y: 0 }, out = null) => {
   return target;
 };
 
-const getVertexPoint = (r, c, refs, offset = { x: 0, y: 0 }, out = null) => {
+const getVertexPoint = (r, c, refs, offset = { x: 0, y: 0 }, out = null, dpr = 0) => {
   const target = out || { x: 0, y: 0 };
   if (pathLayoutMetrics.ready) {
     const step = pathLayoutMetrics.cell + pathLayoutMetrics.gap;
-    target.x = pathLayoutMetrics.pad + (c * step) - (pathLayoutMetrics.gap * 0.5) + offset.x;
-    target.y = pathLayoutMetrics.pad + (r * step) - (pathLayoutMetrics.gap * 0.5) + offset.y;
+    if (dpr > 0) {
+      const half = pathLayoutMetrics.cell * 0.5;
+      const x0 = snapCssToDevicePixel(pathLayoutMetrics.pad + ((c - 1) * step) + half + offset.x, dpr);
+      const x1 = snapCssToDevicePixel(pathLayoutMetrics.pad + (c * step) + half + offset.x, dpr);
+      const y0 = snapCssToDevicePixel(pathLayoutMetrics.pad + ((r - 1) * step) + half + offset.y, dpr);
+      const y1 = snapCssToDevicePixel(pathLayoutMetrics.pad + (r * step) + half + offset.y, dpr);
+      target.x = (x0 + x1) * 0.5;
+      target.y = (y0 + y1) * 0.5;
+    } else {
+      target.x = pathLayoutMetrics.pad + (c * step) - (pathLayoutMetrics.gap * 0.5) + offset.x;
+      target.y = pathLayoutMetrics.pad + (r * step) - (pathLayoutMetrics.gap * 0.5) + offset.y;
+    }
     return target;
   }
   const p = vertexPos(r, c, refs.gridEl);
@@ -3021,7 +3034,12 @@ const syncPathTipDragHoverCell = (interactionModel = null, cells = gridCells) =>
     }
   }
 
-  if (nextCell === lastPathTipDragHoverCell) return;
+  if (nextCell === lastPathTipDragHoverCell) {
+    if (nextCell && !nextCell.classList.contains('pathTipDragHover')) {
+      nextCell.classList.add('pathTipDragHover');
+    }
+    return;
+  }
   clearPathTipDragHoverCell();
   if (!nextCell) return;
   nextCell.classList.add('pathTipDragHover');
@@ -3621,11 +3639,11 @@ function drawCrossStitches(snapshot, refs, ctx, vertexStatus = EMPTY_MAP) {
     return entry?.[key] || 'pending';
   };
 
-  const buildSnappedLine = (x1, y1, x2, y2) => ({
-    x1: snapCanvasPoint(x1, canvasScale.x),
-    y1: snapCanvasPoint(y1, canvasScale.y),
-    x2: snapCanvasPoint(x2, canvasScale.x),
-    y2: snapCanvasPoint(y2, canvasScale.y),
+  const buildUnsnappedLine = (x1, y1, x2, y2) => ({
+    x1,
+    y1,
+    x2,
+    y2,
   });
 
   const drawLine = (line, color, width) => {
@@ -3640,16 +3658,16 @@ function drawCrossStitches(snapshot, refs, ctx, vertexStatus = EMPTY_MAP) {
   };
 
   for (const [vr, vc] of snapshot.stitches) {
-    const point = getVertexPoint(vr, vc, refs, offset, headPointScratchA);
-    const centerX = snapCanvasPoint(point.x, canvasScale.x);
-    const centerY = snapCanvasPoint(point.y, canvasScale.y);
-    const diagALine = buildSnappedLine(
+    const point = getVertexPoint(vr, vc, refs, offset, headPointScratchA, canvasScale.x);
+    const centerX = point.x;
+    const centerY = point.y;
+    const diagALine = buildUnsnappedLine(
       centerX - stitchLineHalf,
       centerY - stitchLineHalf,
       centerX + stitchLineHalf,
       centerY + stitchLineHalf,
     );
-    const diagBLine = buildSnappedLine(
+    const diagBLine = buildUnsnappedLine(
       centerX + stitchLineHalf,
       centerY - stitchLineHalf,
       centerX - stitchLineHalf,
@@ -3665,16 +3683,16 @@ function drawCrossStitches(snapshot, refs, ctx, vertexStatus = EMPTY_MAP) {
       const entry = vertexStatus.get(vk) || 'pending';
       const diagAState = resolveDiagStatus(entry, 'diagA');
       const diagBState = resolveDiagStatus(entry, 'diagB');
-      const point = getVertexPoint(vr, vc, refs, offset, headPointScratchB);
-      const centerX = snapCanvasPoint(point.x, canvasScale.x);
-      const centerY = snapCanvasPoint(point.y, canvasScale.y);
-      const diagALine = buildSnappedLine(
+      const point = getVertexPoint(vr, vc, refs, offset, headPointScratchB, canvasScale.x);
+      const centerX = point.x;
+      const centerY = point.y;
+      const diagALine = buildUnsnappedLine(
         centerX - stitchLineHalf,
         centerY - stitchLineHalf,
         centerX + stitchLineHalf,
         centerY + stitchLineHalf,
       );
-      const diagBLine = buildSnappedLine(
+      const diagBLine = buildUnsnappedLine(
         centerX + stitchLineHalf,
         centerY - stitchLineHalf,
         centerX - stitchLineHalf,
@@ -3726,9 +3744,9 @@ function drawCornerCounts(snapshot, refs, ctx, cornerVertexStatus = EMPTY_MAP) {
     if (state === 'good') accentColor = colorGood;
     else if (state === 'bad') accentColor = colorBad;
 
-    const point = getVertexPoint(vr, vc, refs, offset, headPointScratchC);
-    const x = snapCanvasPoint(point.x, canvasScale.x);
-    const y = snapCanvasPoint(point.y, canvasScale.y);
+    const point = getVertexPoint(vr, vc, refs, offset, headPointScratchC, canvasScale.x);
+    const x = point.x;
+    const y = point.y;
 
     ctx.beginPath();
     ctx.fillStyle = cornerFillColor;
@@ -4000,6 +4018,11 @@ return {
     if (!refs) return;
     pathThemeCacheInitialized = false;
     resizeCanvas(refs);
+    if (!interactiveResizeActive && latestPathSnapshot) {
+      pendingRenderDirty.symbols = true;
+      pendingRenderDirty.path = true;
+      scheduleRendererFrame();
+    }
   },
 
   setLowPowerMode(enabled = false) {
