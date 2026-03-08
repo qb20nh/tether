@@ -16,7 +16,7 @@
     "witnessValidatedCount": 30000
   },
   "artifacts": {
-    "dailyOverridesFile": "src/daily_overrides.bin.gz",
+    "dailyOverridesFile": "src/generated/daily_overrides.bin.gz",
     "overrideCount": 26902,
     "variantBits": 3,
     "packedBytes": 26905,

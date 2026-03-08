@@ -15,15 +15,21 @@ import {
   utcDateIdFromMs,
   utcStartMsFromDateId,
 } from './daily_pool_tools.js';
+import {
+  DAILY_OVERRIDES_REPO_FILE,
+  DAILY_POOL_MANIFEST_REPO_FILE,
+  PUBLIC_DAILY_HISTORY_REPO_FILE,
+  PUBLIC_DAILY_PAYLOAD_REPO_FILE,
+} from '../src/shared/paths.js';
 
 const HISTORY_SCHEMA_VERSION = 1;
 const PAYLOAD_SCHEMA_VERSION = 1;
 
 const DEFAULTS = {
-  manifestFile: path.resolve(process.cwd(), 'src/daily_pool_manifest.json'),
-  overridesFile: path.resolve(process.cwd(), 'src/daily_overrides.bin.gz'),
-  historyFile: path.resolve(process.cwd(), 'public/daily/history.json'),
-  todayFile: path.resolve(process.cwd(), 'public/daily/today.json'),
+  manifestFile: path.resolve(process.cwd(), DAILY_POOL_MANIFEST_REPO_FILE),
+  overridesFile: path.resolve(process.cwd(), DAILY_OVERRIDES_REPO_FILE),
+  historyFile: path.resolve(process.cwd(), PUBLIC_DAILY_HISTORY_REPO_FILE),
+  todayFile: path.resolve(process.cwd(), PUBLIC_DAILY_PAYLOAD_REPO_FILE),
   nowMs: null,
   dailySecret: null,
   json: false,

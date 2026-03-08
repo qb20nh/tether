@@ -2,6 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { gzipSync } from 'node:zlib';
+import { INFINITE_OVERRIDES_REPO_FILE } from '../src/shared/paths.js';
 import {
   INFINITE_CANDIDATE_VARIANTS,
   INFINITE_MAX_LEVELS,
@@ -16,7 +17,7 @@ const FORMAT_VERSION = 1;
 const DEFAULTS = {
   maxLevels: INFINITE_MAX_LEVELS,
   maxVariantProbe: 255,
-  outBinFile: path.resolve(process.cwd(), 'src/infinite_overrides.bin.gz'),
+  outBinFile: path.resolve(process.cwd(), INFINITE_OVERRIDES_REPO_FILE),
   json: false,
 };
 

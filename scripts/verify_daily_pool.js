@@ -3,6 +3,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { INFINITE_MAX_LEVELS } from '../src/infinite.js';
 import {
+  DAILY_OVERRIDES_REPO_FILE,
+  DAILY_POOL_MANIFEST_REPO_FILE,
+} from '../src/shared/paths.js';
+import {
   DAILY_POOL_BASE_VARIANT_ID,
   DAILY_POOL_MAX_SLOTS,
   buildInfiniteCanonicalKeySet,
@@ -13,8 +17,8 @@ import {
 } from './daily_pool_tools.js';
 
 const DEFAULTS = {
-  manifestFile: path.resolve(process.cwd(), 'src/daily_pool_manifest.json'),
-  overridesFile: path.resolve(process.cwd(), 'src/daily_overrides.bin.gz'),
+  manifestFile: path.resolve(process.cwd(), DAILY_POOL_MANIFEST_REPO_FILE),
+  overridesFile: path.resolve(process.cwd(), DAILY_OVERRIDES_REPO_FILE),
   maxSlots: null,
   json: false,
 };

@@ -3,6 +3,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { INFINITE_MAX_LEVELS } from '../src/infinite.js';
 import {
+  DAILY_OVERRIDES_REPO_FILE,
+  DAILY_POOL_MANIFEST_REPO_FILE,
+} from '../src/shared/paths.js';
+import {
   DAILY_POOL_BASE_VARIANT_ID,
   DAILY_POOL_DIFFICULTY_VARIANT_WINDOW,
   DAILY_POOL_EPOCH_UTC_DATE,
@@ -20,8 +24,8 @@ const DEFAULTS = {
   maxSlots: DAILY_POOL_MAX_SLOTS,
   maxVariantProbe: DAILY_POOL_MAX_VARIANT_PROBE,
   difficultyVariantWindow: DAILY_POOL_DIFFICULTY_VARIANT_WINDOW,
-  outBinFile: path.resolve(process.cwd(), 'src/daily_overrides.bin.gz'),
-  outManifestFile: path.resolve(process.cwd(), 'src/daily_pool_manifest.json'),
+  outBinFile: path.resolve(process.cwd(), DAILY_OVERRIDES_REPO_FILE),
+  outManifestFile: path.resolve(process.cwd(), DAILY_POOL_MANIFEST_REPO_FILE),
   generatedAtUtcMs: 0,
   poolVersion: DAILY_POOL_VERSION,
   epochUtcDate: DAILY_POOL_EPOCH_UTC_DATE,
