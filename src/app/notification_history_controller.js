@@ -56,7 +56,7 @@ export function createNotificationHistoryController(options = {}) {
     let title = entry?.title || '-';
     let body = entry?.body || '';
 
-    if (!entry || entry.source !== 'system') {
+    if (!entry) {
       return { title, body };
     }
 
@@ -81,6 +81,30 @@ export function createNotificationHistoryController(options = {}) {
       const localizedBody = translateNow('ui.newVersionAvailableBody');
       if (localizedTitle !== 'ui.newVersionAvailableTitle') title = localizedTitle;
       if (localizedBody !== 'ui.newVersionAvailableBody') body = localizedBody;
+      return { title, body };
+    }
+
+    if (entry.kind === 'new-version-toast') {
+      const localizedTitle = translateNow('ui.newVersionAvailableToast');
+      if (localizedTitle !== 'ui.newVersionAvailableToast') title = localizedTitle;
+      return { title, body };
+    }
+
+    if (entry.kind === 'update-apply-failed') {
+      const localizedTitle = translateNow('ui.updateApplyFailedToast');
+      if (localizedTitle !== 'ui.updateApplyFailedToast') title = localizedTitle;
+      return { title, body };
+    }
+
+    if (entry.kind === 'update-applied') {
+      const localizedTitle = translateNow('ui.updateAppliedToast');
+      if (localizedTitle !== 'ui.updateAppliedToast') title = localizedTitle;
+      return { title, body };
+    }
+
+    if (entry.kind === 'low-power-hint') {
+      const localizedTitle = translateNow('ui.lowPowerModeHintToast');
+      if (localizedTitle !== 'ui.lowPowerModeHintToast') title = localizedTitle;
       return { title, body };
     }
 

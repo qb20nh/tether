@@ -1095,10 +1095,10 @@ const appendSystemHistoryEntry = async (kind, title, body, dailyId, action = nul
   });
 };
 
-const appendToastHistoryEntry = async (title, body) => {
+const appendToastHistoryEntry = async (title, body, kind = 'toast') => {
   return appendHistoryEntry({
     source: 'toast',
-    kind: 'toast',
+    kind,
     title,
     body,
     createdAtUtcMs: Date.now(),
@@ -1510,10 +1510,11 @@ self.addEventListener('message', (event) => {
 
   if (data.type === 'SW_APPEND_TOAST_HISTORY') {
     const payload = data.payload && typeof data.payload === 'object' ? data.payload : {};
+    const kind = normalizeString(payload.kind, 'toast');
     const title = normalizeString(payload.title);
     const body = normalizeString(payload.body);
     if (!title && !body) return;
-    event.waitUntil(appendToastHistoryEntry(title, body));
+    event.waitUntil(appendToastHistoryEntry(title, body, kind));
     return;
   }
 

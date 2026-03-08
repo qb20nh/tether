@@ -102,7 +102,7 @@ const formatBuildDateTimeUtc = (rawValue) => {
   const parsed = new Date(rawValue);
   if (Number.isNaN(parsed.getTime())) return '';
   const iso = parsed.toISOString();
-  return `${iso.slice(0, 16).replace('T', ' ')} UTC`;
+  return iso.slice(0, 16).replace('T', ' ');
 };
 
 const resolveBaseUrl = () => {
@@ -251,7 +251,7 @@ const setUpdateProgressOverlayActive = (active) => {
 
 const showInAppToast = (text, options = {}) => {
   if (typeof text !== 'string' || text.trim().length === 0) return;
-  const { recordInHistory = true } = options;
+  const { recordInHistory = true, kind = 'toast' } = options;
 
   const existing = document.getElementById(APP_TOAST_ID);
   if (existing) existing.remove();
@@ -279,6 +279,7 @@ const showInAppToast = (text, options = {}) => {
     void postMessageToServiceWorker({
       type: SW_MESSAGE_TYPES.APPEND_TOAST_HISTORY,
       payload: {
+        kind,
         title: text.trim(),
         body: '',
       },
@@ -731,7 +732,7 @@ export async function initTetherApp() {
       onLowPowerModeSuggestion: () => {
         if (readLowPowerHintShown()) return;
         writeLowPowerHintShown();
-        showInAppToast(resolveLowPowerHintToastText());
+        showInAppToast(resolveLowPowerHintToastText(), { kind: 'low-power-hint' });
       },
     },
   });
@@ -772,7 +773,7 @@ export async function initTetherApp() {
   if (didUpgradeBuild) {
     const toastText = translateNow('ui.updateAppliedToast');
     if (toastText !== 'ui.updateAppliedToast') {
-      showInAppToast(toastText);
+      showInAppToast(toastText, { kind: 'update-applied' });
     }
   }
 
