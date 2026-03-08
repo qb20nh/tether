@@ -15,7 +15,7 @@ test('e2e: renderer recovers after resize stress and context loss', async (t) =>
     ({ chromium } = await import('playwright'));
   } catch {
     // Allows the e2e test file to live in-repo even when Playwright is not installed locally.
-    t.skip('playwright is not installed; run `npm i -D playwright` and `npx playwright install chromium`');
+    t.skip('playwright is not installed; run `pnpm add -D playwright` and `pnpm exec playwright install chromium`');
     return;
   }
 

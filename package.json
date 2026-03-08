@@ -3,17 +3,19 @@
   "version": "1.0.0",
   "description": "",
   "main": "index.js",
+  "packageManager": "pnpm@10.30.3",
   "directories": {
     "test": "tests"
   },
   "type": "module",
   "scripts": {
+    "preinstall": "npx --yes only-allow pnpm",
     "dev": "vite",
     "build": "vite build",
     "build:native": "NATIVE_BUILD=1 vite build",
     "verify:release-no-debug": "node scripts/verify_release_no_debug_artifacts.js",
     "preview": "vite preview",
-    "tauri": "npm run build:native && env NO_STRIP=1 tauri",
+    "tauri": "pnpm run build:native && env NO_STRIP=1 tauri",
     "test": "node --test \"tests/contracts/*.test.js\" \"tests/core/*.test.js\" \"tests/input/*.test.js\" \"tests/persistence/*.test.js\" \"tests/renderer/*.test.js\" \"tests/rules/*.test.js\" \"tests/runtime/*.test.js\" \"tests/scripts/*.test.js\" \"tests/state/*.test.js\"",
     "test:e2e": "node scripts/run_e2e_resize_recovery.js"
   },
