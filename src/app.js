@@ -2,13 +2,6 @@ import { mountStyles } from './styles.js';
 import { APP_SHELL_TEMPLATE, buildLegendTemplate } from './templates.js';
 import { BADGE_DEFINITIONS, ICONS, ICON_X } from './icons.js';
 import { ELEMENT_IDS } from './config.js';
-import {
-  getLocaleOptions,
-  getLocale,
-  resolveLocale,
-  setLocale as setLocaleCore,
-  t as createTranslator,
-} from './i18n.js';
 import { createDefaultAdapters } from './runtime/default_adapters.js';
 import { createRuntime } from './runtime/create_runtime.js';
 import { uiActionIntent, UI_ACTIONS } from './runtime/intents.js';
@@ -30,6 +23,7 @@ import {
   resolveUpdateCheckDecision,
   shouldResyncManualUpdatePolicy,
 } from './runtime/update_flow_policy.js';
+import { createLocaleController } from './app/locale_controller.js';
 
 const BUILD_NUMBER_META_NAME = 'tether-build-number';
 const BUILD_LABEL_META_NAME = 'tether-build-label';
@@ -69,6 +63,7 @@ let updateProgressOverlayEl = null;
 let updateProgressOverlayLabelEl = null;
 let updateProgressOverlayActive = false;
 let updateFlow = null;
+const localeController = createLocaleController();
 
 const readMetaContent = (metaName) => {
   const meta = document.querySelector(`meta[name="${metaName}"]`);
@@ -340,10 +335,11 @@ const refreshSettingsVersionUi = () => {
   versionEl.textContent = text;
 };
 
-const translateNow = (key, vars = {}) => createTranslator(getLocale())(key, vars);
+const translateNow = (key, vars = {}) => localeController.translateNow(key, vars);
+const getLocale = () => localeController.getLocale();
 
-const buildNotificationTextPayload = (locale = getLocale()) => {
-  const translate = createTranslator(locale);
+const buildNotificationTextPayload = (locale = localeController.getLocale()) => {
+  const translate = localeController.createTranslator(locale);
   return {
     unsolvedTitle: translate('ui.notificationUnsolvedTitle'),
     unsolvedBody: translate('ui.notificationUnsolvedBody'),
@@ -633,6 +629,26 @@ const bindConfigSync = () => {
   });
 };
 
+const refreshRuntimeLocaleAvailabilityUi = () => {
+  if (!runtimeInstance || typeof runtimeInstance.refreshLocalizationUi !== 'function') return;
+  runtimeInstance.refreshLocalizationUi();
+};
+
+const bindLocaleAvailabilitySync = () => {
+  if (window._localeAvailabilitySyncBound) return;
+
+  window.addEventListener('online', refreshRuntimeLocaleAvailabilityUi);
+  window.addEventListener('offline', refreshRuntimeLocaleAvailabilityUi);
+  window.addEventListener('appinstalled', () => {
+    void (async () => {
+      await localeController.preloadAllLocales();
+      refreshRuntimeLocaleAvailabilityUi();
+    })();
+  });
+
+  window._localeAvailabilitySyncBound = true;
+};
+
 export async function initTetherApp() {
   if (!window._unloadBlockerBound) {
     const hideBoard = () => {
@@ -658,18 +674,19 @@ export async function initTetherApp() {
   latestDailyState.dailyId = bootDaily.dailyId;
   latestDailyState.hardInvalidateAtUtcMs = bootDaily.hardInvalidateAtUtcMs;
 
-  const initialLocale = resolveLocale();
-  const translate = createTranslator(initialLocale);
+  const initialLocale = await localeController.initialize();
+  const translate = localeController.createTranslator(initialLocale);
 
   appEl.innerHTML = APP_SHELL_TEMPLATE(
     translate,
-    getLocaleOptions(initialLocale),
+    localeController.getLocaleOptions(initialLocale),
     initialLocale,
   );
   refreshSettingsVersionUi();
 
   notificationCenter.bind();
   bindConfigSync();
+  bindLocaleAvailabilitySync();
   bindServiceWorkerHistoryMessages();
   bindServiceWorkerRuntimeEvents();
   void clearAppliedUpdateHistoryActions(localBuildNumber);
@@ -688,8 +705,8 @@ export async function initTetherApp() {
     ? bootState.dailySolvedDate
     : null;
 
-  const setLocaleWithEffects = (locale) => {
-    const resolved = setLocaleCore(locale);
+  const setLocaleWithEffects = async (locale) => {
+    const resolved = await localeController.setLocale(locale);
     notificationCenter.refreshToggleUi();
     notificationCenter.refreshLocalizedUi();
     if (updateProgressOverlayActive && updateProgressOverlayLabelEl) {
@@ -707,11 +724,11 @@ export async function initTetherApp() {
     renderer: adapters.renderer,
     input: adapters.input,
     i18n: {
-      getLocaleOptions,
-      getLocale,
-      resolveLocale,
+      getLocaleOptions: (locale) => localeController.getLocaleOptions(locale),
+      getLocale: () => localeController.getLocale(),
+      resolveLocale: localeController.resolveLocale,
       setLocale: setLocaleWithEffects,
-      createTranslator,
+      createTranslator: (locale) => localeController.createTranslator(locale),
     },
     ui: {
       buildLegendTemplate,

@@ -5,8 +5,8 @@ import LOGO_URL from './logo.svg';
 const buildOptionList = (localeOptions, currentLocale) =>
   (localeOptions || [])
     .map(
-      ({ value, label }) =>
-        `<option value="${value}" ${value === currentLocale ? 'selected' : ''}>${label}</option>`,
+      ({ value, label, disabled }) =>
+        `<option value="${value}" ${disabled ? 'disabled' : ''} ${value === currentLocale ? 'selected' : ''}>${label}</option>`,
     )
     .join('');
 

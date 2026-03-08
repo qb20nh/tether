@@ -27,6 +27,16 @@ const DAILY_LEVEL = {
   cornerCounts: [],
 };
 
+const createDeferred = () => {
+  let resolve;
+  let reject;
+  const promise = new Promise((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+};
+
 const createClassList = () => {
   const tokens = new Set();
   return {
@@ -213,6 +223,7 @@ const createRuntimeHarness = ({
   levels = [LEVEL],
   dailyLevel = null,
   effects = {},
+  i18nOverrides = {},
   rendererOverrides = {},
   persistenceInitialState = {},
   persistenceOverrides = {},
@@ -284,6 +295,19 @@ const createRuntimeHarness = ({
     renderer.setPathFlowFreezeImmediate = rendererOverrides.setPathFlowFreezeImmediate;
   }
 
+  const i18n = {
+    resolveLocale: () => 'en',
+    createTranslator: () => (key, vars = {}) => {
+      if (key === 'ui.infiniteLevelOption') return `Infinite ${vars.n ?? ''}`.trim();
+      if (key === 'ui.dailyLevelOptionWithDate') return `${vars.label} ${vars.date}`.trim();
+      return key;
+    },
+    getLocale: () => 'en',
+    setLocale: () => 'en',
+    getLocaleOptions: () => [{ value: 'en', label: 'English' }],
+    ...i18nOverrides,
+  };
+
   const runtime = createRuntime({
     appEl: {
       querySelectorAll: () => [],
@@ -301,17 +325,7 @@ const createRuntimeHarness = ({
         unbindCount += 1;
       },
     },
-    i18n: {
-      resolveLocale: () => 'en',
-      createTranslator: () => (key, vars = {}) => {
-        if (key === 'ui.infiniteLevelOption') return `Infinite ${vars.n ?? ''}`.trim();
-        if (key === 'ui.dailyLevelOptionWithDate') return `${vars.label} ${vars.date}`.trim();
-        return key;
-      },
-      getLocale: () => 'en',
-      setLocale: () => 'en',
-      getLocaleOptions: () => [{ value: 'en', label: 'English' }],
-    },
+    i18n,
     ui: {
       buildLegendTemplate: () => '',
       badgeDefinitions: {},
@@ -423,6 +437,84 @@ test('createRuntime daily solve fires onDailySolvedDateChanged exactly once', (t
   rafFlush?.(16);
 
   assert.deepEqual(calls, ['2026-03-08']);
+  harness.runtime.destroy();
+});
+
+test('createRuntime locale changes keep only the latest async selection', async (t) => {
+  installBrowserEnv(t);
+  let currentLocale = 'en';
+  const pendingLoads = new Map();
+  const harness = createRuntimeHarness({
+    i18nOverrides: {
+      getLocale: () => currentLocale,
+      resolveLocale: (locale) => locale,
+      createTranslator: (locale) => (key) => `${locale}:${key}`,
+      getLocaleOptions: () => [
+        { value: 'en', label: 'English' },
+        { value: 'fr-FR', label: 'Francais' },
+        { value: 'de-DE', label: 'Deutsch' },
+      ],
+      setLocale: (locale) => {
+        const deferred = createDeferred();
+        pendingLoads.set(locale, deferred);
+        return deferred.promise.then((resolved) => {
+          currentLocale = resolved;
+          return resolved;
+        });
+      },
+    },
+  });
+
+  harness.runtime.start();
+
+  harness.runtime.emitIntent({
+    type: INTENT_TYPES.UI_ACTION,
+    payload: { actionType: UI_ACTIONS.LOCALE_CHANGE, value: 'fr-FR' },
+  });
+  harness.runtime.emitIntent({
+    type: INTENT_TYPES.UI_ACTION,
+    payload: { actionType: UI_ACTIONS.LOCALE_CHANGE, value: 'de-DE' },
+  });
+
+  assert.equal(harness.refs.langSel.disabled, true);
+
+  pendingLoads.get('fr-FR').resolve('fr-FR');
+  await Promise.resolve();
+
+  assert.equal(globalThis.document.documentElement.lang, 'en');
+  assert.equal(harness.refs.langSel.disabled, true);
+
+  pendingLoads.get('de-DE').resolve('de-DE');
+  await Promise.resolve();
+  await Promise.resolve();
+
+  assert.equal(globalThis.document.documentElement.lang, 'de-DE');
+  assert.equal(harness.refs.langSel.value, 'de-DE');
+  assert.equal(harness.refs.langSel.disabled, false);
+
+  harness.runtime.destroy();
+});
+
+test('createRuntime refreshLocalizationUi updates disabled locale options', (t) => {
+  installBrowserEnv(t);
+  let offlineUnavailable = false;
+  const harness = createRuntimeHarness({
+    i18nOverrides: {
+      getLocaleOptions: () => [
+        { value: 'en', label: 'English', disabled: false },
+        { value: 'fr-FR', label: 'Francais', disabled: offlineUnavailable },
+      ],
+    },
+  });
+
+  harness.runtime.start();
+  assert.equal(harness.refs.langSel.innerHTML.includes('disabled'), false);
+
+  offlineUnavailable = true;
+  harness.runtime.refreshLocalizationUi();
+
+  assert.equal(harness.refs.langSel.innerHTML.includes('value=\"fr-FR\" disabled'), true);
+
   harness.runtime.destroy();
 });
 

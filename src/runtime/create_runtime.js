@@ -62,6 +62,15 @@ const applyDataAttributes = (appEl, translate) => {
   });
 };
 
+const buildLocaleOptionList = (localeOptions, activeLocale) =>
+  (localeOptions || [])
+    .map((item) => {
+      const disabled = item.disabled ? 'disabled' : '';
+      const selected = item.value === activeLocale ? 'selected' : '';
+      return `<option value="${item.value}" ${disabled} ${selected}>${item.label}</option>`;
+    })
+    .join('');
+
 
 
 export function createRuntime(options) {
@@ -119,9 +128,13 @@ export function createRuntime(options) {
   let activeTheme = normalizeTheme(bootState.theme);
   let lowPowerModeEnabled = Boolean(bootState.lowPowerModeEnabled);
 
-  const initialLocale = i18n.resolveLocale();
+  const initialLocale = typeof i18n.getLocale === 'function'
+    ? i18n.getLocale()
+    : i18n.resolveLocale();
   let activeLocale = initialLocale;
   let translate = i18n.createTranslator(activeLocale);
+  let localeChangeRequestToken = 0;
+  let localeChangeInFlight = false;
 
   let currentMessageKind = null;
   let currentMessageHtml = '';
@@ -1348,6 +1361,7 @@ export function createRuntime(options) {
   const refreshStaticUiText = (opts = {}) => {
     const refs = renderer.getRefs();
     const locale = opts.locale || activeLocale;
+    const languageSelectorDisabled = opts.languageSelectorDisabled ?? localeChangeInFlight;
 
     document.documentElement.lang = locale;
     applyTextDirection(locale);
@@ -1355,10 +1369,12 @@ export function createRuntime(options) {
     translate = i18n.createTranslator(activeLocale);
 
     if (refs.langSel) {
-      refs.langSel.innerHTML = i18n.getLocaleOptions(activeLocale)
-        .map((item) => `<option value="${item.value}" ${item.value === activeLocale ? 'selected' : ''}>${item.label}</option>`)
-        .join('');
+      refs.langSel.innerHTML = buildLocaleOptionList(
+        i18n.getLocaleOptions(activeLocale),
+        activeLocale,
+      );
       refs.langSel.value = activeLocale;
+      refs.langSel.disabled = languageSelectorDisabled;
     }
 
     refreshLevelOptions();
@@ -1394,6 +1410,35 @@ export function createRuntime(options) {
     refreshThemeButton();
     refreshSettingsToggle();
     syncLowPowerToggle();
+  };
+
+  const applyLocaleChange = async (locale) => {
+    const nextLocale = i18n.resolveLocale(locale);
+    if (!nextLocale || nextLocale === activeLocale) {
+      refreshStaticUiText({ locale: activeLocale });
+      return;
+    }
+
+    const requestToken = ++localeChangeRequestToken;
+    localeChangeInFlight = true;
+    refreshStaticUiText({ locale: activeLocale, languageSelectorDisabled: true });
+
+    try {
+      const resolvedLocale = await i18n.setLocale(nextLocale);
+      if (requestToken !== localeChangeRequestToken) return;
+      localeChangeInFlight = false;
+      refreshStaticUiText({ locale: resolvedLocale, languageSelectorDisabled: false });
+      queueBoardLayout(true, {
+        isPathDragging: interactionState.isPathDragging,
+        pathDragSide: interactionState.pathDragSide,
+        pathDragCursor: interactionState.pathDragCursor,
+        needsResize: true,
+      });
+    } catch {
+      if (requestToken !== localeChangeRequestToken) return;
+      localeChangeInFlight = false;
+      refreshStaticUiText({ locale: activeLocale, languageSelectorDisabled: false });
+    }
   };
 
   const applyThemeState = (nextTheme) => {
@@ -1480,14 +1525,7 @@ export function createRuntime(options) {
 
     if (actionType === UI_ACTIONS.LOCALE_CHANGE) {
       setSettingsMenuOpen(false);
-      const nextLocale = i18n.setLocale(payload.value);
-      refreshStaticUiText({ locale: nextLocale });
-      queueBoardLayout(true, {
-        isPathDragging: interactionState.isPathDragging,
-        pathDragSide: interactionState.pathDragSide,
-        pathDragCursor: interactionState.pathDragCursor,
-        needsResize: true,
-      });
+      void applyLocaleChange(payload.value);
       return;
     }
 
@@ -1913,6 +1951,9 @@ export function createRuntime(options) {
     start,
     destroy,
     emitIntent,
+    refreshLocalizationUi: () => {
+      refreshStaticUiText({ locale: activeLocale });
+    },
     readDebugDailyFreezeState,
     setDebugForceDailyFrozen,
     toggleDebugForceDailyFrozen,

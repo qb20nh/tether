@@ -1,15 +1,3 @@
-import enMessages from '../locales/en.js';
-import itMessages from '../locales/it.js';
-import zhHansMessages from '../locales/zh-Hans.js';
-import zhHantMessages from '../locales/zh-Hant.js';
-import es419Messages from '../locales/es-419.js';
-import ptBrMessages from '../locales/pt-BR.js';
-import arMessages from '../locales/ar.js';
-import jaJPMessages from '../locales/ja-JP.js';
-import koKrMessages from '../locales/ko-KR.js';
-import deDeMessages from '../locales/de-DE.js';
-import frFrMessages from '../locales/fr-FR.js';
-
 const LOCALE_LABELS = {
   ko: '한국어',
   en: 'English',
@@ -43,29 +31,30 @@ export const DEFAULT_LOCALE = 'ko-KR';
 export const FALLBACK_EN_LOCALE = 'en';
 export const LOCALE_STORAGE_KEY = 'tetherLocale';
 const LOCALE_ORDER_SEED_KEY = 'tetherLocaleOrderSeed';
+const AVAILABLE_LOCALES_STORAGE_KEY = 'tetherAvailableLocales';
 
-const LOCALE_MAP = {
-  en: enMessages,
-  it: itMessages,
-  'zh-Hans': zhHansMessages,
-  'zh-Hant': zhHantMessages,
-  'es-419': es419Messages,
-  'pt-BR': ptBrMessages,
-  ar: arMessages,
-  'ja-JP': jaJPMessages,
-  'ko-KR': koKrMessages,
-  'de-DE': deDeMessages,
-  'fr-FR': frFrMessages,
+const LOCALE_LOADERS = {
+  en: () => import('../locales/en.js'),
+  it: () => import('../locales/it.js'),
+  'zh-Hans': () => import('../locales/zh-Hans.js'),
+  'zh-Hant': () => import('../locales/zh-Hant.js'),
+  'es-419': () => import('../locales/es-419.js'),
+  'pt-BR': () => import('../locales/pt-BR.js'),
+  ar: () => import('../locales/ar.js'),
+  'ja-JP': () => import('../locales/ja-JP.js'),
+  'ko-KR': () => import('../locales/ko-KR.js'),
+  'de-DE': () => import('../locales/de-DE.js'),
+  'fr-FR': () => import('../locales/fr-FR.js'),
 };
 
 const LOCALE_ALIASES = {
-  'en': 'en',
+  en: 'en',
   'en-us': 'en',
   'en-gb': 'en',
   'en-uk': 'en',
   it: 'it',
   'it-it': 'it',
-  'zh': 'zh-Hans',
+  zh: 'zh-Hans',
   'zh-hans': 'zh-Hans',
   'zh-hant': 'zh-Hant',
   'zh-cn': 'zh-Hans',
@@ -74,18 +63,18 @@ const LOCALE_ALIASES = {
   'zh-hk': 'zh-Hant',
   'zh-mo': 'zh-Hant',
   'zh-tw': 'zh-Hant',
-  'es': 'es-419',
+  es: 'es-419',
   'es-419': 'es-419',
-  'pt': 'pt-BR',
+  pt: 'pt-BR',
   'pt-br': 'pt-BR',
-  'ar': 'ar',
-  'ja': 'ja-JP',
+  ar: 'ar',
+  ja: 'ja-JP',
   'ja-jp': 'ja-JP',
-  'ko': 'ko-KR',
+  ko: 'ko-KR',
   'ko-kr': 'ko-KR',
-  'de': 'de-DE',
+  de: 'de-DE',
   'de-de': 'de-DE',
-  'fr': 'fr-FR',
+  fr: 'fr-FR',
   'fr-fr': 'fr-FR',
 };
 
@@ -102,6 +91,11 @@ const FALLBACK_BY_BASE = {
   fr: 'fr-FR',
 };
 
+const loadedLocaleMessages = new Map();
+const localeLoadPromises = new Map();
+let cachedLocaleOrderSeed = null;
+let cachedAvailableLocales = null;
+
 const normalizeSeed = (value) => {
   const candidate = Number.parseInt(value, 10);
   if (!Number.isFinite(candidate)) return null;
@@ -116,8 +110,6 @@ const generateLocaleOrderSeed = () => {
   }
   return (Math.random() * 0x100000000) >>> 0;
 };
-
-let cachedLocaleOrderSeed = null;
 
 const readLocaleOrderSeed = () => {
   try {
@@ -169,12 +161,10 @@ const shuffleBySeed = (items, seed) => {
   return copy;
 };
 
-const resolvePath = (obj, keyPath) => {
-  return keyPath.split('.').reduce((acc, part) => {
-    if (!acc || typeof acc !== 'object') return undefined;
-    return acc[part];
-  }, obj);
-};
+const resolvePath = (obj, keyPath) => keyPath.split('.').reduce((acc, part) => {
+  if (!acc || typeof acc !== 'object') return undefined;
+  return acc[part];
+}, obj);
 
 const normalizeLocale = (value) => {
   if (!value || typeof value !== 'string') return null;
@@ -199,9 +189,102 @@ const readStoredLocale = () => {
 
 const detectNavigatorLocale = () => {
   if (typeof navigator === 'undefined') return null;
-  const candidate = normalizeLocale(navigator.language || navigator.userLanguage || '');
-  return candidate;
+  return normalizeLocale(navigator.language || navigator.userLanguage || '');
 };
+
+const readAvailableLocales = () => {
+  if (cachedAvailableLocales) return new Set(cachedAvailableLocales);
+  try {
+    const raw = window.localStorage.getItem(AVAILABLE_LOCALES_STORAGE_KEY);
+    const parsed = JSON.parse(raw || '[]');
+    const normalized = new Set(
+      (Array.isArray(parsed) ? parsed : [])
+        .map((entry) => normalizeLocale(entry))
+        .filter(Boolean),
+    );
+    cachedAvailableLocales = normalized;
+  } catch {
+    cachedAvailableLocales = new Set();
+  }
+  return new Set(cachedAvailableLocales);
+};
+
+const writeAvailableLocales = (locales) => {
+  const normalized = new Set(
+    [...locales]
+      .map((entry) => normalizeLocale(entry))
+      .filter(Boolean),
+  );
+  cachedAvailableLocales = normalized;
+  try {
+    window.localStorage.setItem(AVAILABLE_LOCALES_STORAGE_KEY, JSON.stringify([...normalized]));
+  } catch {
+    // localStorage might be unavailable in restricted contexts.
+  }
+};
+
+export const isLocaleAvailable = (locale) => {
+  const resolved = resolveLocale(locale);
+  if (!resolved) return false;
+  return loadedLocaleMessages.has(resolved) || readAvailableLocales().has(resolved);
+};
+
+export const markLocaleUnavailable = (locale) => {
+  const resolved = resolveLocale(locale);
+  if (!resolved) return;
+  const next = readAvailableLocales();
+  next.delete(resolved);
+  writeAvailableLocales(next);
+};
+
+const markLocaleAvailable = (locale) => {
+  const resolved = resolveLocale(locale);
+  if (!resolved) return;
+  const next = readAvailableLocales();
+  next.add(resolved);
+  writeAvailableLocales(next);
+};
+
+export const loadLocaleMessages = async (locale) => {
+  const resolved = resolveLocale(locale);
+  if (!resolved) return null;
+  if (loadedLocaleMessages.has(resolved)) return loadedLocaleMessages.get(resolved);
+  if (localeLoadPromises.has(resolved)) return localeLoadPromises.get(resolved);
+
+  const load = LOCALE_LOADERS[resolved];
+  if (typeof load !== 'function') {
+    throw new Error(`Unsupported locale loader: ${resolved}`);
+  }
+
+  const promise = load()
+    .then((module) => {
+      const messages = module?.default ?? module;
+      loadedLocaleMessages.set(resolved, messages);
+      markLocaleAvailable(resolved);
+      return messages;
+    })
+    .finally(() => {
+      localeLoadPromises.delete(resolved);
+    });
+
+  localeLoadPromises.set(resolved, promise);
+  return promise;
+};
+
+export const preloadLocales = async (locales = []) => {
+  const queue = [];
+  for (const locale of locales) {
+    const resolved = resolveLocale(locale);
+    if (!resolved || queue.includes(resolved)) continue;
+    queue.push(resolved);
+  }
+  for (const locale of queue) {
+    await loadLocaleMessages(locale);
+  }
+  return queue;
+};
+
+export const preloadAllLocales = async () => preloadLocales(SUPPORTED_LOCALES);
 
 export const resolveLocale = (locale) => {
   const explicit = normalizeLocale(locale);
@@ -216,8 +299,9 @@ export const resolveLocale = (locale) => {
   return DEFAULT_LOCALE;
 };
 
-export const setLocale = (locale) => {
+export const setLocale = async (locale) => {
   const resolved = resolveLocale(locale);
+  await loadLocaleMessages(resolved);
   try {
     window.localStorage.setItem(LOCALE_STORAGE_KEY, resolved);
   } catch {
@@ -242,9 +326,11 @@ export const t = (locale) => {
   const fallbackOrder = Array.from(fallback);
 
   return (key, vars = {}) => {
-    for (let i = 0; i < fallbackOrder.length; i++) {
+    for (let i = 0; i < fallbackOrder.length; i += 1) {
       const localeKey = fallbackOrder[i];
-      const message = resolvePath(LOCALE_MAP[localeKey], key);
+      const messages = loadedLocaleMessages.get(localeKey);
+      if (!messages) continue;
+      const message = resolvePath(messages, key);
       if (message != null) return interpolate(message, vars);
     }
     return key;
@@ -253,10 +339,11 @@ export const t = (locale) => {
 
 export const getLocale = () => resolveLocale();
 
-export const getLocaleOptions = (locale) => {
+export const getLocaleOptions = (locale, options = {}) => {
   const localeList = shuffleBySeed(SUPPORTED_LOCALES, getLocaleOrderSeed());
   const preferred = resolveLocale(locale) || null;
   const ordered = preferred ? [...localeList] : localeList;
+  const online = options.online ?? (typeof navigator === 'undefined' ? true : navigator.onLine !== false);
 
   if (preferred) {
     const currentIndex = ordered.indexOf(preferred);
@@ -266,8 +353,13 @@ export const getLocaleOptions = (locale) => {
     }
   }
 
-  return ordered.map((code) => ({
-    value: code,
-    label: LOCALE_LABELS[code] || code,
-  }));
+  return ordered.map((code) => {
+    const available = isLocaleAvailable(code);
+    return {
+      value: code,
+      label: LOCALE_LABELS[code] || code,
+      available,
+      disabled: !online && !available,
+    };
+  });
 };
