@@ -398,11 +398,9 @@ header h1.brandTitle {
 }
 
 .notificationHistoryItem.isDying {
-  border-color: color-mix(
-    in srgb,
-    var(--panel-outline),
-    transparent calc(18% + ((var(--death-rank, 0) + 1) * 11%))
-  );
+  border-color: color-mix(in srgb,
+      var(--panel-outline),
+      transparent calc(18% + ((var(--death-rank, 0) + 1) * 11%)));
 }
 
 .notificationHistoryItem.isDying .notificationHistoryItem__content,
@@ -1191,6 +1189,7 @@ body.isUpdateApplying .app {
   width: calc(var(--grid-cols) * var(--cell) + (var(--grid-cols) - 1) * var(--gap) + (var(--gap) * 2));
   height: calc(var(--grid-rows) * var(--cell) + (var(--grid-rows) - 1) * var(--gap) + (var(--gap) * 2));
   margin: 0 auto;
+  contain: layout paint style;
 }
 
 @property --interactive-corner-color {
@@ -1825,6 +1824,7 @@ body:not(.isPathDragging) .cell.pathEnd:active {
   z-index: 3;
   pointer-events: none;
   mix-blend-mode: var(--path-canvas-blend);
+  contain: layout paint style;
 }
 
 #symbolCanvas {
@@ -1833,6 +1833,7 @@ body:not(.isPathDragging) .cell.pathEnd:active {
   z-index: 4;
   pointer-events: none;
   mix-blend-mode: normal;
+  contain: layout paint style;
 }
 
 .legend {

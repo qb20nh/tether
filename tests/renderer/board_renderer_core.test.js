@@ -872,6 +872,80 @@ test('createBoardRendererCore performs one heavy render per RAF and skips symbol
   assert.equal((counters.pathDraws || 0) >= 2, true);
 });
 
+test('createBoardRendererCore does not rewrite message DOM when message content is unchanged', (t) => {
+  const env = installRendererEnv(t);
+  const gridData = [['.', '.']];
+  const snapshot = createSnapshot({
+    gridData,
+    path: [
+      { r: 0, c: 0 },
+      { r: 0, c: 1 },
+    ],
+  });
+  const core = createBoardRendererCore();
+  const refs = createShellRefs();
+  const innerHtmlDescriptor = Object.getOwnPropertyDescriptor(FakeElement.prototype, 'innerHTML');
+  let messageHtmlWrites = 0;
+  let messageClassAdds = 0;
+  let messageClassRemoves = 0;
+
+  Object.defineProperty(refs.msgEl, 'innerHTML', {
+    configurable: true,
+    enumerable: true,
+    get() {
+      return innerHtmlDescriptor.get.call(this);
+    },
+    set(value) {
+      messageHtmlWrites += 1;
+      innerHtmlDescriptor.set.call(this, value);
+    },
+  });
+  const originalAdd = refs.msgEl.classList.add.bind(refs.msgEl.classList);
+  const originalRemove = refs.msgEl.classList.remove.bind(refs.msgEl.classList);
+  refs.msgEl.classList.add = (...values) => {
+    messageClassAdds += 1;
+    return originalAdd(...values);
+  };
+  refs.msgEl.classList.remove = (...values) => {
+    messageClassRemoves += 1;
+    return originalRemove(...values);
+  };
+
+  core.mount(refs);
+  core.rebuildGrid(snapshot);
+  core.renderFrame({
+    snapshot,
+    evaluation: {},
+    completion: null,
+    uiModel: {
+      messageKind: 'good',
+      messageHtml: '<strong>stable</strong>',
+    },
+    interactionModel: {},
+  });
+  flushNextRaf(env, 16);
+
+  assert.equal(messageHtmlWrites, 1);
+  assert.equal(messageClassAdds, 1);
+  assert.equal(messageClassRemoves, 0);
+
+  core.renderFrame({
+    snapshot,
+    evaluation: {},
+    completion: null,
+    uiModel: {
+      messageKind: 'good',
+      messageHtml: '<strong>stable</strong>',
+    },
+    interactionModel: {},
+  });
+  flushNextRaf(env, 32);
+
+  assert.equal(messageHtmlWrites, 1);
+  assert.equal(messageClassAdds, 1);
+  assert.equal(messageClassRemoves, 0);
+});
+
 test('createBoardRendererCore keeps path flow moving across consecutive state render frames', (t) => {
   const env = installRendererEnv(t);
   const gridData = [['.', '.']];

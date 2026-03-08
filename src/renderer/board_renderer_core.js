@@ -50,6 +50,8 @@ let latestPathStatusSets = null;
 let latestCompletionModel = null;
 let latestTutorialFlags = null;
 let latestInteractionModel = null;
+let latestMessageKind = null;
+let latestMessageHtml = '';
 let pendingRenderState = null;
 const pendingRenderDirty = {
   cells: false,
@@ -2668,9 +2670,19 @@ const hideWallDragGhost = () => {
 };
 
 function setMessage(msgEl, kind, html) {
-  msgEl.classList.remove('good', 'bad');
-  if (kind) msgEl.classList.add(kind);
-  msgEl.innerHTML = html;
+  const nextKind = kind || null;
+  const nextHtml = html || '';
+  if (latestMessageKind === nextKind && latestMessageHtml === nextHtml) return;
+
+  if (latestMessageKind !== nextKind) {
+    if (latestMessageKind) msgEl.classList.remove(latestMessageKind);
+    if (nextKind) msgEl.classList.add(nextKind);
+    latestMessageKind = nextKind;
+  }
+  if (latestMessageHtml !== nextHtml) {
+    msgEl.innerHTML = nextHtml;
+    latestMessageHtml = nextHtml;
+  }
 }
 
 function setLegendIcons(icons, refs, iconX) {
@@ -2744,6 +2756,7 @@ function buildGrid(snapshot, refs, icons, iconX) {
       }
 
       cell.appendChild(mark);
+      cell.style.setProperty('--diag-order', String(r + c));
       gridEl.appendChild(cell);
       gridCells[r][c] = cell;
     }
@@ -2937,17 +2950,6 @@ const applyCellSnapshotState = (snapshot, r, c, statusSets) => {
     idxEl.textContent = idxText;
   }
 
-  const markEl = idxEl?.nextElementSibling;
-  const markHtml = resolveCellMarkHtml(code);
-  if (markEl && markEl.innerHTML !== markHtml) {
-    markEl.innerHTML = markHtml;
-  }
-
-  const diagOrderValue = String(r + c);
-  if (cell.style.getPropertyValue('--diag-order') !== diagOrderValue) {
-    cell.style.setProperty('--diag-order', diagOrderValue);
-  }
-
   const pathOrderValue = idxText ? String(Math.max(0, Number(idxText) - 1)) : '';
   const currentPathOrder = cell.style.getPropertyValue('--path-order');
   if (pathOrderValue) {
@@ -3076,12 +3078,6 @@ function updateCells(
         const markEl = idxEl?.nextElementSibling;
         if (markEl && markEl.innerHTML !== state.markHtml) {
           markEl.innerHTML = state.markHtml;
-        }
-
-        const diagOrderValue = String(r + c);
-        const currentDiagOrder = cell.style.getPropertyValue('--diag-order');
-        if (currentDiagOrder !== diagOrderValue) {
-          cell.style.setProperty('--diag-order', diagOrderValue);
         }
 
         const pathOrderValue = state.idx ? String(Math.max(0, Number(state.idx) - 1)) : '';
@@ -3853,6 +3849,8 @@ const resetCoreState = () => {
   latestCompletionModel = null;
   latestTutorialFlags = null;
   latestInteractionModel = null;
+  latestMessageKind = null;
+  latestMessageHtml = '';
   pendingRenderState = null;
   clearPendingRenderDirty();
   latestPathMainFlowTravel = 0;
