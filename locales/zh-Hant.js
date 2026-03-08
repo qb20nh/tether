@@ -54,6 +54,8 @@ export default {
     "notificationHistoryEmpty": "尚無通知。",
     "autoUpdate": "自動更新",
     "autoUpdateEnable": "啟用自動更新",
+    "lowPowerMode": "低耗電模式",
+    "lowPowerModeEnable": "啟用低耗電模式",
     "newVersionAvailableTitle": "有新版本可用",
     "newVersionAvailableBody": "點一下即可更新到最新版本。",
     "newVersionAvailableToast": "有新版本可用。",

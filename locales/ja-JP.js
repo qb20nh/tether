@@ -54,6 +54,8 @@ export default {
     "notificationHistoryEmpty": "まだ通知はありません。",
     "autoUpdate": "自動更新",
     "autoUpdateEnable": "自動更新を有効にする",
+    "lowPowerMode": "低電力モード",
+    "lowPowerModeEnable": "低電力モードを有効にする",
     "newVersionAvailableTitle": "新しいバージョンがあります",
     "newVersionAvailableBody": "タップして最新バージョンに更新できます。",
     "newVersionAvailableToast": "新しいバージョンがあります。",

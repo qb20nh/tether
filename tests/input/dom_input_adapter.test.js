@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createGameStateStore } from '../../src/state/game_state_store.js';
 import { createDomInputAdapter } from '../../src/input/dom_input_adapter.js';
-import { GAME_COMMANDS, INTENT_TYPES } from '../../src/runtime/intents.js';
+import { GAME_COMMANDS, INTENT_TYPES, UI_ACTIONS } from '../../src/runtime/intents.js';
 
 const LEVEL = {
   name: 'Input Adapter',
@@ -54,6 +54,7 @@ const createRefs = (gridEl) => ({
   infiniteSel: new FakeElement(),
   langSel: new FakeElement(),
   themeToggle: new FakeElement(),
+  lowPowerToggle: new FakeElement(),
   settingsToggle: new FakeElement(),
   settingsPanel: new FakeElement(),
   resetBtn: new FakeElement(),
@@ -180,10 +181,11 @@ const createGridHarness = (t, options = {}) => {
   const store = createGameStateStore(() => level);
   store.dispatch({ type: GAME_COMMANDS.LOAD_LEVEL, payload: { levelIndex: 0 } });
   const emittedIntents = [];
+  const refs = createRefs(gridEl);
 
   const adapter = createDomInputAdapter();
   adapter.bind({
-    refs: createRefs(gridEl),
+    refs,
     readSnapshot: () => store.getSnapshot(),
     readLayoutMetrics: options.readLayoutMetrics || (() => null),
     emitIntent: (intent) => {
@@ -208,6 +210,7 @@ const createGridHarness = (t, options = {}) => {
   return {
     adapter,
     store,
+    refs,
     gridEl,
     metrics,
     windowTarget,
@@ -423,4 +426,20 @@ test('dom input adapter uses a one-step sequence command for single-cell drags',
     { r: 0, c: 0 },
     { r: 0, c: 1 },
   ]);
+});
+
+test('dom input adapter emits low power toggle actions from settings', (t) => {
+  const harness = createGridHarness(t);
+
+  harness.refs.lowPowerToggle.dispatch('change', {
+    target: { checked: true },
+  });
+
+  assert.deepEqual(harness.emittedIntents.at(-1), {
+    type: INTENT_TYPES.UI_ACTION,
+    payload: {
+      actionType: UI_ACTIONS.LOW_POWER_TOGGLE,
+      enabled: true,
+    },
+  });
 });

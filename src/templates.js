@@ -132,6 +132,13 @@ export const APP_SHELL_TEMPLATE = (t = (k) => k, localeOptions = [], currentLoca
               <button id="${ELEMENT_IDS.THEME_TOGGLE}" type="button">${t('ui.themeDark')}</button>
             </div>
             <div class="settingsField">
+              <span id="${ELEMENT_IDS.LOW_POWER_LABEL}" class="small" data-i18n="ui.lowPowerMode">${t('ui.lowPowerMode')}</span>
+              <label class="settingsCheckbox">
+                <input id="${ELEMENT_IDS.LOW_POWER_TOGGLE}" type="checkbox" />
+                <span data-i18n="ui.lowPowerModeEnable">${t('ui.lowPowerModeEnable')}</span>
+              </label>
+            </div>
+            <div class="settingsField">
               <span id="${ELEMENT_IDS.NOTIFICATIONS_LABEL}" class="small" data-i18n="ui.notifications">${t('ui.notifications')}</span>
               <label class="settingsCheckbox">
                 <input id="${ELEMENT_IDS.NOTIFICATIONS_TOGGLE}" type="checkbox" />

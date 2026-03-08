@@ -8,6 +8,7 @@ export function createMemoryPersistence(initialState = {}, options = {}) {
 
   const state = {
     theme: initialState.theme || 'dark',
+    lowPowerModeEnabled: Boolean(initialState.lowPowerModeEnabled),
     hiddenPanels: {
       guide: Boolean(initialState.hiddenPanels?.guide),
       legend: initialState.hiddenPanels?.legend ?? true,
@@ -23,6 +24,7 @@ export function createMemoryPersistence(initialState = {}, options = {}) {
     readBootState() {
       return {
         theme: state.theme,
+        lowPowerModeEnabled: state.lowPowerModeEnabled,
         hiddenPanels: {
           guide: state.hiddenPanels.guide,
           legend: state.hiddenPanels.legend,
@@ -46,6 +48,10 @@ export function createMemoryPersistence(initialState = {}, options = {}) {
 
     writeTheme(theme) {
       state.theme = theme;
+    },
+
+    writeLowPowerModeEnabled(enabled) {
+      state.lowPowerModeEnabled = Boolean(enabled);
     },
 
     writeHiddenPanel(panel, hidden) {

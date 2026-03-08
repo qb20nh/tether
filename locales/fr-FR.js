@@ -54,6 +54,8 @@ export default {
     "notificationHistoryEmpty": "Aucune notification pour le moment.",
     "autoUpdate": "Mise à jour automatique",
     "autoUpdateEnable": "Activer la mise à jour automatique",
+    "lowPowerMode": "Mode économie d'énergie",
+    "lowPowerModeEnable": "Activer le mode économie d'énergie",
     "newVersionAvailableTitle": "Nouvelle version disponible",
     "newVersionAvailableBody": "Touchez pour mettre à jour vers la dernière version.",
     "newVersionAvailableToast": "Une nouvelle version est disponible.",

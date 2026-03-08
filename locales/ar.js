@@ -54,6 +54,8 @@ export default {
     "notificationHistoryEmpty": "لا توجد إشعارات بعد.",
     "autoUpdate": "التحديث التلقائي",
     "autoUpdateEnable": "تفعيل التحديث التلقائي",
+    "lowPowerMode": "وضع الطاقة المنخفضة",
+    "lowPowerModeEnable": "تفعيل وضع الطاقة المنخفضة",
     "newVersionAvailableTitle": "يتوفر إصدار جديد",
     "newVersionAvailableBody": "اضغط للتحديث إلى أحدث إصدار.",
     "newVersionAvailableToast": "يتوفر إصدار جديد.",

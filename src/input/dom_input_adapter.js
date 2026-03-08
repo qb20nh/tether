@@ -663,6 +663,10 @@ export function createDomInputAdapter() {
         sendUiAction(UI_ACTIONS.THEME_TOGGLE);
       });
 
+      addListener(refs.lowPowerToggle, 'change', (e) => {
+        sendUiAction(UI_ACTIONS.LOW_POWER_TOGGLE, { enabled: Boolean(e.target?.checked) });
+      });
+
       addListener(refs.settingsToggle, 'click', (e) => {
         e.stopPropagation();
         sendUiAction(UI_ACTIONS.SETTINGS_TOGGLE);

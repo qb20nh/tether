@@ -90,6 +90,9 @@ let pathRetainedArcTokenSeed = 0;
 let tutorialBracketSignature = '';
 let tutorialBracketGeometryToken = 0;
 let reducedMotionQuery = null;
+let lowPowerModeEnabled = false;
+let lowPowerFrameDelayTimer = 0;
+let lastPresentedFrameTimestamp = 0;
 let wallGhostOffsetLeft = 0;
 let wallGhostOffsetTop = 0;
 let lastPathRendererRecoveryAttemptMs = 0;
@@ -196,6 +199,7 @@ const TAU = Math.PI * 2;
 const CANVAS_ALIGN_OFFSET_CSS_PX = 0;
 const PATH_RENDERER_RECOVERY_COOLDOWN_MS = 500;
 const INTERACTIVE_RESIZE_IDLE_MS = 200;
+const LOW_POWER_FRAME_INTERVAL_MS = 1000 / 30;
 const PATH_TIP_HOVER_SCALE_DURATION_MS = 120;
 const PATH_TIP_HOVER_UP_SCALE = 1.15;
 const PATH_TIP_HOVER_SCALE_EPSILON = 1e-4;
@@ -270,6 +274,12 @@ const clearPendingRenderDirty = () => {
   pendingRenderDirty.symbols = false;
   pendingRenderDirty.message = false;
   pendingRenderDirty.interaction = false;
+};
+
+const clearLowPowerFrameDelayTimer = () => {
+  if (!lowPowerFrameDelayTimer) return;
+  clearTimeout(lowPowerFrameDelayTimer);
+  lowPowerFrameDelayTimer = 0;
 };
 
 const easeOutCubic = (unit) => {
@@ -1622,6 +1632,7 @@ const runAnimationOnlyFrame = (timestamp) => {
 
 const runRendererFrame = (timestamp) => {
   pathAnimationFrame = 0;
+  lastPresentedFrameTimestamp = Number.isFinite(timestamp) ? timestamp : getNowMs();
   let shouldContinue = false;
   if (pendingRenderState) {
     shouldContinue = flushPendingRenderFrame(timestamp);
@@ -1633,13 +1644,37 @@ const runRendererFrame = (timestamp) => {
     shouldContinue = runAnimationOnlyFrame(timestamp);
   }
   if (pendingRenderState || pendingRenderDirty.interaction || shouldContinue) {
-    pathAnimationFrame = requestAnimationFrame(runRendererFrame);
+    scheduleRendererFrame();
   }
 };
 
 const scheduleRendererFrame = () => {
-  if (pathAnimationFrame) return;
-  pathAnimationFrame = requestAnimationFrame(runRendererFrame);
+  if (pathAnimationFrame || lowPowerFrameDelayTimer) return;
+  if (!lowPowerModeEnabled) {
+    pathAnimationFrame = requestAnimationFrame(runRendererFrame);
+    return;
+  }
+
+  const nowMs = (
+    typeof performance !== 'undefined' && typeof performance.now === 'function'
+      ? performance.now()
+      : Date.now()
+  );
+  const elapsedMs = lastPresentedFrameTimestamp > 0
+    ? (nowMs - lastPresentedFrameTimestamp)
+    : LOW_POWER_FRAME_INTERVAL_MS;
+  const waitMs = Math.max(0, LOW_POWER_FRAME_INTERVAL_MS - elapsedMs);
+  if (waitMs <= 0) {
+    pathAnimationFrame = requestAnimationFrame(runRendererFrame);
+    return;
+  }
+
+  lowPowerFrameDelayTimer = setTimeout(() => {
+    lowPowerFrameDelayTimer = 0;
+    if (!pathAnimationFrame) {
+      pathAnimationFrame = requestAnimationFrame(runRendererFrame);
+    }
+  }, waitMs);
 };
 
 
@@ -1653,7 +1688,9 @@ const getDevicePixelScale = () => {
   const dpr = typeof window !== 'undefined'
     ? Number(window.devicePixelRatio)
     : NaN;
-  return Number.isFinite(dpr) && dpr > 0 ? dpr : 1;
+  const safeDpr = Number.isFinite(dpr) && dpr > 0 ? dpr : 1;
+  if (!lowPowerModeEnabled) return safeDpr;
+  return Math.max(1, safeDpr / 2);
 };
 
 const snapCssToDevicePixel = (value, scale = getDevicePixelScale()) => {
@@ -1685,12 +1722,12 @@ const snapCanvasPoint = (value, scale) => {
   return Math.round((Number(value) || 0) * safeScale) / safeScale;
 };
 
-const configureHiDPICanvas = (canvas, ctx, cssWidth, cssHeight) => {
+const configureHiDPICanvas = (canvas, ctx, cssWidth, cssHeight, dpr = getDevicePixelScale()) => {
   const safeCssWidth = Math.max(1, cssWidth);
   const safeCssHeight = Math.max(1, cssHeight);
-  const dpr = window.devicePixelRatio || 1;
-  const pixelWidth = Math.max(1, Math.round(safeCssWidth * dpr));
-  const pixelHeight = Math.max(1, Math.round(safeCssHeight * dpr));
+  const safeDpr = Number.isFinite(dpr) && dpr > 0 ? dpr : 1;
+  const pixelWidth = Math.max(1, Math.round(safeCssWidth * safeDpr));
+  const pixelHeight = Math.max(1, Math.round(safeCssHeight * safeDpr));
   const scaleX = pixelWidth / safeCssWidth;
   const scaleY = pixelHeight / safeCssHeight;
 
@@ -1856,6 +1893,7 @@ const getCachedPathFlowMetrics = (refs = latestPathRefs, cellSize = null) => {
 };
 
 const isReducedMotionPreferred = () => {
+  if (lowPowerModeEnabled) return true;
   if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return false;
   if (!reducedMotionQuery) {
     reducedMotionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
@@ -2404,7 +2442,7 @@ const flushInteractiveResize = () => {
   if (wallGhostEl) refreshWallGhostOffset();
   const pathRenderer = ensurePathRenderer({ refs, allowRecovery: true });
   if (pathRenderer) pathRenderer.resize(cssWidth, cssHeight, dpr);
-  configureHiDPICanvas(refs.symbolCanvas, refs.symbolCtx, cssWidth, cssHeight);
+  configureHiDPICanvas(refs.symbolCanvas, refs.symbolCtx, cssWidth, cssHeight, dpr);
 
   if (refs === latestPathRefs && latestPathSnapshot) {
     drawAllInternal(
@@ -2448,6 +2486,8 @@ function cacheElements() {
     langSel: get(ELEMENT_IDS.LANG_SEL),
     themeLabel: get(ELEMENT_IDS.THEME_LABEL),
     themeToggle: get(ELEMENT_IDS.THEME_TOGGLE),
+    lowPowerLabel: get(ELEMENT_IDS.LOW_POWER_LABEL),
+    lowPowerToggle: get(ELEMENT_IDS.LOW_POWER_TOGGLE),
     settingsToggle: get(ELEMENT_IDS.SETTINGS_TOGGLE),
     settingsPanel: get(ELEMENT_IDS.SETTINGS_PANEL),
     themeSwitchDialog: get(ELEMENT_IDS.THEME_SWITCH_DIALOG),
@@ -3709,7 +3749,7 @@ function drawCornerCounts(snapshot, refs, ctx, cornerVertexStatus = EMPTY_MAP) {
 function resizeCanvas(refs) {
   const { boardWrap, canvas, symbolCanvas, symbolCtx } = refs;
   if (!boardWrap || !canvas || !symbolCanvas || !symbolCtx || !refs.gridEl) return;
-  const dpr = window.devicePixelRatio || 1;
+  const dpr = getDevicePixelScale();
   const viewportWidth = window.visualViewport?.width || window.innerWidth || 0;
   const viewportHeight = window.visualViewport?.height || window.innerHeight || 0;
   const wrapRect = boardWrap.getBoundingClientRect();
@@ -3798,7 +3838,7 @@ function resizeCanvas(refs) {
   if (wallGhostEl) refreshWallGhostOffset();
   const pathRenderer = ensurePathRenderer(refs);
   if (pathRenderer) pathRenderer.resize(cw, ch, dpr);
-  configureHiDPICanvas(symbolCanvas, symbolCtx, cw, ch);
+  configureHiDPICanvas(symbolCanvas, symbolCtx, cw, ch, dpr);
 }
 
 function notifyInteractiveResize() {
@@ -3884,6 +3924,8 @@ const resetCoreState = () => {
   lastPathRendererRecoveryAttemptMs = 0;
   interactiveResizeActive = false;
   interactiveResizeTimer = 0;
+  lowPowerFrameDelayTimer = 0;
+  lastPresentedFrameTimestamp = 0;
   pendingInteractiveResizePayload = null;
   realTimeLastMs = 0;
   scaledTimeAccumulatorMs = 0;
@@ -3894,6 +3936,7 @@ const resetCoreState = () => {
   clearPathRetainedArcStates();
   clearPathTipHoverScaleStates();
   transitionCompensationBuffer.clear();
+  lowPowerModeEnabled = false;
 };
 
 return {
@@ -3959,6 +4002,42 @@ return {
     resizeCanvas(refs);
   },
 
+  setLowPowerMode(enabled = false) {
+    const nextEnabled = Boolean(enabled);
+    if (nextEnabled === lowPowerModeEnabled) return;
+    lowPowerModeEnabled = nextEnabled;
+    clearLowPowerFrameDelayTimer();
+    lastPresentedFrameTimestamp = 0;
+    resizeCanvasSignature = '';
+    pathThemeCacheInitialized = false;
+    if (lowPowerModeEnabled) {
+      pathAnimationEngine.resetTransitionState();
+      clearPathRetainedArcStates();
+      clearPathTipHoverScaleStates();
+      clearPathTransitionCompensationBuffer();
+      stopPathAnimation();
+    }
+    if (refs) {
+      resizeCanvas(refs);
+      if (!pendingRenderState && latestPathSnapshot && latestPathStatuses) {
+        pendingRenderState = {
+          snapshot: latestPathSnapshot,
+          evaluation: latestPathStatuses,
+          completion: latestCompletionModel,
+          uiModel: {
+            messageKind: latestMessageKind,
+            messageHtml: latestMessageHtml,
+            tutorialFlags: latestTutorialFlags,
+          },
+        };
+        pendingRenderDirty.path = true;
+        pendingRenderDirty.symbols = true;
+        pendingRenderDirty.interaction = true;
+      }
+      scheduleRendererFrame();
+    }
+  },
+
   notifyResizeInteraction() {
     notifyInteractiveResize();
   },
@@ -3981,6 +4060,7 @@ return {
     hideWallDragGhost();
     syncPathTipDragHoverCell({ isPathDragging: false, pathDragCursor: null }, []);
     clearInteractiveResizeTimer();
+    clearLowPowerFrameDelayTimer();
     stopPathAnimation();
     refs?.pathRenderer?.destroy?.();
     pathAnimationEngine.resetForCacheElements(null);

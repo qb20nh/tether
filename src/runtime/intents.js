@@ -48,6 +48,7 @@ export const UI_ACTIONS = Object.freeze({
   REVERSE_CLICK: 'reverse/click',
   LOCALE_CHANGE: 'locale/change',
   THEME_TOGGLE: 'theme/toggle',
+  LOW_POWER_TOGGLE: 'low-power/toggle',
   PANEL_TOGGLE: 'panel/toggle',
   SETTINGS_TOGGLE: 'settings/toggle',
   SETTINGS_CLOSE: 'settings/close',

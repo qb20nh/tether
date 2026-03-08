@@ -54,6 +54,8 @@ export default {
     "notificationHistoryEmpty": "No notifications yet.",
     "autoUpdate": "Auto-update",
     "autoUpdateEnable": "Enable auto-update",
+    "lowPowerMode": "Low Power Mode",
+    "lowPowerModeEnable": "Enable low power mode",
     "newVersionAvailableTitle": "New version available",
     "newVersionAvailableBody": "Tap to update to the latest version.",
     "newVersionAvailableToast": "A new version is available.",

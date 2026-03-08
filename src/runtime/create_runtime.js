@@ -104,6 +104,7 @@ export function createRuntime(options) {
 
   let dailySolvedDate = typeof bootState.dailySolvedDate === 'string' ? bootState.dailySolvedDate : null;
   let activeTheme = normalizeTheme(bootState.theme);
+  let lowPowerModeEnabled = Boolean(bootState.lowPowerModeEnabled);
 
   const initialLocale = i18n.resolveLocale();
   let activeLocale = initialLocale;
@@ -234,6 +235,24 @@ export function createRuntime(options) {
   const setThemeSwitchPrompt = (nextTheme) => setThemeSwitchPromptCore(nextTheme, renderer.getRefs(), translate);
   const requestLightThemeConfirmation = (targetTheme) => requestLightThemeConfirmationCore(targetTheme, renderer.getRefs(), translate);
   const refreshSettingsToggle = () => refreshSettingsToggleCore(renderer.getRefs(), translate);
+  const syncLowPowerToggle = () => {
+    const refs = renderer.getRefs();
+    if (refs?.lowPowerToggle) {
+      refs.lowPowerToggle.checked = lowPowerModeEnabled;
+    }
+  };
+  const applyLowPowerMode = (enabled, options = {}) => {
+    const nextEnabled = Boolean(enabled);
+    const force = Boolean(options.force);
+    if (!force && nextEnabled === lowPowerModeEnabled) return;
+    lowPowerModeEnabled = nextEnabled;
+    persistence.writeLowPowerModeEnabled?.(lowPowerModeEnabled);
+    syncLowPowerToggle();
+    renderer.setLowPowerMode?.(lowPowerModeEnabled);
+    if (started && !destroyed && hasLoadedLevel) {
+      queueBoardLayout(false, { needsResize: true });
+    }
+  };
 
   const isDailyExpired = () =>
     debugForceDailyFrozen
@@ -1197,6 +1216,7 @@ export function createRuntime(options) {
 
     refreshThemeButton();
     refreshSettingsToggle();
+    syncLowPowerToggle();
   };
 
   const applyThemeState = (nextTheme) => {
@@ -1299,6 +1319,11 @@ export function createRuntime(options) {
       const targetTheme = activeTheme === 'dark' ? 'light' : 'dark';
       if (targetTheme === 'light' && requestLightThemeConfirmation(targetTheme)) return;
       applyThemeState(targetTheme);
+      return;
+    }
+
+    if (actionType === UI_ACTIONS.LOW_POWER_TOGGLE) {
+      applyLowPowerMode(payload.enabled);
       return;
     }
 
@@ -1580,6 +1605,7 @@ export function createRuntime(options) {
 
     renderer.mount();
     const refs = renderer.getRefs();
+    applyLowPowerMode(lowPowerModeEnabled, { force: true });
 
     if (refs.legend) {
       refs.legend.innerHTML = ui.buildLegendTemplate(

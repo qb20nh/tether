@@ -30,6 +30,7 @@ export function createDomRenderer(options = {}) {
   let completePulseFrame = 0;
   let completePulseTimer = 0;
   let lateSolveTriggerUntilMs = 0;
+  let lowPowerModeEnabled = false;
 
   const setDraggingBodyClasses = (state = {}) => {
     if (typeof document === 'undefined' || !document.body) return;
@@ -148,9 +149,12 @@ export function createDomRenderer(options = {}) {
   };
 
   const prefersReducedMotion = () => (
+    lowPowerModeEnabled
+    || (
     typeof window !== 'undefined'
     && typeof window.matchMedia === 'function'
     && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    )
   );
 
   const isSolvedSnapshot = (snapshot, evaluation) => {
@@ -328,6 +332,29 @@ export function createDomRenderer(options = {}) {
       boardRendererCore.notifyResizeInteraction();
     },
 
+    setLowPowerMode(enabled = false) {
+      const nextEnabled = Boolean(enabled);
+      if (nextEnabled === lowPowerModeEnabled) return;
+      lowPowerModeEnabled = nextEnabled;
+      if (refs?.boardWrap) {
+        refs.boardWrap.classList.toggle('isLowPowerMode', lowPowerModeEnabled);
+      }
+      if (lowPowerModeEnabled) {
+        clearCompleteFinishTimer();
+        clearCompletePulse();
+        lateSolveTriggerUntilMs = 0;
+        completionCascadeState = {
+          ...completionCascadeState,
+          isCompleting: false,
+          durationMs: 0,
+        };
+        if (refs?.boardWrap) {
+          refs.boardWrap.classList.remove('isCompleting', 'isCompletePulse');
+        }
+      }
+      boardRendererCore.setLowPowerMode(lowPowerModeEnabled);
+    },
+
     setPathFlowFreezeImmediate(isFrozen = false) {
       boardRendererCore.setPathFlowFreezeImmediate(isFrozen);
     },
@@ -350,12 +377,19 @@ export function createDomRenderer(options = {}) {
       setDraggingBodyClasses({ isWallDragging: false, isPathDragging: false });
       boardRendererCore.destroy();
       if (refs?.boardWrap) {
-        refs.boardWrap.classList.remove('isComplete', 'isCompleting', 'isCompletePulse', 'tutorialBracketNormalBlend');
+        refs.boardWrap.classList.remove(
+          'isComplete',
+          'isCompleting',
+          'isCompletePulse',
+          'tutorialBracketNormalBlend',
+          'isLowPowerMode',
+        );
       }
       clearCompleteFinishTimer();
       clearCompletePulse();
       hasRenderedFrame = false;
       lateSolveTriggerUntilMs = 0;
+      lowPowerModeEnabled = false;
       completionCascadeState = {
         isSolved: false,
         isCompleting: false,

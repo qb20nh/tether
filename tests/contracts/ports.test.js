@@ -19,6 +19,7 @@ test('default adapters expose required contract methods', () => {
 
   assert.equal(typeof adapters.persistence.readBootState, 'function');
   assert.equal(typeof adapters.persistence.writeTheme, 'function');
+  assert.equal(typeof adapters.persistence.writeLowPowerModeEnabled, 'function');
   assert.equal(typeof adapters.persistence.writeSessionBoard, 'function');
   assert.equal(typeof adapters.persistence.writeDailySolvedDate, 'function');
   assert.equal(typeof adapters.persistence.writeScoreState, 'function');
@@ -26,6 +27,7 @@ test('default adapters expose required contract methods', () => {
   assert.equal(typeof adapters.renderer.mount, 'function');
   assert.equal(typeof adapters.renderer.renderFrame, 'function');
   assert.equal(typeof adapters.renderer.resize, 'function');
+  assert.equal(typeof adapters.renderer.setLowPowerMode, 'function');
   assert.equal(typeof adapters.renderer.recordPathTransition, 'function');
   assert.equal(typeof adapters.renderer.clearPathTransitionCompensation, 'function');
 

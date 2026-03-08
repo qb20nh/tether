@@ -54,6 +54,8 @@ export default {
     "notificationHistoryEmpty": "알림이 아직 없습니다.",
     "autoUpdate": "자동 업데이트",
     "autoUpdateEnable": "자동 업데이트 켜기",
+    "lowPowerMode": "저전력 모드",
+    "lowPowerModeEnable": "저전력 모드 켜기",
     "newVersionAvailableTitle": "새 버전이 있습니다",
     "newVersionAvailableBody": "탭하면 최신 버전으로 업데이트할 수 있습니다.",
     "newVersionAvailableToast": "새 버전이 있습니다.",

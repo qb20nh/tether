@@ -11,6 +11,7 @@ const DAILY_SOLVED_VERSION = 1;
 const SCORE_STATE_KEY = 'tetherScoreState';
 const SCORE_STATE_VERSION = 1;
 const THEME_KEY = 'tetherTheme';
+const LOW_POWER_MODE_KEY = 'tetherLowPowerMode';
 const SESSION_SAVE_KEY = 'tetherSessionSave';
 const SESSION_SEAL_KEY = 'tetherSessionSeal';
 const SESSION_SAVE_VERSION = 3;
@@ -197,6 +198,7 @@ export function createLocalStoragePersistence(options = {}) {
   let dailySolvedDateCache = null;
   let scoreStateCache = null;
   let cachedTheme = null;
+  let cachedLowPowerModeEnabled = null;
   let cachedSessionSeal = null;
   let volatileSessionSeal = null;
 
@@ -347,6 +349,12 @@ export function createLocalStoragePersistence(options = {}) {
     }
     cachedTheme = detectSystemTheme(windowObj);
     return cachedTheme;
+  };
+
+  const readLowPowerModeEnabled = () => {
+    if (cachedLowPowerModeEnabled !== null) return cachedLowPowerModeEnabled;
+    cachedLowPowerModeEnabled = readStorage(LOW_POWER_MODE_KEY) === '1';
+    return cachedLowPowerModeEnabled;
   };
 
   const getSessionSeal = () => {
@@ -555,6 +563,11 @@ export function createLocalStoragePersistence(options = {}) {
     writeStorage(THEME_KEY, normalized);
   };
 
+  const writeLowPowerModeEnabled = (enabled) => {
+    cachedLowPowerModeEnabled = Boolean(enabled);
+    writeStorage(LOW_POWER_MODE_KEY, cachedLowPowerModeEnabled ? '1' : '0');
+  };
+
   const writeDailySolvedDate = (dailyId) => {
     dailySolvedDateCache = typeof dailyId === 'string' ? dailyId : '';
     const payload = {
@@ -616,6 +629,7 @@ export function createLocalStoragePersistence(options = {}) {
 
     return {
       theme: readTheme(),
+      lowPowerModeEnabled: readLowPowerModeEnabled(),
       hiddenPanels: {
         guide: getHiddenPanel('guide'),
         legend: getHiddenPanel('legend'),
@@ -631,6 +645,7 @@ export function createLocalStoragePersistence(options = {}) {
   return {
     readBootState,
     writeTheme,
+    writeLowPowerModeEnabled,
     writeHiddenPanel,
     writeCampaignProgress,
     writeInfiniteProgress,
@@ -649,6 +664,7 @@ export const STORAGE_KEYS = Object.freeze({
   DAILY_SOLVED_KEY,
   SCORE_STATE_KEY,
   THEME_KEY,
+  LOW_POWER_MODE_KEY,
   SESSION_SAVE_KEY,
   SESSION_SEAL_KEY,
 });

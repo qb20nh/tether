@@ -5,7 +5,7 @@ import { createDefaultCore } from '../../src/core/default_core.js';
 import { createGameStateStore } from '../../src/state/game_state_store.js';
 import { createMemoryPersistence } from '../../src/persistence/memory_persistence.js';
 import { createRuntime } from '../../src/runtime/create_runtime.js';
-import { GAME_COMMANDS, INTENT_TYPES } from '../../src/runtime/intents.js';
+import { GAME_COMMANDS, INTENT_TYPES, UI_ACTIONS } from '../../src/runtime/intents.js';
 
 const LEVEL = {
   name: 'Runtime Lifecycle',
@@ -45,6 +45,7 @@ const createClassList = () => {
 const createElement = () => ({
   hidden: false,
   disabled: false,
+  checked: false,
   textContent: '',
   innerHTML: '',
   value: '',
@@ -99,6 +100,7 @@ const createRefs = () => {
     dailyCountdownValue: createElement(),
     settingsPanel: createElement(),
     settingsToggle: createElement(),
+    lowPowerToggle: createElement(),
     themeSwitchMessage: createElement(),
     themeSwitchDialog: createElement(),
     resetBtn: createElement(),
@@ -212,6 +214,7 @@ const createRuntimeHarness = ({
   dailyLevel = null,
   effects = {},
   rendererOverrides = {},
+  persistenceInitialState = {},
   persistenceOverrides = {},
 } = {}) => {
   const levelProvider = createLevelProvider({
@@ -223,7 +226,7 @@ const createRuntimeHarness = ({
   });
   const core = createDefaultCore(levelProvider);
   const state = createGameStateStore((idx) => core.getLevel(idx));
-  const basePersistence = createMemoryPersistence({}, {
+  const basePersistence = createMemoryPersistence(persistenceInitialState, {
     dailyAbsIndex: core.getDailyAbsIndex(),
     activeDailyId: core.getDailyId(),
   });
@@ -235,6 +238,7 @@ const createRuntimeHarness = ({
   let bindCount = 0;
   let unbindCount = 0;
   let lastBindPayload = null;
+  const lowPowerSetCalls = [];
 
   const persistence = {
     ...basePersistence,
@@ -256,6 +260,10 @@ const createRuntimeHarness = ({
     resize: () => {
       resizeCount += 1;
       rendererOverrides.resize?.();
+    },
+    setLowPowerMode: (enabled) => {
+      lowPowerSetCalls.push(Boolean(enabled));
+      rendererOverrides.setLowPowerMode?.(enabled);
     },
     unmount: () => {
       unmountCount += 1;
@@ -327,6 +335,7 @@ const createRuntimeHarness = ({
     getBindCount: () => bindCount,
     getUnbindCount: () => unbindCount,
     getLastBindPayload: () => lastBindPayload,
+    getLowPowerSetCalls: () => [...lowPowerSetCalls],
   };
 };
 
@@ -513,6 +522,55 @@ test('createRuntime only resizes on layout-invalidating board updates', (t) => {
   env.resizeObservers[0].callback();
   flushNextRaf(64);
   assert.equal(harness.getResizeCount(), 3);
+
+  harness.runtime.destroy();
+});
+
+test('createRuntime applies persisted low power mode before first level render', (t) => {
+  const env = installBrowserEnv(t);
+  const harness = createRuntimeHarness({
+    persistenceInitialState: {
+      lowPowerModeEnabled: true,
+    },
+  });
+
+  harness.runtime.start();
+
+  assert.deepEqual(harness.getLowPowerSetCalls(), [true]);
+  assert.equal(harness.refs.lowPowerToggle.checked, true);
+  assert.equal(env.rafCallbacks.size, 1);
+
+  harness.runtime.destroy();
+});
+
+test('createRuntime toggles low power mode through runtime-owned state and queues a resize redraw', (t) => {
+  const env = installBrowserEnv(t);
+  const harness = createRuntimeHarness();
+
+  const flushNextRaf = (ts) => {
+    const callback = [...env.rafCallbacks.values()][0];
+    callback?.(ts);
+  };
+
+  harness.runtime.start();
+  flushNextRaf(16);
+  assert.equal(harness.getResizeCount(), 1);
+
+  harness.runtime.emitIntent({
+    type: INTENT_TYPES.UI_ACTION,
+    payload: {
+      actionType: UI_ACTIONS.LOW_POWER_TOGGLE,
+      enabled: true,
+    },
+  });
+
+  assert.equal(harness.refs.lowPowerToggle.checked, true);
+  assert.equal(harness.persistence.readBootState().lowPowerModeEnabled, true);
+  assert.deepEqual(harness.getLowPowerSetCalls(), [false, true]);
+  assert.equal(env.rafCallbacks.size, 1);
+
+  flushNextRaf(32);
+  assert.equal(harness.getResizeCount(), 2);
 
   harness.runtime.destroy();
 });

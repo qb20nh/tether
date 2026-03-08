@@ -325,9 +325,14 @@ const installRendererEnv = (t) => {
   const originalPerformance = globalThis.performance;
   const originalRaf = globalThis.requestAnimationFrame;
   const originalCancelRaf = globalThis.cancelAnimationFrame;
+  const originalSetTimeout = globalThis.setTimeout;
+  const originalClearTimeout = globalThis.clearTimeout;
 
   const rafCallbacks = new Map();
   let nextRafId = 1;
+  const timeoutCallbacks = new Map();
+  let nextTimeoutId = 1;
+  let nowMs = 100;
 
   const documentElement = new FakeElement('html');
   documentElement.clientWidth = 1280;
@@ -346,6 +351,18 @@ const installRendererEnv = (t) => {
     innerHeight: 720,
     devicePixelRatio: 1,
     visualViewport: null,
+    setTimeout(callback) {
+      const id = nextTimeoutId;
+      nextTimeoutId += 1;
+      timeoutCallbacks.set(id, (...args) => {
+        timeoutCallbacks.delete(id);
+        return callback(...args);
+      });
+      return id;
+    },
+    clearTimeout(id) {
+      timeoutCallbacks.delete(id);
+    },
     matchMedia() {
       return { matches: false };
     },
@@ -353,7 +370,7 @@ const installRendererEnv = (t) => {
   globalThis.getComputedStyle = (element) => createComputedStyle(element);
   globalThis.performance = {
     now() {
-      return 100;
+      return nowMs;
     },
   };
   globalThis.requestAnimationFrame = (callback) => {
@@ -365,6 +382,8 @@ const installRendererEnv = (t) => {
   globalThis.cancelAnimationFrame = (id) => {
     rafCallbacks.delete(id);
   };
+  globalThis.setTimeout = globalThis.window.setTimeout;
+  globalThis.clearTimeout = globalThis.window.clearTimeout;
 
   t.after(() => {
     globalThis.Element = originalElement;
@@ -374,9 +393,17 @@ const installRendererEnv = (t) => {
     globalThis.performance = originalPerformance;
     globalThis.requestAnimationFrame = originalRaf;
     globalThis.cancelAnimationFrame = originalCancelRaf;
+    globalThis.setTimeout = originalSetTimeout;
+    globalThis.clearTimeout = originalClearTimeout;
   });
 
-  return { rafCallbacks };
+  return {
+    rafCallbacks,
+    timeoutCallbacks,
+    setNowMs(value) {
+      nowMs = Number(value) || 0;
+    },
+  };
 };
 
 const flushNextRaf = (env, timestamp = 16) => {
@@ -385,6 +412,15 @@ const flushNextRaf = (env, timestamp = 16) => {
   const [id, callback] = nextEntry;
   env.rafCallbacks.delete(id);
   callback(timestamp);
+  return true;
+};
+
+const flushNextTimeout = (env) => {
+  const nextEntry = env.timeoutCallbacks.entries().next().value;
+  if (!nextEntry) return false;
+  const [id, callback] = nextEntry;
+  env.timeoutCallbacks.delete(id);
+  callback();
   return true;
 };
 
@@ -870,6 +906,75 @@ test('createBoardRendererCore performs one heavy render per RAF and skips symbol
   assert.equal(counters.heavyFrameRenders, 1);
   assert.equal(counters.symbolRedraws, 1);
   assert.equal((counters.pathDraws || 0) >= 2, true);
+});
+
+test('createBoardRendererCore low power mode halves effective DPR, suppresses animation continuation, and coalesces to 30fps', (t) => {
+  const env = installRendererEnv(t);
+  env.setNowMs(0);
+  globalThis.window.devicePixelRatio = 3;
+
+  const counters = {};
+  const gridData = [['.', '.', '.']];
+  const firstSnapshot = createSnapshot({
+    gridData,
+    path: [
+      { r: 0, c: 0 },
+      { r: 0, c: 1 },
+    ],
+  });
+  const secondSnapshot = createSnapshot({
+    gridData,
+    path: [
+      { r: 0, c: 0 },
+      { r: 0, c: 1 },
+      { r: 0, c: 2 },
+    ],
+  });
+  const core = createBoardRendererCore({ debugCounters: counters });
+  const refs = createShellRefs();
+
+  core.mount(refs);
+  core.rebuildGrid(firstSnapshot);
+  core.resize();
+  assert.equal(refs.pathRenderer.resizeCalls.at(-1)?.dpr, 3);
+
+  core.setLowPowerMode(true);
+  assert.equal(refs.pathRenderer.resizeCalls.at(-1)?.dpr, 1.5);
+
+  core.renderFrame({
+    snapshot: firstSnapshot,
+    evaluation: {},
+    completion: null,
+    uiModel: {},
+    interactionModel: {},
+  });
+  flushNextRaf(env, 16);
+  assert.equal(env.rafCallbacks.size, 0);
+
+  env.setNowMs(20);
+  core.renderFrame({
+    snapshot: firstSnapshot,
+    evaluation: {},
+    completion: null,
+    uiModel: {},
+    interactionModel: {},
+  });
+  core.renderFrame({
+    snapshot: secondSnapshot,
+    evaluation: {},
+    completion: null,
+    uiModel: {},
+    interactionModel: {},
+  });
+
+  assert.equal(env.timeoutCallbacks.size, 1);
+  assert.equal(env.rafCallbacks.size, 0);
+  flushNextTimeout(env);
+  assert.equal(env.rafCallbacks.size, 1);
+  flushNextRaf(env, 50);
+
+  assert.equal(counters.heavyFrameRenders, 2);
+  assert.equal(refs.pathRenderer.calls.at(-1)?.pointCount, 3);
 });
 
 test('createBoardRendererCore does not rewrite message DOM when message content is unchanged', (t) => {

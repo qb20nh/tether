@@ -1181,6 +1181,14 @@ body.isUpdateApplying .app {
     --interactive-corner-color 1000ms ease !important;
 }
 
+.boardWrap.isLowPowerMode,
+.boardWrap.isLowPowerMode::after,
+.boardWrap.isLowPowerMode .cell,
+.boardWrap.isLowPowerMode .cell::before {
+  transition-duration: 0ms !important;
+  transition-delay: 0ms !important;
+}
+
 #grid {
   display: grid;
   gap: var(--gap);

@@ -107,6 +107,7 @@
 /**
  * @typedef {{
  *   theme:string,
+ *   lowPowerModeEnabled:boolean,
  *   hiddenPanels:{guide:boolean,legend:boolean},
  *   campaignProgress:number,
  *   infiniteProgress:number,
@@ -119,6 +120,7 @@
  * @typedef {{
  *   readBootState:()=>BootState,
  *   writeTheme:(theme:string)=>void,
+ *   writeLowPowerModeEnabled:(enabled:boolean)=>void,
  *   writeHiddenPanel:(panel:'guide'|'legend', hidden:boolean)=>void,
  *   writeCampaignProgress:(value:number)=>void,
  *   writeInfiniteProgress:(value:number)=>void,
@@ -144,6 +146,7 @@
  *   clearPathTransitionCompensation?:()=>void,
  *   resize:()=>void,
  *   getLayoutMetrics?:()=>BoardLayoutMetrics|null,
+ *   setLowPowerMode?:(enabled:boolean)=>void,
  *   unmount:()=>void,
  * }} RendererPort
  */
