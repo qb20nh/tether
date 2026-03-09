@@ -435,7 +435,11 @@ const flushNextTimeout = (env) => {
 
 const createFakeWebgl2 = () => {
   let nextId = 1;
+  const stats = {
+    drawCalls: 0,
+  };
   return {
+    stats,
     gl: {
       VERTEX_SHADER: 0x8b31,
       FRAGMENT_SHADER: 0x8b30,
@@ -483,7 +487,9 @@ const createFakeWebgl2 = () => {
       uniform2f() {},
       uniform1f() {},
       uniform3f() {},
-      drawElements() {},
+      drawElements() {
+        stats.drawCalls += 1;
+      },
       deleteBuffer() {},
       deleteVertexArray() {},
       getUniformLocation() { return { id: nextId++ }; },
@@ -574,8 +580,9 @@ const createShellRefsWithWebglCanvas = () => {
     const fallbackGetContext = canvas.getContext.bind(canvas);
     canvas.getContext = (kind, options) => {
       if (kind === 'webgl2') {
-        contextOptions.push({ canvas, options });
-        return createFakeWebgl2().gl;
+        const context = createFakeWebgl2();
+        contextOptions.push({ canvas, options, stats: context.stats });
+        return context.gl;
       }
       return fallbackGetContext(kind, options);
     };
@@ -1094,21 +1101,106 @@ test('createBoardRendererCore recreates the WebGL path renderer without antialia
   const core = createBoardRendererCore();
   const { refs, contextOptions, restore } = createShellRefsWithWebglCanvas();
   t.after(restore);
-  const initialCanvas = refs.canvas;
 
   core.mount(refs);
   core.rebuildGrid(snapshot);
   core.resize();
+  core.renderFrame({
+    snapshot,
+    evaluation: {},
+    completion: null,
+    uiModel: {},
+    interactionModel: {},
+  });
+  flushNextRaf(env, 1016);
   assert.equal(contextOptions.at(-1)?.options?.antialias, true);
+  assert.equal(contextOptions.length, 1);
 
   core.setLowPowerMode(true);
-  assert.notEqual(refs.canvas, initialCanvas);
+  assert.equal(contextOptions.length, 2);
   assert.equal(contextOptions.at(-1)?.options?.antialias, false);
-  const lowPowerCanvas = refs.canvas;
 
   core.setLowPowerMode(false);
-  assert.notEqual(refs.canvas, lowPowerCanvas);
+  assert.equal(contextOptions.length, 3);
   assert.equal(contextOptions.at(-1)?.options?.antialias, true);
+});
+
+test('createBoardRendererCore redraws the current path immediately when toggling low power mode', (t) => {
+  const env = installRendererEnv(t);
+  env.setNowMs(1000);
+
+  const snapshot = createSnapshot({
+    gridData: [['.', '.', '.']],
+    path: [
+      { r: 0, c: 0 },
+      { r: 0, c: 1 },
+      { r: 0, c: 2 },
+    ],
+  });
+  const core = createBoardRendererCore();
+  const { refs, contextOptions, restore } = createShellRefsWithWebglCanvas();
+  t.after(restore);
+
+  core.mount(refs);
+  core.rebuildGrid(snapshot);
+  core.resize();
+  core.renderFrame({
+    snapshot,
+    evaluation: {},
+    completion: null,
+    uiModel: {},
+    interactionModel: {},
+  });
+  flushNextRaf(env, 1016);
+  assert.equal(contextOptions.at(-1)?.stats?.drawCalls, 1);
+
+  core.setLowPowerMode(true);
+  assert.equal(contextOptions.at(-1)?.options?.antialias, false);
+  assert.equal(contextOptions.at(-1)?.stats?.drawCalls, 1);
+
+  core.setLowPowerMode(false);
+  assert.equal(contextOptions.at(-1)?.options?.antialias, true);
+  assert.equal(contextOptions.at(-1)?.stats?.drawCalls, 1);
+});
+
+test('createBoardRendererCore redraws the current path immediately during resize', (t) => {
+  const env = installRendererEnv(t);
+  env.setNowMs(1000);
+
+  const snapshot = createSnapshot({
+    gridData: [['.', '.', '.']],
+    path: [
+      { r: 0, c: 0 },
+      { r: 0, c: 1 },
+      { r: 0, c: 2 },
+    ],
+  });
+  const core = createBoardRendererCore();
+  const { refs, contextOptions, restore } = createShellRefsWithWebglCanvas();
+  t.after(restore);
+
+  core.mount(refs);
+  core.rebuildGrid(snapshot);
+  core.resize();
+  core.renderFrame({
+    snapshot,
+    evaluation: {},
+    completion: null,
+    uiModel: {},
+    interactionModel: {},
+  });
+  flushNextRaf(env, 1016);
+  assert.equal(contextOptions.at(-1)?.stats?.drawCalls, 1);
+
+  refs.boardWrap.setBoundingClientRect({ left: 10, top: 20, width: 260, height: 260 });
+  refs.gridEl.setBoundingClientRect({ left: 10, top: 20, width: 260, height: 260 });
+  refs.boardWrap.clientWidth = 260;
+  refs.boardWrap.clientHeight = 260;
+  refs.gridEl.clientWidth = 260;
+  refs.gridEl.clientHeight = 260;
+
+  core.resize();
+  assert.equal(contextOptions.at(-1)?.stats?.drawCalls, 2);
 });
 
 test('createBoardRendererCore previews the old drag endpoint immediately in low power mode', (t) => {

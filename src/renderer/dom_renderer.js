@@ -348,6 +348,7 @@ export function createDomRenderer(options = {}) {
       const nextEnabled = Boolean(enabled);
       if (nextEnabled === lowPowerModeEnabled) return;
       lowPowerModeEnabled = nextEnabled;
+      syncBoardWrapClasses();
       if (lowPowerModeEnabled) {
         clearCompleteFinishTimer();
         clearCompletePulse({ preserveClass: true });

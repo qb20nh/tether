@@ -104,6 +104,7 @@ const pendingRenderDirty = {
   message: false,
   interaction: false,
 };
+let pendingPathCanvasSwap = null;
 let latestPathMainFlowTravel = 0;
 let colorParserCtx = null;
 let reusablePathPoints = [];
@@ -311,6 +312,26 @@ const clearPendingRenderDirty = () => {
   pendingRenderDirty.symbols = false;
   pendingRenderDirty.message = false;
   pendingRenderDirty.interaction = false;
+};
+
+const stageLatestFrameForRender = () => {
+  if (!latestPathSnapshot || !latestPathStatuses) return false;
+  if (!pendingRenderState) {
+    pendingRenderState = {
+      snapshot: latestPathSnapshot,
+      evaluation: latestPathStatuses,
+      completion: latestCompletionModel,
+      uiModel: {
+        messageKind: latestMessageKind,
+        messageHtml: latestMessageHtml,
+        tutorialFlags: latestTutorialFlags,
+      },
+    };
+  }
+  pendingRenderDirty.path = true;
+  pendingRenderDirty.symbols = true;
+  pendingRenderDirty.interaction = true;
+  return true;
 };
 
 const clearLowPowerFrameDelayTimer = () => {
@@ -2050,6 +2071,7 @@ const drawIdleAnimatedPath = (
   if (!latestPathSnapshot) {
     latestPathMainFlowTravel = 0;
     pathRenderer.clear();
+    commitPendingPathCanvasSwap();
     return;
   }
 
@@ -2163,6 +2185,7 @@ const drawIdleAnimatedPath = (
   pathFramePayload.completionProgress = getCompletionProgress(completionModel);
   countPathDraws();
   latestPathMainFlowTravel = pathRenderer.drawPathFrame(pathFramePayload);
+  commitPendingPathCanvasSwap();
 
   if (latestTutorialFlags?.path || latestTutorialFlags?.movable) {
     drawStaticSymbols(latestPathSnapshot, latestPathRefs, latestPathStatuses);
@@ -2424,6 +2447,15 @@ const pathRendererAntialiasMismatch = (renderer) => (
   && renderer.antialiasEnabled !== shouldPathRendererUseAntialias()
 );
 
+const commitPendingPathCanvasSwap = () => {
+  if (!pendingPathCanvasSwap) return;
+  const { previousCanvas, nextCanvas } = pendingPathCanvasSwap;
+  if (previousCanvas?.parentElement && typeof previousCanvas.replaceWith === 'function') {
+    previousCanvas.replaceWith(nextCanvas);
+  }
+  pendingPathCanvasSwap = null;
+};
+
 const ensurePathRenderer = (refs) => {
   const allowRecovery = refs?.allowRecovery !== false;
   const targetRefs = refs?.refs || refs;
@@ -2451,7 +2483,10 @@ const ensurePathRenderer = (refs) => {
   let nextCanvas = currentCanvas;
   if ((rendererLost || antialiasMismatch) && currentCanvas.parentElement && typeof currentCanvas.replaceWith === 'function') {
     const replacement = createReplacementPathCanvas(currentCanvas);
-    currentCanvas.replaceWith(replacement);
+    pendingPathCanvasSwap = {
+      previousCanvas: currentCanvas,
+      nextCanvas: replacement,
+    };
     targetRefs.canvas = replacement;
     nextCanvas = replacement;
   }
@@ -3664,6 +3699,7 @@ function drawAnimatedPathImpl(
   pathFramePayload.drawTutorialBracketsInPathLayer = false;
   countPathDraws();
   latestPathMainFlowTravel = pathRenderer.drawPathFrame(pathFramePayload);
+  commitPendingPathCanvasSwap();
 }
 
 const pathAnimationEngine = createPathAnimationEngine({
@@ -4037,6 +4073,7 @@ const resetCoreState = () => {
   lowPowerFrameDelayTimer = 0;
   lastPresentedFrameTimestamp = 0;
   pendingInteractiveResizePayload = null;
+  pendingPathCanvasSwap = null;
   realTimeLastMs = 0;
   scaledTimeAccumulatorMs = 0;
   reusableArrivalPathPoints = [];
@@ -4110,10 +4147,14 @@ return {
     if (!refs) return;
     pathThemeCacheInitialized = false;
     resizeCanvas(refs);
-    if (!interactiveResizeActive && latestPathSnapshot) {
-      pendingRenderDirty.symbols = true;
-      pendingRenderDirty.path = true;
-      scheduleRendererFrame();
+    if (!interactiveResizeActive && stageLatestFrameForRender()) {
+      const presentationTimestamp = getNowMs();
+      lastPresentedFrameTimestamp = presentationTimestamp;
+      const shouldContinue = flushPendingRenderFrame(presentationTimestamp);
+      if (pendingRenderState || pendingRenderDirty.interaction || shouldContinue) {
+        scheduleRendererFrame();
+      }
+      return;
     }
   },
 
@@ -4134,20 +4175,14 @@ return {
     }
     if (refs) {
       resizeCanvas(refs);
-      if (!pendingRenderState && latestPathSnapshot && latestPathStatuses) {
-        pendingRenderState = {
-          snapshot: latestPathSnapshot,
-          evaluation: latestPathStatuses,
-          completion: latestCompletionModel,
-          uiModel: {
-            messageKind: latestMessageKind,
-            messageHtml: latestMessageHtml,
-            tutorialFlags: latestTutorialFlags,
-          },
-        };
-        pendingRenderDirty.path = true;
-        pendingRenderDirty.symbols = true;
-        pendingRenderDirty.interaction = true;
+      if (stageLatestFrameForRender()) {
+        const presentationTimestamp = getNowMs();
+        lastPresentedFrameTimestamp = presentationTimestamp;
+        const shouldContinue = flushPendingRenderFrame(presentationTimestamp);
+        if (pendingRenderState || pendingRenderDirty.interaction || shouldContinue) {
+          scheduleRendererFrame();
+        }
+        return;
       }
       scheduleRendererFrame();
     }
