@@ -999,6 +999,13 @@ button:disabled:active {
   transform: translate(-50%, 0);
 }
 
+.theme-light .appToast {
+  background: var(--panel);
+  border-color: rgba(15, 23, 42, 0.12);
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.16);
+  color: var(--text);
+}
+
 body.isUpdateApplying {
   cursor: progress;
 }
