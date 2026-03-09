@@ -440,6 +440,140 @@ test('createRuntime daily solve fires onDailySolvedDateChanged exactly once', (t
   harness.runtime.destroy();
 });
 
+test('createRuntime reset restores the last untouched board state on the next click', (t) => {
+  const env = installBrowserEnv(t);
+  const renderCalls = [];
+  const harness = createRuntimeHarness({
+    rendererOverrides: {
+      renderFrame: (payload) => {
+        renderCalls.push({
+          pathLength: payload.snapshot.path.length,
+          messageHtml: payload.uiModel.messageHtml,
+          isBoardSolved: payload.uiModel.isBoardSolved,
+        });
+      },
+    },
+  });
+
+  const flushNextRaf = (ts) => {
+    const callback = [...env.rafCallbacks.values()][0];
+    callback?.(ts);
+  };
+
+  harness.runtime.start();
+  flushNextRaf(16);
+
+  emitSolvePath(harness.runtime, [
+    [0, 0],
+    [0, 1],
+    [1, 1],
+    [1, 0],
+  ]);
+  flushNextRaf(32);
+
+  harness.runtime.emitIntent({
+    type: INTENT_TYPES.UI_ACTION,
+    payload: {
+      actionType: UI_ACTIONS.RESET_CLICK,
+    },
+  });
+  flushNextRaf(48);
+
+  assert.deepEqual(renderCalls.at(-1), {
+    pathLength: 0,
+    messageHtml: harness.core.goalText(0, (key) => key),
+    isBoardSolved: false,
+  });
+
+  harness.runtime.emitIntent({
+    type: INTENT_TYPES.UI_ACTION,
+    payload: {
+      actionType: UI_ACTIONS.RESET_CLICK,
+    },
+  });
+  flushNextRaf(64);
+
+  assert.deepEqual(renderCalls.at(-1), {
+    pathLength: 4,
+    messageHtml: 'completion.completed',
+    isBoardSolved: true,
+  });
+  harness.runtime.destroy();
+});
+
+test('createRuntime keeps reset restore state through zero-segment path attempts', (t) => {
+  const env = installBrowserEnv(t);
+  const renderCalls = [];
+  const harness = createRuntimeHarness({
+    rendererOverrides: {
+      renderFrame: (payload) => {
+        renderCalls.push({
+          pathLength: payload.snapshot.path.length,
+          messageHtml: payload.uiModel.messageHtml,
+          isBoardSolved: payload.uiModel.isBoardSolved,
+        });
+      },
+    },
+  });
+
+  const flushNextRaf = (ts) => {
+    const callback = [...env.rafCallbacks.values()][0];
+    callback?.(ts);
+  };
+
+  harness.runtime.start();
+  flushNextRaf(16);
+
+  emitSolvePath(harness.runtime, [
+    [0, 0],
+    [0, 1],
+    [1, 1],
+    [1, 0],
+  ]);
+  flushNextRaf(32);
+
+  harness.runtime.emitIntent({
+    type: INTENT_TYPES.UI_ACTION,
+    payload: {
+      actionType: UI_ACTIONS.RESET_CLICK,
+    },
+  });
+  flushNextRaf(48);
+
+  harness.runtime.emitIntent({
+    type: INTENT_TYPES.GAME_COMMAND,
+    payload: {
+      commandType: GAME_COMMANDS.START_OR_STEP,
+      r: 0,
+      c: 0,
+    },
+  });
+  flushNextRaf(64);
+
+  harness.runtime.emitIntent({
+    type: INTENT_TYPES.UI_ACTION,
+    payload: {
+      actionType: UI_ACTIONS.RESET_CLICK,
+    },
+  });
+  flushNextRaf(80);
+
+  harness.runtime.emitIntent({
+    type: INTENT_TYPES.UI_ACTION,
+    payload: {
+      actionType: UI_ACTIONS.RESET_CLICK,
+    },
+  });
+  flushNextRaf(96);
+
+  assert.deepEqual(renderCalls.at(-1), {
+    pathLength: 4,
+    messageHtml: 'completion.completed',
+    isBoardSolved: true,
+  });
+  harness.runtime.destroy();
+});
+
 test('createRuntime locale changes keep only the latest async selection', async (t) => {
   installBrowserEnv(t);
   let currentLocale = 'en';

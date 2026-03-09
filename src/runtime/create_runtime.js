@@ -173,6 +173,7 @@ export function createRuntime(options) {
 
   let currentMessageKind = null;
   let currentMessageHtml = '';
+  let lastResetUiState = null;
 
   let currentLevelCleared = false;
   let currentBoardSolved = false;
@@ -410,6 +411,39 @@ export function createRuntime(options) {
   const setUiMessage = (kind, html) => {
     currentMessageKind = kind;
     currentMessageHtml = html;
+  };
+
+  const captureResetUiState = () => ({
+    currentLevelCleared,
+    currentBoardSolved,
+    currentMessageKind,
+    currentMessageHtml,
+  });
+
+  const clearResetUiState = () => {
+    lastResetUiState = null;
+  };
+
+  const restoreResetUiState = (savedState) => {
+    if (!savedState) return false;
+
+    const nextMessageKind = savedState.currentMessageKind ?? null;
+    const nextMessageHtml = typeof savedState.currentMessageHtml === 'string'
+      ? savedState.currentMessageHtml
+      : '';
+    const nextLevelCleared = Boolean(savedState.currentLevelCleared);
+    const nextBoardSolved = Boolean(savedState.currentBoardSolved);
+    const uiStateChanged = (
+      currentLevelCleared !== nextLevelCleared
+      || currentBoardSolved !== nextBoardSolved
+      || currentMessageKind !== nextMessageKind
+      || currentMessageHtml !== nextMessageHtml
+    );
+
+    currentLevelCleared = nextLevelCleared;
+    currentBoardSolved = nextBoardSolved;
+    setUiMessage(nextMessageKind, nextMessageHtml);
+    return uiStateChanged;
   };
 
   const resolveLevelName = (level) => {
@@ -1015,10 +1049,18 @@ export function createRuntime(options) {
 
   const showLevelGoal = (levelIndex) => {
     const refs = renderer.getRefs();
+    const nextLevelCleared = isLevelPreviouslyCleared(levelIndex);
+    const nextMessageHtml = core.goalText(levelIndex, translate);
+    const uiStateChanged = (
+      currentLevelCleared !== nextLevelCleared
+      || currentBoardSolved
+      || currentMessageKind !== null
+      || currentMessageHtml !== nextMessageHtml
+    );
 
-    currentLevelCleared = isLevelPreviouslyCleared(levelIndex);
+    currentLevelCleared = nextLevelCleared;
     currentBoardSolved = false;
-    setUiMessage(null, core.goalText(levelIndex, translate));
+    setUiMessage(null, nextMessageHtml);
 
     if (refs?.nextLevelBtn) {
       refs.nextLevelBtn.textContent = resolveNextButtonLabel(levelIndex);
@@ -1026,6 +1068,7 @@ export function createRuntime(options) {
     }
     if (refs?.prevInfiniteBtn) refs.prevInfiniteBtn.hidden = true;
     syncInfiniteNavigation(levelIndex, currentLevelCleared);
+    return uiStateChanged;
   };
 
   const resolveDraggedHintSuppressionKey = (snapshot) => {
@@ -1603,13 +1646,9 @@ export function createRuntime(options) {
 
     if (actionType === UI_ACTIONS.RESET_CLICK) {
       if (dailyBoardLocked) return;
-      renderer.clearPathTransitionCompensation?.();
-      state.dispatch({ type: 'path/reset', payload: {} });
-      const snapshot = state.getSnapshot();
-      refresh(snapshot, false);
-      showLevelGoal(snapshot.levelIndex);
-      mutableBoardState = null;
-      queueSessionSave();
+      handleGameCommand({
+        commandType: GAME_COMMANDS.RESET_PATH,
+      });
       return;
     }
 
@@ -1771,12 +1810,37 @@ export function createRuntime(options) {
     const commandType = payload.commandType;
     const pathStepSide = resolvePathStepCommandSide(commandType, payload);
     const isPathStepCommand = pathStepSide === 'start' || pathStepSide === 'end';
-    const previousSnapshot = isPathStepCommand ? state.getSnapshot() : null;
+    const previousSnapshot = state.getSnapshot();
 
     const transition = state.dispatch({
       type: commandType,
       payload,
     });
+    const didStateSnapshotChange = transition.snapshot.version !== previousSnapshot.version;
+    const shouldClearResetUiState = (
+      transition.rebuildGrid
+      || commandType === GAME_COMMANDS.WALL_MOVE_ATTEMPT
+      || transition.snapshot.path.length > 1
+    );
+    if (commandType !== GAME_COMMANDS.RESET_PATH && didStateSnapshotChange && shouldClearResetUiState) {
+      clearResetUiState();
+    }
+
+    let didResetUiState = false;
+    if (commandType === GAME_COMMANDS.RESET_PATH) {
+      const resetMode = transition.meta?.resetMode || null;
+      if (resetMode === 'cleared') {
+        if (transition.meta?.storedResetCandidate) {
+          lastResetUiState = captureResetUiState();
+        }
+        didResetUiState = showLevelGoal(transition.snapshot.levelIndex);
+      } else if (resetMode === 'restored') {
+        didResetUiState = restoreResetUiState(lastResetUiState);
+        clearResetUiState();
+      } else {
+        clearResetUiState();
+      }
+    }
 
     if (transition.changed && isPathStepCommand) {
       renderer.recordPathTransition?.(
@@ -1797,14 +1861,6 @@ export function createRuntime(options) {
       interactionState.pathTipArrivalHint = null;
     }
 
-    if (
-      commandType === GAME_COMMANDS.RESET_PATH
-      || commandType === GAME_COMMANDS.LOAD_LEVEL
-      || (!isPathStepCommand && transition.rebuildGrid)
-    ) {
-      renderer.clearPathTransitionCompensation?.();
-    }
-
     if (transition.rebuildGrid) {
       invalidateEvaluateCache();
       renderer.rebuildGrid(transition.snapshot);
@@ -1813,8 +1869,16 @@ export function createRuntime(options) {
       invalidateEvaluateCache();
     }
 
-    if (!transition.changed && !transition.validate && !transition.rebuildGrid) {
+    if (!transition.changed && !transition.validate && !transition.rebuildGrid && !didResetUiState) {
       return;
+    }
+
+    if (
+      commandType === GAME_COMMANDS.RESET_PATH
+      || commandType === GAME_COMMANDS.LOAD_LEVEL
+      || (!isPathStepCommand && transition.rebuildGrid)
+    ) {
+      renderer.clearPathTransitionCompensation?.();
     }
 
     queueBoardLayout(transition.validate, {
@@ -1826,7 +1890,8 @@ export function createRuntime(options) {
     });
 
     const shouldPersistInputState = Boolean(transition.validate) && !interactionState.isPathDragging;
-    if (shouldPersistInputState) queueSessionSave();
+    const shouldPersistResetState = commandType === GAME_COMMANDS.RESET_PATH && transition.changed;
+    if (shouldPersistInputState || shouldPersistResetState) queueSessionSave();
   };
 
   const emitIntent = (intent) => {

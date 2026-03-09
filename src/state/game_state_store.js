@@ -21,6 +21,7 @@ export function createGameStateStore(levelSource) {
   let stitchSet = new Set();
   let stitchReq = new Map();
   let cornerCounts = [];
+  let resetRestoreCandidate = null;
   let stateVersion = 0;
   let cachedSnapshot = null;
   let cachedSnapshotVersion = -1;
@@ -56,6 +57,22 @@ export function createGameStateStore(levelSource) {
     cachedSnapshotVersion = -1;
   };
 
+  const clonePath = (sourcePath) => sourcePath.map((point) => ({ r: point.r, c: point.c }));
+  const hasPathSegments = (sourcePath) => Array.isArray(sourcePath) && sourcePath.length > 1;
+
+  const buildVisitedForPath = (sourcePath) => {
+    const nextVisited = new Set();
+    for (let i = 0; i < sourcePath.length; i++) {
+      const point = sourcePath[i];
+      nextVisited.add(keyOf(point.r, point.c));
+    }
+    return nextVisited;
+  };
+
+  const clearResetRestoreCandidate = () => {
+    resetRestoreCandidate = null;
+  };
+
   const loadLevel = (index) => {
     const level = getLevelByIndex(index);
     if (!level) throw new Error(`Missing level at index ${index}`);
@@ -72,6 +89,7 @@ export function createGameStateStore(levelSource) {
     buildStitches();
     path = [];
     visited = new Set();
+    clearResetRestoreCandidate();
     invalidateSnapshotCache();
   };
 
@@ -203,6 +221,7 @@ export function createGameStateStore(levelSource) {
     gridData = nextGrid;
     path = nextPath;
     visited = nextVisited;
+    clearResetRestoreCandidate();
     invalidateSnapshotCache();
     return true;
   };
@@ -242,9 +261,54 @@ export function createGameStateStore(levelSource) {
     return cachedSnapshot;
   };
 
-  const resetPath = () => {
+  const clearPath = (rememberResetCandidate = false) => {
+    if (path.length <= 0) return false;
+    if (rememberResetCandidate && hasPathSegments(path)) {
+      resetRestoreCandidate = {
+        path: clonePath(path),
+        gridData,
+      };
+    }
     path = [];
     visited = new Set();
+    invalidateSnapshotCache();
+    return true;
+  };
+
+  const resetPath = () => {
+    const storedResetCandidate = hasPathSegments(path);
+    if (clearPath(true)) {
+      return {
+        resetMode: 'cleared',
+        storedResetCandidate,
+      };
+    }
+
+    if (
+      resetRestoreCandidate
+      && gridData === resetRestoreCandidate.gridData
+    ) {
+      path = clonePath(resetRestoreCandidate.path);
+      visited = buildVisitedForPath(path);
+      clearResetRestoreCandidate();
+      invalidateSnapshotCache();
+      return {
+        resetMode: 'restored',
+        storedResetCandidate: false,
+      };
+    }
+
+    clearResetRestoreCandidate();
+    return {
+      resetMode: 'noop',
+      storedResetCandidate: false,
+    };
+  };
+
+  const commitPathMutation = () => {
+    if (hasPathSegments(path)) {
+      clearResetRestoreCandidate();
+    }
     invalidateSnapshotCache();
   };
 
@@ -252,7 +316,7 @@ export function createGameStateStore(levelSource) {
     if (path.length === 0) return false;
     const last = path.pop();
     visited.delete(keyOf(last.r, last.c));
-    if (!deferInvalidate) invalidateSnapshotCache();
+    if (!deferInvalidate) commitPathMutation();
     return true;
   };
 
@@ -266,7 +330,7 @@ export function createGameStateStore(levelSource) {
     if (path.length === 0) {
       path = [next];
       visited = new Set([nextKey]);
-      if (!deferInvalidate) invalidateSnapshotCache();
+      if (!deferInvalidate) commitPathMutation();
       return true;
     }
 
@@ -284,7 +348,7 @@ export function createGameStateStore(levelSource) {
 
     path.push(next);
     visited.add(nextKey);
-    if (!deferInvalidate) invalidateSnapshotCache();
+    if (!deferInvalidate) commitPathMutation();
     return true;
   };
 
@@ -298,7 +362,7 @@ export function createGameStateStore(levelSource) {
     if (path.length === 0) {
       path = [next];
       visited = new Set([nextKey]);
-      if (!deferInvalidate) invalidateSnapshotCache();
+      if (!deferInvalidate) commitPathMutation();
       return true;
     }
 
@@ -308,7 +372,7 @@ export function createGameStateStore(levelSource) {
       if (next.r === nextFromStart.r && next.c === nextFromStart.c) {
         path.shift();
         visited.delete(keyOf(head.r, head.c));
-        if (!deferInvalidate) invalidateSnapshotCache();
+        if (!deferInvalidate) commitPathMutation();
         return true;
       }
     }
@@ -318,7 +382,7 @@ export function createGameStateStore(levelSource) {
 
     path.unshift(next);
     visited.add(nextKey);
-    if (!deferInvalidate) invalidateSnapshotCache();
+    if (!deferInvalidate) commitPathMutation();
     return true;
   };
 
@@ -337,14 +401,14 @@ export function createGameStateStore(levelSource) {
       changed = true;
     }
 
-    if (changed) invalidateSnapshotCache();
+    if (changed) commitPathMutation();
     return changed;
   };
 
   const finalizePathAfterPointerUp = () => {
     if (path.length <= 1) {
       if (path.length > 0) {
-        resetPath();
+        clearPath(false);
       }
       return true;
     }
@@ -355,7 +419,7 @@ export function createGameStateStore(levelSource) {
   const reversePath = () => {
     if (path.length < 2) return false;
     path = [...path].reverse();
-    invalidateSnapshotCache();
+    commitPathMutation();
     return true;
   };
 
@@ -374,17 +438,19 @@ export function createGameStateStore(levelSource) {
     nextGrid[from.r][from.c] = CELL_TYPES.EMPTY;
     nextGrid[to.r][to.c] = CELL_TYPES.MOVABLE_WALL;
     gridData = nextGrid;
+    clearResetRestoreCandidate();
     invalidateSnapshotCache();
     return true;
   };
 
   const getCurrentLevel = () => getLevelByIndex(levelIndex);
 
-  const makeTransition = (command, changed, rebuildGrid, validate) => ({
+  const makeTransition = (command, changed, rebuildGrid, validate, meta = null) => ({
     changed: Boolean(changed),
     rebuildGrid: Boolean(rebuildGrid),
     validate: Boolean(validate),
     command,
+    meta,
     snapshot: toSnapshot(),
   });
 
@@ -418,9 +484,14 @@ export function createGameStateStore(levelSource) {
     }
 
     if (type === 'path/reset') {
-      const changed = path.length > 0;
-      resetPath();
-      return makeTransition(type, changed, false, false);
+      const resetState = resetPath();
+      return makeTransition(
+        type,
+        resetState.resetMode !== 'noop',
+        false,
+        false,
+        resetState,
+      );
     }
 
     if (type === 'path/reverse') {

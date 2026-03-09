@@ -169,3 +169,91 @@ test('game state store batched retract matches repeated single-step dispatch', (
   assert.deepEqual(store.getSnapshot().path, legacyStore.getSnapshot().path);
   assert.equal(store.getSnapshot().version, previousSnapshot.version + 1);
 });
+
+test('game state store reset restores the last cleared path when no new progress overwrote it', () => {
+  const store = createGameStateStore(() => LEVEL);
+  store.dispatch({ type: 'level/load', payload: { levelIndex: 0 } });
+  store.dispatch({
+    type: 'path/apply-drag-sequence',
+    payload: {
+      side: 'end',
+      steps: [
+        { r: 0, c: 0 },
+        { r: 0, c: 1 },
+        { r: 0, c: 2 },
+      ],
+    },
+  });
+
+  const originalPath = store.getSnapshot().path;
+  const cleared = store.dispatch({ type: 'path/reset', payload: {} });
+  assert.equal(cleared.changed, true);
+  assert.equal(cleared.meta?.resetMode, 'cleared');
+  assert.deepEqual(cleared.snapshot.path, []);
+
+  const restored = store.dispatch({ type: 'path/reset', payload: {} });
+  assert.equal(restored.changed, true);
+  assert.equal(restored.meta?.resetMode, 'restored');
+  assert.deepEqual(restored.snapshot.path, originalPath);
+});
+
+test('game state store reset restore candidate is replaced once new path progress is made', () => {
+  const store = createGameStateStore(() => LEVEL);
+  store.dispatch({ type: 'level/load', payload: { levelIndex: 0 } });
+  store.dispatch({
+    type: 'path/apply-drag-sequence',
+    payload: {
+      side: 'end',
+      steps: [
+        { r: 0, c: 0 },
+        { r: 0, c: 1 },
+      ],
+    },
+  });
+
+  const originalPath = store.getSnapshot().path;
+  store.dispatch({ type: 'path/reset', payload: {} });
+  store.dispatch({ type: 'path/start-or-step', payload: { r: 2, c: 1 } });
+  store.dispatch({ type: 'path/start-or-step', payload: { r: 2, c: 2 } });
+
+  const replacementPath = store.getSnapshot().path;
+  assert.notDeepEqual(replacementPath, originalPath);
+
+  const clearedReplacement = store.dispatch({ type: 'path/reset', payload: {} });
+  assert.equal(clearedReplacement.meta?.resetMode, 'cleared');
+  assert.deepEqual(clearedReplacement.snapshot.path, []);
+
+  const restoredReplacement = store.dispatch({ type: 'path/reset', payload: {} });
+  assert.equal(restoredReplacement.meta?.resetMode, 'restored');
+  assert.deepEqual(restoredReplacement.snapshot.path, replacementPath);
+  assert.notDeepEqual(restoredReplacement.snapshot.path, originalPath);
+});
+
+test('game state store zero-segment path does not overwrite reset restore state', () => {
+  const store = createGameStateStore(() => LEVEL);
+  store.dispatch({ type: 'level/load', payload: { levelIndex: 0 } });
+  store.dispatch({
+    type: 'path/apply-drag-sequence',
+    payload: {
+      side: 'end',
+      steps: [
+        { r: 0, c: 0 },
+        { r: 0, c: 1 },
+        { r: 0, c: 2 },
+      ],
+    },
+  });
+
+  const originalPath = store.getSnapshot().path;
+  store.dispatch({ type: 'path/reset', payload: {} });
+  store.dispatch({ type: 'path/start-or-step', payload: { r: 2, c: 1 } });
+
+  const clearedZeroSegmentPath = store.dispatch({ type: 'path/reset', payload: {} });
+  assert.equal(clearedZeroSegmentPath.meta?.resetMode, 'cleared');
+  assert.equal(clearedZeroSegmentPath.meta?.storedResetCandidate, false);
+  assert.deepEqual(clearedZeroSegmentPath.snapshot.path, []);
+
+  const restoredOriginal = store.dispatch({ type: 'path/reset', payload: {} });
+  assert.equal(restoredOriginal.meta?.resetMode, 'restored');
+  assert.deepEqual(restoredOriginal.snapshot.path, originalPath);
+});
