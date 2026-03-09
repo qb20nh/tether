@@ -32,6 +32,7 @@ export function createDomRenderer(options = {}) {
   let completePulseTimer = 0;
   let lateSolveTriggerUntilMs = 0;
   let lowPowerModeEnabled = false;
+  let pendingCompletePulseClassClear = false;
 
   const setDraggingBodyClasses = (state = {}) => {
     if (typeof document === 'undefined' || !document.body) return;
@@ -110,7 +111,8 @@ export function createDomRenderer(options = {}) {
     completeFinishTimer = 0;
   };
 
-  const clearCompletePulse = () => {
+  const clearCompletePulse = (options = {}) => {
+    const preserveClass = Boolean(options.preserveClass);
     if (completePulseFrame) {
       cancelAnimationFrame(completePulseFrame);
       completePulseFrame = 0;
@@ -119,12 +121,18 @@ export function createDomRenderer(options = {}) {
       clearTimeout(completePulseTimer);
       completePulseTimer = 0;
     }
+    if (preserveClass) {
+      pendingCompletePulseClassClear = true;
+      return;
+    }
+    pendingCompletePulseClassClear = false;
     if (refs?.boardWrap) refs.boardWrap.classList.remove('isCompletePulse');
   };
 
   const triggerCompletePulse = (pulseTotalMs) => {
     clearCompletePulse();
     if (!refs?.boardWrap || !(pulseTotalMs > 0)) return;
+    pendingCompletePulseClassClear = false;
     completePulseFrame = requestAnimationFrame(() => {
       completePulseFrame = 0;
       if (!refs?.boardWrap || !completionCascadeState.isSolved) return;
@@ -147,6 +155,18 @@ export function createDomRenderer(options = {}) {
       }
       triggerCompletePulse(pulseTotalMs);
     }, durationMs + 16);
+  };
+
+  const syncBoardWrapClasses = (solved = completionCascadeState.isSolved) => {
+    if (!refs?.boardWrap) return;
+    refs.boardWrap.classList.toggle('isLowPowerMode', lowPowerModeEnabled);
+    refs.boardWrap.classList.toggle('isComplete', solved);
+    refs.boardWrap.classList.toggle('isCompleting', solved && completionCascadeState.isCompleting);
+    if (!solved || pendingCompletePulseClassClear) {
+      refs.boardWrap.classList.remove('isCompletePulse');
+      pendingCompletePulseClassClear = false;
+    }
+    refs.boardWrap.classList.remove('tutorialBracketNormalBlend');
   };
 
   const prefersReducedMotion = () => (
@@ -176,6 +196,7 @@ export function createDomRenderer(options = {}) {
     mount(shellRefs = null) {
       boardRendererCore.mount(shellRefs);
       refs = boardRendererCore.getRefs();
+      syncBoardWrapClasses();
     },
 
     getRefs() {
@@ -306,13 +327,7 @@ export function createDomRenderer(options = {}) {
         interactionModel,
       });
       setDraggingBodyClasses(interactionModel);
-
-      if (refs.boardWrap) {
-        refs.boardWrap.classList.toggle('isComplete', solved);
-        refs.boardWrap.classList.toggle('isCompleting', solved && completionCascadeState.isCompleting);
-        if (!solved) refs.boardWrap.classList.remove('isCompletePulse');
-        refs.boardWrap.classList.remove('tutorialBracketNormalBlend');
-      }
+      syncBoardWrapClasses(solved);
 
       hasRenderedFrame = true;
     },
@@ -333,21 +348,15 @@ export function createDomRenderer(options = {}) {
       const nextEnabled = Boolean(enabled);
       if (nextEnabled === lowPowerModeEnabled) return;
       lowPowerModeEnabled = nextEnabled;
-      if (refs?.boardWrap) {
-        refs.boardWrap.classList.toggle('isLowPowerMode', lowPowerModeEnabled);
-      }
       if (lowPowerModeEnabled) {
         clearCompleteFinishTimer();
-        clearCompletePulse();
+        clearCompletePulse({ preserveClass: true });
         lateSolveTriggerUntilMs = 0;
         completionCascadeState = {
           ...completionCascadeState,
           isCompleting: false,
           durationMs: 0,
         };
-        if (refs?.boardWrap) {
-          refs.boardWrap.classList.remove('isCompleting', 'isCompletePulse');
-        }
       }
       boardRendererCore.setLowPowerMode(lowPowerModeEnabled);
     },
@@ -357,8 +366,7 @@ export function createDomRenderer(options = {}) {
     },
 
     recordPathTransition(previousSnapshot, nextSnapshot, interactionModel = null) {
-      void interactionModel;
-      boardRendererCore.recordPathTransition(previousSnapshot, nextSnapshot);
+      boardRendererCore.recordPathTransition(previousSnapshot, nextSnapshot, interactionModel);
     },
 
     clearPathTransitionCompensation() {
@@ -387,6 +395,7 @@ export function createDomRenderer(options = {}) {
       hasRenderedFrame = false;
       lateSolveTriggerUntilMs = 0;
       lowPowerModeEnabled = false;
+      pendingCompletePulseClassClear = false;
       completionCascadeState = {
         isSolved: false,
         isCompleting: false,

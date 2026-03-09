@@ -3096,17 +3096,18 @@ const syncPathTipDragHoverCell = (interactionModel = null, cells = gridCells) =>
   lastPathTipDragHoverCell = nextCell;
 };
 
-const tryApplyIncrementalPathUpdate = (snapshot, results) => {
-  const prevSnapshot = latestPathSnapshot;
-  if (!prevSnapshot) return false;
-  if (snapshot.rows !== prevSnapshot.rows || snapshot.cols !== prevSnapshot.cols) return false;
-  if (snapshot.gridData !== prevSnapshot.gridData) return false;
+const collectIncrementalPathTouchedKeys = (
+  prevSnapshot,
+  snapshot,
+  statusSets,
+  prevSets,
+) => {
+  if (!prevSnapshot) return null;
+  if (snapshot.rows !== prevSnapshot.rows || snapshot.cols !== prevSnapshot.cols) return null;
+  if (snapshot.gridData !== prevSnapshot.gridData) return null;
 
   const delta = resolveEndpointPathDelta(prevSnapshot.path, snapshot.path);
-  if (!delta) return false;
-
-  const statusSets = buildStatusSets(results);
-  const prevSets = latestPathStatusSets || buildStatusSets(latestPathStatuses || {});
+  if (!delta) return null;
 
   const touchedKeys = new Set();
   if (delta.side === 'start') {
@@ -3132,6 +3133,21 @@ const tryApplyIncrementalPathUpdate = (snapshot, results) => {
   addStatusDeltaKeys(statusSets.goodRps, prevSets.goodRps, touchedKeys);
   addStatusDeltaKeys(statusSets.badBlocked, prevSets.badBlocked, touchedKeys);
 
+  return touchedKeys;
+};
+
+const tryApplyIncrementalPathUpdate = (snapshot, results) => {
+  const prevSnapshot = latestPathSnapshot;
+  const statusSets = buildStatusSets(results);
+  const prevSets = latestPathStatusSets || buildStatusSets(latestPathStatuses || {});
+  const touchedKeys = collectIncrementalPathTouchedKeys(
+    prevSnapshot,
+    snapshot,
+    statusSets,
+    prevSets,
+  );
+  if (!touchedKeys) return false;
+
   touchedKeys.forEach((key) => {
     const parsed = parseGridKey(key);
     if (!parsed) return;
@@ -3142,6 +3158,33 @@ const tryApplyIncrementalPathUpdate = (snapshot, results) => {
   });
 
   countIncrementalCellPatches();
+  return true;
+};
+
+const previewLowPowerPathDragCells = (
+  previousSnapshot,
+  snapshot,
+  statusSets,
+) => {
+  if (!refs || !statusSets) return false;
+  const prevSets = latestPathStatusSets || buildStatusSets(latestPathStatuses || {});
+  const touchedKeys = collectIncrementalPathTouchedKeys(
+    previousSnapshot,
+    snapshot,
+    statusSets,
+    prevSets,
+  );
+  if (!touchedKeys) return false;
+
+  touchedKeys.forEach((key) => {
+    const parsed = parseGridKey(key);
+    if (!parsed) return;
+    const r = parsed.r;
+    const c = parsed.c;
+    if (r < 0 || c < 0 || r >= snapshot.rows || c >= snapshot.cols) return;
+    applyCellSnapshotState(snapshot, r, c, statusSets);
+  });
+
   return true;
 };
 
@@ -4118,9 +4161,12 @@ return {
     setPathFlowFreezeImmediate(isFrozen);
   },
 
-  recordPathTransition(previousSnapshot, nextSnapshot) {
+  recordPathTransition(previousSnapshot, nextSnapshot, interactionModel = null) {
     if (!refs) return;
     recordPathTransitionCompensation(previousSnapshot, nextSnapshot, refs);
+    if (!lowPowerModeEnabled || !interactionModel?.isPathDragging) return;
+    const previewStatusSets = latestPathStatusSets || buildStatusSets(latestPathStatuses || {});
+    previewLowPowerPathDragCells(previousSnapshot, nextSnapshot, previewStatusSets);
   },
 
   clearPathTransitionCompensation() {

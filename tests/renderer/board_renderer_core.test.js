@@ -1111,6 +1111,59 @@ test('createBoardRendererCore recreates the WebGL path renderer without antialia
   assert.equal(contextOptions.at(-1)?.options?.antialias, true);
 });
 
+test('createBoardRendererCore previews the old drag endpoint immediately in low power mode', (t) => {
+  const env = installRendererEnv(t);
+  const gridData = [['.', '.', '.']];
+  const previousSnapshot = createSnapshot({
+    gridData,
+    path: [
+      { r: 0, c: 0 },
+      { r: 0, c: 1 },
+    ],
+  });
+  const nextSnapshot = createSnapshot({
+    gridData,
+    path: [
+      { r: 0, c: 0 },
+      { r: 0, c: 1 },
+      { r: 0, c: 2 },
+    ],
+  });
+  const core = createBoardRendererCore();
+  const refs = createShellRefs();
+
+  core.mount(refs);
+  core.rebuildGrid(previousSnapshot);
+  core.renderFrame({
+    snapshot: previousSnapshot,
+    evaluation: {},
+    completion: null,
+    uiModel: {},
+    interactionModel: {
+      isPathDragging: true,
+      pathDragSide: 'end',
+      pathDragCursor: { r: 0, c: 1 },
+    },
+  });
+  flushNextRaf(env, 16);
+
+  const previousEndCell = getGridCell(refs, 0, 1, 3);
+  const nextEndCell = getGridCell(refs, 0, 2, 3);
+  assert.equal(previousEndCell.classList.contains('pathEnd'), true);
+  assert.equal(nextEndCell.classList.contains('pathEnd'), false);
+
+  core.setLowPowerMode(true);
+  core.recordPathTransition(previousSnapshot, nextSnapshot, {
+    isPathDragging: true,
+    pathDragSide: 'end',
+    pathDragCursor: { r: 0, c: 2 },
+  });
+
+  assert.equal(previousEndCell.classList.contains('pathEnd'), false);
+  assert.equal(previousEndCell.classList.contains('visited'), true);
+  assert.equal(nextEndCell.classList.contains('pathEnd'), true);
+});
+
 test('createBoardRendererCore does not rewrite message DOM when message content is unchanged', (t) => {
   const env = installRendererEnv(t);
   const gridData = [['.', '.']];

@@ -1192,8 +1192,8 @@ body.isUpdateApplying .app {
 .boardWrap.isLowPowerMode::after,
 .boardWrap.isLowPowerMode .cell,
 .boardWrap.isLowPowerMode .cell::before {
-  transition-duration: 0ms !important;
-  transition-delay: 0ms !important;
+  transition: none !important;
+  animation: none !important;
 }
 
 #grid {
