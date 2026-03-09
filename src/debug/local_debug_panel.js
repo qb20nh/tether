@@ -1,3 +1,9 @@
+import {
+  DEBUG_REDUCED_MOTION_CLASS,
+  readDebugReducedMotionSimulation,
+  setDebugReducedMotionSimulation,
+} from './reduced_motion_debug.js';
+
 const PANEL_ID = 'tetherLocalDebugPanel';
 const STYLE_ID = 'tetherLocalDebugPanelStyle';
 const LOGO_TEXT_SELECTOR = '.brandTitle > span';
@@ -36,6 +42,12 @@ const ensurePanelStyles = () => {
       grid-template-columns: 1fr 1fr;
       gap: 6px;
     }
+    #${PANEL_ID} .debugCheckbox {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      cursor: pointer;
+    }
     #${PANEL_ID} input,
     #${PANEL_ID} textarea,
     #${PANEL_ID} button {
@@ -49,6 +61,13 @@ const ensurePanelStyles = () => {
     #${PANEL_ID} textarea {
       resize: vertical;
       min-block-size: 54px;
+    }
+    #${PANEL_ID} input[type='checkbox'] {
+      inline-size: 14px;
+      block-size: 14px;
+      margin: 0;
+      padding: 0;
+      accent-color: #7dd3fc;
     }
     #${PANEL_ID} button {
       cursor: pointer;
@@ -104,6 +123,17 @@ const ensurePanelStyles = () => {
       padding: 8px;
       white-space: pre-wrap;
       word-break: break-word;
+    }
+    :root.${DEBUG_REDUCED_MOTION_CLASS} .boardWrap {
+      --complete-cascade-total-ms: 0ms;
+      --complete-cascade-cell-ms: 0ms;
+      --complete-step-ms: 0ms;
+      --complete-cell-duration-ms: 0ms;
+      --complete-done-pulse-ms: 0ms;
+      --complete-done-pulse-step-ms: 0ms;
+    }
+    :root.${DEBUG_REDUCED_MOTION_CLASS} #grid {
+      animation: none;
     }
   `;
   document.head.appendChild(style);
@@ -382,6 +412,19 @@ export const mountLocalDebugPanel = (callbacks = {}) => {
   const animationButtons = document.createElement('div');
   animationButtons.className = 'debugGrid';
   let activeTabKey = DEBUG_TAB_NOTIFICATION;
+  const reducedMotionToggleLabel = document.createElement('label');
+  reducedMotionToggleLabel.className = 'debugCheckbox';
+  const reducedMotionToggle = document.createElement('input');
+  reducedMotionToggle.type = 'checkbox';
+  reducedMotionToggle.checked = setDebugReducedMotionSimulation(readDebugReducedMotionSimulation());
+  const reducedMotionToggleText = document.createElement('span');
+  reducedMotionToggleText.textContent = 'Simulate prefers-reduced-motion';
+  reducedMotionToggleLabel.appendChild(reducedMotionToggle);
+  reducedMotionToggleLabel.appendChild(reducedMotionToggleText);
+  reducedMotionToggle.addEventListener('change', () => {
+    reducedMotionToggle.checked = setDebugReducedMotionSimulation(reducedMotionToggle.checked);
+    refreshAnimationSync();
+  });
   animationButtons.appendChild(mkButton('Speed: 1x', () => {
     window.TETHER_DEBUG_ANIM_SPEED = 1;
     refreshAnimationSync();
@@ -394,6 +437,7 @@ export const mountLocalDebugPanel = (callbacks = {}) => {
     window.TETHER_DEBUG_ANIM_SPEED = 10;
     refreshAnimationSync();
   }));
+  animationTab.appendChild(reducedMotionToggleLabel);
   animationTab.appendChild(animationButtons);
 
   let animationRafId = 0;

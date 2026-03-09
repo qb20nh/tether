@@ -757,36 +757,38 @@ export async function initTetherApp() {
   runtimeInstance.start();
   notificationCenter.refreshToggleUi();
   notificationCenter.refreshHistoryUi();
-  void mountRuntimePlugins({
-    isLocalhostHostname,
-    canUseServiceWorker,
-    requestNotificationPermission,
-    postMessageToServiceWorker,
-    fetchDailyPayload,
-    readDailyDebugSnapshot: () => ({
-      nowIsoUtc: new Date().toISOString(),
-      dailyPayloadUrl: DAILY_PAYLOAD_URL,
-      versionUrl: VERSION_URL,
-      localBuildNumber,
-      runtimeDailyFreezeState: (
-        runtimeInstance && typeof runtimeInstance.readDebugDailyFreezeState === 'function'
-          ? runtimeInstance.readDebugDailyFreezeState()
+  if (typeof __TETHER_DEV__ === 'boolean' ? __TETHER_DEV__ : true) {
+    void mountRuntimePlugins({
+      isLocalhostHostname,
+      canUseServiceWorker,
+      requestNotificationPermission,
+      postMessageToServiceWorker,
+      fetchDailyPayload,
+      readDailyDebugSnapshot: () => ({
+        nowIsoUtc: new Date().toISOString(),
+        dailyPayloadUrl: DAILY_PAYLOAD_URL,
+        versionUrl: VERSION_URL,
+        localBuildNumber,
+        runtimeDailyFreezeState: (
+          runtimeInstance && typeof runtimeInstance.readDebugDailyFreezeState === 'function'
+            ? runtimeInstance.readDebugDailyFreezeState()
+            : null
+        ),
+        latestDailyState: {
+          dailyId: latestDailyState.dailyId,
+          hardInvalidateAtUtcMs: latestDailyState.hardInvalidateAtUtcMs,
+          dailySolvedDate: latestDailyState.dailySolvedDate,
+        },
+      }),
+      toggleForceDailyFrozenState: () => (
+        runtimeInstance && typeof runtimeInstance.toggleDebugForceDailyFrozen === 'function'
+          ? runtimeInstance.toggleDebugForceDailyFrozen()
           : null
       ),
-      latestDailyState: {
-        dailyId: latestDailyState.dailyId,
-        hardInvalidateAtUtcMs: latestDailyState.hardInvalidateAtUtcMs,
-        dailySolvedDate: latestDailyState.dailySolvedDate,
-      },
-    }),
-    toggleForceDailyFrozenState: () => (
-      runtimeInstance && typeof runtimeInstance.toggleDebugForceDailyFrozen === 'function'
-        ? runtimeInstance.toggleDebugForceDailyFrozen()
-        : null
-    ),
-    reloadApp: () => window.location.reload(),
-    showToast: (text, options = {}) => showInAppToast(text, options),
-  });
+      reloadApp: () => window.location.reload(),
+      showToast: (text, options = {}) => showInAppToast(text, options),
+    });
+  }
   if (didUpgradeBuild) {
     const toastText = translateNow('ui.updateAppliedToast');
     if (toastText !== 'ui.updateAppliedToast') {

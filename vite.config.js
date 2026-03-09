@@ -3,6 +3,7 @@ import { execSync } from 'node:child_process';
 import { readFile, writeFile } from 'node:fs/promises';
 import { defineConfig, loadEnv } from 'vite';
 import { DAILY_PAYLOAD_FILE } from './src/shared/paths.js';
+import { verifyReleaseNoDebugArtifacts } from './scripts/verify_release_no_debug_artifacts.js';
 
 const BUILD_NUMBER_META_NAME = 'tether-build-number';
 const BUILD_LABEL_META_NAME = 'tether-build-label';
@@ -120,6 +121,16 @@ const buildVersionPlugin = ({ buildNumber, buildLabel, buildDateTime, dailyPaylo
     },
 });
 
+const buildReleaseVerificationPlugin = () => ({
+    name: 'tether-release-no-debug-verifier',
+    writeBundle(outputOptions) {
+        const outDir = outputOptions?.dir
+            ? path.resolve(outputOptions.dir)
+            : path.resolve(process.cwd(), 'dist');
+        verifyReleaseNoDebugArtifacts({ distDir: outDir });
+    },
+});
+
 export default defineConfig(({ mode }) => {
     const env = loadEnv(mode, process.cwd(), '');
     const buildNumber = resolveBuildNumber(env);
@@ -131,8 +142,12 @@ export default defineConfig(({ mode }) => {
     const shouldExternalizeDaily = isNativeBuild && configuredDailyUrl.length > 0;
 
     return {
+        define: {
+            __TETHER_DEV__: JSON.stringify(mode !== 'production'),
+        },
         plugins: [
             buildVersionPlugin({ buildNumber, buildLabel, buildDateTime, dailyPayloadPathname }),
+            buildReleaseVerificationPlugin(),
         ],
         base: './', // Use relative paths for assets so they work in Capacitor/Tauri
         build: {

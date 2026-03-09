@@ -12,6 +12,8 @@ test('package metadata standardizes on pnpm and only-allow', () => {
   const pkg = readJson('package.json');
   assert.equal(pkg.packageManager, 'pnpm@10.30.3');
   assert.equal(pkg.scripts.preinstall, 'npx --yes only-allow pnpm');
+  assert.equal(pkg.scripts.build, 'vite build');
+  assert.equal(pkg.scripts['verify:release-no-debug'], 'node scripts/verify_release_no_debug_artifacts.js');
   assert.equal(fs.existsSync(repoFile('package-lock.json')), false);
 });
 

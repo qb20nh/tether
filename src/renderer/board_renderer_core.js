@@ -28,11 +28,55 @@ import {
   resolvePathSignature,
 } from './path_transition_utils.js';
 import { createPathTransitionCompensationBuffer } from './path_transition_compensation_buffer.js';
+import { isReducedMotionPreferred as readReducedMotionPreference } from '../reduced_motion.js';
+
+const DEBUG_COUNTER_NOOP = () => {};
+
+const createDebugCounterFnsDev = (debugCounters = null) => {
+  if (!debugCounters) {
+    return [
+      DEBUG_COUNTER_NOOP,
+      DEBUG_COUNTER_NOOP,
+      DEBUG_COUNTER_NOOP,
+      DEBUG_COUNTER_NOOP,
+      DEBUG_COUNTER_NOOP,
+    ];
+  }
+
+  const increment = (name, amount = 1) => {
+    const previous = Number(debugCounters[name]) || 0;
+    debugCounters[name] = previous + amount;
+  };
+
+  return [
+    (amount = 1) => increment('heavyFrameRenders', amount),
+    (amount = 1) => increment('pathDraws', amount),
+    (amount = 1) => increment('incrementalCellPatches', amount),
+    (amount = 1) => increment('fullCellRebuilds', amount),
+    (amount = 1) => increment('symbolRedraws', amount),
+  ];
+};
+
+const createDebugCounterFns = (typeof __TETHER_DEV__ === 'boolean' ? __TETHER_DEV__ : true)
+  ? createDebugCounterFnsDev
+  : () => [
+    DEBUG_COUNTER_NOOP,
+    DEBUG_COUNTER_NOOP,
+    DEBUG_COUNTER_NOOP,
+    DEBUG_COUNTER_NOOP,
+    DEBUG_COUNTER_NOOP,
+  ];
 
 export function createBoardRendererCore(options = {}) {
 const icons = options.icons || {};
 const iconX = options.iconX || '';
-const debugCounters = options.debugCounters || null;
+const [
+  countHeavyFrameRenders,
+  countPathDraws,
+  countIncrementalCellPatches,
+  countFullCellRebuilds,
+  countSymbolRedraws,
+] = createDebugCounterFns(options.debugCounters || null);
 let refs = null;
 let gridCells = [];
 let lastDropTargetKey = null;
@@ -89,7 +133,6 @@ let pathEndRetainedArcState = null;
 let pathRetainedArcTokenSeed = 0;
 let tutorialBracketSignature = '';
 let tutorialBracketGeometryToken = 0;
-let reducedMotionQuery = null;
 let lowPowerModeEnabled = false;
 let lowPowerFrameDelayTimer = 0;
 let lastPresentedFrameTimestamp = 0;
@@ -261,12 +304,6 @@ let reusableStartRetainedArcPoints = [];
 let reusableEndRetainedArcPoints = [];
 const pathStartTipHoverScaleState = { fromScale: 1, toScale: 1, startTimeMs: NaN };
 const pathEndTipHoverScaleState = { fromScale: 1, toScale: 1, startTimeMs: NaN };
-
-const incrementDebugCounter = (name, amount = 1) => {
-  if (!debugCounters || typeof name !== 'string') return;
-  const previous = Number(debugCounters[name]) || 0;
-  debugCounters[name] = previous + amount;
-};
 
 const clearPendingRenderDirty = () => {
   pendingRenderDirty.cells = false;
@@ -1547,7 +1584,7 @@ const flushPendingRenderFrame = (timestamp) => {
   );
 
   clearPendingRenderDirty();
-  incrementDebugCounter('heavyFrameRenders');
+  countHeavyFrameRenders();
   const shouldContinue = drawAllImpl(
     frame.snapshot,
     refs,
@@ -1894,11 +1931,7 @@ const getCachedPathFlowMetrics = (refs = latestPathRefs, cellSize = null) => {
 
 const isReducedMotionPreferred = () => {
   if (lowPowerModeEnabled) return true;
-  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return false;
-  if (!reducedMotionQuery) {
-    reducedMotionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
-  }
-  return Boolean(reducedMotionQuery.matches);
+  return readReducedMotionPreference();
 };
 
 const updatePathLayoutMetrics = (offset, cell, gap, pad) => {
@@ -2128,7 +2161,7 @@ const drawIdleAnimatedPath = (
   }
   pathFramePayload.isCompletionSolved = Boolean(completionModel?.isSolved);
   pathFramePayload.completionProgress = getCompletionProgress(completionModel);
-  incrementDebugCounter('pathDraws');
+  countPathDraws();
   latestPathMainFlowTravel = pathRenderer.drawPathFrame(pathFramePayload);
 
   if (latestTutorialFlags?.path || latestTutorialFlags?.movable) {
@@ -2574,7 +2607,6 @@ function cacheElements() {
   clearInteractiveResizeTimer();
   pathLayoutMetrics.ready = false;
   pathLayoutMetrics.version = 0;
-  reducedMotionQuery = null;
   pathAnimationEngine.resetTransitionState();
   clearPathRetainedArcStates();
   clearPathTipHoverScaleStates();
@@ -3109,7 +3141,7 @@ const tryApplyIncrementalPathUpdate = (snapshot, results) => {
     applyCellSnapshotState(snapshot, r, c, statusSets);
   });
 
-  incrementDebugCounter('incrementalCellPatches');
+  countIncrementalCellPatches();
   return true;
 };
 
@@ -3127,7 +3159,7 @@ function updateCells(
     { hintStatus, rpsStatus, blockedStatus },
   );
   if (!usedIncremental) {
-    incrementDebugCounter('fullCellRebuilds');
+    countFullCellRebuilds();
     reusableCellViewModel = buildBoardCellViewModel(
       snapshot,
       { hintStatus, rpsStatus, blockedStatus },
@@ -3297,7 +3329,7 @@ function drawStaticSymbols(snapshot, refs, statuses) {
   const { symbolCtx, symbolCanvas } = refs;
   if (!symbolCtx || !symbolCanvas) return;
 
-  incrementDebugCounter('symbolRedraws');
+  countSymbolRedraws();
   clearCanvas(symbolCtx, symbolCanvas);
 
   drawCornerCounts(snapshot, refs, symbolCtx, statuses?.hintStatus?.cornerVertexStatus);
@@ -3587,7 +3619,7 @@ function drawAnimatedPathImpl(
   pathFramePayload.flowRise = PATH_FLOW_RISE;
   pathFramePayload.flowDrop = PATH_FLOW_DROP;
   pathFramePayload.drawTutorialBracketsInPathLayer = false;
-  incrementDebugCounter('pathDraws');
+  countPathDraws();
   latestPathMainFlowTravel = pathRenderer.drawPathFrame(pathFramePayload);
 }
 
@@ -3954,7 +3986,6 @@ const resetCoreState = () => {
   pathRetainedArcTokenSeed = 0;
   tutorialBracketSignature = '';
   tutorialBracketGeometryToken = 0;
-  reducedMotionQuery = null;
   wallGhostOffsetLeft = 0;
   wallGhostOffsetTop = 0;
   lastPathRendererRecoveryAttemptMs = 0;

@@ -1,6 +1,7 @@
 import {
   createBoardRendererCore,
 } from './board_renderer_core.js';
+import { isReducedMotionPreferred as readReducedMotionPreference } from '../reduced_motion.js';
 
 export function createDomRenderer(options = {}) {
   const icons = options.icons || {};
@@ -150,11 +151,7 @@ export function createDomRenderer(options = {}) {
 
   const prefersReducedMotion = () => (
     lowPowerModeEnabled
-    || (
-    typeof window !== 'undefined'
-    && typeof window.matchMedia === 'function'
-    && window.matchMedia('(prefers-reduced-motion: reduce)').matches
-    )
+    || readReducedMotionPreference()
   );
 
   const isSolvedSnapshot = (snapshot, evaluation) => {

@@ -38,6 +38,41 @@ const LOW_POWER_HINT_P99_DROP_RATIO = 0.72;
 const LOW_POWER_HINT_MIN_AVG_DROP_FPS = 8;
 const LOW_POWER_HINT_MIN_P99_DROP_FPS = 8;
 
+const createDebugDailyFreezeDev = ({
+  getLocked,
+  renderDailyMeta,
+  applyDailyBoardLockState,
+  readSnapshot,
+  queueBoardLayout,
+  interactionState,
+}) => {
+  let forced = false;
+
+  const readState = () => ({
+    forced,
+    locked: getLocked(),
+  });
+
+  const setForced = (nextForced) => {
+    forced = Boolean(nextForced);
+    renderDailyMeta();
+    applyDailyBoardLockState(readSnapshot());
+    queueBoardLayout(false, {
+      isPathDragging: interactionState.isPathDragging,
+      pathDragSide: interactionState.pathDragSide,
+      pathDragCursor: interactionState.pathDragCursor,
+    });
+    return readState();
+  };
+
+  return {
+    isForced: () => forced,
+    readState,
+    setForced,
+    toggle: () => setForced(!forced),
+  };
+};
+
 const applyTextDirection = (locale) => {
   const direction = isRtlLocale(locale) ? 'rtl' : 'ltr';
   document.documentElement.setAttribute('dir', direction);
@@ -175,7 +210,6 @@ export function createRuntime(options) {
   let settingsMenuOpen = false;
   let dailyCountdownTimer = 0;
   let dailyBoardLocked = false;
-  let debugForceDailyFrozen = false;
   let evaluateCacheBoardVersion = 0;
   const evaluateCache = new Map();
   const lowPowerHintDetector = {
@@ -444,8 +478,19 @@ export function createRuntime(options) {
     }
   };
 
+  const debugDailyFreeze = (typeof __TETHER_DEV__ === 'boolean' ? __TETHER_DEV__ : true)
+    ? createDebugDailyFreezeDev({
+      getLocked: () => dailyBoardLocked,
+      renderDailyMeta: () => renderDailyMeta(),
+      applyDailyBoardLockState: (snapshot) => applyDailyBoardLockState(snapshot),
+      readSnapshot: () => state.getSnapshot(),
+      queueBoardLayout: (immediate, payload) => queueBoardLayout(immediate, payload),
+      interactionState,
+    })
+    : null;
+
   const isDailyExpired = () =>
-    debugForceDailyFrozen
+    (debugDailyFreeze && debugDailyFreeze.isForced())
     || (Number.isInteger(dailyResetUtcMs) && Date.now() >= dailyResetUtcMs);
 
   const applyDailyBoardLockState = (snapshot = null) => {
@@ -542,27 +587,6 @@ export function createRuntime(options) {
       syncDailyUi();
     }, 1000);
   };
-
-  const readDebugDailyFreezeState = () => ({
-    forced: debugForceDailyFrozen,
-    locked: dailyBoardLocked,
-  });
-
-  const setDebugForceDailyFrozen = (forced) => {
-    debugForceDailyFrozen = Boolean(forced);
-    renderDailyMeta();
-    applyDailyBoardLockState(state.getSnapshot());
-    queueBoardLayout(false, {
-      isPathDragging: interactionState.isPathDragging,
-      pathDragSide: interactionState.pathDragSide,
-      pathDragCursor: interactionState.pathDragCursor,
-    });
-    return readDebugDailyFreezeState();
-  };
-
-  const toggleDebugForceDailyFrozen = () => setDebugForceDailyFrozen(!debugForceDailyFrozen);
-
-
 
   const isDailyLevelIndex = (levelIndex) =>
     typeof core.isDailyAbsIndex === 'function' && core.isDailyAbsIndex(levelIndex);
@@ -1954,9 +1978,11 @@ export function createRuntime(options) {
     refreshLocalizationUi: () => {
       refreshStaticUiText({ locale: activeLocale });
     },
-    readDebugDailyFreezeState,
-    setDebugForceDailyFrozen,
-    toggleDebugForceDailyFrozen,
+    ...(debugDailyFreeze ? {
+      readDebugDailyFreezeState: debugDailyFreeze.readState,
+      setDebugForceDailyFrozen: debugDailyFreeze.setForced,
+      toggleDebugForceDailyFrozen: debugDailyFreeze.toggle,
+    } : {}),
   };
 }
 

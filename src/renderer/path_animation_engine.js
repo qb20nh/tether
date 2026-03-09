@@ -15,6 +15,7 @@ import {
   normalizeFlowOffset,
   pathsMatch,
 } from './path_transition_utils.js';
+import { isReducedMotionPreferred as readReducedMotionPreference } from '../reduced_motion.js';
 
 const PATH_FLOW_CYCLE = 128;
 const PATH_FLOW_FREEZE_DURATION_MS = 2500;
@@ -352,14 +353,7 @@ const normalizeShouldAnimate = (value) => {
 };
 
 const resolveDefaultReducedMotionQuery = () => {
-  let reducedMotionQuery = null;
-  return () => {
-    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return false;
-    if (!reducedMotionQuery) {
-      reducedMotionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
-    }
-    return Boolean(reducedMotionQuery.matches);
-  };
+  return () => readReducedMotionPreference();
 };
 
 const getPathSegmentCount = (path) => {
