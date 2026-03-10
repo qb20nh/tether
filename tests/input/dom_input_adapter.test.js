@@ -89,6 +89,7 @@ class FakeElement {
 }
 
 const createRefs = (gridEl) => ({
+  boardFocusProxy: new FakeElement('button'),
   gridEl,
   levelSel: new FakeElement('select'),
   infiniteSel: new FakeElement('select'),
@@ -155,6 +156,11 @@ const getLastBoardNavIntent = (harness) => getLastIntent(
     intent?.type === INTENT_TYPES.INTERACTION_UPDATE
     && intent.payload?.updateType === INTERACTION_UPDATES.BOARD_NAV
   ),
+);
+
+const getLastGameCommandIntent = (harness) => getLastIntent(
+  harness,
+  (intent) => intent?.type === INTENT_TYPES.GAME_COMMAND,
 );
 
 const tapDirectionalKeys = (harness, keys, timestamp = 16) => {
@@ -634,6 +640,17 @@ test('dom input adapter ignores board keyboard input while controls are disabled
   assert.equal(getLastBoardNavIntent(harness), null);
 });
 
+test('dom input adapter forwards the board focus proxy to the grid', (t) => {
+  const harness = createGridHarness(t);
+
+  assert.notEqual(globalThis.document.activeElement, harness.gridEl);
+  harness.refs.boardFocusProxy.dispatch('click', {
+    preventDefault() {},
+  });
+
+  assert.equal(globalThis.document.activeElement, harness.gridEl);
+});
+
 test('dom input adapter drives board cursor and path selection with keyboard when enabled', (t) => {
   const harness = createGridHarness(t);
   harness.adapter.setKeyboardGamepadControlsEnabled(true);
@@ -644,6 +661,7 @@ test('dom input adapter drives board cursor and path selection with keyboard whe
   assert.deepEqual(getLastBoardNavIntent(harness)?.payload, {
     updateType: INTERACTION_UPDATES.BOARD_NAV,
     isBoardNavActive: true,
+    isBoardNavPressing: true,
     boardCursor: { r: 0, c: 0 },
     boardSelection: { kind: 'path-end', r: 0, c: 0 },
     boardSelectionInteractive: true,
@@ -723,12 +741,45 @@ test('dom input adapter shows a held-only selection highlight for non-interactiv
     r: 0,
     c: 1,
   });
+  assert.equal(getLastBoardNavIntent(harness)?.payload.isBoardNavPressing, true);
   assert.equal(getLastBoardNavIntent(harness)?.payload.boardSelectionInteractive, false);
 
   harness.gridEl.dispatch('keyup', createKeyEvent('Enter'));
   assert.equal(getLastBoardNavIntent(harness)?.payload.boardSelection, null);
+  assert.equal(
+    Object.prototype.hasOwnProperty.call(getLastBoardNavIntent(harness)?.payload || {}, 'isBoardNavPressing'),
+    false,
+  );
   assert.equal(getLastBoardNavIntent(harness)?.payload.boardSelectionInteractive, null);
   assert.deepEqual(getLastBoardNavIntent(harness)?.payload.boardCursor, { r: 0, c: 1 });
+});
+
+test('dom input adapter finalizes a selected path tip when keyboard deselects it', (t) => {
+  const harness = createGridHarness(t);
+  harness.adapter.setKeyboardGamepadControlsEnabled(true);
+  harness.store.dispatch({ type: GAME_COMMANDS.START_OR_STEP, payload: { r: 0, c: 0 } });
+  harness.store.dispatch({ type: GAME_COMMANDS.START_OR_STEP, payload: { r: 0, c: 1 } });
+  harness.store.dispatch({ type: GAME_COMMANDS.START_OR_STEP, payload: { r: 1, c: 1 } });
+  harness.store.dispatch({ type: GAME_COMMANDS.START_OR_STEP, payload: { r: 1, c: 0 } });
+  harness.adapter.syncSnapshot();
+  harness.gridEl.focus();
+
+  harness.gridEl.dispatch('keydown', createKeyEvent('Enter'));
+  assert.deepEqual(getLastBoardNavIntent(harness)?.payload.boardSelection, {
+    kind: 'path-start',
+    r: 0,
+    c: 0,
+  });
+
+  harness.gridEl.dispatch('keydown', createKeyEvent('Enter'));
+  assert.equal(getLastGameCommandIntent(harness)?.payload.commandType, GAME_COMMANDS.FINALIZE_PATH);
+  assert.equal(getLastBoardNavIntent(harness)?.payload.boardSelection, null);
+  assert.deepEqual(harness.store.getSnapshot().path, [
+    { r: 0, c: 0 },
+    { r: 0, c: 1 },
+    { r: 1, c: 1 },
+    { r: 1, c: 0 },
+  ]);
 });
 
 test('dom input adapter nudges board nav toward invalid keyboard moves only while held', (t) => {
@@ -737,13 +788,19 @@ test('dom input adapter nudges board nav toward invalid keyboard moves only whil
   harness.gridEl.focus();
 
   harness.gridEl.dispatch('keydown', createKeyEvent('ArrowLeft'));
+  assert.equal(getLastBoardNavIntent(harness)?.payload.isBoardNavPressing, true);
   harness.flushNextRaf(16);
   harness.flushNextRaf(16);
   assert.deepEqual(getLastBoardNavIntent(harness)?.payload.boardCursor, { r: 0, c: 0 });
+  assert.equal(getLastBoardNavIntent(harness)?.payload.isBoardNavPressing, true);
   assert.deepEqual(getLastBoardNavIntent(harness)?.payload.boardNavPreviewDelta, { r: 0, c: -1 });
 
   harness.gridEl.dispatch('keyup', createKeyEvent('ArrowLeft'));
   assert.deepEqual(getLastBoardNavIntent(harness)?.payload.boardCursor, { r: 0, c: 0 });
+  assert.equal(
+    Object.prototype.hasOwnProperty.call(getLastBoardNavIntent(harness)?.payload || {}, 'isBoardNavPressing'),
+    false,
+  );
   assert.equal(
     Object.prototype.hasOwnProperty.call(getLastBoardNavIntent(harness)?.payload || {}, 'boardNavPreviewDelta'),
     false,

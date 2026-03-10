@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createBoardRendererCore } from '../../src/renderer/board_renderer_core.js';
+import { createDomRenderer } from '../../src/renderer/dom_renderer.js';
 
 class FakeStyle {
   constructor() {
@@ -758,6 +759,169 @@ test('createBoardRendererCore hides the nav marker when inactive or daily locked
   });
   flushNextRaf(env, 48);
   assert.equal(marker?.classList.contains('isActive'), false);
+});
+
+test('createBoardRendererCore applies mouse-drag press styling to keyboard-held nav targets', (t) => {
+  const env = installRendererEnv(t);
+  const snapshot = createSnapshot({
+    gridData: [['.', '.']],
+    path: [
+      { r: 0, c: 0 },
+      { r: 0, c: 1 },
+    ],
+  });
+  const core = createBoardRendererCore();
+  const refs = createShellRefs();
+
+  core.mount(refs);
+  core.rebuildGrid(snapshot);
+  core.renderFrame({
+    snapshot,
+    evaluation: {},
+    completion: null,
+    uiModel: {},
+    interactionModel: {},
+  });
+  flushNextRaf(env, 8);
+
+  const firstCell = getGridCell(refs, 0, 0, 2);
+  const secondCell = getGridCell(refs, 0, 1, 2);
+  assert.equal(firstCell.classList.contains('pathTipDragHover'), false);
+  assert.equal(secondCell.classList.contains('pathTipDragHover'), false);
+
+  core.updateInteraction({
+    isBoardNavActive: true,
+    isBoardNavPressing: true,
+    boardCursor: { r: 0, c: 0 },
+  });
+  flushNextRaf(env, 16);
+  assert.equal(firstCell.classList.contains('pathTipDragHover'), false);
+  assert.equal(secondCell.classList.contains('pathTipDragHover'), false);
+
+  core.updateInteraction({
+    isBoardNavActive: true,
+    isBoardNavPressing: false,
+    boardCursor: { r: 0, c: 0 },
+    boardSelection: { kind: 'path-end', r: 0, c: 1 },
+  });
+  flushNextRaf(env, 32);
+  assert.equal(firstCell.classList.contains('pathTipDragHover'), false);
+  assert.equal(secondCell.classList.contains('pathTipDragHover'), false);
+  assert.equal(firstCell.classList.contains('pathTipDragSelected'), false);
+  assert.equal(secondCell.classList.contains('pathTipDragSelected'), true);
+
+  core.updateInteraction({
+    isBoardNavActive: true,
+    isBoardNavPressing: true,
+    boardCursor: { r: 0, c: 0 },
+    boardSelection: { kind: 'path-end', r: 0, c: 1 },
+  });
+  flushNextRaf(env, 48);
+  assert.equal(secondCell.classList.contains('pathTipDragSelected'), true);
+  assert.equal(secondCell.classList.contains('pathTipDragHover'), false);
+
+  core.updateInteraction({
+    isPathDragging: true,
+    pathDragSide: 'end',
+    pathDragCursor: { r: 0, c: 0 },
+  });
+  flushNextRaf(env, 64);
+  assert.equal(secondCell.classList.contains('pathTipDragSelected'), true);
+  assert.equal(firstCell.classList.contains('pathTipDragHover'), true);
+
+  core.updateInteraction({
+    isPathDragging: false,
+    isBoardNavActive: true,
+    isBoardNavPressing: false,
+    boardCursor: { r: 0, c: 0 },
+    boardSelection: { kind: 'path-end', r: 0, c: 1 },
+  });
+  flushNextRaf(env, 80);
+  assert.equal(secondCell.classList.contains('pathTipDragSelected'), true);
+  assert.equal(firstCell.classList.contains('pathTipDragHover'), false);
+
+  core.updateInteraction({
+    isBoardNavActive: true,
+    isBoardNavPressing: false,
+    boardCursor: { r: 0, c: 0 },
+  });
+  flushNextRaf(env, 96);
+  assert.equal(firstCell.classList.contains('pathTipDragHover'), false);
+  assert.equal(secondCell.classList.contains('pathTipDragHover'), false);
+  assert.equal(firstCell.classList.contains('pathTipDragSelected'), false);
+  assert.equal(secondCell.classList.contains('pathTipDragSelected'), false);
+});
+
+test('createBoardRendererCore keeps selected interactive cells pressed and non-interactive ones pressed only while held', (t) => {
+  const env = installRendererEnv(t);
+  const snapshot = createSnapshot({
+    gridData: [['.', 'm', '.']],
+    path: [
+      { r: 0, c: 0 },
+      { r: 0, c: 1 },
+      { r: 0, c: 2 },
+    ],
+  });
+  const core = createBoardRendererCore();
+  const refs = createShellRefs();
+
+  core.mount(refs);
+  core.rebuildGrid(snapshot);
+  core.renderFrame({
+    snapshot,
+    evaluation: {},
+    completion: null,
+    uiModel: {},
+    interactionModel: {},
+  });
+  flushNextRaf(env, 8);
+
+  const startCell = getGridCell(refs, 0, 0, 3);
+  const wallCell = getGridCell(refs, 0, 1, 3);
+  const endCell = getGridCell(refs, 0, 2, 3);
+
+  core.updateInteraction({
+    isBoardNavActive: true,
+    isBoardNavPressing: false,
+    boardCursor: { r: 0, c: 2 },
+    boardSelection: { kind: 'path-end', r: 0, c: 2 },
+    boardSelectionInteractive: true,
+  });
+  flushNextRaf(env, 16);
+  assert.equal(endCell.classList.contains('pathTipDragSelected'), true);
+
+  core.updateInteraction({
+    isBoardNavActive: true,
+    isBoardNavPressing: false,
+    boardCursor: { r: 0, c: 1 },
+    boardSelection: { kind: 'wall', r: 0, c: 1 },
+    boardSelectionInteractive: true,
+  });
+  flushNextRaf(env, 24);
+  assert.equal(endCell.classList.contains('pathTipDragSelected'), false);
+  assert.equal(wallCell.classList.contains('pathTipDragSelected'), true);
+
+  core.updateInteraction({
+    isBoardNavActive: true,
+    isBoardNavPressing: false,
+    boardCursor: { r: 0, c: 1 },
+    boardSelection: { kind: 'path-end', r: 0, c: 1 },
+    boardSelectionInteractive: false,
+  });
+  flushNextRaf(env, 32);
+  assert.equal(wallCell.classList.contains('pathTipDragSelected'), false);
+  assert.equal(startCell.classList.contains('pathTipDragSelected'), false);
+  assert.equal(endCell.classList.contains('pathTipDragSelected'), false);
+
+  core.updateInteraction({
+    isBoardNavActive: true,
+    isBoardNavPressing: true,
+    boardCursor: { r: 0, c: 1 },
+    boardSelection: { kind: 'path-end', r: 0, c: 1 },
+    boardSelectionInteractive: false,
+  });
+  flushNextRaf(env, 40);
+  assert.equal(wallCell.classList.contains('pathTipDragSelected'), true);
 });
 
 test('createBoardRendererCore nudges the nav marker toward invalid preview directions', (t) => {
@@ -1576,4 +1740,61 @@ test('createBoardRendererCore keeps path flow moving across consecutive state re
 
   assert.equal(firstFlowOffset, 0);
   assert.equal(secondFlowOffset > firstFlowOffset, true);
+});
+
+test('createDomRenderer defers solved completion classes while a keyboard path tip is still selected', (t) => {
+  const env = installRendererEnv(t);
+  const snapshot = createSnapshot({
+    gridData: [['.', '.']],
+    path: [
+      { r: 0, c: 0 },
+      { r: 0, c: 1 },
+    ],
+  });
+  const renderer = createDomRenderer();
+  const refs = createShellRefs();
+  const solvedEvaluation = {
+    hintStatus: { total: 0, good: 0, bad: 0 },
+    stitchStatus: { total: 0, good: 0, bad: 0 },
+    rpsStatus: { total: 0, good: 0, bad: 0 },
+  };
+
+  refs.boardWrap.style.setProperty('--complete-cascade-total-ms', '120ms');
+  refs.boardWrap.style.setProperty('--complete-step-ms', '60ms');
+  refs.boardWrap.style.setProperty('--complete-cell-duration-ms', '60ms');
+
+  renderer.mount(refs);
+  renderer.rebuildGrid(snapshot);
+
+  renderer.renderFrame({
+    snapshot,
+    evaluation: solvedEvaluation,
+    completion: null,
+    uiModel: {},
+    interactionModel: {
+      isBoardNavActive: true,
+      boardSelection: { kind: 'path-end', r: 0, c: 1 },
+    },
+  });
+  flushNextRaf(env, 16);
+
+  assert.equal(refs.boardWrap.classList.contains('isComplete'), false);
+  assert.equal(refs.boardWrap.classList.contains('isCompleting'), false);
+
+  renderer.renderFrame({
+    snapshot,
+    evaluation: solvedEvaluation,
+    completion: null,
+    uiModel: {
+      completionAnimationTrigger: true,
+    },
+    interactionModel: {
+      isBoardNavActive: true,
+      boardCursor: { r: 0, c: 1 },
+    },
+  });
+  flushNextRaf(env, 32);
+
+  assert.equal(refs.boardWrap.classList.contains('isComplete'), true);
+  assert.equal(refs.boardWrap.classList.contains('isCompleting'), true);
 });

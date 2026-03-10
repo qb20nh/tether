@@ -305,6 +305,18 @@ export function createDomInputAdapter() {
       : null
   );
 
+  const isBoardNavKeyboardPressActive = () => (
+    isGridFocusedForKeyboardBoardInput()
+    && (
+      keyboardConfirmKeysPressed.enter
+      || keyboardConfirmKeysPressed.space
+      || keyboardDirectionsPressed.up
+      || keyboardDirectionsPressed.down
+      || keyboardDirectionsPressed.left
+      || keyboardDirectionsPressed.right
+    )
+  );
+
   const boardNavPayloadsMatch = (left, right) => (
     Boolean(left?.isBoardNavActive) === Boolean(right?.isBoardNavActive)
     && (left?.boardCursor?.r ?? null) === (right?.boardCursor?.r ?? null)
@@ -312,6 +324,7 @@ export function createDomInputAdapter() {
     && (left?.boardSelection?.kind ?? null) === (right?.boardSelection?.kind ?? null)
     && (left?.boardSelection?.r ?? null) === (right?.boardSelection?.r ?? null)
     && (left?.boardSelection?.c ?? null) === (right?.boardSelection?.c ?? null)
+    && Boolean(left?.isBoardNavPressing) === Boolean(right?.isBoardNavPressing)
     && (left?.boardSelectionInteractive ?? null) === (right?.boardSelectionInteractive ?? null)
     && (left?.boardNavPreviewDelta?.r ?? null) === (right?.boardNavPreviewDelta?.r ?? null)
     && (left?.boardNavPreviewDelta?.c ?? null) === (right?.boardNavPreviewDelta?.c ?? null)
@@ -362,6 +375,7 @@ export function createDomInputAdapter() {
       boardSelection: selection,
       boardSelectionInteractive: selection ? isBoardCursorInteractive(snapshot, selection) : null,
     };
+    if (isBoardNavKeyboardPressActive()) payload.isBoardNavPressing = true;
     if (previewDelta) payload.boardNavPreviewDelta = previewDelta;
     if (boardNavPayloadsMatch(payload, lastBoardNavPayload)) return;
     lastBoardNavPayload = payload;
@@ -760,12 +774,15 @@ export function createDomInputAdapter() {
       if (
         (boardNav.selectionKind === BOARD_SELECTION_KINDS.PATH_START
           || boardNav.selectionKind === BOARD_SELECTION_KINDS.PATH_END)
-        && Array.isArray(snapshot.path)
-        && snapshot.path.length <= 1
       ) {
         const { afterSnapshot, changed } = runGameCommand(GAME_COMMANDS.FINALIZE_PATH);
+        commitBoardNavState({
+          cursor,
+          selectionKind: null,
+          navActive: true,
+        });
         syncBoardNavSnapshot(afterSnapshot);
-        return changed;
+        return changed || true;
       }
       return commitBoardNavState({
         cursor,
@@ -1200,18 +1217,22 @@ export function createDomInputAdapter() {
     if (key === 'ArrowUp') {
       keyboardDirectionsPressed.up = true;
       scheduleKeyboardDirectionPolling();
+      refreshBoardNavVisibility();
       handled = true;
     } else if (key === 'ArrowDown') {
       keyboardDirectionsPressed.down = true;
       scheduleKeyboardDirectionPolling();
+      refreshBoardNavVisibility();
       handled = true;
     } else if (key === 'ArrowLeft') {
       keyboardDirectionsPressed.left = true;
       scheduleKeyboardDirectionPolling();
+      refreshBoardNavVisibility();
       handled = true;
     } else if (key === 'ArrowRight') {
       keyboardDirectionsPressed.right = true;
       scheduleKeyboardDirectionPolling();
+      refreshBoardNavVisibility();
       handled = true;
     } else if (confirmKeyId) {
       keyboardConfirmKeysPressed[confirmKeyId] = true;
@@ -1597,6 +1618,11 @@ export function createDomInputAdapter() {
       if (!refs?.gridEl) {
         throw new Error('createDomInputAdapter.bind requires refs.gridEl');
       }
+
+      addListener(refs.boardFocusProxy, 'click', (e) => {
+        e.preventDefault?.();
+        refs.gridEl.focus?.();
+      });
 
       addListener(refs.gridEl, 'pointerdown', onPointerDown);
       addListener(refs.gridEl, 'pointermove', onPointerMove, { passive: false });

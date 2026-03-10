@@ -38,6 +38,7 @@ export const RPS_WIN_ORDER = {
 
 export const ELEMENT_IDS = Object.freeze({
   APP: 'app',
+  BOARD_FOCUS_PROXY: 'boardFocusProxy',
   LEVEL_SEL: 'levelSel',
   LEVEL_SELECT_GROUP: 'levelSelectGroup',
   INFINITE_SEL: 'infiniteSel',

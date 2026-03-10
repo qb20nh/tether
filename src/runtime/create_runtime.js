@@ -203,6 +203,7 @@ export function createRuntime(options) {
     },
     dropTarget: null,
     isBoardNavActive: false,
+    isBoardNavPressing: false,
     boardCursor: null,
     boardSelection: null,
     boardSelectionInteractive: null,
@@ -1346,6 +1347,7 @@ export function createRuntime(options) {
         wallGhost: interactionState.wallGhost,
         dropTarget: interactionState.dropTarget,
         isBoardNavActive: interactionState.isBoardNavActive,
+        isBoardNavPressing: interactionState.isBoardNavPressing,
         boardCursor: interactionState.boardCursor,
         boardSelection: interactionState.boardSelection,
         boardSelectionInteractive: interactionState.boardSelectionInteractive,
@@ -1910,6 +1912,7 @@ export function createRuntime(options) {
       const nextBoardSelectionInteractive = typeof payload.boardSelectionInteractive === 'boolean'
         ? payload.boardSelectionInteractive
         : null;
+      const nextIsBoardNavPressing = Boolean(payload.isBoardNavPressing);
       const rawPreviewDelta = payload.boardNavPreviewDelta;
       const nextBoardNavPreviewDelta = (
         Number.isInteger(rawPreviewDelta?.r) && Number.isInteger(rawPreviewDelta?.c)
@@ -1919,6 +1922,7 @@ export function createRuntime(options) {
       const nextIsBoardNavActive = Boolean(payload.isBoardNavActive);
       const stateChanged = (
         interactionState.isBoardNavActive !== nextIsBoardNavActive
+        || interactionState.isBoardNavPressing !== nextIsBoardNavPressing
         || (interactionState.boardCursor?.r ?? null) !== (nextBoardCursor?.r ?? null)
         || (interactionState.boardCursor?.c ?? null) !== (nextBoardCursor?.c ?? null)
         || (interactionState.boardSelection?.kind ?? null) !== (nextBoardSelection?.kind ?? null)
@@ -1931,6 +1935,7 @@ export function createRuntime(options) {
       if (!stateChanged) return;
 
       interactionState.isBoardNavActive = nextIsBoardNavActive;
+      interactionState.isBoardNavPressing = nextIsBoardNavPressing;
       interactionState.boardCursor = nextBoardCursor;
       interactionState.boardSelection = nextBoardSelection;
       interactionState.boardSelectionInteractive = nextBoardSelectionInteractive;

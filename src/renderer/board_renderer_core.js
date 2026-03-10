@@ -81,6 +81,7 @@ export function createBoardRendererCore(options = {}) {
   let gridCells = [];
   let lastDropTargetKey = null;
   let lastPathTipDragHoverCell = null;
+  let lastPathTipDragSelectedCell = null;
   let boardNavMarkerEl = null;
   let wallGhostEl = null;
   let cachedBoardWrap = null;
@@ -2561,6 +2562,7 @@ export function createBoardRendererCore(options = {}) {
 
     const result = {
       app: get(ELEMENT_IDS.APP),
+      boardFocusProxy: get(ELEMENT_IDS.BOARD_FOCUS_PROXY),
       levelLabel: get(ELEMENT_IDS.LEVEL_LABEL),
       levelSelectGroup: get(ELEMENT_IDS.LEVEL_SELECT_GROUP),
       levelSel: get(ELEMENT_IDS.LEVEL_SEL),
@@ -3279,6 +3281,54 @@ export function createBoardRendererCore(options = {}) {
     lastPathTipDragHoverCell = null;
   };
 
+  const clearPathTipDragSelectedCell = () => {
+    if (!lastPathTipDragSelectedCell) return;
+    lastPathTipDragSelectedCell.classList.remove('pathTipDragSelected');
+    lastPathTipDragSelectedCell = null;
+  };
+
+  const resolvePathTipDragSelectedCell = (interactionModel = null, cells = gridCells) => {
+    if (interactionModel?.isPathDragging) {
+      const snapshot = pendingRenderState?.snapshot || latestPathSnapshot;
+      const path = Array.isArray(snapshot?.path) ? snapshot.path : [];
+      if (path.length <= 0) return null;
+
+      const side = interactionModel.pathDragSide === 'start' ? 'start' : 'end';
+      const tip = side === 'start'
+        ? path[0]
+        : path[path.length - 1];
+      const tipR = Number(tip?.r);
+      const tipC = Number(tip?.c);
+      if (Number.isInteger(tipR) && Number.isInteger(tipC)) {
+        const cell = cells[tipR]?.[tipC];
+        if (cell && !cell.classList.contains('wall')) return cell;
+      }
+      return null;
+    }
+
+    const selection = interactionModel?.boardSelection;
+    if (interactionModel?.isBoardNavActive === true && selection) {
+      const selectionIsInteractive = typeof interactionModel?.boardSelectionInteractive === 'boolean'
+        ? interactionModel.boardSelectionInteractive
+        : isBoardNavSelectionInteractive(
+          pendingRenderState?.snapshot || latestPathSnapshot,
+          selection,
+        );
+      if (!selectionIsInteractive && interactionModel?.isBoardNavPressing !== true) {
+        return null;
+      }
+      const selectionR = Number(selection?.r);
+      const selectionC = Number(selection?.c);
+      if (Number.isInteger(selectionR) && Number.isInteger(selectionC)) {
+        const cell = cells[selectionR]?.[selectionC];
+        if (cell && !cell.classList.contains('wall')) return cell;
+        if (cell) return cell;
+      }
+    }
+
+    return null;
+  };
+
   const syncPathTipDragHoverCell = (interactionModel = null, cells = gridCells) => {
     let nextCell = null;
     if (interactionModel?.isPathDragging) {
@@ -3303,6 +3353,20 @@ export function createBoardRendererCore(options = {}) {
     if (!nextCell) return;
     nextCell.classList.add('pathTipDragHover');
     lastPathTipDragHoverCell = nextCell;
+  };
+
+  const syncPathTipDragSelectedCell = (interactionModel = null, cells = gridCells) => {
+    const nextCell = resolvePathTipDragSelectedCell(interactionModel, cells);
+    if (nextCell === lastPathTipDragSelectedCell) {
+      if (nextCell && !nextCell.classList.contains('pathTipDragSelected')) {
+        nextCell.classList.add('pathTipDragSelected');
+      }
+      return;
+    }
+    clearPathTipDragSelectedCell();
+    if (!nextCell) return;
+    nextCell.classList.add('pathTipDragSelected');
+    lastPathTipDragSelectedCell = nextCell;
   };
 
   const collectIncrementalPathTouchedKeys = (
@@ -4191,16 +4255,19 @@ export function createBoardRendererCore(options = {}) {
     if (!refs) return;
     applyImmediateInteractionState(interactionModel);
     syncPathTipDragHoverCell(interactionModel);
+    syncPathTipDragSelectedCell(interactionModel);
     syncBoardNavHighlights(interactionModel);
   };
 
   const resetCoreState = () => {
     clearDropTarget();
     clearPathTipDragHoverCell();
+    clearPathTipDragSelectedCell();
     removeBoardNavMarker();
     gridCells = [];
     lastDropTargetKey = null;
     lastPathTipDragHoverCell = null;
+    lastPathTipDragSelectedCell = null;
     wallGhostEl = null;
     cachedBoardWrap = null;
     activeBoardSize = { rows: 0, cols: 0 };

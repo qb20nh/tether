@@ -192,6 +192,17 @@ export function createDomRenderer(options = {}) {
     return allVisited && hintsOk && stitchesOk && rpsOk;
   };
 
+  const hasPendingPathFinalizeInteraction = (interactionModel = {}) => (
+    interactionModel?.isPathDragging === true
+    || (
+      interactionModel?.isBoardNavActive === true
+      && (
+        interactionModel?.boardSelection?.kind === 'path-start'
+        || interactionModel?.boardSelection?.kind === 'path-end'
+      )
+    )
+  );
+
   return {
     mount(shellRefs = null) {
       boardRendererCore.mount(shellRefs);
@@ -218,9 +229,13 @@ export function createDomRenderer(options = {}) {
       const timeNow = nowMs();
       const solvedByValidation = completion?.kind === 'good';
       const solvedBySnapshot = isSolvedSnapshot(snapshot, evaluation);
+      const suppressSolvedBySnapshot = Boolean(
+        !completionCascadeState.isSolved
+        && hasPendingPathFinalizeInteraction(interactionModel),
+      );
       const solvedBySnapshotAllowed = Boolean(
         solvedBySnapshot
-        && (!interactionModel.isPathDragging || completionCascadeState.isSolved),
+        && !suppressSolvedBySnapshot,
       );
       const solved = Boolean(solvedByValidation || solvedBySnapshotAllowed);
       if (lateSolveTriggerUntilMs > 0 && timeNow > lateSolveTriggerUntilMs) {

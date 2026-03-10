@@ -145,6 +145,32 @@ body.isPathDragging * {
   display: grid;
   gap: 6px;
   grid-template-columns: 1fr;
+  position: relative;
+}
+
+.boardFocusProxy {
+  position: absolute;
+  inset-block-start: calc(var(--app-pad-top) + 4px);
+  inset-inline-start: calc(var(--app-pad-inline) + 4px);
+  z-index: 40;
+  border: 1px solid var(--control-border-opposite);
+  border-radius: 999px;
+  background: var(--control-bg-opposite);
+  color: var(--control-text-opposite);
+  padding: 9px 14px;
+  font: inherit;
+  line-height: 1;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.22);
+  transform: translateY(-160%);
+  opacity: 0;
+  pointer-events: none;
+  transition: transform 140ms ease, opacity 120ms ease;
+}
+
+.boardFocusProxy:focus-visible {
+  transform: translateY(0);
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .bootShell {
@@ -1562,6 +1588,13 @@ body:not(.isPathDragging) .cell:active {
     0 0 0 var(--cell-shadow-2) rgba(15, 23, 42, 0.30);
 }
 
+.theme-light .cell.wall.movable.pathTipDragSelected {
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.12) inset,
+    0 0 0 var(--cell-shadow-3) rgba(147, 197, 253, 0.24) inset,
+    0 0 0 var(--cell-shadow-2) rgba(15, 23, 42, 0.30);
+}
+
 .cell .mark {
   position: relative;
   display: flex;
@@ -1695,17 +1728,29 @@ body:not(.isPathDragging) .cell:active {
   --interactive-corner-color: rgba(120, 190, 255, 1);
 }
 
-body.isPathDragging .cell.pathTipDragHover,
+.cell.pathTipDragSelected,
+.cell.pathTipDragHover,
+body.isPathDragging .cell.pathStart:active,
+body.isPathDragging .cell.pathEnd:active,
 body.isPathDragging .cell:not(.wall):hover {
   transform: scale(0.95) !important;
   transform-origin: center;
   transition: transform 120ms ease-out;
+}
+
+.cell.pathTipDragHover,
+body.isPathDragging .cell:not(.wall):hover {
   box-shadow: 0 0 0 var(--cell-shadow-2) rgba(255, 255, 255, 0.14) inset;
 }
 
-body.isPathDragging .cell.pathStart:active,
-body.isPathDragging .cell.pathEnd:active {
-  transform: scale(0.95) !important;
+.cell.wall.movable.pathTipDragSelected {
+  z-index: 3;
+  cursor: grabbing;
+  transform: translateY(1px) !important;
+  --interactive-corner-color: rgba(120, 190, 255, 1);
+  box-shadow:
+    0 0 0 var(--cell-shadow-3) rgba(120, 190, 255, 0.24) inset,
+    0 0 0 var(--cell-shadow-2) rgba(120, 190, 255, 0.30);
 }
 
 body:not(.isPathDragging) .cell.pathStart:active,

@@ -68,6 +68,17 @@ const renderBootGuideMessage = () =>
     <span class="bootShellGuideLine">${BOOT_GUIDE_PLACEHOLDERS[0]}<br>${BOOT_GUIDE_PLACEHOLDERS[1]}</span>
   </div>`;
 
+const buildBoardFocusProxyMarkup = ({ t, boot = false }) => `
+    <button
+      id="${ELEMENT_IDS.BOARD_FOCUS_PROXY}"
+      class="boardFocusProxy"
+      type="button"
+      data-i18n="ui.puzzleGridAria"
+      ${boot ? 'disabled tabindex="-1"' : ''}
+    >
+      ${t('ui.puzzleGridAria')}
+    </button>`;
+
 const buildConfirmDialogTemplate = (t, options = {}) => {
   const {
     dialogId,
@@ -445,6 +456,7 @@ const renderShellMarkup = ({
   boot = false,
 }) => `
   <div class="app${boot ? ' bootShell' : ''}"${boot ? ' data-boot-shell' : ''}>
+${buildBoardFocusProxyMarkup({ t, boot })}
 ${buildHeaderMarkup({ t, localeOptions, currentLocale, boot })}
 ${buildControlsPanelMarkup({ t, boot })}
     <section class="layout">

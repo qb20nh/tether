@@ -50,6 +50,16 @@ test('icon buttons reserve symmetric icon space so labels stay centered', () => 
   assert.ok(stylesheet.includes('text-align: center;'));
 });
 
+test('app shell renders a hidden first-tab-stop control for focusing the puzzle grid', () => {
+  const markup = renderAppShellMarkup();
+  const stylesheet = readFileSync(new URL('../../src/styles.css', import.meta.url), 'utf8');
+
+  assert.match(markup, /<button\s+id="boardFocusProxy"\s+class="boardFocusProxy"/);
+  assert.match(markup, /<button[\s\S]+data-i18n="ui\.puzzleGridAria"/);
+  assert.ok(stylesheet.includes('.boardFocusProxy {'));
+  assert.ok(stylesheet.includes('.boardFocusProxy:focus-visible {'));
+});
+
 test('boot shell board keeps the same outer inset as the live board grid', () => {
   const stylesheet = readFileSync(new URL('../../src/styles.css', import.meta.url), 'utf8');
 

@@ -1013,6 +1013,41 @@ test('createRuntime applies persisted keyboard / gamepad controls and syncs boar
   harness.runtime.destroy();
 });
 
+test('createRuntime forwards board-nav key press state to renderer interaction updates', (t) => {
+  installBrowserEnv(t);
+  const interactionUpdates = [];
+  const harness = createRuntimeHarness({
+    rendererOverrides: {
+      updateInteraction: (interactionModel) => {
+        interactionUpdates.push({
+          isBoardNavActive: interactionModel.isBoardNavActive,
+          isBoardNavPressing: interactionModel.isBoardNavPressing,
+          boardCursor: interactionModel.boardCursor,
+        });
+      },
+    },
+  });
+
+  harness.runtime.start();
+  harness.runtime.emitIntent({
+    type: INTENT_TYPES.INTERACTION_UPDATE,
+    payload: {
+      updateType: INTERACTION_UPDATES.BOARD_NAV,
+      isBoardNavActive: true,
+      isBoardNavPressing: true,
+      boardCursor: { r: 0, c: 1 },
+    },
+  });
+
+  assert.deepEqual(interactionUpdates.at(-1), {
+    isBoardNavActive: true,
+    isBoardNavPressing: true,
+    boardCursor: { r: 0, c: 1 },
+  });
+
+  harness.runtime.destroy();
+});
+
 test('createRuntime toggles keyboard / gamepad controls through runtime-owned state', (t) => {
   installBrowserEnv(t);
   const harness = createRuntimeHarness({
