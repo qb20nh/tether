@@ -689,6 +689,19 @@ export function createRuntime(options) {
     return { tutorialIndices, practiceIndices };
   };
 
+  const resolveLatestUnlockedCampaignBucketIndex = (indices) => {
+    if (!Array.isArray(indices) || indices.length === 0) return null;
+
+    let latestUnlockedIndex = indices[0];
+    for (let i = 0; i < indices.length; i += 1) {
+      const levelIndex = indices[i];
+      if (!isCampaignLevelUnlocked(levelIndex)) break;
+      latestUnlockedIndex = levelIndex;
+    }
+
+    return latestUnlockedIndex;
+  };
+
   const renderScoreMeta = () => {
     const refs = renderer.getRefs();
     if (!refs?.scoreMeta || !refs?.infiniteScoreValue || !refs?.dailyScoreValue) return;
@@ -977,8 +990,8 @@ export function createRuntime(options) {
     const infiniteActive = core.isInfiniteAbsIndex(currentIndex);
     const dailyActive = isDailyLevelIndex(currentIndex);
     const campaignActive = !infiniteActive && !dailyActive;
-    const firstTutorialIndex = tutorialIndices[0];
-    const firstPracticeIndex = practiceIndices[0];
+    const tutorialPrimaryIndex = resolveLatestUnlockedCampaignBucketIndex(tutorialIndices);
+    const practicePrimaryIndex = resolveLatestUnlockedCampaignBucketIndex(practiceIndices);
     const buildOption = (value, label, options = {}) => {
       const selected = options.selected ? 'selected' : '';
       const disabled = options.disabled ? 'disabled' : '';
@@ -996,23 +1009,23 @@ export function createRuntime(options) {
     const selectedPrimaryValue = (() => {
       if (dailyActive) return dailyAbsIndex;
       if (infiniteActive) return infiniteAbsIndex;
-      if (practiceSet.has(currentIndex) && Number.isInteger(firstPracticeIndex)) return firstPracticeIndex;
-      if (tutorialSet.has(currentIndex) && Number.isInteger(firstTutorialIndex)) return firstTutorialIndex;
-      if (Number.isInteger(firstTutorialIndex)) return firstTutorialIndex;
-      if (Number.isInteger(firstPracticeIndex)) return firstPracticeIndex;
+      if (practiceSet.has(currentIndex) && Number.isInteger(practicePrimaryIndex)) return practicePrimaryIndex;
+      if (tutorialSet.has(currentIndex) && Number.isInteger(tutorialPrimaryIndex)) return tutorialPrimaryIndex;
+      if (Number.isInteger(tutorialPrimaryIndex)) return tutorialPrimaryIndex;
+      if (Number.isInteger(practicePrimaryIndex)) return practicePrimaryIndex;
       return 0;
     })();
 
-    if (Number.isInteger(firstTutorialIndex)) {
-      campaignOptions.push(buildOption(firstTutorialIndex, translate('ui.levelGroupTutorial'), {
-        disabled: !isCampaignLevelUnlocked(firstTutorialIndex),
-        selected: selectedPrimaryValue === firstTutorialIndex,
+    if (Number.isInteger(tutorialPrimaryIndex)) {
+      campaignOptions.push(buildOption(tutorialPrimaryIndex, translate('ui.levelGroupTutorial'), {
+        disabled: !isCampaignLevelUnlocked(tutorialPrimaryIndex),
+        selected: selectedPrimaryValue === tutorialPrimaryIndex,
       }));
     }
-    if (Number.isInteger(firstPracticeIndex)) {
-      campaignOptions.push(buildOption(firstPracticeIndex, translate('ui.levelGroupPractice'), {
-        disabled: !isCampaignLevelUnlocked(firstPracticeIndex),
-        selected: selectedPrimaryValue === firstPracticeIndex,
+    if (Number.isInteger(practicePrimaryIndex)) {
+      campaignOptions.push(buildOption(practicePrimaryIndex, translate('ui.levelGroupPractice'), {
+        disabled: !isCampaignLevelUnlocked(practicePrimaryIndex),
+        selected: selectedPrimaryValue === practicePrimaryIndex,
       }));
     }
 

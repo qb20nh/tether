@@ -660,6 +660,37 @@ test('createRuntime keeps existing session progress when switching to an untouch
   harness.runtime.destroy();
 });
 
+test('createRuntime targets the latest unlocked campaign level for primary bucket options', (t) => {
+  installBrowserEnv(t);
+  const campaignLevels = [
+    { ...LEVEL, nameKey: 'level.tutorial_1' },
+    { ...LEVEL, nameKey: 'level.tutorial_2' },
+    { ...LEVEL, nameKey: 'level.pilot_1' },
+    { ...LEVEL, nameKey: 'level.pilot_2' },
+  ];
+  const harness = createRuntimeHarness({
+    levels: campaignLevels,
+    persistenceInitialState: {
+      campaignProgress: 3,
+      sessionBoard: {
+        levelIndex: 2,
+        path: [],
+        movableWalls: [],
+        dailyId: null,
+      },
+    },
+  });
+
+  harness.runtime.start();
+
+  assert.match(harness.refs.levelSel.innerHTML, /<option value="1"[^>]*>ui\.levelGroupTutorial<\/option>/);
+  assert.match(harness.refs.levelSel.innerHTML, /<option value="3"[^>]*>ui\.levelGroupPractice<\/option>/);
+  assert.equal(harness.refs.levelSel.value, '3');
+  assert.equal(harness.refs.infiniteSel.value, '2');
+
+  harness.runtime.destroy();
+});
+
 test('createRuntime replaces the prior session save after a new level is attempted', (t) => {
   const env = installBrowserEnv(t);
   const harness = createRuntimeHarness({
