@@ -58,11 +58,19 @@ export function createDomInputAdapter() {
     left: false,
     right: false,
   };
+  const keyboardDirectionPressOrder = {
+    up: 0,
+    down: 0,
+    left: 0,
+    right: 0,
+  };
+  let nextKeyboardDirectionPressOrder = 1;
   const keyboardDirectionState = {
     directionKey: null,
     nextActionAtMs: 0,
     hasDispatched: false,
   };
+  let pendingKeyboardDiagonalReplacement = null;
   const gamepadButtonsPressed = {
     confirm: false,
     reverse: false,
@@ -443,6 +451,7 @@ export function createDomInputAdapter() {
   };
 
   const clearBoardNavState = () => {
+    pendingKeyboardDiagonalReplacement = null;
     boardNav.transientSelectionVisible = false;
     boardNav.invalidMovePreviewDelta = null;
     commitBoardNavState({
@@ -753,6 +762,7 @@ export function createDomInputAdapter() {
     const delta = normalizeDirectionDelta(directionOrDelta);
     const cursor = boardCursorOrDefault(snapshot);
     if (!delta || !snapshot || !cursor) return false;
+    pendingKeyboardDiagonalReplacement = null;
     const nextCursor = {
       r: clampToRange(cursor.r + delta.r, 0, snapshot.rows - 1),
       c: clampToRange(cursor.c + delta.c, 0, snapshot.cols - 1),
@@ -766,6 +776,7 @@ export function createDomInputAdapter() {
 
   const handleBoardConfirmAction = () => {
     if (!keyboardGamepadControlsEnabled) return false;
+    pendingKeyboardDiagonalReplacement = null;
     const snapshot = readSnapshot();
     const cursor = boardCursorOrDefault(snapshot);
     if (!snapshot || !cursor) return false;
@@ -848,6 +859,7 @@ export function createDomInputAdapter() {
     }
 
     if (boardNav.selectionKind === BOARD_SELECTION_KINDS.WALL) {
+      pendingKeyboardDiagonalReplacement = null;
       if (Math.abs(delta.r) + Math.abs(delta.c) !== 1) return false;
       const target = {
         r: cursor.r + delta.r,
@@ -870,8 +882,50 @@ export function createDomInputAdapter() {
 
     const source = resolveSelectedPathEndpoint(snapshot, boardNav.selectionKind);
     if (!source) {
+      pendingKeyboardDiagonalReplacement = null;
       syncBoardNavSnapshot(snapshot);
       return false;
+    }
+
+    if (Math.abs(delta.r) === 1 && Math.abs(delta.c) === 1) {
+      const replaceSide = boardNav.selectionKind === BOARD_SELECTION_KINDS.PATH_START ? 'start' : 'end';
+      const replaceDelta = pendingKeyboardDiagonalReplacement?.delta;
+      const replaceSourceTip = pendingKeyboardDiagonalReplacement?.sourceTip;
+      const canReplaceLastSingleAxisStep = Boolean(
+        pendingKeyboardDiagonalReplacement
+        && pendingKeyboardDiagonalReplacement.side === replaceSide
+        && pendingKeyboardDiagonalReplacement.afterVersion === snapshot.version
+        && Number.isInteger(replaceSourceTip?.r)
+        && Number.isInteger(replaceSourceTip?.c)
+        && (
+          (replaceDelta?.r === delta.r && replaceDelta?.c === 0)
+          || (replaceDelta?.r === 0 && replaceDelta?.c === delta.c)
+        )
+      );
+      if (canReplaceLastSingleAxisStep) {
+        const replacementTarget = {
+          r: replaceSourceTip.r + delta.r,
+          c: replaceSourceTip.c + delta.c,
+        };
+        pendingKeyboardDiagonalReplacement = null;
+        if (
+          isPointInBounds(snapshot, replacementTarget)
+          && isUsableCell(snapshot, replacementTarget.r, replacementTarget.c)
+          && isAdjacentMove(snapshot, replaceSourceTip, replacementTarget)
+        ) {
+          const { afterSnapshot, changed } = runGameCommand(GAME_COMMANDS.APPLY_PATH_DRAG_SEQUENCE, {
+            side: replaceSide,
+            steps: [
+              { r: replaceSourceTip.r, c: replaceSourceTip.c },
+              replacementTarget,
+            ],
+          });
+          if (changed) {
+            syncBoardNavSnapshot(afterSnapshot);
+            return true;
+          }
+        }
+      }
     }
 
     const target = {
@@ -885,12 +939,23 @@ export function createDomInputAdapter() {
       : GAME_COMMANDS.START_OR_STEP;
     const { afterSnapshot, changed } = runGameCommand(commandType, target);
     if (!changed) return false;
+    if (Math.abs(delta.r) + Math.abs(delta.c) === 1) {
+      pendingKeyboardDiagonalReplacement = {
+        side: boardNav.selectionKind === BOARD_SELECTION_KINDS.PATH_START ? 'start' : 'end',
+        delta,
+        sourceTip: { r: source.r, c: source.c },
+        afterVersion: afterSnapshot?.version ?? null,
+      };
+    } else {
+      pendingKeyboardDiagonalReplacement = null;
+    }
     syncBoardNavSnapshot(afterSnapshot);
     return true;
   };
 
   const handleBoardShortcutAction = (shortcut) => {
     if (!keyboardGamepadControlsEnabled) return false;
+    pendingKeyboardDiagonalReplacement = null;
     const snapshot = readSnapshot();
     const cursor = currentBoardCursor(snapshot);
 
@@ -955,10 +1020,129 @@ export function createDomInputAdapter() {
     return { r: vertical, c: horizontal };
   };
 
+  const resolvePressedKeyboardDirectionComponents = () => {
+    const components = [];
+    if (keyboardDirectionsPressed.up !== keyboardDirectionsPressed.down) {
+      const key = keyboardDirectionsPressed.up ? 'up' : 'down';
+      components.push({
+        key,
+        order: keyboardDirectionPressOrder[key],
+        delta: DIRECTION_DELTAS[key],
+      });
+    }
+    if (keyboardDirectionsPressed.left !== keyboardDirectionsPressed.right) {
+      const key = keyboardDirectionsPressed.left ? 'left' : 'right';
+      components.push({
+        key,
+        order: keyboardDirectionPressOrder[key],
+        delta: DIRECTION_DELTAS[key],
+      });
+    }
+    components.sort((left, right) => left.order - right.order);
+    return components;
+  };
+
+  const parseDirectionKeyDelta = (directionKey) => {
+    if (typeof directionKey !== 'string') return null;
+    const [rawR, rawC] = directionKey.split(',');
+    const r = Number.parseInt(rawR, 10);
+    const c = Number.parseInt(rawC, 10);
+    if (!Number.isInteger(r) || !Number.isInteger(c)) return null;
+    return { r, c };
+  };
+
+  const canUsePendingKeyboardDiagonalReplacement = (snapshot, selectionKind, delta) => {
+    if (!(Math.abs(delta?.r) === 1 && Math.abs(delta?.c) === 1)) return false;
+    const replaceSide = selectionKind === BOARD_SELECTION_KINDS.PATH_START ? 'start' : 'end';
+    const replaceDelta = pendingKeyboardDiagonalReplacement?.delta;
+    const replaceSourceTip = pendingKeyboardDiagonalReplacement?.sourceTip;
+    if (
+      !pendingKeyboardDiagonalReplacement
+      || pendingKeyboardDiagonalReplacement.side !== replaceSide
+      || pendingKeyboardDiagonalReplacement.afterVersion !== snapshot?.version
+      || !Number.isInteger(replaceSourceTip?.r)
+      || !Number.isInteger(replaceSourceTip?.c)
+      || (
+        (replaceDelta?.r !== delta.r || replaceDelta?.c !== 0)
+        && (replaceDelta?.r !== 0 || replaceDelta?.c !== delta.c)
+      )
+    ) {
+      return false;
+    }
+
+    const replacementTarget = {
+      r: replaceSourceTip.r + delta.r,
+      c: replaceSourceTip.c + delta.c,
+    };
+    return (
+      isPointInBounds(snapshot, replacementTarget)
+      && isUsableCell(snapshot, replacementTarget.r, replacementTarget.c)
+      && isAdjacentMove(snapshot, replaceSourceTip, replacementTarget)
+    );
+  };
+
+  const canUseDirectKeyboardPathDiagonal = (snapshot, selectionKind, delta) => {
+    if (!(Math.abs(delta?.r) === 1 && Math.abs(delta?.c) === 1)) return false;
+    const source = resolveSelectedPathEndpoint(snapshot, selectionKind);
+    if (!source) return false;
+    const target = {
+      r: source.r + delta.r,
+      c: source.c + delta.c,
+    };
+    return (
+      isPointInBounds(snapshot, target)
+      && isUsableCell(snapshot, target.r, target.c)
+      && isAdjacentMove(snapshot, source, target)
+    );
+  };
+
+  const shouldSplitSelectedPathDiagonalChord = (snapshot, delta, components) => {
+    if (components.length !== 2) return false;
+    if (!(Math.abs(delta?.r) === 1 && Math.abs(delta?.c) === 1)) return false;
+    if (
+      boardNav.selectionKind !== BOARD_SELECTION_KINDS.PATH_START
+      && boardNav.selectionKind !== BOARD_SELECTION_KINDS.PATH_END
+    ) {
+      return false;
+    }
+    return !(
+      canUsePendingKeyboardDiagonalReplacement(snapshot, boardNav.selectionKind, delta)
+      || canUseDirectKeyboardPathDiagonal(snapshot, boardNav.selectionKind, delta)
+    );
+  };
+
+  const handleBoardDirectionalChord = (components = [], consumedDelta = null) => {
+    let changed = false;
+    for (let i = 0; i < components.length; i += 1) {
+      if (
+        Number.isInteger(consumedDelta?.r)
+        && Number.isInteger(consumedDelta?.c)
+        && components[i]?.delta?.r === consumedDelta.r
+        && components[i]?.delta?.c === consumedDelta.c
+      ) {
+        continue;
+      }
+      const didChange = handleBoardDirectionalAction(components[i]?.delta);
+      changed = didChange || changed;
+    }
+    return changed;
+  };
+
   const resetKeyboardDirectionState = () => {
     keyboardDirectionState.directionKey = null;
     keyboardDirectionState.nextActionAtMs = 0;
     keyboardDirectionState.hasDispatched = false;
+  };
+
+  const armHeldKeyboardDirectionForRepeat = (direction, timestamp = nowMs()) => {
+    const normalized = normalizeDirectionDelta(direction);
+    if (!normalized) {
+      resetKeyboardDirectionState();
+      return;
+    }
+    keyboardDirectionState.directionKey = `${normalized.r},${normalized.c}`;
+    keyboardDirectionState.hasDispatched = true;
+    keyboardDirectionState.nextActionAtMs = timestamp + KEYBOARD_DIRECTION_INITIAL_DELAY_MS;
   };
 
   const resolveConfirmKeyId = (key) => {
@@ -986,6 +1170,11 @@ export function createDomInputAdapter() {
     keyboardDirectionsPressed.down = false;
     keyboardDirectionsPressed.left = false;
     keyboardDirectionsPressed.right = false;
+    keyboardDirectionPressOrder.up = 0;
+    keyboardDirectionPressOrder.down = 0;
+    keyboardDirectionPressOrder.left = 0;
+    keyboardDirectionPressOrder.right = 0;
+    pendingKeyboardDiagonalReplacement = null;
     stopKeyboardDirectionPolling();
     clearBoardNavInvalidMovePreview();
   };
@@ -1014,6 +1203,7 @@ export function createDomInputAdapter() {
     }
 
     const direction = resolvePressedKeyboardDirection();
+    const directionComponents = resolvePressedKeyboardDirectionComponents();
     if (!direction) {
       resetKeyboardDirectionState();
       clearBoardNavInvalidMovePreview();
@@ -1023,6 +1213,7 @@ export function createDomInputAdapter() {
 
     const directionKey = `${direction.r},${direction.c}`;
     const previousDirectionKey = keyboardDirectionState.directionKey;
+    const previousDirectionHadDispatched = keyboardDirectionState.hasDispatched;
     if (directionKey !== previousDirectionKey) {
       const cameFromIdle = previousDirectionKey === null;
       keyboardDirectionState.directionKey = directionKey;
@@ -1033,7 +1224,24 @@ export function createDomInputAdapter() {
     }
 
     if (timestamp >= keyboardDirectionState.nextActionAtMs) {
-      const handled = handleBoardDirectionalAction(direction);
+      const previouslyConsumedDelta = parseDirectionKeyDelta(previousDirectionKey);
+      const consumedSplitAxisDelta = (
+        directionKey !== previousDirectionKey
+        && previousDirectionHadDispatched === true
+        && Math.abs(previouslyConsumedDelta?.r ?? 0) + Math.abs(previouslyConsumedDelta?.c ?? 0) === 1
+      )
+        ? previouslyConsumedDelta
+        : null;
+      const snapshot = readSnapshot();
+      const handled = shouldSplitSelectedPathDiagonalChord(snapshot, direction, directionComponents)
+        ? handleBoardDirectionalChord(directionComponents, consumedSplitAxisDelta)
+        : (
+          !boardNav.selectionKind
+          && consumedSplitAxisDelta
+          && directionComponents.length === 2
+            ? handleBoardDirectionalChord(directionComponents, consumedSplitAxisDelta)
+            : handleBoardDirectionalAction(direction)
+        );
       if (!handled) setBoardNavInvalidMovePreview(direction);
       else clearBoardNavInvalidMovePreview();
       keyboardDirectionState.hasDispatched = true;
@@ -1215,21 +1423,25 @@ export function createDomInputAdapter() {
     const confirmKeyId = resolveConfirmKeyId(key);
 
     if (key === 'ArrowUp') {
+      if (!keyboardDirectionsPressed.up) keyboardDirectionPressOrder.up = nextKeyboardDirectionPressOrder++;
       keyboardDirectionsPressed.up = true;
       scheduleKeyboardDirectionPolling();
       refreshBoardNavVisibility();
       handled = true;
     } else if (key === 'ArrowDown') {
+      if (!keyboardDirectionsPressed.down) keyboardDirectionPressOrder.down = nextKeyboardDirectionPressOrder++;
       keyboardDirectionsPressed.down = true;
       scheduleKeyboardDirectionPolling();
       refreshBoardNavVisibility();
       handled = true;
     } else if (key === 'ArrowLeft') {
+      if (!keyboardDirectionsPressed.left) keyboardDirectionPressOrder.left = nextKeyboardDirectionPressOrder++;
       keyboardDirectionsPressed.left = true;
       scheduleKeyboardDirectionPolling();
       refreshBoardNavVisibility();
       handled = true;
     } else if (key === 'ArrowRight') {
+      if (!keyboardDirectionsPressed.right) keyboardDirectionPressOrder.right = nextKeyboardDirectionPressOrder++;
       keyboardDirectionsPressed.right = true;
       scheduleKeyboardDirectionPolling();
       refreshBoardNavVisibility();
@@ -1266,16 +1478,28 @@ export function createDomInputAdapter() {
       return;
     }
 
-    if (event.key === 'ArrowUp') keyboardDirectionsPressed.up = false;
-    else if (event.key === 'ArrowDown') keyboardDirectionsPressed.down = false;
-    else if (event.key === 'ArrowLeft') keyboardDirectionsPressed.left = false;
-    else if (event.key === 'ArrowRight') keyboardDirectionsPressed.right = false;
+    if (event.key === 'ArrowUp') {
+      keyboardDirectionsPressed.up = false;
+      keyboardDirectionPressOrder.up = 0;
+    } else if (event.key === 'ArrowDown') {
+      keyboardDirectionsPressed.down = false;
+      keyboardDirectionPressOrder.down = 0;
+    } else if (event.key === 'ArrowLeft') {
+      keyboardDirectionsPressed.left = false;
+      keyboardDirectionPressOrder.left = 0;
+    } else if (event.key === 'ArrowRight') {
+      keyboardDirectionsPressed.right = false;
+      keyboardDirectionPressOrder.right = 0;
+    }
     else return;
 
     clearBoardNavInvalidMovePreview();
-    if (resolvePressedKeyboardDirection()) {
+    const remainingDirection = resolvePressedKeyboardDirection();
+    if (remainingDirection) {
+      armHeldKeyboardDirectionForRepeat(remainingDirection);
       scheduleKeyboardDirectionPolling();
     } else {
+      pendingKeyboardDiagonalReplacement = null;
       stopKeyboardDirectionPolling();
     }
     refreshBoardNavVisibility();

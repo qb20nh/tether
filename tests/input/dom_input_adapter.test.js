@@ -1011,6 +1011,605 @@ test('dom input adapter supports stitched diagonal keyboard movement from simult
   });
 });
 
+test('dom input adapter replaces the last single-axis keyboard step with a stitched diagonal when the second axis arrives', (t) => {
+  const harness = createGridHarness(t, {
+    level: {
+      name: 'Delayed Stitched Diagonal',
+      grid: [
+        '..',
+        '..',
+      ],
+      stitches: [[1, 1]],
+      cornerCounts: [],
+    },
+  });
+  harness.adapter.setKeyboardGamepadControlsEnabled(true);
+  harness.gridEl.focus();
+
+  harness.gridEl.dispatch('keydown', createKeyEvent('Enter'));
+
+  harness.gridEl.dispatch('keydown', createKeyEvent('ArrowDown'));
+  harness.flushAllRafs(16, 6);
+  assert.deepEqual(harness.store.getSnapshot().path, [
+    { r: 0, c: 0 },
+    { r: 1, c: 0 },
+  ]);
+
+  harness.gridEl.dispatch('keydown', createKeyEvent('ArrowRight'));
+  harness.flushAllRafs(32, 6);
+
+  assert.equal(getLastGameCommandIntent(harness)?.payload.commandType, GAME_COMMANDS.APPLY_PATH_DRAG_SEQUENCE);
+  assert.deepEqual(getLastGameCommandIntent(harness)?.payload.side, 'end');
+  assert.deepEqual(getLastGameCommandIntent(harness)?.payload.steps, [
+    { r: 0, c: 0 },
+    { r: 1, c: 1 },
+  ]);
+  assert.deepEqual(harness.store.getSnapshot().path, [
+    { r: 0, c: 0 },
+    { r: 1, c: 1 },
+  ]);
+  assert.deepEqual(getLastBoardNavIntent(harness)?.payload.boardSelection, {
+    kind: 'path-end',
+    r: 1,
+    c: 1,
+  });
+
+  harness.gridEl.dispatch('keyup', createKeyEvent('ArrowRight'));
+  harness.gridEl.dispatch('keyup', createKeyEvent('ArrowDown'));
+});
+
+test('dom input adapter replaces a delayed single-axis detour with diagonal backtrack at a stitch', (t) => {
+  const harness = createGridHarness(t, {
+    level: {
+      name: 'Delayed Stitched Diagonal Cancel',
+      grid: [
+        '..',
+        '..',
+      ],
+      stitches: [[1, 1]],
+      cornerCounts: [],
+    },
+  });
+  harness.adapter.setKeyboardGamepadControlsEnabled(true);
+  harness.gridEl.focus();
+
+  harness.gridEl.dispatch('keydown', createKeyEvent('Enter'));
+  tapDirectionalKeys(harness, ['ArrowDown', 'ArrowRight']);
+  assert.deepEqual(harness.store.getSnapshot().path, [
+    { r: 0, c: 0 },
+    { r: 1, c: 1 },
+  ]);
+
+  harness.gridEl.dispatch('keydown', createKeyEvent('ArrowUp'));
+  harness.flushAllRafs(32, 6);
+  assert.deepEqual(harness.store.getSnapshot().path, [
+    { r: 0, c: 0 },
+    { r: 1, c: 1 },
+    { r: 0, c: 1 },
+  ]);
+
+  harness.gridEl.dispatch('keydown', createKeyEvent('ArrowLeft'));
+  harness.flushAllRafs(48, 6);
+
+  assert.equal(getLastGameCommandIntent(harness)?.payload.commandType, GAME_COMMANDS.APPLY_PATH_DRAG_SEQUENCE);
+  assert.deepEqual(getLastGameCommandIntent(harness)?.payload.side, 'end');
+  assert.deepEqual(getLastGameCommandIntent(harness)?.payload.steps, [
+    { r: 1, c: 1 },
+    { r: 0, c: 0 },
+  ]);
+  assert.deepEqual(harness.store.getSnapshot().path, [
+    { r: 0, c: 0 },
+  ]);
+  assert.deepEqual(getLastBoardNavIntent(harness)?.payload.boardSelection, {
+    kind: 'path-end',
+    r: 0,
+    c: 0,
+  });
+
+  harness.gridEl.dispatch('keyup', createKeyEvent('ArrowLeft'));
+  harness.gridEl.dispatch('keyup', createKeyEvent('ArrowUp'));
+});
+
+test('dom input adapter does not immediately step along a remaining axis after a stitched diagonal chord resolves', (t) => {
+  const harness = createGridHarness(t, {
+    level: {
+      name: 'Stitched Diagonal Release',
+      grid: [
+        '...',
+        '...',
+        '...',
+      ],
+      stitches: [[1, 1]],
+      cornerCounts: [],
+    },
+    metrics: {
+      rows: 3,
+      cols: 3,
+      left: 0,
+      top: 0,
+      right: 60,
+      bottom: 60,
+      size: 20,
+      gap: 0,
+      pad: 0,
+      step: 20,
+    },
+  });
+  harness.adapter.setKeyboardGamepadControlsEnabled(true);
+  harness.gridEl.focus();
+
+  harness.gridEl.dispatch('keydown', createKeyEvent('Enter'));
+  harness.gridEl.dispatch('keydown', createKeyEvent('ArrowDown'));
+  harness.gridEl.dispatch('keydown', createKeyEvent('ArrowRight'));
+  harness.flushAllRafs(16, 6);
+
+  assert.deepEqual(harness.store.getSnapshot().path, [
+    { r: 0, c: 0 },
+    { r: 1, c: 1 },
+  ]);
+
+  harness.gridEl.dispatch('keyup', createKeyEvent('ArrowRight'));
+  harness.flushAllRafs(32, 6);
+
+  assert.deepEqual(harness.store.getSnapshot().path, [
+    { r: 0, c: 0 },
+    { r: 1, c: 1 },
+  ]);
+
+  harness.gridEl.dispatch('keyup', createKeyEvent('ArrowDown'));
+});
+
+test('dom input adapter cancels a delayed retract and restores the intended stitched diagonal move', (t) => {
+  const harness = createGridHarness(t, {
+    level: {
+      name: 'Stitched Diagonal Retract Replace',
+      grid: [
+        '..',
+        '..',
+      ],
+      stitches: [[1, 1]],
+      cornerCounts: [],
+    },
+  });
+  harness.adapter.setKeyboardGamepadControlsEnabled(true);
+  harness.gridEl.focus();
+
+  harness.gridEl.dispatch('keydown', createKeyEvent('Enter'));
+  tapDirectionalKeys(harness, ['ArrowRight']);
+  assert.deepEqual(harness.store.getSnapshot().path, [
+    { r: 0, c: 0 },
+    { r: 0, c: 1 },
+  ]);
+
+  harness.gridEl.dispatch('keydown', createKeyEvent('ArrowLeft'));
+  harness.flushAllRafs(16, 6);
+  assert.deepEqual(harness.store.getSnapshot().path, [
+    { r: 0, c: 0 },
+  ]);
+
+  harness.gridEl.dispatch('keydown', createKeyEvent('ArrowDown'));
+  harness.flushAllRafs(32, 6);
+
+  assert.equal(getLastGameCommandIntent(harness)?.payload.commandType, GAME_COMMANDS.APPLY_PATH_DRAG_SEQUENCE);
+  assert.deepEqual(getLastGameCommandIntent(harness)?.payload.side, 'end');
+  assert.deepEqual(getLastGameCommandIntent(harness)?.payload.steps, [
+    { r: 0, c: 1 },
+    { r: 1, c: 0 },
+  ]);
+  assert.deepEqual(harness.store.getSnapshot().path, [
+    { r: 0, c: 0 },
+    { r: 0, c: 1 },
+    { r: 1, c: 0 },
+  ]);
+  assert.deepEqual(getLastBoardNavIntent(harness)?.payload.boardSelection, {
+    kind: 'path-end',
+    r: 1,
+    c: 0,
+  });
+
+  harness.gridEl.dispatch('keyup', createKeyEvent('ArrowDown'));
+  harness.gridEl.dispatch('keyup', createKeyEvent('ArrowLeft'));
+});
+
+test('dom input adapter replaces a non-retracting delayed axis step with a later stitched diagonal when an earlier diagonal already exists', (t) => {
+  const harness = createGridHarness(t, {
+    level: {
+      name: 'Existing Diagonal Delayed Replace',
+      grid: [
+        '...',
+        '...',
+      ],
+      stitches: [[1, 1], [1, 2]],
+      cornerCounts: [],
+    },
+    metrics: {
+      rows: 2,
+      cols: 3,
+      left: 0,
+      top: 0,
+      right: 60,
+      bottom: 40,
+      size: 20,
+      gap: 0,
+      pad: 0,
+      step: 20,
+    },
+  });
+  harness.adapter.setKeyboardGamepadControlsEnabled(true);
+  harness.gridEl.focus();
+
+  harness.gridEl.dispatch('keydown', createKeyEvent('Enter'));
+  tapDirectionalKeys(harness, ['ArrowDown', 'ArrowRight']);
+  tapDirectionalKeys(harness, ['ArrowRight']);
+  assert.deepEqual(harness.store.getSnapshot().path, [
+    { r: 0, c: 0 },
+    { r: 1, c: 1 },
+    { r: 1, c: 2 },
+  ]);
+
+  harness.gridEl.dispatch('keydown', createKeyEvent('ArrowUp'));
+  harness.flushAllRafs(16, 6);
+  assert.deepEqual(harness.store.getSnapshot().path, [
+    { r: 0, c: 0 },
+    { r: 1, c: 1 },
+    { r: 1, c: 2 },
+    { r: 0, c: 2 },
+  ]);
+
+  harness.gridEl.dispatch('keydown', createKeyEvent('ArrowLeft'));
+  harness.flushAllRafs(32, 6);
+
+  assert.equal(getLastGameCommandIntent(harness)?.payload.commandType, GAME_COMMANDS.APPLY_PATH_DRAG_SEQUENCE);
+  assert.deepEqual(getLastGameCommandIntent(harness)?.payload.side, 'end');
+  assert.deepEqual(getLastGameCommandIntent(harness)?.payload.steps, [
+    { r: 1, c: 2 },
+    { r: 0, c: 1 },
+  ]);
+  assert.deepEqual(harness.store.getSnapshot().path, [
+    { r: 0, c: 0 },
+    { r: 1, c: 1 },
+    { r: 1, c: 2 },
+    { r: 0, c: 1 },
+  ]);
+
+  harness.gridEl.dispatch('keyup', createKeyEvent('ArrowLeft'));
+  harness.gridEl.dispatch('keyup', createKeyEvent('ArrowUp'));
+});
+
+test('dom input adapter can chain a delayed stitched diagonal after an existing diagonal crossing', (t) => {
+  const harness = createGridHarness(t, {
+    level: {
+      name: 'Existing Diagonal Chain',
+      grid: [
+        '...',
+        '...',
+        '...',
+      ],
+      stitches: [[1, 1], [2, 2]],
+      cornerCounts: [],
+    },
+    metrics: {
+      rows: 3,
+      cols: 3,
+      left: 0,
+      top: 0,
+      right: 60,
+      bottom: 60,
+      size: 20,
+      gap: 0,
+      pad: 0,
+      step: 20,
+    },
+  });
+  harness.adapter.setKeyboardGamepadControlsEnabled(true);
+  harness.gridEl.focus();
+
+  harness.gridEl.dispatch('keydown', createKeyEvent('Enter'));
+  tapDirectionalKeys(harness, ['ArrowDown', 'ArrowRight']);
+  assert.deepEqual(harness.store.getSnapshot().path, [
+    { r: 0, c: 0 },
+    { r: 1, c: 1 },
+  ]);
+
+  harness.gridEl.dispatch('keydown', createKeyEvent('ArrowDown'));
+  harness.flushAllRafs(16, 6);
+  assert.deepEqual(harness.store.getSnapshot().path, [
+    { r: 0, c: 0 },
+    { r: 1, c: 1 },
+    { r: 2, c: 1 },
+  ]);
+
+  harness.gridEl.dispatch('keydown', createKeyEvent('ArrowRight'));
+  harness.flushAllRafs(32, 6);
+
+  assert.equal(getLastGameCommandIntent(harness)?.payload.commandType, GAME_COMMANDS.APPLY_PATH_DRAG_SEQUENCE);
+  assert.deepEqual(getLastGameCommandIntent(harness)?.payload.side, 'end');
+  assert.deepEqual(getLastGameCommandIntent(harness)?.payload.steps, [
+    { r: 1, c: 1 },
+    { r: 2, c: 2 },
+  ]);
+  assert.deepEqual(harness.store.getSnapshot().path, [
+    { r: 0, c: 0 },
+    { r: 1, c: 1 },
+    { r: 2, c: 2 },
+  ]);
+
+  harness.gridEl.dispatch('keyup', createKeyEvent('ArrowRight'));
+  harness.gridEl.dispatch('keyup', createKeyEvent('ArrowDown'));
+});
+
+test('dom input adapter treats a fresh diagonal chord after idle as a new move instead of replacing the previous tap', (t) => {
+  const harness = createGridHarness(t, {
+    level: {
+      name: 'Fresh Chord After Idle',
+      grid: [
+        '...',
+        '...',
+      ],
+      stitches: [[1, 1], [1, 2]],
+      cornerCounts: [],
+    },
+    metrics: {
+      rows: 2,
+      cols: 3,
+      left: 0,
+      top: 0,
+      right: 60,
+      bottom: 40,
+      size: 20,
+      gap: 0,
+      pad: 0,
+      step: 20,
+    },
+  });
+  harness.adapter.setKeyboardGamepadControlsEnabled(true);
+  harness.gridEl.focus();
+
+  harness.gridEl.dispatch('keydown', createKeyEvent('Enter'));
+  tapDirectionalKeys(harness, ['ArrowDown', 'ArrowRight']);
+  tapDirectionalKeys(harness, ['ArrowRight']);
+  tapDirectionalKeys(harness, ['ArrowUp']);
+  tapDirectionalKeys(harness, ['ArrowLeft']);
+
+  assert.deepEqual(harness.store.getSnapshot().path, [
+    { r: 0, c: 0 },
+    { r: 1, c: 1 },
+    { r: 1, c: 2 },
+    { r: 0, c: 2 },
+    { r: 0, c: 1 },
+  ]);
+
+  tapDirectionalKeys(harness, ['ArrowDown', 'ArrowLeft'], 96);
+
+  assert.deepEqual(harness.store.getSnapshot().path, [
+    { r: 0, c: 0 },
+    { r: 1, c: 1 },
+    { r: 1, c: 2 },
+    { r: 0, c: 2 },
+    { r: 0, c: 1 },
+    { r: 1, c: 0 },
+  ]);
+  assert.deepEqual(getLastBoardNavIntent(harness)?.payload.boardSelection, {
+    kind: 'path-end',
+    r: 1,
+    c: 0,
+  });
+});
+
+test('dom input adapter splits an away-from-stitch diagonal chord into two normal moves', (t) => {
+  const harness = createGridHarness(t, {
+    level: {
+      name: 'Away From Stitch Chord',
+      grid: [
+        '...',
+        '...',
+        '...',
+      ],
+      stitches: [[2, 2]],
+      cornerCounts: [],
+    },
+    metrics: {
+      rows: 3,
+      cols: 3,
+      left: 0,
+      top: 0,
+      right: 60,
+      bottom: 60,
+      size: 20,
+      gap: 0,
+      pad: 0,
+      step: 20,
+    },
+  });
+  harness.adapter.setKeyboardGamepadControlsEnabled(true);
+  harness.gridEl.focus();
+
+  tapDirectionalKeys(harness, ['ArrowDown']);
+  tapDirectionalKeys(harness, ['ArrowRight']);
+  harness.gridEl.dispatch('keydown', createKeyEvent('Enter'));
+  assert.deepEqual(harness.store.getSnapshot().path, [
+    { r: 1, c: 1 },
+  ]);
+
+  tapDirectionalKeys(harness, ['ArrowUp', 'ArrowLeft'], 64);
+
+  assert.deepEqual(harness.store.getSnapshot().path, [
+    { r: 1, c: 1 },
+    { r: 0, c: 1 },
+    { r: 0, c: 0 },
+  ]);
+  assert.deepEqual(getLastBoardNavIntent(harness)?.payload.boardSelection, {
+    kind: 'path-end',
+    r: 0,
+    c: 0,
+  });
+});
+
+test('dom input adapter splits a diagonal chord into two normal moves when no adjacent stitch is present', (t) => {
+  const harness = createGridHarness(t, {
+    level: {
+      name: 'No Stitch Chord',
+      grid: [
+        '...',
+        '...',
+        '...',
+      ],
+      stitches: [],
+      cornerCounts: [],
+    },
+    metrics: {
+      rows: 3,
+      cols: 3,
+      left: 0,
+      top: 0,
+      right: 60,
+      bottom: 60,
+      size: 20,
+      gap: 0,
+      pad: 0,
+      step: 20,
+    },
+  });
+  harness.adapter.setKeyboardGamepadControlsEnabled(true);
+  harness.gridEl.focus();
+
+  tapDirectionalKeys(harness, ['ArrowDown']);
+  tapDirectionalKeys(harness, ['ArrowRight']);
+  harness.gridEl.dispatch('keydown', createKeyEvent('Enter'));
+
+  tapDirectionalKeys(harness, ['ArrowUp', 'ArrowLeft'], 80);
+
+  assert.deepEqual(harness.store.getSnapshot().path, [
+    { r: 1, c: 1 },
+    { r: 0, c: 1 },
+    { r: 0, c: 0 },
+  ]);
+  assert.deepEqual(getLastBoardNavIntent(harness)?.payload.boardSelection, {
+    kind: 'path-end',
+    r: 0,
+    c: 0,
+  });
+});
+
+test('dom input adapter does not replay an already-consumed axis when splitting a held non-stitched chord', (t) => {
+  const harness = createGridHarness(t, {
+    level: {
+      name: 'No Stitch Held Chord',
+      grid: [
+        '....',
+        '....',
+        '....',
+        '....',
+      ],
+      stitches: [],
+      cornerCounts: [],
+    },
+    metrics: {
+      rows: 4,
+      cols: 4,
+      left: 0,
+      top: 0,
+      right: 80,
+      bottom: 80,
+      size: 20,
+      gap: 0,
+      pad: 0,
+      step: 20,
+    },
+  });
+  harness.adapter.setKeyboardGamepadControlsEnabled(true);
+  harness.gridEl.focus();
+
+  tapDirectionalKeys(harness, ['ArrowDown']);
+  tapDirectionalKeys(harness, ['ArrowDown']);
+  tapDirectionalKeys(harness, ['ArrowRight']);
+  tapDirectionalKeys(harness, ['ArrowRight']);
+  harness.gridEl.dispatch('keydown', createKeyEvent('Enter'));
+
+  harness.gridEl.dispatch('keydown', createKeyEvent('ArrowUp'));
+  harness.flushAllRafs(16, 6);
+  assert.deepEqual(harness.store.getSnapshot().path, [
+    { r: 2, c: 2 },
+    { r: 1, c: 2 },
+  ]);
+
+  harness.gridEl.dispatch('keydown', createKeyEvent('ArrowLeft'));
+  harness.flushAllRafs(32, 6);
+
+  assert.deepEqual(harness.store.getSnapshot().path, [
+    { r: 2, c: 2 },
+    { r: 1, c: 2 },
+    { r: 1, c: 1 },
+  ]);
+  assert.deepEqual(getLastBoardNavIntent(harness)?.payload.boardSelection, {
+    kind: 'path-end',
+    r: 1,
+    c: 1,
+  });
+
+  harness.gridEl.dispatch('keyup', createKeyEvent('ArrowLeft'));
+  harness.gridEl.dispatch('keyup', createKeyEvent('ArrowUp'));
+});
+
+test('dom input adapter does not replay an already-consumed axis for free cursor movement when a held chord forms', (t) => {
+  const harness = createGridHarness(t, {
+    level: {
+      name: 'Free Cursor Held Chord',
+      grid: [
+        '....',
+        '....',
+        '....',
+        '....',
+      ],
+      stitches: [],
+      cornerCounts: [],
+    },
+    metrics: {
+      rows: 4,
+      cols: 4,
+      left: 0,
+      top: 0,
+      right: 80,
+      bottom: 80,
+      size: 20,
+      gap: 0,
+      pad: 0,
+      step: 20,
+    },
+  });
+  harness.adapter.setKeyboardGamepadControlsEnabled(true);
+  harness.gridEl.focus();
+
+  tapDirectionalKeys(harness, ['ArrowDown']);
+  tapDirectionalKeys(harness, ['ArrowDown']);
+  tapDirectionalKeys(harness, ['ArrowRight']);
+  tapDirectionalKeys(harness, ['ArrowRight']);
+  assert.deepEqual(getLastBoardNavIntent(harness)?.payload.boardCursor, {
+    r: 2,
+    c: 2,
+  });
+  assert.equal(getLastBoardNavIntent(harness)?.payload.boardSelection, null);
+
+  harness.gridEl.dispatch('keydown', createKeyEvent('ArrowUp'));
+  harness.flushAllRafs(16, 6);
+  assert.deepEqual(getLastBoardNavIntent(harness)?.payload.boardCursor, {
+    r: 1,
+    c: 2,
+  });
+
+  harness.gridEl.dispatch('keydown', createKeyEvent('ArrowLeft'));
+  harness.flushAllRafs(32, 6);
+
+  assert.deepEqual(getLastBoardNavIntent(harness)?.payload.boardCursor, {
+    r: 1,
+    c: 1,
+  });
+  assert.equal(getLastBoardNavIntent(harness)?.payload.boardSelection, null);
+
+  harness.gridEl.dispatch('keyup', createKeyEvent('ArrowLeft'));
+  harness.gridEl.dispatch('keyup', createKeyEvent('ArrowUp'));
+});
+
 test('dom input adapter polls standard gamepad movement with repeat timing and ignores ambiguous directions', (t) => {
   const harness = createGridHarness(t, {
     level: {
