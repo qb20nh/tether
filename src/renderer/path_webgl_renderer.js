@@ -2014,7 +2014,8 @@ export function createPathWebglRenderer(canvas, options = {}) {
     return reusableMesh.mainTravel;
   };
 
-  const destroy = () => {
+  const destroy = (options = {}) => {
+    const releaseContext = options.releaseContext !== false;
     gl.deleteBuffer(positionBuffer);
     gl.deleteBuffer(travelBuffer);
     gl.deleteBuffer(cornerFlagBuffer);
@@ -2033,7 +2034,8 @@ export function createPathWebglRenderer(canvas, options = {}) {
       ? gl.getExtension('WEBGL_lose_context')
       : null;
     if (
-      !isContextLost()
+      releaseContext
+      && !isContextLost()
       && loseContextExt
       && typeof loseContextExt.loseContext === 'function'
     ) {

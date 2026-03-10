@@ -59,6 +59,7 @@ const SW_MESSAGE_TYPES = Object.freeze({
 let runtimeInstance = null;
 let runtimeStateAdapter = null;
 let runtimeCoreAdapter = null;
+let runtimeUnloadTeardownBound = false;
 let updateProgressOverlayEl = null;
 let updateProgressOverlayLabelEl = null;
 let updateProgressOverlayActive = false;
@@ -135,12 +136,25 @@ const isLocalhostHostname = (hostname = '') =>
   || hostname === '::1'
   || hostname.endsWith('.localhost');
 
-const teardownRuntime = () => {
+const teardownRuntime = (options = {}) => {
   if (!runtimeInstance) return;
-  runtimeInstance.destroy();
+  runtimeInstance.destroy(options);
   runtimeInstance = null;
   runtimeStateAdapter = null;
   runtimeCoreAdapter = null;
+};
+
+const bindRuntimeUnloadTeardown = () => {
+  if (runtimeUnloadTeardownBound || typeof window === 'undefined') return;
+
+  const handleRuntimeUnload = (event) => {
+    if (event?.type === 'pagehide' && event.persisted) return;
+    teardownRuntime({ releaseWebglContext: false });
+  };
+
+  window.addEventListener('pagehide', handleRuntimeUnload);
+  window.addEventListener('beforeunload', handleRuntimeUnload);
+  runtimeUnloadTeardownBound = true;
 };
 
 const readLastSeenBuildNumber = () => {
@@ -650,18 +664,7 @@ const bindLocaleAvailabilitySync = () => {
 };
 
 export async function initTetherApp() {
-  if (!window._unloadBlockerBound) {
-    const hideBoard = () => {
-      const wrap = document.getElementById(ELEMENT_IDS.BOARD_WRAP);
-      if (wrap) {
-        wrap.style.opacity = '0';
-        wrap.style.transition = 'none';
-      }
-    };
-    window.addEventListener('pagehide', hideBoard);
-    window.addEventListener('beforeunload', hideBoard);
-    window._unloadBlockerBound = true;
-  }
+  bindRuntimeUnloadTeardown();
 
   mountStyles();
 

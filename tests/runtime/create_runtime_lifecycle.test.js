@@ -409,6 +409,23 @@ test('createRuntime destroy removes listeners, disconnects observers, and cancel
   assert.equal(writeSessionBoards.length, 0);
 });
 
+test('createRuntime destroy forwards renderer teardown options', (t) => {
+  const env = installBrowserEnv(t);
+  const unmountOptions = [];
+  const harness = createRuntimeHarness({
+    rendererOverrides: {
+      unmount: (options) => {
+        unmountOptions.push(options);
+      },
+    },
+  });
+
+  harness.runtime.start();
+  harness.runtime.destroy({ releaseWebglContext: false });
+
+  assert.deepEqual(unmountOptions, [{ releaseWebglContext: false }]);
+});
+
 test('createRuntime daily solve fires onDailySolvedDateChanged exactly once', (t) => {
   const env = installBrowserEnv(t);
   const calls = [];
@@ -765,6 +782,30 @@ test('createRuntime applies persisted low power mode before first level render',
   assert.deepEqual(harness.getLowPowerSetCalls(), [true]);
   assert.equal(harness.refs.lowPowerToggle.checked, true);
   assert.equal(env.rafCallbacks.size, 1);
+
+  harness.runtime.destroy();
+});
+
+test('createRuntime applies persisted low power mode before mounting the renderer', (t) => {
+  const env = installBrowserEnv(t);
+  const callOrder = [];
+  const harness = createRuntimeHarness({
+    persistenceInitialState: {
+      lowPowerModeEnabled: true,
+    },
+    rendererOverrides: {
+      mount: () => {
+        callOrder.push('mount');
+      },
+      setLowPowerMode: (enabled) => {
+        callOrder.push(`lowPower:${enabled}`);
+      },
+    },
+  });
+
+  harness.runtime.start();
+
+  assert.deepEqual(callOrder.slice(0, 2), ['lowPower:true', 'mount']);
 
   harness.runtime.destroy();
 });

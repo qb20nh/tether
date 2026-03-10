@@ -1920,9 +1920,10 @@ export function createRuntime(options) {
     document.documentElement.lang = activeLocale;
     applyTextDirection(activeLocale);
 
+    applyLowPowerMode(lowPowerModeEnabled, { force: true });
     renderer.mount();
     const refs = renderer.getRefs();
-    applyLowPowerMode(lowPowerModeEnabled, { force: true });
+    syncLowPowerToggle();
 
     if (refs.legend) {
       refs.legend.innerHTML = ui.buildLegendTemplate(
@@ -1994,7 +1995,7 @@ export function createRuntime(options) {
     startLowPowerHintDetector();
   };
 
-  const destroy = () => {
+  const destroy = (options = {}) => {
     destroyed = true;
     started = false;
     if (layoutRafId) {
@@ -2033,7 +2034,7 @@ export function createRuntime(options) {
     windowResizeHandler = null;
     clearDailyCountdownTimer();
     input.unbind();
-    renderer.unmount();
+    renderer.unmount(options);
   };
 
   return {

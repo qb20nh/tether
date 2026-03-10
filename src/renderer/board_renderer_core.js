@@ -4208,14 +4208,16 @@ return {
     clearPathTransitionCompensationBuffer();
   },
 
-  destroy() {
+  destroy(options = {}) {
     clearDropTarget();
     hideWallDragGhost();
     syncPathTipDragHoverCell({ isPathDragging: false, pathDragCursor: null }, []);
     clearInteractiveResizeTimer();
     clearLowPowerFrameDelayTimer();
     stopPathAnimation();
-    refs?.pathRenderer?.destroy?.();
+    refs?.pathRenderer?.destroy?.({
+      releaseContext: options.releaseWebglContext !== false,
+    });
     pathAnimationEngine.resetForCacheElements(null);
     refs = null;
     resetCoreState();

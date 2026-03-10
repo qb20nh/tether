@@ -500,6 +500,7 @@ const createFakeWebgl2 = () => {
 const createFakePathRenderer = () => ({
   calls: [],
   destroyed: false,
+  destroyCalls: [],
   resizeCalls: [],
   drawPathFrame(payload) {
     this.calls.push({
@@ -512,8 +513,9 @@ const createFakePathRenderer = () => ({
   resize(width, height, dpr) {
     this.resizeCalls.push({ width, height, dpr });
   },
-  destroy() {
+  destroy(options) {
     this.destroyed = true;
+    this.destroyCalls.push(options);
   },
 });
 
@@ -783,6 +785,16 @@ test('createBoardRendererCore destroy clears animation and remount starts clean'
   assert.equal(core.getRefs(), secondRefs);
   assert.equal(getGridCell(secondRefs, 0, 0, 2).classList.contains('pathTipDragHover'), false);
   assert.equal(getGridCell(secondRefs, 0, 1, 2).classList.contains('dropTarget'), false);
+});
+
+test('createBoardRendererCore destroy forwards the WebGL release option', () => {
+  const core = createBoardRendererCore();
+  const refs = createShellRefs();
+
+  core.mount(refs);
+  core.destroy({ releaseWebglContext: false });
+
+  assert.deepEqual(refs.pathRenderer.destroyCalls, [{ releaseContext: false }]);
 });
 
 test('createBoardRendererCore applies incremental path patches for end/start batches and mixed endpoint turns', (t) => {

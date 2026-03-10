@@ -29,10 +29,12 @@ const assertTravelFinite = (mesh) => {
 
 const createFakeWebgl2 = () => {
   let nextId = 1;
+  let contextLost = false;
   const counters = {
     bufferData: 0,
     bufferSubData: 0,
     drawElements: 0,
+    loseContext: 0,
   };
   const gl = {
     VERTEX_SHADER: 0x8b31,
@@ -85,6 +87,16 @@ const createFakeWebgl2 = () => {
     deleteBuffer() {},
     deleteVertexArray() {},
     getUniformLocation() { return { id: nextId++ }; },
+    isContextLost() { return contextLost; },
+    getExtension(name) {
+      if (name !== 'WEBGL_lose_context') return null;
+      return {
+        loseContext() {
+          counters.loseContext += 1;
+          contextLost = true;
+        },
+      };
+    },
   };
   return { gl, counters };
 };
@@ -465,6 +477,31 @@ test('createPathWebglRenderer forwards the antialias option to WebGL2 context cr
     assert.equal(contextOptions.at(-1)?.antialias, false);
     assert.equal(renderer.antialiasEnabled, false);
     renderer.destroy();
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+test('createPathWebglRenderer destroy can skip explicit WebGL context loss', () => {
+  const originalWindow = globalThis.window;
+  globalThis.window = { devicePixelRatio: 1 };
+  try {
+    const fake = createFakeWebgl2();
+    const fakeCanvas = {
+      width: 0,
+      height: 0,
+      clientWidth: 100,
+      clientHeight: 100,
+      style: {},
+      getContext(kind) {
+        if (kind === 'webgl2') return fake.gl;
+        return null;
+      },
+    };
+
+    const renderer = createPathWebglRenderer(fakeCanvas);
+    renderer.destroy({ releaseContext: false });
+    assert.equal(fake.counters.loseContext, 0);
   } finally {
     globalThis.window = originalWindow;
   }

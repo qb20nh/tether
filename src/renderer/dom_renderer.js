@@ -379,9 +379,9 @@ export function createDomRenderer(options = {}) {
       setDraggingBodyClasses(interactionModel);
     },
 
-    unmount() {
+    unmount(options = {}) {
       setDraggingBodyClasses({ isWallDragging: false, isPathDragging: false });
-      boardRendererCore.destroy();
+      boardRendererCore.destroy(options);
       if (refs?.boardWrap) {
         refs.boardWrap.classList.remove(
           'isComplete',
