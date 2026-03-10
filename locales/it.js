@@ -56,6 +56,8 @@ export default {
     "autoUpdateEnable": "Attiva aggiornamento automatico",
     "lowPowerMode": "Modalità risparmio energetico",
     "lowPowerModeEnable": "Attiva modalità risparmio energetico",
+    "keyboardGamepadControls": "Controlli tastiera / gamepad",
+    "keyboardGamepadControlsEnable": "Attiva controlli tastiera / gamepad",
     "lowPowerModeHintToast": "Se il percorso scatta mentre lo trascini, prova ad attivare la modalità risparmio energetico nelle impostazioni.",
     "newVersionAvailableTitle": "Nuova versione disponibile",
     "newVersionAvailableBody": "Tocca per aggiornare all'ultima versione.",

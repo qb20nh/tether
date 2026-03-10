@@ -49,6 +49,7 @@ export const UI_ACTIONS = Object.freeze({
   LOCALE_CHANGE: 'locale/change',
   THEME_TOGGLE: 'theme/toggle',
   LOW_POWER_TOGGLE: 'low-power/toggle',
+  KEYBOARD_GAMEPAD_CONTROLS_TOGGLE: 'keyboard-gamepad-controls/toggle',
   PANEL_TOGGLE: 'panel/toggle',
   SETTINGS_TOGGLE: 'settings/toggle',
   SETTINGS_CLOSE: 'settings/close',
@@ -60,4 +61,5 @@ export const INTERACTION_UPDATES = Object.freeze({
   PATH_DRAG: 'path-drag',
   WALL_DRAG: 'wall-drag',
   WALL_DROP_TARGET: 'wall-drop-target',
+  BOARD_NAV: 'board-nav',
 });

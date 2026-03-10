@@ -56,6 +56,8 @@ export default {
     "autoUpdateEnable": "Activar actualización automática",
     "lowPowerMode": "Modo de bajo consumo",
     "lowPowerModeEnable": "Activar modo de bajo consumo",
+    "keyboardGamepadControls": "Controles de teclado / gamepad",
+    "keyboardGamepadControlsEnable": "Activar controles de teclado / gamepad",
     "lowPowerModeHintToast": "Si al arrastrar la ruta notas tirones, prueba activar el modo de bajo consumo en Configuración.",
     "newVersionAvailableTitle": "Nueva versión disponible",
     "newVersionAvailableBody": "Toca para actualizar a la versión más reciente.",

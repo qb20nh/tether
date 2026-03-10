@@ -2,7 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createGameStateStore } from '../../src/state/game_state_store.js';
 import { createDomInputAdapter } from '../../src/input/dom_input_adapter.js';
-import { GAME_COMMANDS, INTENT_TYPES, UI_ACTIONS } from '../../src/runtime/intents.js';
+import {
+  GAME_COMMANDS,
+  INTENT_TYPES,
+  UI_ACTIONS,
+  INTERACTION_UPDATES,
+} from '../../src/runtime/intents.js';
 
 const LEVEL = {
   name: 'Input Adapter',
@@ -15,13 +20,16 @@ const LEVEL = {
 };
 
 class FakeElement {
-  constructor() {
+  constructor(tagName = 'div') {
+    this.tagName = String(tagName).toUpperCase();
     this.listeners = new Map();
     this.style = {
       getPropertyValue: () => '',
       setProperty() {},
     };
     this.dataset = {};
+    this.parentElement = null;
+    this.open = false;
   }
 
   addEventListener(eventName, handler) {
@@ -39,6 +47,20 @@ class FakeElement {
     }
   }
 
+  focus() {
+    if (globalThis.document) {
+      globalThis.document.activeElement = this;
+    }
+    this.dispatch('focus', { target: this });
+  }
+
+  blur() {
+    if (globalThis.document?.activeElement === this) {
+      globalThis.document.activeElement = globalThis.document.body || null;
+    }
+    this.dispatch('blur', { target: this });
+  }
+
   querySelector() {
     return null;
   }
@@ -48,26 +70,41 @@ class FakeElement {
   }
 
   closest(selector) {
+    if (selector === 'dialog' && this.tagName === 'DIALOG') return this;
     return selector === '.cell' ? this : null;
+  }
+
+  matches(selector) {
+    if (selector === 'dialog') return this.tagName === 'DIALOG';
+    return false;
+  }
+
+  setAttribute(name, value) {
+    this[name] = value;
+  }
+
+  removeAttribute(name) {
+    delete this[name];
   }
 }
 
 const createRefs = (gridEl) => ({
   gridEl,
-  levelSel: new FakeElement(),
-  infiniteSel: new FakeElement(),
-  langSel: new FakeElement(),
-  themeToggle: new FakeElement(),
-  lowPowerToggle: new FakeElement(),
-  settingsToggle: new FakeElement(),
+  levelSel: new FakeElement('select'),
+  infiniteSel: new FakeElement('select'),
+  langSel: new FakeElement('select'),
+  themeToggle: new FakeElement('button'),
+  lowPowerToggle: new FakeElement('input'),
+  keyboardGamepadToggle: new FakeElement('input'),
+  settingsToggle: new FakeElement('button'),
   settingsPanel: new FakeElement(),
-  resetBtn: new FakeElement(),
-  reverseBtn: new FakeElement(),
-  nextLevelBtn: new FakeElement(),
-  prevInfiniteBtn: new FakeElement(),
-  guideToggleBtn: new FakeElement(),
-  legendToggleBtn: new FakeElement(),
-  themeSwitchDialog: new FakeElement(),
+  resetBtn: new FakeElement('button'),
+  reverseBtn: new FakeElement('button'),
+  nextLevelBtn: new FakeElement('button'),
+  prevInfiniteBtn: new FakeElement('button'),
+  guideToggleBtn: new FakeElement('button'),
+  legendToggleBtn: new FakeElement('button'),
+  themeSwitchDialog: new FakeElement('dialog'),
 });
 
 const createPointerEvent = (pointerId, clientX, clientY) => ({
@@ -78,16 +115,75 @@ const createPointerEvent = (pointerId, clientX, clientY) => ({
   preventDefault() {},
 });
 
+const createKeyEvent = (key, overrides = {}) => ({
+  key,
+  repeat: false,
+  altKey: false,
+  ctrlKey: false,
+  metaKey: false,
+  preventDefault() {},
+  ...overrides,
+});
+
+const createGamepad = ({ buttons = {}, axes = [0, 0], mapping = 'standard' } = {}) => {
+  const gamepadButtons = Array.from({ length: 16 }, () => ({ pressed: false, value: 0 }));
+  Object.entries(buttons).forEach(([index, pressed]) => {
+    gamepadButtons[Number(index)] = {
+      pressed: Boolean(pressed),
+      value: pressed ? 1 : 0,
+    };
+  });
+  return {
+    connected: true,
+    mapping,
+    buttons: gamepadButtons,
+    axes,
+  };
+};
+
+const getLastIntent = (harness, matcher) => {
+  for (let index = harness.emittedIntents.length - 1; index >= 0; index -= 1) {
+    const intent = harness.emittedIntents[index];
+    if (matcher(intent)) return intent;
+  }
+  return null;
+};
+
+const getLastBoardNavIntent = (harness) => getLastIntent(
+  harness,
+  (intent) => (
+    intent?.type === INTENT_TYPES.INTERACTION_UPDATE
+    && intent.payload?.updateType === INTERACTION_UPDATES.BOARD_NAV
+  ),
+);
+
+const tapDirectionalKeys = (harness, keys, timestamp = 16) => {
+  keys.forEach((key) => {
+    harness.gridEl.dispatch('keydown', createKeyEvent(key));
+  });
+  harness.flushAllRafs(timestamp, 6);
+  keys.forEach((key) => {
+    harness.gridEl.dispatch('keyup', createKeyEvent(key));
+  });
+};
+
 const installDomGlobals = (t, metrics, elementFromPoint, windowState = null) => {
   const originalDocument = globalThis.document;
   const originalElement = globalThis.Element;
   const originalGetComputedStyle = globalThis.getComputedStyle;
   const originalWindow = globalThis.window;
+  const originalNavigatorDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+  const originalRaf = globalThis.requestAnimationFrame;
+  const originalCancelRaf = globalThis.cancelAnimationFrame;
 
-  const documentElement = new FakeElement();
-  const documentTarget = new FakeElement();
+  const documentElement = new FakeElement('html');
+  const documentTarget = new FakeElement('document');
+  const body = new FakeElement('body');
   documentTarget.documentElement = documentElement;
+  documentTarget.body = body;
+  documentTarget.activeElement = body;
   documentTarget.elementFromPoint = elementFromPoint;
+  documentTarget.querySelector = () => null;
   const windowTarget = windowState || {
     scrollX: 0,
     scrollY: 0,
@@ -103,10 +199,31 @@ const installDomGlobals = (t, metrics, elementFromPoint, windowState = null) => 
   if (!windowTarget.visualViewport) {
     windowTarget.visualViewport = null;
   }
+  const rafCallbacks = new Map();
+  let nextRafId = 1;
+  let currentGamepads = [];
 
   globalThis.document = documentTarget;
   globalThis.Element = FakeElement;
   globalThis.window = windowTarget;
+  Object.defineProperty(globalThis, 'navigator', {
+    configurable: true,
+    writable: true,
+    value: {
+      getGamepads() {
+        return currentGamepads;
+      },
+    },
+  });
+  globalThis.requestAnimationFrame = (callback) => {
+    const id = nextRafId;
+    nextRafId += 1;
+    rafCallbacks.set(id, callback);
+    return id;
+  };
+  globalThis.cancelAnimationFrame = (id) => {
+    rafCallbacks.delete(id);
+  };
   globalThis.getComputedStyle = () => ({
     getPropertyValue(name) {
       if (name === '--cell') return String(metrics.size);
@@ -123,12 +240,23 @@ const installDomGlobals = (t, metrics, elementFromPoint, windowState = null) => 
     globalThis.document = originalDocument;
     globalThis.Element = originalElement;
     globalThis.window = originalWindow;
+    if (originalNavigatorDescriptor) {
+      Object.defineProperty(globalThis, 'navigator', originalNavigatorDescriptor);
+    } else {
+      delete globalThis.navigator;
+    }
+    globalThis.requestAnimationFrame = originalRaf;
+    globalThis.cancelAnimationFrame = originalCancelRaf;
     globalThis.getComputedStyle = originalGetComputedStyle;
   });
 
   return {
     documentTarget,
     windowTarget,
+    rafCallbacks,
+    setGamepads(gamepads) {
+      currentGamepads = Array.isArray(gamepads) ? gamepads : [];
+    },
   };
 };
 
@@ -175,7 +303,12 @@ const createGridHarness = (t, options = {}) => {
     return cell;
   });
 
-  const { documentTarget, windowTarget } = installDomGlobals(
+  const {
+    documentTarget,
+    windowTarget,
+    rafCallbacks,
+    setGamepads,
+  } = installDomGlobals(
     t,
     metrics,
     elementFromPoint,
@@ -221,6 +354,31 @@ const createGridHarness = (t, options = {}) => {
     windowTarget,
     emittedIntents,
     getRectReads: () => rectReads,
+    flushNextRaf: (timestamp = 16) => {
+      const nextEntry = rafCallbacks.entries().next().value;
+      if (!nextEntry) return false;
+      const [id, callback] = nextEntry;
+      rafCallbacks.delete(id);
+      callback(timestamp);
+      return true;
+    },
+    flushAllRafs: (timestamp = 16, limit = 20) => {
+      let count = 0;
+      while (count < limit) {
+        const didFlush = (() => {
+          const nextEntry = rafCallbacks.entries().next().value;
+          if (!nextEntry) return false;
+          const [id, callback] = nextEntry;
+          rafCallbacks.delete(id);
+          callback(timestamp);
+          return true;
+        })();
+        if (!didFlush) break;
+        count += 1;
+      }
+      return count;
+    },
+    setGamepads,
   };
 };
 
@@ -447,6 +605,422 @@ test('dom input adapter emits low power toggle actions from settings', (t) => {
       enabled: true,
     },
   });
+});
+
+test('dom input adapter emits keyboard/gamepad controls toggle actions from settings', (t) => {
+  const harness = createGridHarness(t);
+
+  harness.refs.keyboardGamepadToggle.dispatch('change', {
+    target: { checked: true },
+  });
+
+  assert.deepEqual(harness.emittedIntents.at(-1), {
+    type: INTENT_TYPES.UI_ACTION,
+    payload: {
+      actionType: UI_ACTIONS.KEYBOARD_GAMEPAD_CONTROLS_TOGGLE,
+      enabled: true,
+    },
+  });
+});
+
+test('dom input adapter ignores board keyboard input while controls are disabled', (t) => {
+  const harness = createGridHarness(t);
+  harness.gridEl.focus();
+
+  harness.gridEl.dispatch('keydown', createKeyEvent('ArrowRight'));
+  harness.flushNextRaf(16);
+
+  assert.deepEqual(harness.store.getSnapshot().path, []);
+  assert.equal(getLastBoardNavIntent(harness), null);
+});
+
+test('dom input adapter drives board cursor and path selection with keyboard when enabled', (t) => {
+  const harness = createGridHarness(t);
+  harness.adapter.setKeyboardGamepadControlsEnabled(true);
+  harness.gridEl.focus();
+
+  harness.gridEl.dispatch('keydown', createKeyEvent('Enter'));
+  assert.deepEqual(harness.store.getSnapshot().path, [{ r: 0, c: 0 }]);
+  assert.deepEqual(getLastBoardNavIntent(harness)?.payload, {
+    updateType: INTERACTION_UPDATES.BOARD_NAV,
+    isBoardNavActive: true,
+    boardCursor: { r: 0, c: 0 },
+    boardSelection: { kind: 'path-end', r: 0, c: 0 },
+    boardSelectionInteractive: true,
+  });
+
+  tapDirectionalKeys(harness, ['ArrowRight']);
+  assert.deepEqual(harness.store.getSnapshot().path, [
+    { r: 0, c: 0 },
+    { r: 0, c: 1 },
+  ]);
+  assert.deepEqual(getLastBoardNavIntent(harness)?.payload.boardSelection, {
+    kind: 'path-end',
+    r: 0,
+    c: 1,
+  });
+
+  tapDirectionalKeys(harness, ['ArrowLeft']);
+  assert.deepEqual(harness.store.getSnapshot().path, [{ r: 0, c: 0 }]);
+  assert.deepEqual(getLastBoardNavIntent(harness)?.payload.boardSelection, {
+    kind: 'path-end',
+    r: 0,
+    c: 0,
+  });
+
+  harness.gridEl.dispatch('keydown', createKeyEvent('Spacebar'));
+  assert.deepEqual(harness.store.getSnapshot().path, []);
+  assert.equal(getLastBoardNavIntent(harness)?.payload.boardSelection, null);
+
+  tapDirectionalKeys(harness, ['ArrowRight']);
+  assert.deepEqual(harness.store.getSnapshot().path, []);
+  assert.deepEqual(getLastBoardNavIntent(harness)?.payload.boardCursor, { r: 0, c: 1 });
+
+  tapDirectionalKeys(harness, ['ArrowLeft']);
+  harness.gridEl.dispatch('keydown', createKeyEvent('Enter'));
+  assert.deepEqual(harness.store.getSnapshot().path, [{ r: 0, c: 0 }]);
+  assert.deepEqual(getLastBoardNavIntent(harness)?.payload.boardSelection, {
+    kind: 'path-end',
+    r: 0,
+    c: 0,
+  });
+});
+
+test('dom input adapter shows a held-only selection highlight for non-interactive confirm', (t) => {
+  const harness = createGridHarness(t, {
+    level: {
+      name: 'Path Interior',
+      grid: ['...'],
+      stitches: [],
+      cornerCounts: [],
+    },
+    metrics: {
+      rows: 1,
+      cols: 3,
+      left: 0,
+      top: 0,
+      right: 60,
+      bottom: 20,
+      size: 20,
+      gap: 0,
+      pad: 0,
+      step: 20,
+    },
+  });
+  harness.adapter.setKeyboardGamepadControlsEnabled(true);
+  harness.store.dispatch({ type: GAME_COMMANDS.START_OR_STEP, payload: { r: 0, c: 0 } });
+  harness.store.dispatch({ type: GAME_COMMANDS.START_OR_STEP, payload: { r: 0, c: 1 } });
+  harness.store.dispatch({ type: GAME_COMMANDS.START_OR_STEP, payload: { r: 0, c: 2 } });
+  harness.adapter.syncSnapshot();
+  harness.gridEl.focus();
+
+  tapDirectionalKeys(harness, ['ArrowRight']);
+  assert.equal(getLastBoardNavIntent(harness)?.payload.boardSelection, null);
+
+  harness.gridEl.dispatch('keydown', createKeyEvent('Enter'));
+  assert.deepEqual(getLastBoardNavIntent(harness)?.payload.boardSelection, {
+    kind: 'path-end',
+    r: 0,
+    c: 1,
+  });
+  assert.equal(getLastBoardNavIntent(harness)?.payload.boardSelectionInteractive, false);
+
+  harness.gridEl.dispatch('keyup', createKeyEvent('Enter'));
+  assert.equal(getLastBoardNavIntent(harness)?.payload.boardSelection, null);
+  assert.equal(getLastBoardNavIntent(harness)?.payload.boardSelectionInteractive, null);
+  assert.deepEqual(getLastBoardNavIntent(harness)?.payload.boardCursor, { r: 0, c: 1 });
+});
+
+test('dom input adapter nudges board nav toward invalid keyboard moves only while held', (t) => {
+  const harness = createGridHarness(t);
+  harness.adapter.setKeyboardGamepadControlsEnabled(true);
+  harness.gridEl.focus();
+
+  harness.gridEl.dispatch('keydown', createKeyEvent('ArrowLeft'));
+  harness.flushNextRaf(16);
+  harness.flushNextRaf(16);
+  assert.deepEqual(getLastBoardNavIntent(harness)?.payload.boardCursor, { r: 0, c: 0 });
+  assert.deepEqual(getLastBoardNavIntent(harness)?.payload.boardNavPreviewDelta, { r: 0, c: -1 });
+
+  harness.gridEl.dispatch('keyup', createKeyEvent('ArrowLeft'));
+  assert.deepEqual(getLastBoardNavIntent(harness)?.payload.boardCursor, { r: 0, c: 0 });
+  assert.equal(
+    Object.prototype.hasOwnProperty.call(getLastBoardNavIntent(harness)?.payload || {}, 'boardNavPreviewDelta'),
+    false,
+  );
+});
+
+test('dom input adapter selects and moves movable walls with keyboard', (t) => {
+  const harness = createGridHarness(t, {
+    level: {
+      name: 'Wall Move',
+      grid: ['.m'],
+      stitches: [],
+      cornerCounts: [],
+    },
+    metrics: {
+      rows: 1,
+      cols: 2,
+      left: 0,
+      top: 0,
+      right: 40,
+      bottom: 20,
+      size: 20,
+      gap: 0,
+      pad: 0,
+      step: 20,
+    },
+  });
+  harness.adapter.setKeyboardGamepadControlsEnabled(true);
+  harness.gridEl.focus();
+
+  tapDirectionalKeys(harness, ['ArrowRight']);
+  harness.gridEl.dispatch('keydown', createKeyEvent('Enter'));
+  assert.deepEqual(getLastBoardNavIntent(harness)?.payload.boardSelection, {
+    kind: 'wall',
+    r: 0,
+    c: 1,
+  });
+
+  tapDirectionalKeys(harness, ['ArrowLeft']);
+  const snapshot = harness.store.getSnapshot();
+  assert.equal(snapshot.gridData[0][0], 'm');
+  assert.equal(snapshot.gridData[0][1], '.');
+  assert.deepEqual(getLastBoardNavIntent(harness)?.payload.boardSelection, {
+    kind: 'wall',
+    r: 0,
+    c: 0,
+  });
+});
+
+test('dom input adapter does not snap the keyboard cursor to the last clicked cell', (t) => {
+  const harness = createGridHarness(t, {
+    level: {
+      name: 'Wall Click',
+      grid: ['.m'],
+      stitches: [],
+      cornerCounts: [],
+    },
+    metrics: {
+      rows: 1,
+      cols: 2,
+      left: 0,
+      top: 0,
+      right: 40,
+      bottom: 20,
+      size: 20,
+      gap: 0,
+      pad: 0,
+      step: 20,
+    },
+  });
+  harness.adapter.setKeyboardGamepadControlsEnabled(true);
+  harness.gridEl.focus();
+
+  assert.deepEqual(getLastBoardNavIntent(harness)?.payload.boardCursor, { r: 0, c: 0 });
+
+  harness.gridEl.dispatch('pointerdown', createPointerEvent(1, 30, 10));
+  harness.gridEl.dispatch('pointerup', createPointerEvent(1, 30, 10));
+
+  assert.deepEqual(getLastBoardNavIntent(harness)?.payload, {
+    updateType: INTERACTION_UPDATES.BOARD_NAV,
+    isBoardNavActive: true,
+    boardCursor: { r: 0, c: 0 },
+    boardSelection: null,
+    boardSelectionInteractive: null,
+  });
+});
+
+test('dom input adapter emits board shortcut intents only from focused grid and escape remains global', (t) => {
+  const harness = createGridHarness(t);
+  harness.adapter.setKeyboardGamepadControlsEnabled(true);
+
+  globalThis.document.activeElement = harness.refs.levelSel;
+  harness.gridEl.dispatch('keydown', createKeyEvent('ArrowRight'));
+  harness.flushAllRafs(16, 4);
+  assert.deepEqual(getLastBoardNavIntent(harness)?.payload.boardCursor, { r: 0, c: 0 });
+
+  harness.gridEl.focus();
+  harness.gridEl.dispatch('keydown', createKeyEvent('Backspace'));
+  assert.deepEqual(harness.emittedIntents.at(-1), {
+    type: INTENT_TYPES.UI_ACTION,
+    payload: { actionType: UI_ACTIONS.RESET_CLICK },
+  });
+
+  harness.gridEl.dispatch('keydown', createKeyEvent('r'));
+  assert.deepEqual(harness.emittedIntents.at(-1), {
+    type: INTENT_TYPES.UI_ACTION,
+    payload: { actionType: UI_ACTIONS.REVERSE_CLICK },
+  });
+
+  harness.store.dispatch({
+    type: GAME_COMMANDS.LOAD_LEVEL,
+    payload: { levelIndex: 1 },
+  });
+  harness.adapter.syncSnapshot();
+  harness.gridEl.dispatch('keydown', createKeyEvent('PageUp'));
+  assert.deepEqual(harness.emittedIntents.at(-1), {
+    type: INTENT_TYPES.UI_ACTION,
+    payload: { actionType: UI_ACTIONS.LEVEL_SELECT, value: 0 },
+  });
+
+  harness.gridEl.dispatch('keydown', createKeyEvent('PageDown'));
+  assert.deepEqual(harness.emittedIntents.at(-1), {
+    type: INTENT_TYPES.UI_ACTION,
+    payload: { actionType: UI_ACTIONS.NEXT_LEVEL_CLICK },
+  });
+
+  harness.adapter.setKeyboardGamepadControlsEnabled(false);
+  harness.documentTarget.dispatch('keydown', createKeyEvent('Escape'));
+  assert.deepEqual(harness.emittedIntents.at(-1), {
+    type: INTENT_TYPES.UI_ACTION,
+    payload: { actionType: UI_ACTIONS.DOCUMENT_ESCAPE },
+  });
+});
+
+test('dom input adapter prevents browser scroll defaults for keyboard board controls even on no-op input', (t) => {
+  const harness = createGridHarness(t);
+  harness.adapter.setKeyboardGamepadControlsEnabled(true);
+  harness.gridEl.focus();
+
+  let arrowPrevented = false;
+  harness.gridEl.dispatch('keydown', createKeyEvent('ArrowLeft', {
+    preventDefault() {
+      arrowPrevented = true;
+    },
+  }));
+
+  let pagePrevented = false;
+  harness.gridEl.dispatch('keydown', createKeyEvent('PageUp', {
+    preventDefault() {
+      pagePrevented = true;
+    },
+  }));
+
+  assert.equal(arrowPrevented, true);
+  assert.equal(pagePrevented, true);
+});
+
+test('dom input adapter hides board highlight when the board is not currently controllable', (t) => {
+  const harness = createGridHarness(t);
+  harness.adapter.setKeyboardGamepadControlsEnabled(true);
+
+  assert.equal(getLastBoardNavIntent(harness)?.payload.isBoardNavActive, false);
+
+  harness.gridEl.focus();
+  assert.equal(getLastBoardNavIntent(harness)?.payload.isBoardNavActive, true);
+
+  harness.gridEl.blur();
+  assert.equal(getLastBoardNavIntent(harness)?.payload.isBoardNavActive, false);
+
+  harness.setGamepads([createGamepad({ buttons: { 15: true } })]);
+  harness.flushNextRaf(100);
+  assert.equal(getLastBoardNavIntent(harness)?.payload.isBoardNavActive, true);
+
+  globalThis.document.activeElement = harness.refs.levelSel;
+  harness.documentTarget.dispatch('focusin', { target: harness.refs.levelSel });
+  assert.equal(getLastBoardNavIntent(harness)?.payload.isBoardNavActive, false);
+
+  harness.adapter.setBoardControlSuppressed(true);
+  assert.equal(getLastBoardNavIntent(harness)?.payload.isBoardNavActive, false);
+});
+
+test('dom input adapter supports stitched diagonal keyboard movement from simultaneous axes', (t) => {
+  const harness = createGridHarness(t, {
+    level: {
+      name: 'Stitched Diagonal',
+      grid: [
+        '..',
+        '..',
+      ],
+      stitches: [[1, 1]],
+      cornerCounts: [],
+    },
+  });
+  harness.adapter.setKeyboardGamepadControlsEnabled(true);
+  harness.gridEl.focus();
+
+  harness.gridEl.dispatch('keydown', createKeyEvent('Enter'));
+  tapDirectionalKeys(harness, ['ArrowDown', 'ArrowRight']);
+
+  assert.deepEqual(harness.store.getSnapshot().path, [
+    { r: 0, c: 0 },
+    { r: 1, c: 1 },
+  ]);
+  assert.deepEqual(getLastBoardNavIntent(harness)?.payload.boardSelection, {
+    kind: 'path-end',
+    r: 1,
+    c: 1,
+  });
+});
+
+test('dom input adapter polls standard gamepad movement with repeat timing and ignores ambiguous directions', (t) => {
+  const harness = createGridHarness(t, {
+    level: {
+      name: 'Gamepad Line',
+      grid: ['....'],
+      stitches: [],
+      cornerCounts: [],
+    },
+    metrics: {
+      rows: 1,
+      cols: 4,
+      left: 0,
+      top: 0,
+      right: 80,
+      bottom: 20,
+      size: 20,
+      gap: 0,
+      pad: 0,
+      step: 20,
+    },
+  });
+  harness.adapter.setKeyboardGamepadControlsEnabled(true);
+
+  harness.setGamepads([createGamepad({ buttons: { 15: true } })]);
+  harness.flushNextRaf(100);
+  assert.deepEqual(getLastBoardNavIntent(harness)?.payload.boardCursor, { r: 0, c: 1 });
+
+  harness.flushNextRaf(250);
+  assert.deepEqual(getLastBoardNavIntent(harness)?.payload.boardCursor, { r: 0, c: 1 });
+
+  harness.flushNextRaf(281);
+  assert.deepEqual(getLastBoardNavIntent(harness)?.payload.boardCursor, { r: 0, c: 2 });
+
+  harness.setGamepads([createGamepad({ axes: [0.5, 0] })]);
+  harness.flushNextRaf(400);
+  assert.deepEqual(getLastBoardNavIntent(harness)?.payload.boardCursor, { r: 0, c: 2 });
+
+  harness.setGamepads([createGamepad({ axes: [0.8, 0.8] })]);
+  harness.flushNextRaf(500);
+  assert.deepEqual(getLastBoardNavIntent(harness)?.payload.boardCursor, { r: 0, c: 2 });
+});
+
+test('dom input adapter ignores blocked or non-standard gamepads and edge-triggers gamepad buttons', (t) => {
+  const harness = createGridHarness(t);
+  harness.adapter.setKeyboardGamepadControlsEnabled(true);
+
+  globalThis.document.activeElement = harness.refs.levelSel;
+  harness.setGamepads([createGamepad({ buttons: { 15: true } })]);
+  harness.flushNextRaf(100);
+  assert.deepEqual(getLastBoardNavIntent(harness)?.payload.boardCursor, { r: 0, c: 0 });
+
+  globalThis.document.activeElement = globalThis.document.body;
+  harness.setGamepads([createGamepad({ buttons: { 15: true }, mapping: '' })]);
+  harness.flushNextRaf(200);
+  assert.deepEqual(getLastBoardNavIntent(harness)?.payload.boardCursor, { r: 0, c: 0 });
+
+  harness.setGamepads([createGamepad({ buttons: { 0: true } })]);
+  harness.flushNextRaf(300);
+  harness.flushNextRaf(400);
+  assert.deepEqual(harness.store.getSnapshot().path, [{ r: 0, c: 0 }]);
+  assert.equal(
+    harness.emittedIntents.filter((intent) => (
+      intent?.type === INTENT_TYPES.GAME_COMMAND
+      && intent.payload?.commandType === GAME_COMMANDS.START_OR_STEP
+    )).length,
+    1,
+  );
 });
 
 test('dom input adapter closes settings on outside pointerdown before click', (t) => {

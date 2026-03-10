@@ -111,6 +111,7 @@ const createRefs = () => {
     settingsPanel: createElement(),
     settingsToggle: createElement(),
     lowPowerToggle: createElement(),
+    keyboardGamepadToggle: createElement(),
     themeSwitchMessage: createElement(),
     themeSwitchDialog: createElement(),
     resetBtn: createElement(),
@@ -250,6 +251,8 @@ const createRuntimeHarness = ({
   let unbindCount = 0;
   let lastBindPayload = null;
   const lowPowerSetCalls = [];
+  const keyboardGamepadControlsSetCalls = [];
+  const inputSyncSnapshots = [];
 
   const persistence = {
     ...basePersistence,
@@ -321,6 +324,12 @@ const createRuntimeHarness = ({
         bindCount += 1;
         lastBindPayload = payload;
       },
+      setKeyboardGamepadControlsEnabled: (enabled) => {
+        keyboardGamepadControlsSetCalls.push(Boolean(enabled));
+      },
+      syncSnapshot: (snapshot) => {
+        inputSyncSnapshots.push(snapshot);
+      },
       unbind: () => {
         unbindCount += 1;
       },
@@ -350,6 +359,8 @@ const createRuntimeHarness = ({
     getUnbindCount: () => unbindCount,
     getLastBindPayload: () => lastBindPayload,
     getLowPowerSetCalls: () => [...lowPowerSetCalls],
+    getKeyboardGamepadControlsSetCalls: () => [...keyboardGamepadControlsSetCalls],
+    getInputSyncSnapshots: () => [...inputSyncSnapshots],
   };
 };
 
@@ -948,6 +959,47 @@ test('createRuntime toggles low power mode through runtime-owned state and queue
 
   flushNextRaf(32);
   assert.equal(harness.getResizeCount(), 2);
+
+  harness.runtime.destroy();
+});
+
+test('createRuntime applies persisted keyboard / gamepad controls and syncs board input on startup', (t) => {
+  installBrowserEnv(t);
+  const harness = createRuntimeHarness({
+    persistenceInitialState: {
+      keyboardGamepadControlsEnabled: true,
+    },
+  });
+
+  harness.runtime.start();
+
+  assert.equal(harness.refs.keyboardGamepadToggle.checked, true);
+  assert.deepEqual(harness.getKeyboardGamepadControlsSetCalls(), [true]);
+  assert.equal(harness.getInputSyncSnapshots().length > 0, true);
+
+  harness.runtime.destroy();
+});
+
+test('createRuntime toggles keyboard / gamepad controls through runtime-owned state', (t) => {
+  installBrowserEnv(t);
+  const harness = createRuntimeHarness({
+    persistenceInitialState: {
+      keyboardGamepadControlsEnabled: true,
+    },
+  });
+
+  harness.runtime.start();
+  harness.runtime.emitIntent({
+    type: INTENT_TYPES.UI_ACTION,
+    payload: {
+      actionType: UI_ACTIONS.KEYBOARD_GAMEPAD_CONTROLS_TOGGLE,
+      enabled: false,
+    },
+  });
+
+  assert.equal(harness.refs.keyboardGamepadToggle.checked, false);
+  assert.equal(harness.persistence.readBootState().keyboardGamepadControlsEnabled, false);
+  assert.deepEqual(harness.getKeyboardGamepadControlsSetCalls(), [true, false]);
 
   harness.runtime.destroy();
 });

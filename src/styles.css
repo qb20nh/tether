@@ -1343,7 +1343,7 @@ body.isUpdateApplying .app {
   inset: 0;
   background: rgba(10, 14, 20, 0.46);
   pointer-events: none;
-  z-index: 5;
+  z-index: 7;
   opacity: 0;
   transition: opacity 1000ms ease;
 }
@@ -1393,6 +1393,10 @@ body.isUpdateApplying .app {
   box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0);
 }
 
+.boardWrap.isDailyLocked ~ .boardNavMarker {
+  opacity: 0 !important;
+}
+
 .boardWrap.isDailyLocked .cell::before {
   opacity: 0;
 }
@@ -1432,6 +1436,11 @@ body.isUpdateApplying .app {
   height: calc(var(--grid-rows) * var(--cell) + (var(--grid-rows) - 1) * var(--gap) + (var(--gap) * 2));
   margin: 0 auto;
   contain: layout paint style;
+}
+
+#grid:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
 }
 
 @property --interactive-corner-color {
@@ -1728,6 +1737,69 @@ body:not(.isPathDragging) .cell.pathEnd:active {
 .theme-light .cell.visited {
   background: linear-gradient(180deg, rgba(37, 99, 235, 0.14) 0%, rgba(30, 64, 175, 0.24) 100%);
   border-color: rgba(37, 99, 235, 0.34);
+}
+
+.boardNavMarker {
+  --board-nav-marker-ease: cubic-bezier(0, 0.9, 0.1, 1);
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 6;
+  pointer-events: none;
+  box-sizing: border-box;
+  transform-origin: center;
+  border-radius: var(--cell-radius);
+  opacity: 0;
+  background: transparent;
+  border: 2px solid rgba(255, 219, 89, 0.84);
+  box-shadow: 0 0 0 var(--cell-shadow-1) rgba(255, 219, 89, 0.18);
+  transition:
+    transform 140ms var(--board-nav-marker-ease),
+    border-color 140ms var(--board-nav-marker-ease),
+    box-shadow 140ms var(--board-nav-marker-ease),
+    opacity 100ms var(--board-nav-marker-ease);
+  will-change: transform, opacity;
+}
+
+.boardNavMarker.isActive {
+  opacity: 1;
+}
+
+.boardNavMarker.isCursor {
+  box-shadow: 0 0 0 var(--cell-shadow-2) rgba(255, 219, 89, 0.18);
+}
+
+.boardNavMarker.isSelected {
+  border: 3px solid rgba(255, 219, 89, 0.98);
+  box-shadow: 0 0 0 var(--cell-shadow-2) rgba(255, 219, 89, 0.28);
+}
+
+.boardNavMarker.isSelected.isInvalidSelection {
+  border-color: rgba(239, 68, 68, 0.98);
+  box-shadow: 0 0 0 var(--cell-shadow-2) rgba(239, 68, 68, 0.26);
+}
+
+.theme-light .boardNavMarker {
+  border-color: rgba(217, 119, 6, 0.88);
+  box-shadow: 0 0 0 var(--cell-shadow-1) rgba(217, 119, 6, 0.18);
+}
+
+.theme-light .boardNavMarker.isCursor {
+  box-shadow: 0 0 0 var(--cell-shadow-2) rgba(217, 119, 6, 0.18);
+}
+
+.theme-light .boardNavMarker.isSelected {
+  border-color: rgba(180, 83, 9, 0.98);
+  box-shadow: 0 0 0 var(--cell-shadow-2) rgba(180, 83, 9, 0.28);
+}
+
+.theme-light .boardNavMarker.isSelected.isInvalidSelection {
+  border-color: rgba(220, 38, 38, 0.98);
+  box-shadow: 0 0 0 var(--cell-shadow-2) rgba(220, 38, 38, 0.24);
+}
+
+.boardNavMarker.isLowPowerMode {
+  transition: none !important;
 }
 
 .theme-light .cell.visited:not(.pathStart):not(.pathEnd) {

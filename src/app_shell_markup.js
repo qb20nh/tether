@@ -33,6 +33,8 @@ const BOOT_LABELS = Object.freeze({
   'ui.moveDailyDialogConfirm': 'Move',
   'ui.lowPowerMode': 'Low power mode',
   'ui.lowPowerModeEnable': 'Enable low power mode',
+  'ui.keyboardGamepadControls': 'Keyboard / gamepad controls',
+  'ui.keyboardGamepadControlsEnable': 'Enable keyboard / gamepad controls',
   'ui.notificationsEnable': 'Enable notifications',
   'ui.autoUpdate': 'Auto update',
   'ui.autoUpdateEnable': 'Enable auto update',
@@ -198,6 +200,13 @@ const buildHeaderMarkup = ({ t, localeOptions, currentLocale, boot = false }) =>
               </label>
             </div>
             <div class="settingsField">
+              <span id="${ELEMENT_IDS.KEYBOARD_GAMEPAD_LABEL}" class="small" data-i18n="ui.keyboardGamepadControls">${t('ui.keyboardGamepadControls')}</span>
+              <label class="settingsCheckbox">
+                <input id="${ELEMENT_IDS.KEYBOARD_GAMEPAD_TOGGLE}" type="checkbox"${hiddenControlAttrs} />
+                <span data-i18n="ui.keyboardGamepadControlsEnable">${t('ui.keyboardGamepadControlsEnable')}</span>
+              </label>
+            </div>
+            <div class="settingsField">
               <span id="${ELEMENT_IDS.NOTIFICATIONS_LABEL}" class="small" data-i18n="ui.notifications">${t('ui.notifications')}</span>
               <label class="settingsCheckbox">
                 <input id="${ELEMENT_IDS.NOTIFICATIONS_TOGGLE}" type="checkbox"${hiddenControlAttrs} />
@@ -356,7 +365,7 @@ const buildBoardMarkup = ({ t, boot = false }) => {
     : `
           <canvas id="${ELEMENT_IDS.CANVAS}"></canvas>
           <canvas id="${ELEMENT_IDS.SYMBOL_CANVAS}"></canvas>
-          <div id="${ELEMENT_IDS.GRID}" role="application" aria-label="${t('ui.puzzleGridAria')}" data-i18n-aria-label="ui.puzzleGridAria"></div>`;
+          <div id="${ELEMENT_IDS.GRID}" role="application" tabindex="${boot ? '-1' : '0'}" aria-label="${t('ui.puzzleGridAria')}" data-i18n-aria-label="ui.puzzleGridAria"></div>`;
 
   return `
       <div class="panel">

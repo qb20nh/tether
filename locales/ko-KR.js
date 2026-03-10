@@ -56,6 +56,8 @@ export default {
     "autoUpdateEnable": "자동 업데이트 켜기",
     "lowPowerMode": "저전력 모드",
     "lowPowerModeEnable": "저전력 모드 켜기",
+    "keyboardGamepadControls": "키보드 / 게임패드 조작",
+    "keyboardGamepadControlsEnable": "키보드 / 게임패드 조작 켜기",
     "lowPowerModeHintToast": "경로를 드래그할 때 화면이 끊기면, 설정에서 저전력 모드를 켜 보세요.",
     "newVersionAvailableTitle": "새 버전이 있습니다",
     "newVersionAvailableBody": "탭하면 최신 버전으로 업데이트할 수 있습니다.",

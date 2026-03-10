@@ -9,6 +9,7 @@ export function createMemoryPersistence(initialState = {}, options = {}) {
   const state = {
     theme: initialState.theme || 'dark',
     lowPowerModeEnabled: Boolean(initialState.lowPowerModeEnabled),
+    keyboardGamepadControlsEnabled: Boolean(initialState.keyboardGamepadControlsEnabled),
     hiddenPanels: {
       guide: Boolean(initialState.hiddenPanels?.guide),
       legend: initialState.hiddenPanels?.legend ?? true,
@@ -25,6 +26,7 @@ export function createMemoryPersistence(initialState = {}, options = {}) {
       return {
         theme: state.theme,
         lowPowerModeEnabled: state.lowPowerModeEnabled,
+        keyboardGamepadControlsEnabled: state.keyboardGamepadControlsEnabled,
         hiddenPanels: {
           guide: state.hiddenPanels.guide,
           legend: state.hiddenPanels.legend,
@@ -52,6 +54,10 @@ export function createMemoryPersistence(initialState = {}, options = {}) {
 
     writeLowPowerModeEnabled(enabled) {
       state.lowPowerModeEnabled = Boolean(enabled);
+    },
+
+    writeKeyboardGamepadControlsEnabled(enabled) {
+      state.keyboardGamepadControlsEnabled = Boolean(enabled);
     },
 
     writeHiddenPanel(panel, hidden) {

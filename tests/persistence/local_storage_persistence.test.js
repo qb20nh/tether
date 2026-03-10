@@ -44,6 +44,7 @@ test('localStorage persistence round-trips and validates session signature', () 
   let boot = persistence.readBootState();
   assert.equal(boot.theme, 'dark');
   assert.equal(boot.lowPowerModeEnabled, false);
+  assert.equal(boot.keyboardGamepadControlsEnabled, false);
   assert.equal(boot.hiddenPanels.guide, false);
   assert.equal(boot.hiddenPanels.legend, true);
   assert.equal(boot.dailySolvedDate, null);
@@ -57,6 +58,7 @@ test('localStorage persistence round-trips and validates session signature', () 
 
   persistence.writeTheme('light');
   persistence.writeLowPowerModeEnabled(true);
+  persistence.writeKeyboardGamepadControlsEnabled(true);
   persistence.writeHiddenPanel('guide', true);
   persistence.writeCampaignProgress(5);
   persistence.writeInfiniteProgress(3);
@@ -80,6 +82,7 @@ test('localStorage persistence round-trips and validates session signature', () 
   boot = persistence.readBootState();
   assert.equal(boot.theme, 'light');
   assert.equal(boot.lowPowerModeEnabled, true);
+  assert.equal(boot.keyboardGamepadControlsEnabled, true);
   assert.equal(boot.hiddenPanels.guide, true);
   assert.equal(boot.campaignProgress, 5);
   assert.equal(boot.infiniteProgress, 3);
@@ -128,6 +131,31 @@ test('low power mode falls back to disabled when stored value is invalid', () =>
 
   const boot = persistence.readBootState();
   assert.equal(boot.lowPowerModeEnabled, false);
+  assert.equal(boot.keyboardGamepadControlsEnabled, false);
+});
+
+test('keyboard / gamepad controls fall back to disabled when stored value is invalid', () => {
+  const storage = createFakeStorage();
+  const fakeWindow = {
+    localStorage: storage,
+    matchMedia: () => ({ matches: false }),
+    crypto: {
+      getRandomValues(bytes) {
+        for (let i = 0; i < bytes.length; i++) bytes[i] = i + 1;
+      },
+    },
+  };
+
+  storage.setItem(STORAGE_KEYS.KEYBOARD_GAMEPAD_CONTROLS_KEY, 'maybe');
+
+  const persistence = createLocalStoragePersistence({
+    windowObj: fakeWindow,
+    campaignLevelCount: 10,
+    maxInfiniteIndex: 20,
+  });
+
+  const boot = persistence.readBootState();
+  assert.equal(boot.keyboardGamepadControlsEnabled, false);
 });
 
 test('score state falls back to defaults when payload is malformed', () => {

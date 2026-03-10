@@ -56,6 +56,8 @@ export const ELEMENT_IDS = Object.freeze({
   THEME_TOGGLE: 'themeToggle',
   LOW_POWER_LABEL: 'lowPowerLabel',
   LOW_POWER_TOGGLE: 'lowPowerToggle',
+  KEYBOARD_GAMEPAD_LABEL: 'keyboardGamepadLabel',
+  KEYBOARD_GAMEPAD_TOGGLE: 'keyboardGamepadToggle',
   NOTIFICATIONS_LABEL: 'notificationsLabel',
   NOTIFICATIONS_TOGGLE: 'notificationsToggle',
   AUTO_UPDATE_LABEL: 'autoUpdateLabel',

@@ -56,6 +56,8 @@ export default {
     "autoUpdateEnable": "启用自动更新",
     "lowPowerMode": "低功耗模式",
     "lowPowerModeEnable": "启用低功耗模式",
+    "keyboardGamepadControls": "键盘 / 手柄控制",
+    "keyboardGamepadControlsEnable": "启用键盘 / 手柄控制",
     "lowPowerModeHintToast": "如果拖动路径时出现卡顿，可以在设置中启用低功耗模式。",
     "newVersionAvailableTitle": "有新版本可用",
     "newVersionAvailableBody": "点击即可更新到最新版本。",

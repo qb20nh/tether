@@ -21,6 +21,7 @@ test('transformed index ships the static boot shell inside the app root', () => 
   assert.match(transformedIndexHtml, /bootShellGuideLine/);
   assert.match(transformedIndexHtml, /Goal visit every open cell once\.<br>This level start anywhere\./);
   assert.match(transformedIndexHtml, /id="levelSel" class="bootShellSelect"[\s\S]*?<option selected><\/option>/);
+  assert.match(transformedIndexHtml, /id="keyboardGamepadToggle"/);
   assert.match(transformedIndexHtml, /<div class="panelBlock is-hidden" id="legendPanel">/);
   assert.doesNotMatch(transformedIndexHtml, /bootShellTextLine--wide/);
   assert.doesNotMatch(transformedIndexHtml, />Loading level\.\.\.</);

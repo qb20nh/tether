@@ -564,6 +564,7 @@ const createShellRefs = () => {
 
   return {
     app,
+    boardHost,
     boardWrap,
     canvas,
     gridEl,
@@ -633,6 +634,10 @@ const createSnapshot = ({ gridData, path = [], levelIndex = 0 }) => {
 };
 
 const getGridCell = (refs, r, c, cols) => refs.gridEl.children[(r * cols) + c] || null;
+const getBoardNavMarker = (refs) => refs.boardHost.querySelector('.boardNavMarker');
+const countBoardNavMarkers = (refs) => (
+  refs.boardHost.children.filter((child) => child.classList.contains('boardNavMarker')).length
+);
 
 test('createBoardRendererCore keeps refs, interaction state, and ghosts isolated per instance', (t) => {
   const env = installRendererEnv(t);
@@ -656,12 +661,17 @@ test('createBoardRendererCore keeps refs, interaction state, and ghosts isolated
     wallGhost: { visible: true, x: 80, y: 96 },
     isPathDragging: true,
     pathDragCursor: { r: 0, c: 1 },
+    isBoardNavActive: true,
+    boardCursor: { r: 0, c: 0 },
+    boardSelection: { kind: 'path-end', r: 0, c: 0 },
   });
 
   second.updateInteraction({
     dropTarget: { r: 0, c: 0 },
     isPathDragging: true,
     pathDragCursor: { r: 1, c: 0 },
+    isBoardNavActive: true,
+    boardCursor: { r: 1, c: 1 },
   });
   flushNextRaf(env, 16);
   flushNextRaf(env, 16);
@@ -670,17 +680,177 @@ test('createBoardRendererCore keeps refs, interaction state, and ghosts isolated
   const secondDropTarget = getGridCell(secondRefs, 0, 0, 2);
   const firstHover = getGridCell(firstRefs, 0, 1, 2);
   const secondHover = getGridCell(secondRefs, 1, 0, 2);
+  const firstMarker = getBoardNavMarker(firstRefs);
+  const secondMarker = getBoardNavMarker(secondRefs);
 
   assert.equal(first.getRefs(), firstRefs);
   assert.equal(second.getRefs(), secondRefs);
+  assert.equal(countBoardNavMarkers(firstRefs), 1);
+  assert.equal(countBoardNavMarkers(secondRefs), 1);
+  assert.equal(firstMarker?.parentElement, firstRefs.boardHost);
+  assert.equal(secondMarker?.parentElement, secondRefs.boardHost);
+  assert.equal(firstRefs.boardWrap.querySelector('.boardNavMarker'), null);
+  assert.equal(secondRefs.boardWrap.querySelector('.boardNavMarker'), null);
   assert.equal(firstDropTarget.classList.contains('dropTarget'), true);
   assert.equal(secondDropTarget.classList.contains('dropTarget'), true);
   assert.equal(getGridCell(firstRefs, 0, 0, 2).classList.contains('dropTarget'), false);
   assert.equal(getGridCell(secondRefs, 1, 1, 2).classList.contains('dropTarget'), false);
+  assert.equal(firstMarker?.classList.contains('isActive'), true);
+  assert.equal(firstMarker?.classList.contains('isSelected'), true);
+  assert.equal(firstMarker?.classList.contains('isCursor'), false);
+  assert.match(firstMarker?.style.transform || '', /scale\(0\.94\)$/);
+  assert.equal(secondMarker?.classList.contains('isActive'), true);
+  assert.equal(secondMarker?.classList.contains('isCursor'), true);
+  assert.equal(secondMarker?.classList.contains('isSelected'), false);
+  assert.match(secondMarker?.style.transform || '', /scale\(1\.06\)$/);
   assert.equal(firstHover.classList.contains('pathTipDragHover'), true);
   assert.equal(secondHover.classList.contains('pathTipDragHover'), true);
   assert.equal(firstRefs.boardWrap.querySelector('.wallDragGhost') !== null, true);
   assert.equal(secondRefs.boardWrap.querySelector('.wallDragGhost'), null);
+
+  const previousSelectionTransform = firstMarker?.style.transform;
+  first.updateInteraction({
+    isBoardNavActive: true,
+    boardSelection: { kind: 'path-end', r: 1, c: 1 },
+  });
+  flushNextRaf(env, 32);
+
+  assert.equal(firstMarker?.classList.contains('isSelected'), true);
+  assert.notEqual(firstMarker?.style.transform, previousSelectionTransform);
+});
+
+test('createBoardRendererCore hides the nav marker when inactive or daily locked', (t) => {
+  const env = installRendererEnv(t);
+  const snapshot = createSnapshot({
+    gridData: [['.', '.']],
+  });
+  const core = createBoardRendererCore();
+  const refs = createShellRefs();
+
+  core.mount(refs);
+  core.rebuildGrid(snapshot);
+
+  const marker = getBoardNavMarker(refs);
+  assert.equal(marker !== null, true);
+  assert.equal(countBoardNavMarkers(refs), 1);
+  assert.equal(marker?.classList.contains('isActive'), false);
+
+  core.updateInteraction({
+    isBoardNavActive: true,
+    boardCursor: { r: 0, c: 1 },
+  });
+  flushNextRaf(env, 16);
+  assert.equal(marker?.classList.contains('isActive'), true);
+  assert.equal(marker?.classList.contains('isCursor'), true);
+
+  core.updateInteraction({
+    isBoardNavActive: false,
+    boardCursor: { r: 0, c: 1 },
+  });
+  flushNextRaf(env, 32);
+  assert.equal(marker?.classList.contains('isActive'), false);
+
+  core.updateInteraction({
+    isBoardNavActive: true,
+    isDailyLocked: true,
+    boardCursor: { r: 0, c: 0 },
+    boardSelection: { kind: 'path-end', r: 0, c: 0 },
+  });
+  flushNextRaf(env, 48);
+  assert.equal(marker?.classList.contains('isActive'), false);
+});
+
+test('createBoardRendererCore nudges the nav marker toward invalid preview directions', (t) => {
+  const env = installRendererEnv(t);
+  const snapshot = createSnapshot({
+    gridData: [['.', '.']],
+  });
+  const core = createBoardRendererCore();
+  const refs = createShellRefs();
+
+  core.mount(refs);
+  core.rebuildGrid(snapshot);
+
+  core.updateInteraction({
+    isBoardNavActive: true,
+    boardCursor: { r: 0, c: 0 },
+  });
+  flushNextRaf(env, 16);
+
+  const marker = getBoardNavMarker(refs);
+  const restingTransform = marker?.style.transform || '';
+
+  core.updateInteraction({
+    isBoardNavActive: true,
+    boardCursor: { r: 0, c: 0 },
+    boardNavPreviewDelta: { r: 0, c: -1 },
+  });
+  flushNextRaf(env, 32);
+  const nudgedTransform = marker?.style.transform || '';
+
+  assert.notEqual(nudgedTransform, restingTransform);
+
+  core.updateInteraction({
+    isBoardNavActive: true,
+    boardCursor: { r: 0, c: 0 },
+    boardNavPreviewDelta: null,
+  });
+  flushNextRaf(env, 48);
+  assert.equal(marker?.style.transform, restingTransform);
+});
+
+test('createBoardRendererCore marks non-interactive selected nav positions as invalid', (t) => {
+  const env = installRendererEnv(t);
+  const snapshot = createSnapshot({
+    gridData: [['.', '.', '.']],
+    path: [
+      { r: 0, c: 0 },
+      { r: 0, c: 1 },
+      { r: 0, c: 2 },
+    ],
+  });
+  const core = createBoardRendererCore();
+  const refs = createShellRefs();
+
+  core.mount(refs);
+  core.rebuildGrid(snapshot);
+  core.renderFrame({
+    snapshot,
+    evaluation: {},
+    completion: null,
+    uiModel: {},
+    interactionModel: {},
+  });
+  flushNextRaf(env, 16);
+
+  const marker = getBoardNavMarker(refs);
+  core.updateInteraction({
+    isBoardNavActive: true,
+    boardCursor: { r: 0, c: 1 },
+    boardSelection: { kind: 'path-end', r: 0, c: 1 },
+  });
+  flushNextRaf(env, 32);
+  assert.equal(marker?.classList.contains('isSelected'), true);
+  assert.equal(marker?.classList.contains('isInvalidSelection'), true);
+
+  core.updateInteraction({
+    isBoardNavActive: true,
+    boardCursor: { r: 0, c: 1 },
+    boardSelection: { kind: 'path-end', r: 0, c: 1 },
+    boardSelectionInteractive: true,
+  });
+  flushNextRaf(env, 40);
+  assert.equal(marker?.classList.contains('isSelected'), true);
+  assert.equal(marker?.classList.contains('isInvalidSelection'), false);
+
+  core.updateInteraction({
+    isBoardNavActive: true,
+    boardCursor: { r: 0, c: 2 },
+    boardSelection: { kind: 'path-end', r: 0, c: 2 },
+  });
+  flushNextRaf(env, 48);
+  assert.equal(marker?.classList.contains('isSelected'), true);
+  assert.equal(marker?.classList.contains('isInvalidSelection'), false);
 });
 
 test('createBoardRendererCore does not share transition compensation state across instances', (t) => {
@@ -763,6 +933,9 @@ test('createBoardRendererCore destroy clears animation and remount starts clean'
     wallGhost: { visible: true, x: 30, y: 42 },
     isPathDragging: true,
     pathDragCursor: { r: 0, c: 0 },
+    isBoardNavActive: true,
+    boardCursor: { r: 0, c: 1 },
+    boardSelection: { kind: 'wall', r: 0, c: 1 },
   });
 
   assert.equal(env.rafCallbacks.size > 0, true);
@@ -774,6 +947,8 @@ test('createBoardRendererCore destroy clears animation and remount starts clean'
   assert.equal(core.getRefs(), null);
   assert.equal(firstRefs.pathRenderer.destroyed, true);
   assert.equal(firstRefs.boardWrap.querySelector('.wallDragGhost'), null);
+  assert.equal(firstRefs.boardWrap.querySelector('.boardNavMarker'), null);
+  assert.equal(firstRefs.boardHost.querySelector('.boardNavMarker'), null);
   assert.equal(getGridCell(firstRefs, 0, 1, 2).classList.contains('dropTarget'), false);
   assert.equal(getGridCell(firstRefs, 0, 0, 2).classList.contains('pathTipDragHover'), false);
 
@@ -783,6 +958,9 @@ test('createBoardRendererCore destroy clears animation and remount starts clean'
   core.updateInteraction({});
 
   assert.equal(core.getRefs(), secondRefs);
+  assert.equal(countBoardNavMarkers(secondRefs), 1);
+  assert.equal(getBoardNavMarker(secondRefs) !== null, true);
+  assert.equal(secondRefs.boardWrap.querySelector('.boardNavMarker'), null);
   assert.equal(getGridCell(secondRefs, 0, 0, 2).classList.contains('pathTipDragHover'), false);
   assert.equal(getGridCell(secondRefs, 0, 1, 2).classList.contains('dropTarget'), false);
 });
@@ -1166,13 +1344,23 @@ test('createBoardRendererCore redraws the current path immediately when toggling
   flushNextRaf(env, 1016);
   assert.equal(contextOptions.at(-1)?.stats?.drawCalls, 1);
 
+  core.updateInteraction({
+    isBoardNavActive: true,
+    boardSelection: { kind: 'path-end', r: 0, c: 2 },
+  });
+  flushNextRaf(env, 1032);
+  const boardNavMarker = getBoardNavMarker(refs);
+  assert.equal(boardNavMarker?.classList.contains('isLowPowerMode'), false);
+
   core.setLowPowerMode(true);
   assert.equal(contextOptions.at(-1)?.options?.antialias, false);
   assert.equal(contextOptions.at(-1)?.stats?.drawCalls, 1);
+  assert.equal(boardNavMarker?.classList.contains('isLowPowerMode'), true);
 
   core.setLowPowerMode(false);
   assert.equal(contextOptions.at(-1)?.options?.antialias, true);
   assert.equal(contextOptions.at(-1)?.stats?.drawCalls, 1);
+  assert.equal(boardNavMarker?.classList.contains('isLowPowerMode'), false);
 });
 
 test('createBoardRendererCore redraws the current path immediately during resize', (t) => {

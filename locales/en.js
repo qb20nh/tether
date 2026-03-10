@@ -56,6 +56,8 @@ export default {
     "autoUpdateEnable": "Enable auto-update",
     "lowPowerMode": "Low Power Mode",
     "lowPowerModeEnable": "Enable low power mode",
+    "keyboardGamepadControls": "Keyboard / Gamepad Controls",
+    "keyboardGamepadControlsEnable": "Enable keyboard / gamepad controls",
     "lowPowerModeHintToast": "If dragging the path feels stuttery, try enabling Low Power Mode in Settings.",
     "newVersionAvailableTitle": "New version available",
     "newVersionAvailableBody": "Tap to update to the latest version.",

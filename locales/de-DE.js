@@ -56,6 +56,8 @@ export default {
     "autoUpdateEnable": "Automatisches Update aktivieren",
     "lowPowerMode": "Energiesparmodus",
     "lowPowerModeEnable": "Energiesparmodus aktivieren",
+    "keyboardGamepadControls": "Tastatur- / Gamepad-Steuerung",
+    "keyboardGamepadControlsEnable": "Tastatur- / Gamepad-Steuerung aktivieren",
     "lowPowerModeHintToast": "Wenn das Ziehen des Pfads ruckelt, versuchen Sie, in den Einstellungen den Energiesparmodus zu aktivieren.",
     "newVersionAvailableTitle": "Neue Version verfügbar",
     "newVersionAvailableBody": "Tippe, um auf die neueste Version zu aktualisieren.",

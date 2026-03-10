@@ -56,6 +56,8 @@ export default {
     "autoUpdateEnable": "Activer la mise à jour automatique",
     "lowPowerMode": "Mode économie d'énergie",
     "lowPowerModeEnable": "Activer le mode économie d'énergie",
+    "keyboardGamepadControls": "Commandes clavier / manette",
+    "keyboardGamepadControlsEnable": "Activer les commandes clavier / manette",
     "lowPowerModeHintToast": "Si le tracé saccade quand vous faites glisser le chemin, essayez d'activer le mode économie d'énergie dans les paramètres.",
     "newVersionAvailableTitle": "Nouvelle version disponible",
     "newVersionAvailableBody": "Touchez pour mettre à jour vers la dernière version.",

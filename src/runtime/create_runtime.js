@@ -162,6 +162,7 @@ export function createRuntime(options) {
   let dailySolvedDate = typeof bootState.dailySolvedDate === 'string' ? bootState.dailySolvedDate : null;
   let activeTheme = normalizeTheme(bootState.theme);
   let lowPowerModeEnabled = Boolean(bootState.lowPowerModeEnabled);
+  let keyboardGamepadControlsEnabled = Boolean(bootState.keyboardGamepadControlsEnabled);
 
   const initialLocale = typeof i18n.getLocale === 'function'
     ? i18n.getLocale()
@@ -201,6 +202,11 @@ export function createRuntime(options) {
       y: 0,
     },
     dropTarget: null,
+    isBoardNavActive: false,
+    boardCursor: null,
+    boardSelection: null,
+    boardSelectionInteractive: null,
+    boardNavPreviewDelta: null,
   };
 
   let layoutQueued = false;
@@ -498,6 +504,15 @@ export function createRuntime(options) {
       refs.lowPowerToggle.checked = lowPowerModeEnabled;
     }
   };
+  const syncKeyboardGamepadControlsToggle = () => {
+    const refs = renderer.getRefs();
+    if (refs?.keyboardGamepadToggle) {
+      refs.keyboardGamepadToggle.checked = keyboardGamepadControlsEnabled;
+    }
+  };
+  const syncInputSnapshot = (snapshot = state.getSnapshot()) => {
+    input.syncSnapshot?.(snapshot);
+  };
   const applyLowPowerMode = (enabled, options = {}) => {
     const nextEnabled = Boolean(enabled);
     const force = Boolean(options.force);
@@ -509,6 +524,19 @@ export function createRuntime(options) {
     renderer.setLowPowerMode?.(lowPowerModeEnabled);
     if (started && !destroyed && hasLoadedLevel) {
       queueBoardLayout(false, { needsResize: true });
+    }
+  };
+  const applyKeyboardGamepadControlsEnabled = (enabled, options = {}) => {
+    const nextEnabled = Boolean(enabled);
+    const force = Boolean(options.force);
+    if (!force && nextEnabled === keyboardGamepadControlsEnabled) return;
+    keyboardGamepadControlsEnabled = nextEnabled;
+    persistence.writeKeyboardGamepadControlsEnabled?.(keyboardGamepadControlsEnabled);
+    syncKeyboardGamepadControlsToggle();
+    input.setKeyboardGamepadControlsEnabled?.(keyboardGamepadControlsEnabled);
+    input.setBoardControlSuppressed?.(dailyBoardLocked);
+    if (keyboardGamepadControlsEnabled) {
+      syncInputSnapshot();
     }
   };
 
@@ -545,6 +573,7 @@ export function createRuntime(options) {
 
     const changed = nextLocked !== dailyBoardLocked;
     dailyBoardLocked = nextLocked;
+    input.setBoardControlSuppressed?.(dailyBoardLocked);
 
     if (nextLocked) {
       interactionState.isPathDragging = false;
@@ -1316,6 +1345,11 @@ export function createRuntime(options) {
         isWallDragging: interactionState.isWallDragging,
         wallGhost: interactionState.wallGhost,
         dropTarget: interactionState.dropTarget,
+        isBoardNavActive: interactionState.isBoardNavActive,
+        boardCursor: interactionState.boardCursor,
+        boardSelection: interactionState.boardSelection,
+        boardSelectionInteractive: interactionState.boardSelectionInteractive,
+        boardNavPreviewDelta: interactionState.boardNavPreviewDelta,
       },
     });
   };
@@ -1464,6 +1498,7 @@ export function createRuntime(options) {
       renderer.setPathFlowFreezeImmediate(dailyBoardLocked);
     }
     syncMutableBoardStateFromSnapshot(snapshot);
+    syncInputSnapshot(snapshot);
     refreshLevelOptions();
     renderScoreMeta();
     renderDailyMeta();
@@ -1524,6 +1559,7 @@ export function createRuntime(options) {
     refreshThemeButton();
     refreshSettingsToggle();
     syncLowPowerToggle();
+    syncKeyboardGamepadControlsToggle();
   };
 
   const applyLocaleChange = async (locale) => {
@@ -1656,6 +1692,11 @@ export function createRuntime(options) {
       return;
     }
 
+    if (actionType === UI_ACTIONS.KEYBOARD_GAMEPAD_CONTROLS_TOGGLE) {
+      applyKeyboardGamepadControlsEnabled(payload.enabled);
+      return;
+    }
+
     if (actionType === UI_ACTIONS.THEME_DIALOG_CLOSE) {
       const targetTheme = payload.pendingTheme;
       if (targetTheme === 'light' && payload.returnValue === 'confirm') {
@@ -1701,9 +1742,9 @@ export function createRuntime(options) {
 
     if (actionType === UI_ACTIONS.REVERSE_CLICK) {
       if (dailyBoardLocked) return;
-      state.dispatch({ type: 'path/reverse', payload: {} });
-      refresh(state.getSnapshot(), true, { validationSource: GAME_COMMANDS.FINALIZE_PATH });
-      queueSessionSave();
+      handleGameCommand({
+        commandType: GAME_COMMANDS.REVERSE_PATH,
+      });
       return;
     }
 
@@ -1745,8 +1786,8 @@ export function createRuntime(options) {
   };
 
   const handleInteractionUpdate = (payload) => {
-    if (dailyBoardLocked) return;
     const updateType = payload?.updateType;
+    if (dailyBoardLocked && updateType !== INTERACTION_UPDATES.BOARD_NAV) return;
 
     if (updateType === INTERACTION_UPDATES.PATH_DRAG) {
       const nextIsPathDragging = Boolean(payload.isPathDragging);
@@ -1848,6 +1889,53 @@ export function createRuntime(options) {
 
       interactionState.dropTarget = nextDropTarget;
       renderer.updateInteraction?.(interactionState);
+      return;
+    }
+
+    if (updateType === INTERACTION_UPDATES.BOARD_NAV) {
+      const rawCursor = payload.boardCursor;
+      const nextBoardCursor = (
+        Number.isInteger(rawCursor?.r) && Number.isInteger(rawCursor?.c)
+          ? { r: rawCursor.r, c: rawCursor.c }
+          : null
+      );
+      const rawSelection = payload.boardSelection;
+      const nextBoardSelection = (
+        Number.isInteger(rawSelection?.r)
+        && Number.isInteger(rawSelection?.c)
+        && typeof rawSelection?.kind === 'string'
+          ? { kind: rawSelection.kind, r: rawSelection.r, c: rawSelection.c }
+          : null
+      );
+      const nextBoardSelectionInteractive = typeof payload.boardSelectionInteractive === 'boolean'
+        ? payload.boardSelectionInteractive
+        : null;
+      const rawPreviewDelta = payload.boardNavPreviewDelta;
+      const nextBoardNavPreviewDelta = (
+        Number.isInteger(rawPreviewDelta?.r) && Number.isInteger(rawPreviewDelta?.c)
+          ? { r: rawPreviewDelta.r, c: rawPreviewDelta.c }
+          : null
+      );
+      const nextIsBoardNavActive = Boolean(payload.isBoardNavActive);
+      const stateChanged = (
+        interactionState.isBoardNavActive !== nextIsBoardNavActive
+        || (interactionState.boardCursor?.r ?? null) !== (nextBoardCursor?.r ?? null)
+        || (interactionState.boardCursor?.c ?? null) !== (nextBoardCursor?.c ?? null)
+        || (interactionState.boardSelection?.kind ?? null) !== (nextBoardSelection?.kind ?? null)
+        || (interactionState.boardSelection?.r ?? null) !== (nextBoardSelection?.r ?? null)
+        || (interactionState.boardSelection?.c ?? null) !== (nextBoardSelection?.c ?? null)
+        || (interactionState.boardSelectionInteractive ?? null) !== nextBoardSelectionInteractive
+        || (interactionState.boardNavPreviewDelta?.r ?? null) !== (nextBoardNavPreviewDelta?.r ?? null)
+        || (interactionState.boardNavPreviewDelta?.c ?? null) !== (nextBoardNavPreviewDelta?.c ?? null)
+      );
+      if (!stateChanged) return;
+
+      interactionState.isBoardNavActive = nextIsBoardNavActive;
+      interactionState.boardCursor = nextBoardCursor;
+      interactionState.boardSelection = nextBoardSelection;
+      interactionState.boardSelectionInteractive = nextBoardSelectionInteractive;
+      interactionState.boardNavPreviewDelta = nextBoardNavPreviewDelta;
+      renderer.updateInteraction?.(interactionState);
     }
   };
 
@@ -1914,6 +2002,9 @@ export function createRuntime(options) {
     }
     if (commandType === GAME_COMMANDS.WALL_MOVE_ATTEMPT && transition.changed) {
       invalidateEvaluateCache();
+    }
+    if (transition.changed || transition.rebuildGrid) {
+      syncInputSnapshot(transition.snapshot);
     }
 
     if (!transition.changed && !transition.validate && !transition.rebuildGrid && !didResetUiState) {
@@ -2039,6 +2130,7 @@ export function createRuntime(options) {
     const initialLevelIndex = savedInitialLevelIndex ?? fallbackInitialLevelIndex;
 
     loadLevel(initialLevelIndex);
+    applyKeyboardGamepadControlsEnabled(keyboardGamepadControlsEnabled, { force: true });
     startLowPowerHintDetector();
   };
 
