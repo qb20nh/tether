@@ -53,10 +53,18 @@ const DIALOG_ICON_HTML = Object.freeze({
   SYSTEM_UPDATE: '<span class="themeSwitchDialog__icon uiIconMaterial" aria-hidden="true">system_update</span>',
   EVENT: '<span class="themeSwitchDialog__icon uiIconMaterial" aria-hidden="true">event</span>',
 });
+const BOOT_GUIDE_PLACEHOLDERS = Object.freeze([
+  'Goal visit every open cell once.',
+  'This level start anywhere.',
+]);
 
 const interactiveAttrs = (disabled = false) => (disabled ? ' disabled tabindex="-1"' : '');
 const renderBootTextBlock = (modifier = 'mid') =>
   `<span class="bootShellTextBlock bootShellTextBlock--${modifier}" aria-hidden="true"></span>`;
+const renderBootGuideMessage = () =>
+  `<div class="bootShellMessageText" aria-hidden="true">
+    <span class="bootShellGuideLine">${BOOT_GUIDE_PLACEHOLDERS[0]}<br>${BOOT_GUIDE_PLACEHOLDERS[1]}</span>
+  </div>`;
 
 const buildConfirmDialogTemplate = (t, options = {}) => {
   const {
@@ -249,14 +257,14 @@ const buildHeaderMarkup = ({ t, localeOptions, currentLocale, boot = false }) =>
 const buildControlsPanelMarkup = ({ t, boot = false }) => {
   const controlAttrs = interactiveAttrs(boot);
   const bootLevelOptions = boot ? '<option selected></option>' : '';
-  const bootMessage = boot
-    ? `
-              <span class="bootShellTextLine bootShellTextLine--wide"></span>
-              <span class="bootShellTextLine bootShellTextLine--mid"></span>`
-    : '';
+  const bootMessage = boot ? renderBootGuideMessage() : '';
   const levelLabel = boot ? renderBootTextBlock('label') : t('ui.levelLabel');
-  const resetLabel = boot ? renderBootTextBlock('button') : `<span data-i18n="ui.reset">${t('ui.reset')}</span>`;
-  const reverseLabel = boot ? renderBootTextBlock('button') : `<span data-i18n="ui.reverse">${t('ui.reverse')}</span>`;
+  const resetLabel = boot
+    ? `<span class="controlActionText">${renderBootTextBlock('button')}</span>`
+    : `<span class="controlActionText" data-i18n="ui.reset">${t('ui.reset')}</span>`;
+  const reverseLabel = boot
+    ? `<span class="controlActionText">${renderBootTextBlock('button')}</span>`
+    : `<span class="controlActionText" data-i18n="ui.reverse">${t('ui.reverse')}</span>`;
   const guideTitle = boot ? renderBootTextBlock('panel-title') : t('ui.guide');
   const guideToggle = boot ? renderBootTextBlock('mini') : t('ui.hide');
 
@@ -376,7 +384,7 @@ const buildLegendMarkup = ({ t, boot = false }) => {
 
   return `
       <aside class="panel">
-        <div class="panelBlock" id="${ELEMENT_IDS.LEGEND_PANEL}">
+        <div class="panelBlock${boot ? ' is-hidden' : ''}" id="${ELEMENT_IDS.LEGEND_PANEL}">
           <div class="panelHead">
             <span class="panelTitle" data-i18n="ui.legend">${legendTitle}</span>
             <button id="${ELEMENT_IDS.LEGEND_TOGGLE_BTN}" class="miniBtn" type="button" aria-controls="${ELEMENT_IDS.LEGEND}"${boot ? ' disabled tabindex="-1"' : ''}>

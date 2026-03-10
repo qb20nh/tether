@@ -159,13 +159,10 @@ body.isPathDragging * {
 
 .bootShellMessage {
   min-height: 66px;
-  display: grid;
-  align-content: center;
-  gap: 8px;
+  display: block;
 }
 
 .bootShellTextBlock,
-.bootShellTextLine,
 .bootShellLegendText {
   border-radius: 0;
   background: linear-gradient(
@@ -208,22 +205,49 @@ body.isPathDragging * {
   --boot-shell-block-size: 0.78em;
 }
 
-.bootShellTextLine {
+.bootShellMessageText {
   display: block;
-  block-size: 0.72em;
 }
 
-.bootShellTextLine--wide {
-  inline-size: min(100%, 92%);
+.bootShellGuideLine {
+  display: inline;
+  color: transparent;
+  border-radius: 0;
+  background-image: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--text), transparent 82%),
+    color-mix(in srgb, var(--text), transparent 74%)
+  );
+  background-repeat: no-repeat;
+  background-size: 100% 1em;
+  background-position: 0 calc((1lh - 1em) / 2);
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
 }
 
-.bootShellTextLine--mid {
-  inline-size: min(100%, 68%);
+.bootShell .boardWrap {
+  --boot-shell-grid-units: max(var(--grid-cols), var(--grid-rows));
+  --board-border: clamp(calc(var(--cell) * 0.024), 0.8px, 2.8px);
+  inline-size: min(
+    100%,
+    calc(var(--boot-shell-grid-units) * var(--cell) + (var(--boot-shell-grid-units) - 1) * var(--gap) + (var(--gap) * 2) + (var(--board-border) * 2))
+  );
 }
 
 .bootShellBoard {
-  inline-size: min(calc(var(--cell) * var(--grid-cols)), calc(100dvw - 40px));
-  aspect-ratio: calc(var(--grid-cols) / var(--grid-rows));
+  position: relative;
+  inline-size: 100%;
+  aspect-ratio: 1;
+  padding: var(--gap);
+  margin: 0 auto;
+  background: rgba(255, 255, 255, 0.04);
+  contain: layout paint style;
+}
+
+.bootShellBoard::before {
+  content: '';
+  position: absolute;
+  inset: var(--gap);
   background-color: color-mix(in srgb, var(--cellbg), var(--panel) 22%);
   background-image:
     linear-gradient(
@@ -231,18 +255,12 @@ body.isPathDragging * {
       color-mix(in srgb, var(--cellbg), var(--text) 6%),
       color-mix(in srgb, var(--cellbg2), transparent 6%)
     ),
-    radial-gradient(circle at 14.285% 14.285%, rgba(120, 190, 255, 0.45) 0, rgba(120, 190, 255, 0.45) 8%, transparent 9%),
-    linear-gradient(90deg, transparent 13%, rgba(120, 190, 255, 0.44) 13%, rgba(120, 190, 255, 0.44) 28%, transparent 28%),
-    linear-gradient(transparent 13%, rgba(120, 190, 255, 0.44) 13%, rgba(120, 190, 255, 0.44) 42%, transparent 42%),
     linear-gradient(color-mix(in srgb, var(--panel-outline), transparent 18%) 1px, transparent 1px),
     linear-gradient(90deg, color-mix(in srgb, var(--panel-outline), transparent 18%) 1px, transparent 1px);
   background-size:
     100% 100%,
-    100% 100%,
-    100% 100%,
-    100% 100%,
-    calc(100% / 7) calc(100% / 7),
-    calc(100% / 7) calc(100% / 7);
+    calc((100% + var(--gap)) / var(--boot-shell-grid-units)) calc((100% + var(--gap)) / var(--boot-shell-grid-units)),
+    calc((100% + var(--gap)) / var(--boot-shell-grid-units)) calc((100% + var(--gap)) / var(--boot-shell-grid-units));
 }
 
 .bootShellSelect {
@@ -587,16 +605,31 @@ header h1.brandTitle {
   min-width: 0;
 }
 
-.controlActionBtn {
-  display: inline-flex;
+.controlActionBtn,
+.themeSwitchDialog__actionBtn {
+  display: inline-grid;
+  grid-template-columns: var(--button-icon-slot-size) minmax(0, 1fr) var(--button-icon-slot-size);
   align-items: center;
-  gap: 7px;
+  column-gap: 7px;
+}
+
+.controlActionBtn {
+  --button-icon-slot-size: 18px;
 }
 
 .controlActionIcon {
   font-size: 18px;
   inline-size: 18px;
   block-size: 18px;
+  grid-column: 1;
+  justify-self: center;
+}
+
+.controlActionText,
+.themeSwitchDialog__actionText {
+  grid-column: 2;
+  justify-self: center;
+  text-align: center;
 }
 
 .settingsCheckbox {
@@ -747,9 +780,7 @@ header h1.brandTitle {
 }
 
 .themeSwitchDialog__actionBtn {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
+  --button-icon-slot-size: 20px;
   padding-inline: 13px;
 }
 
@@ -761,6 +792,8 @@ header h1.brandTitle {
   block-size: 20px;
   justify-content: center;
   align-items: center;
+  grid-column: 1;
+  justify-self: center;
 }
 
 .themeSwitchDialog__actionBtn--no .themeSwitchDialog__actionIcon {
