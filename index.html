@@ -8,15 +8,39 @@
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-title" content="TETHER" />
+  <meta name="darkreader-lock">
   <title>TETHER</title>
-  <link rel="dns-prefetch" href="//fonts.googleapis.com" />
-  <link rel="dns-prefetch" href="//fonts.gstatic.com" />
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link rel="preload" href="/fonts/material-symbols-rounded-w300-grad200-opsz20.woff2" as="font" type="font/woff2"
     crossorigin />
-  <link rel="stylesheet"
-    href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:FILL,GRAD,opsz,wght@0,200,20,300&amp;display=swap" />
+  <script id="theme-bootstrap">
+    (() => {
+      const THEME_KEY = 'tetherTheme';
+      const DEFAULT_THEME = 'dark';
+      const detectSystemTheme = () => {
+        try {
+          if (window.matchMedia('(prefers-color-scheme: dark)').matches) return 'dark';
+          if (window.matchMedia('(prefers-color-scheme: light)').matches) return 'light';
+        } catch {
+          // Ignore unsupported environments.
+        }
+        return DEFAULT_THEME;
+      };
+
+      let activeTheme = DEFAULT_THEME;
+      try {
+        const storedTheme = window.localStorage.getItem(THEME_KEY);
+        activeTheme = storedTheme === 'light' || storedTheme === 'dark'
+          ? storedTheme
+          : detectSystemTheme();
+      } catch {
+        activeTheme = detectSystemTheme();
+      }
+
+      const root = document.documentElement;
+      root.dataset.theme = activeTheme;
+      root.classList.toggle('theme-light', activeTheme === 'light');
+    })();
+  </script>
   <link rel="manifest" href="/manifest.webmanifest" />
   <link rel="apple-touch-icon" href="/icons/icon-192.png" />
   <link rel="icon" type="image/svg+xml" href="/src/logo.svg" />
@@ -24,7 +48,7 @@
 </head>
 
 <body>
-  <div id="app"></div>
+  <div id="app" aria-busy="true"><!--app-boot-shell--></div>
   <script type="module" src="/src/app.js"></script>
 </body>
 

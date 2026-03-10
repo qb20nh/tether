@@ -124,6 +124,7 @@ body.isPathDragging * {
   --control-border-opposite: rgba(231, 238, 247, 0.26);
   --control-border-hover-opposite: rgba(231, 238, 247, 0.38);
   --control-text-opposite: #e7eef7;
+  --control-block-size: 42px;
 }
 
 [dir='rtl'] body {
@@ -144,6 +145,152 @@ body.isPathDragging * {
   display: grid;
   gap: 6px;
   grid-template-columns: 1fr;
+}
+
+.bootShell {
+  pointer-events: none;
+}
+
+.bootShell button,
+.bootShell select,
+.bootShell a {
+  pointer-events: none;
+}
+
+.bootShellMessage {
+  min-height: 66px;
+  display: grid;
+  align-content: center;
+  gap: 8px;
+}
+
+.bootShellTextBlock,
+.bootShellTextLine,
+.bootShellLegendText {
+  border-radius: 0;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--text), transparent 82%),
+    color-mix(in srgb, var(--text), transparent 74%)
+  );
+}
+
+.bootShellTextBlock {
+  display: inline-block;
+  flex: 0 0 auto;
+  inline-size: var(--boot-shell-inline-size, 3em);
+  block-size: var(--boot-shell-block-size, 0.9em);
+  vertical-align: middle;
+}
+
+.bootShellTextBlock--label {
+  --boot-shell-inline-size: 2.85em;
+  --boot-shell-block-size: 0.9em;
+}
+
+.bootShellTextBlock--button {
+  --boot-shell-inline-size: 3.35em;
+  --boot-shell-block-size: 0.85em;
+}
+
+.bootShellTextBlock--panel-title {
+  --boot-shell-inline-size: 2.9em;
+  --boot-shell-block-size: 0.9em;
+}
+
+.bootShellTextBlock--mini {
+  --boot-shell-inline-size: 1.9em;
+  --boot-shell-block-size: 0.72em;
+}
+
+.bootShellTextBlock--footer {
+  --boot-shell-inline-size: 8.5em;
+  --boot-shell-block-size: 0.78em;
+}
+
+.bootShellTextLine {
+  display: block;
+  block-size: 0.72em;
+}
+
+.bootShellTextLine--wide {
+  inline-size: min(100%, 92%);
+}
+
+.bootShellTextLine--mid {
+  inline-size: min(100%, 68%);
+}
+
+.bootShellBoard {
+  inline-size: min(calc(var(--cell) * var(--grid-cols)), calc(100dvw - 40px));
+  aspect-ratio: calc(var(--grid-cols) / var(--grid-rows));
+  background-color: color-mix(in srgb, var(--cellbg), var(--panel) 22%);
+  background-image:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--cellbg), var(--text) 6%),
+      color-mix(in srgb, var(--cellbg2), transparent 6%)
+    ),
+    radial-gradient(circle at 14.285% 14.285%, rgba(120, 190, 255, 0.45) 0, rgba(120, 190, 255, 0.45) 8%, transparent 9%),
+    linear-gradient(90deg, transparent 13%, rgba(120, 190, 255, 0.44) 13%, rgba(120, 190, 255, 0.44) 28%, transparent 28%),
+    linear-gradient(transparent 13%, rgba(120, 190, 255, 0.44) 13%, rgba(120, 190, 255, 0.44) 42%, transparent 42%),
+    linear-gradient(color-mix(in srgb, var(--panel-outline), transparent 18%) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in srgb, var(--panel-outline), transparent 18%) 1px, transparent 1px);
+  background-size:
+    100% 100%,
+    100% 100%,
+    100% 100%,
+    100% 100%,
+    calc(100% / 7) calc(100% / 7),
+    calc(100% / 7) calc(100% / 7);
+}
+
+.bootShellSelect {
+  text-indent: -9999px;
+  background-image:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--text), transparent 82%),
+      color-mix(in srgb, var(--text), transparent 74%)
+    ),
+    linear-gradient(45deg, transparent 50%, currentColor 50%),
+    linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-position:
+    11px 50%,
+    calc(100% - 15px) 1.1em,
+    calc(100% - 10px) 1.1em;
+  background-size:
+    clamp(52px, 34%, 120px) 0.85em,
+    6px 6px,
+    6px 6px;
+  background-repeat: no-repeat;
+}
+
+[dir='rtl'] .bootShellSelect {
+  background-position:
+    calc(100% - 11px) 50%,
+    10px 1.1em,
+    15px 1.1em;
+}
+
+.bootShellLegendRow {
+  align-items: center;
+}
+
+.bootShellLegendBadge {
+  background: color-mix(in srgb, var(--panel2), var(--text) 4%);
+}
+
+.bootShellLegendText {
+  display: block;
+  block-size: 0.72em;
+  flex: 1 1 auto;
+  min-width: 0;
+  margin-block: 0.3em;
+}
+
+.bootShellLegendText--short {
+  max-width: 72%;
 }
 
 @supports selector(:has(*)) {
@@ -183,6 +330,10 @@ header h1.brandTitle {
   block-size: 18px;
   display: block;
   flex: 0 0 auto;
+  background-image: url("./logo.svg");
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: contain;
   image-rendering: pixelated;
 }
 
@@ -217,7 +368,7 @@ header h1.brandTitle {
 }
 
 .uiIconMaterial {
-  font-family: "Material Symbols Rounded", "Material Symbols Rounded Local";
+  font-family: "Material Symbols Rounded Local";
   font-style: normal;
   font-weight: 300;
   font-size: 20px;
@@ -833,6 +984,12 @@ button {
   cursor: pointer;
   outline: none;
   color-scheme: inherit;
+}
+
+select,
+button:not(.settingsToggle):not(.miniBtn) {
+  min-block-size: var(--control-block-size);
+  line-height: 1.2;
 }
 
 select {
@@ -1957,6 +2114,7 @@ body:not(.isPathDragging) .cell.pathEnd:active {
     --panel-padding: 6px;
     --hint-badge: 30px;
     --hint-badge-svg: 22px;
+    --control-block-size: 38px;
   }
 
   body {

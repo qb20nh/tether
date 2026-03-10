@@ -2,6 +2,7 @@ import path from 'node:path';
 import { execSync } from 'node:child_process';
 import { readFile, writeFile } from 'node:fs/promises';
 import { defineConfig, loadEnv } from 'vite';
+import { injectBootShellIntoIndexHtml } from './src/index_boot_shell.js';
 import { DAILY_PAYLOAD_FILE } from './src/shared/paths.js';
 import { verifyReleaseNoDebugArtifacts } from './scripts/verify_release_no_debug_artifacts.js';
 
@@ -64,7 +65,8 @@ const resolveBuildLabel = (env, buildNumber) => {
 
 const buildVersionPlugin = ({ buildNumber, buildLabel, buildDateTime, dailyPayloadPathname }) => ({
     name: 'tether-build-version',
-    transformIndexHtml: () => ({
+    transformIndexHtml: (html) => ({
+        html: injectBootShellIntoIndexHtml(html),
         tags: [
             {
                 tag: 'meta',

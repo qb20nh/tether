@@ -671,13 +671,16 @@ export async function initTetherApp() {
   const appEl = document.getElementById(ELEMENT_IDS.APP);
   if (!appEl) return;
   const didUpgradeBuild = detectBuildUpgrade();
+  const bootDailyPromise = resolveDailyBootPayload();
+  const initialLocalePromise = localeController.initialize();
 
-  const bootDaily = await resolveDailyBootPayload();
+  const [bootDaily, initialLocale] = await Promise.all([
+    bootDailyPromise,
+    initialLocalePromise,
+  ]);
   setupDailyHardInvalidationWatcher(bootDaily);
   latestDailyState.dailyId = bootDaily.dailyId;
   latestDailyState.hardInvalidateAtUtcMs = bootDaily.hardInvalidateAtUtcMs;
-
-  const initialLocale = await localeController.initialize();
   const translate = localeController.createTranslator(initialLocale);
 
   appEl.innerHTML = APP_SHELL_TEMPLATE(
@@ -758,6 +761,7 @@ export async function initTetherApp() {
   });
 
   runtimeInstance.start();
+  appEl.removeAttribute('aria-busy');
   notificationCenter.refreshToggleUi();
   notificationCenter.refreshHistoryUi();
   if (typeof __TETHER_DEV__ === 'boolean' ? __TETHER_DEV__ : true) {

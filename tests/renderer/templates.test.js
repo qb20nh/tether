@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 test('templates source uses material icon ligatures for header and dialog icons', () => {
-  const source = readFileSync(new URL('../../src/templates.js', import.meta.url), 'utf8');
+  const source = readFileSync(new URL('../../src/app_shell_markup.js', import.meta.url), 'utf8');
 
   assert.match(source, /<span class="uiIconMaterial" aria-hidden="true">notifications<\/span>/);
   assert.match(source, /<span class="uiIconMaterial" aria-hidden="true">settings<\/span>/);
@@ -21,17 +21,13 @@ test('templates source uses material icon ligatures for header and dialog icons'
   assert.equal(source.includes('✓'), false);
 });
 
-test('index head includes font dns and preload hints', () => {
+test('index head preloads the bundled icon font without remote Google font boot hints', () => {
   const source = readFileSync(new URL('../../index.html', import.meta.url), 'utf8');
 
-  assert.match(source, /<link rel="dns-prefetch" href="\/\/fonts\.googleapis\.com" \/>/);
-  assert.match(source, /<link rel="dns-prefetch" href="\/\/fonts\.gstatic\.com" \/>/);
   assert.match(
     source,
     /<link\s+rel="preload"\s+href="\/fonts\/material-symbols-rounded-w300-grad200-opsz20\.woff2"\s+as="font"\s+type="font\/woff2"\s+crossorigin\s+\/>/,
   );
-  assert.match(
-    source,
-    /https:\/\/fonts\.googleapis\.com\/css2\?family=Material\+Symbols\+Rounded:FILL,GRAD,opsz,wght@0,200,20,300&amp;display=swap/,
-  );
+  assert.doesNotMatch(source, /fonts\.googleapis\.com/);
+  assert.doesNotMatch(source, /fonts\.gstatic\.com/);
 });
