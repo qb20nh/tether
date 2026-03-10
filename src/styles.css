@@ -162,14 +162,41 @@ body.isPathDragging * {
   display: block;
 }
 
+@keyframes bootShellTextPulse {
+
+  0%,
+  100% {
+    opacity: 0.72;
+    filter: brightness(0.96);
+  }
+
+  10%,
+  40% {
+    opacity: 1;
+    filter: brightness(1.14);
+  }
+
+  20%,
+  30%,
+  50% {
+    opacity: 0.78;
+    filter: brightness(1);
+  }
+}
+
 .bootShellTextBlock,
 .bootShellLegendText {
   border-radius: 0;
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--text), transparent 82%),
-    color-mix(in srgb, var(--text), transparent 74%)
-  );
+  background: linear-gradient(180deg,
+      color-mix(in srgb, var(--text), transparent 82%),
+      color-mix(in srgb, var(--text), transparent 74%));
+}
+
+.bootShellTextBlock,
+.bootShellLegendText,
+.bootShellGuideLine,
+.bootShellSelectText {
+  animation: bootShellTextPulse 1.5s linear infinite;
 }
 
 .bootShellTextBlock {
@@ -213,11 +240,9 @@ body.isPathDragging * {
   display: inline;
   color: transparent;
   border-radius: 0;
-  background-image: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--text), transparent 82%),
-    color-mix(in srgb, var(--text), transparent 74%)
-  );
+  background-image: linear-gradient(180deg,
+      color-mix(in srgb, var(--text), transparent 82%),
+      color-mix(in srgb, var(--text), transparent 74%));
   background-repeat: no-repeat;
   background-size: 100% 1em;
   background-position: 0 calc((1lh - 1em) / 2);
@@ -228,10 +253,8 @@ body.isPathDragging * {
 .bootShell .boardWrap {
   --boot-shell-grid-units: max(var(--grid-cols), var(--grid-rows));
   --board-border: clamp(calc(var(--cell) * 0.024), 0.8px, 2.8px);
-  inline-size: min(
-    100%,
-    calc(var(--boot-shell-grid-units) * var(--cell) + (var(--boot-shell-grid-units) - 1) * var(--gap) + (var(--gap) * 2) + (var(--board-border) * 2))
-  );
+  inline-size: min(100%,
+      calc(var(--boot-shell-grid-units) * var(--cell) + (var(--boot-shell-grid-units) - 1) * var(--gap) + (var(--gap) * 2) + (var(--board-border) * 2)));
 }
 
 .bootShellBoard {
@@ -250,11 +273,9 @@ body.isPathDragging * {
   inset: var(--gap);
   background-color: color-mix(in srgb, var(--cellbg), var(--panel) 22%);
   background-image:
-    linear-gradient(
-      180deg,
+    linear-gradient(180deg,
       color-mix(in srgb, var(--cellbg), var(--text) 6%),
-      color-mix(in srgb, var(--cellbg2), transparent 6%)
-    ),
+      color-mix(in srgb, var(--cellbg2), transparent 6%)),
     linear-gradient(color-mix(in srgb, var(--panel-outline), transparent 18%) 1px, transparent 1px),
     linear-gradient(90deg, color-mix(in srgb, var(--panel-outline), transparent 18%) 1px, transparent 1px);
   background-size:
@@ -263,32 +284,50 @@ body.isPathDragging * {
     calc((100% + var(--gap)) / var(--boot-shell-grid-units)) calc((100% + var(--gap)) / var(--boot-shell-grid-units));
 }
 
+.bootShellSelectWrap {
+  position: relative;
+  flex: 1 1 auto;
+  width: 100%;
+  min-width: 0;
+}
+
 .bootShellSelect {
   text-indent: -9999px;
   background-image:
-    linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--text), transparent 82%),
-      color-mix(in srgb, var(--text), transparent 74%)
-    ),
     linear-gradient(45deg, transparent 50%, currentColor 50%),
     linear-gradient(135deg, currentColor 50%, transparent 50%);
   background-position:
-    11px 50%,
     calc(100% - 15px) 1.1em,
     calc(100% - 10px) 1.1em;
   background-size:
-    clamp(52px, 34%, 120px) 0.85em,
     6px 6px,
     6px 6px;
   background-repeat: no-repeat;
 }
 
+.bootShellSelectText {
+  position: absolute;
+  inset-block-start: 50%;
+  inset-inline-start: 11px;
+  inline-size: clamp(52px, 34%, 120px);
+  block-size: 0.85em;
+  transform: translateY(-50%);
+  border-radius: 0;
+  background: linear-gradient(180deg,
+      color-mix(in srgb, var(--text), transparent 82%),
+      color-mix(in srgb, var(--text), transparent 74%));
+  pointer-events: none;
+}
+
 [dir='rtl'] .bootShellSelect {
   background-position:
-    calc(100% - 11px) 50%,
     10px 1.1em,
     15px 1.1em;
+}
+
+[dir='rtl'] .bootShellSelectText {
+  inset-inline-start: auto;
+  inset-inline-end: 11px;
 }
 
 .bootShellLegendRow {
@@ -1874,6 +1913,13 @@ body:not(.isPathDragging) .cell.pathEnd:active {
   }
 
   #grid {
+    animation: none;
+  }
+
+  .bootShellTextBlock,
+  .bootShellLegendText,
+  .bootShellGuideLine,
+  .bootShellSelectText {
     animation: none;
   }
 }

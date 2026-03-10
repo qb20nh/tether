@@ -258,6 +258,12 @@ const buildControlsPanelMarkup = ({ t, boot = false }) => {
   const controlAttrs = interactiveAttrs(boot);
   const bootLevelOptions = boot ? '<option selected></option>' : '';
   const bootMessage = boot ? renderBootGuideMessage() : '';
+  const levelSelectControl = boot
+    ? `<div class="bootShellSelectWrap">
+            <select id="${ELEMENT_IDS.LEVEL_SEL}" class="bootShellSelect" aria-label="${t('ui.levelSelectAria')}" data-i18n-aria-label="ui.levelSelectAria"${controlAttrs}>${bootLevelOptions}</select>
+            <span class="bootShellSelectText" aria-hidden="true"></span>
+          </div>`
+    : `<select id="${ELEMENT_IDS.LEVEL_SEL}" aria-label="${t('ui.levelSelectAria')}" data-i18n-aria-label="ui.levelSelectAria"${controlAttrs}>${bootLevelOptions}</select>`;
   const levelLabel = boot ? renderBootTextBlock('label') : t('ui.levelLabel');
   const resetLabel = boot
     ? `<span class="controlActionText">${renderBootTextBlock('button')}</span>`
@@ -274,7 +280,7 @@ const buildControlsPanelMarkup = ({ t, boot = false }) => {
         <div class="left">
           <label id="${ELEMENT_IDS.LEVEL_LABEL}" class="small" for="${ELEMENT_IDS.LEVEL_SEL}" data-i18n="ui.levelLabel">${levelLabel}</label>
           <div id="${ELEMENT_IDS.LEVEL_SELECT_GROUP}" class="levelSelectGroup">
-            <select id="${ELEMENT_IDS.LEVEL_SEL}" class="${boot ? 'bootShellSelect' : ''}" aria-label="${t('ui.levelSelectAria')}" data-i18n-aria-label="ui.levelSelectAria"${controlAttrs}>${bootLevelOptions}</select>
+            ${levelSelectControl}
             <select
               id="${ELEMENT_IDS.INFINITE_SEL}"
               aria-label="${t('ui.levelSelectAria')}"
