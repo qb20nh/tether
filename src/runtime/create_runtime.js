@@ -770,6 +770,52 @@ export function createRuntime(options) {
     dailyId: typeof stateValue.dailyId === 'string' ? stateValue.dailyId : null,
   });
 
+  const collectLevelMovableWalls = (grid) => {
+    if (!Array.isArray(grid)) return [];
+    const movableWalls = [];
+    for (let r = 0; r < grid.length; r += 1) {
+      const row = grid[r];
+      if (typeof row !== 'string') continue;
+      for (let c = 0; c < row.length; c += 1) {
+        if (row[c] === 'm') movableWalls.push([r, c]);
+      }
+    }
+    return movableWalls;
+  };
+
+  const coordinateListsMatch = (left, right) => {
+    if (!Array.isArray(left) || !Array.isArray(right) || left.length !== right.length) return false;
+    for (let i = 0; i < left.length; i += 1) {
+      const leftPoint = left[i];
+      const rightPoint = right[i];
+      if (!Array.isArray(leftPoint) || !Array.isArray(rightPoint)) return false;
+      if (leftPoint[0] !== rightPoint[0] || leftPoint[1] !== rightPoint[1]) return false;
+    }
+    return true;
+  };
+
+  const hasMeaningfulSessionProgress = (boardState) => {
+    if (!boardState || !Number.isInteger(boardState.levelIndex)) return false;
+    if (Array.isArray(boardState.path) && boardState.path.length > 0) return true;
+
+    const level = core.getLevel(boardState.levelIndex);
+    if (!level || !Array.isArray(level.grid)) return false;
+
+    const baseMovableWalls = collectLevelMovableWalls(level.grid);
+    const movableWalls = Array.isArray(boardState.movableWalls)
+      ? boardState.movableWalls
+      : baseMovableWalls;
+
+    return !coordinateListsMatch(movableWalls, baseMovableWalls);
+  };
+
+  const shouldPreserveExistingSessionBoard = (nextBoardState) => {
+    if (!nextBoardState || !mutableBoardState) return false;
+    if (mutableBoardState.levelIndex === nextBoardState.levelIndex) return false;
+    if (!hasMeaningfulSessionProgress(mutableBoardState)) return false;
+    return !hasMeaningfulSessionProgress(nextBoardState);
+  };
+
   const syncMutableBoardStateFromSnapshot = (snapshot) => {
     if (!snapshot || !Number.isInteger(snapshot.levelIndex)) return false;
 
@@ -782,6 +828,7 @@ export function createRuntime(options) {
       isDailyLevelIndex,
     });
     if (!serialized) return false;
+    if (shouldPreserveExistingSessionBoard(serialized)) return true;
     mutableBoardState = serialized;
     return true;
   };

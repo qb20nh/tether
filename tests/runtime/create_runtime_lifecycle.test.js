@@ -353,6 +353,15 @@ const createRuntimeHarness = ({
   };
 };
 
+const flushCallbacks = (callbackMap, arg) => {
+  let guard = 0;
+  while (callbackMap.size > 0 && guard < 20) {
+    const callbacks = [...callbackMap.values()];
+    callbacks.forEach((callback) => callback(arg));
+    guard += 1;
+  }
+};
+
 const emitSolvePath = (runtime, cells) => {
   for (let i = 0; i < cells.length; i += 1) {
     runtime.emitIntent({
@@ -588,6 +597,107 @@ test('createRuntime keeps reset restore state through zero-segment path attempts
     messageHtml: 'completion.completed',
     isBoardSolved: true,
   });
+  harness.runtime.destroy();
+});
+
+test('createRuntime keeps existing session progress when switching to an untouched level', (t) => {
+  const env = installBrowserEnv(t);
+  const savedBoard = {
+    levelIndex: 0,
+    path: [[0, 0], [0, 1]],
+    movableWalls: [],
+    dailyId: null,
+  };
+  const harness = createRuntimeHarness({
+    levels: [LEVEL, LEVEL],
+    persistenceInitialState: {
+      campaignProgress: 1,
+      sessionBoard: savedBoard,
+    },
+  });
+
+  harness.runtime.start();
+
+  assert.deepEqual(harness.state.getSnapshot().path, [
+    { r: 0, c: 0 },
+    { r: 0, c: 1 },
+  ]);
+
+  harness.runtime.emitIntent({
+    type: INTENT_TYPES.UI_ACTION,
+    payload: {
+      actionType: UI_ACTIONS.LEVEL_SELECT,
+      value: 1,
+    },
+  });
+  flushCallbacks(env.timeoutCallbacks);
+
+  assert.deepEqual(harness.persistence.readBootState().sessionBoard, savedBoard);
+
+  harness.runtime.emitIntent({
+    type: INTENT_TYPES.UI_ACTION,
+    payload: {
+      actionType: UI_ACTIONS.LEVEL_SELECT,
+      value: 0,
+    },
+  });
+
+  assert.deepEqual(harness.state.getSnapshot().path, [
+    { r: 0, c: 0 },
+    { r: 0, c: 1 },
+  ]);
+  harness.runtime.destroy();
+});
+
+test('createRuntime replaces the prior session save after a new level is attempted', (t) => {
+  const env = installBrowserEnv(t);
+  const harness = createRuntimeHarness({
+    levels: [LEVEL, LEVEL],
+    persistenceInitialState: {
+      campaignProgress: 1,
+      sessionBoard: {
+        levelIndex: 0,
+        path: [[0, 0], [0, 1]],
+        movableWalls: [],
+        dailyId: null,
+      },
+    },
+  });
+
+  harness.runtime.start();
+  harness.runtime.emitIntent({
+    type: INTENT_TYPES.UI_ACTION,
+    payload: {
+      actionType: UI_ACTIONS.LEVEL_SELECT,
+      value: 1,
+    },
+  });
+  flushCallbacks(env.timeoutCallbacks);
+
+  harness.runtime.emitIntent({
+    type: INTENT_TYPES.GAME_COMMAND,
+    payload: {
+      commandType: GAME_COMMANDS.START_OR_STEP,
+      r: 0,
+      c: 0,
+    },
+  });
+  harness.runtime.emitIntent({
+    type: INTENT_TYPES.UI_ACTION,
+    payload: {
+      actionType: UI_ACTIONS.LEVEL_SELECT,
+      value: 0,
+    },
+  });
+  flushCallbacks(env.timeoutCallbacks);
+
+  assert.deepEqual(harness.persistence.readBootState().sessionBoard, {
+    levelIndex: 1,
+    path: [[0, 0]],
+    movableWalls: [],
+    dailyId: null,
+  });
+  assert.deepEqual(harness.state.getSnapshot().path, []);
   harness.runtime.destroy();
 });
 
