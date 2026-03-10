@@ -43,6 +43,10 @@ class FakeElement {
     return null;
   }
 
+  contains(node) {
+    return node === this;
+  }
+
   closest(selector) {
     return selector === '.cell' ? this : null;
   }
@@ -212,6 +216,7 @@ const createGridHarness = (t, options = {}) => {
     store,
     refs,
     gridEl,
+    documentTarget,
     metrics,
     windowTarget,
     emittedIntents,
@@ -442,4 +447,29 @@ test('dom input adapter emits low power toggle actions from settings', (t) => {
       enabled: true,
     },
   });
+});
+
+test('dom input adapter closes settings on outside pointerdown before click', (t) => {
+  const harness = createGridHarness(t);
+
+  harness.documentTarget.dispatch('pointerdown', { target: harness.gridEl });
+
+  assert.deepEqual(harness.emittedIntents.at(-1), {
+    type: INTENT_TYPES.UI_ACTION,
+    payload: {
+      actionType: UI_ACTIONS.SETTINGS_CLOSE,
+    },
+  });
+});
+
+test('dom input adapter ignores pointerdown within settings ui when deciding outside close', (t) => {
+  const harness = createGridHarness(t);
+
+  harness.documentTarget.dispatch('pointerdown', { target: harness.refs.settingsToggle });
+  harness.documentTarget.dispatch('pointerdown', { target: harness.refs.settingsPanel });
+
+  assert.equal(
+    harness.emittedIntents.some((intent) => intent?.payload?.actionType === UI_ACTIONS.SETTINGS_CLOSE),
+    false,
+  );
 });

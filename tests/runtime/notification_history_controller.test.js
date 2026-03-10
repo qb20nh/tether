@@ -225,3 +225,29 @@ test('history controller closes panel on outside click and Escape', async () => 
   documentObj.dispatchEvent({ type: 'keydown', key: 'Escape' });
   assert.equal(panelEl.hidden, true);
 });
+
+test('history controller closes panel on outside pointerdown immediately', async () => {
+  const { controller, documentObj, panelEl, toggleEl } = createHarness();
+  controller.bind();
+
+  toggleEl.dispatchEvent({ type: 'click' });
+  await flushMicrotasks();
+  assert.equal(panelEl.hidden, false);
+
+  const outsideTarget = new FakeElement('div');
+  documentObj.body.appendChild(outsideTarget);
+  documentObj.dispatchEvent({ type: 'pointerdown', target: outsideTarget });
+  assert.equal(panelEl.hidden, true);
+});
+
+test('history controller ignores pointerdown within the open panel', async () => {
+  const { controller, documentObj, listEl, panelEl, toggleEl } = createHarness();
+  controller.bind();
+
+  toggleEl.dispatchEvent({ type: 'click' });
+  await flushMicrotasks();
+  assert.equal(panelEl.hidden, false);
+
+  documentObj.dispatchEvent({ type: 'pointerdown', target: listEl });
+  assert.equal(panelEl.hidden, false);
+});

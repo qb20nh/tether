@@ -414,6 +414,13 @@ export function createNotificationHistoryController(options = {}) {
     }
   };
 
+  const shouldIgnoreOutsideCloseTarget = (target) => {
+    if (!target) return false;
+    if (containsOpenDialogTarget(target)) return true;
+    if (notificationHistoryToggleEl?.contains(target)) return true;
+    return Boolean(notificationHistoryPanelEl?.contains(target));
+  };
+
   const bind = () => {
     if (!documentObj) return;
 
@@ -439,12 +446,17 @@ export function createNotificationHistoryController(options = {}) {
       });
     }
 
+    documentObj.addEventListener('pointerdown', (event) => {
+      if (!notificationHistoryOpen) return;
+      const target = event?.target;
+      if (shouldIgnoreOutsideCloseTarget(target)) return;
+      closePanel();
+    });
+
     documentObj.addEventListener('click', (event) => {
       if (!notificationHistoryOpen) return;
       const target = event?.target;
-      if (!target) return;
-      if (containsOpenDialogTarget(target)) return;
-      if (notificationHistoryToggleEl.contains(target) || notificationHistoryPanelEl.contains(target)) return;
+      if (shouldIgnoreOutsideCloseTarget(target)) return;
       closePanel();
     });
 

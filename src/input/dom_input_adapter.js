@@ -70,6 +70,15 @@ export function createDomInputAdapter() {
     });
   };
 
+  const eventTargetWithin = (target, element) => (
+    Boolean(target)
+    && Boolean(element)
+    && (
+      target === element
+      || (typeof element.contains === 'function' && element.contains(target))
+    )
+  );
+
   const queueWallDragGhostUpdate = (x, y) => {
     wallDragQueuedPoint = {
       x: Number(x) || 0,
@@ -674,6 +683,14 @@ export function createDomInputAdapter() {
 
       addListener(refs.settingsPanel, 'click', (e) => {
         e.stopPropagation();
+      });
+
+      addListener(document, 'pointerdown', (e) => {
+        const target = e?.target;
+        if (eventTargetWithin(target, refs.settingsToggle) || eventTargetWithin(target, refs.settingsPanel)) {
+          return;
+        }
+        sendUiAction(UI_ACTIONS.SETTINGS_CLOSE);
       });
 
       addListener(document, 'click', () => {
