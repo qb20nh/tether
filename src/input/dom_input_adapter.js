@@ -43,11 +43,13 @@ export function createDomInputAdapter() {
   let keyboardDirectionFrame = 0;
   const boardNav = {
     cursor: null,
+    selectionCursor: null,
     selectionKind: null,
     navActive: false,
     transientSelectionVisible: false,
     invalidMovePreviewDelta: null,
   };
+  let keyboardWallPreviewVisible = false;
   const keyboardConfirmKeysPressed = {
     enter: false,
     space: false,
@@ -369,12 +371,106 @@ export function createDomInputAdapter() {
     && (isGridFocusedForKeyboardBoardInput() || canUseGamepadBoardInput())
   );
 
+  const clearKeyboardWallPreviewInteraction = () => {
+    sendInteractionUpdate(INTERACTION_UPDATES.WALL_DROP_TARGET, { dropTarget: null });
+    sendInteractionUpdate(INTERACTION_UPDATES.WALL_DRAG, {
+      visible: false,
+      isWallDragging: false,
+    });
+  };
+
+  const readBoardPreviewGridMetrics = (snapshot = null) => {
+    const cachedMetrics = readCachedGridMetrics(snapshot);
+    if (cachedMetrics) {
+      dragGridMetrics = cachedMetrics;
+      return cachedMetrics;
+    }
+    if (!snapshot) return null;
+    dragGridMetrics = captureGridMetrics(snapshot);
+    return dragGridMetrics;
+  };
+
+  const resolveKeyboardWallGhostPoint = (cursor, snapshot = readSnapshot()) => {
+    if (!snapshot || !cloneCursor(cursor) || !refs?.gridEl) return null;
+    const metrics = readBoardPreviewGridMetrics(snapshot);
+    if (!metrics) return null;
+    return {
+      x: metrics.left + metrics.pad + (cursor.c * metrics.step) + (metrics.size * (2 / 3)),
+      y: metrics.top + metrics.pad + (cursor.r * metrics.step) + (metrics.size * (2 / 3)),
+    };
+  };
+
+  const refreshKeyboardWallPreview = (snapshot = readSnapshot()) => {
+    if (
+      !keyboardGamepadControlsEnabled
+      || boardControlSuppressed
+      || !keyboardWallPreviewVisible
+      || boardNav.selectionKind !== BOARD_SELECTION_KINDS.WALL
+    ) {
+      clearKeyboardWallPreviewInteraction();
+      return;
+    }
+
+    const cursor = cloneCursor(boardNav.cursor);
+    const anchor = cloneCursor(boardNav.selectionCursor);
+    if (!snapshot || !cursor || !anchor) {
+      clearKeyboardWallPreviewInteraction();
+      return;
+    }
+
+    const ghostPoint = resolveKeyboardWallGhostPoint(cursor, snapshot);
+    if (ghostPoint) {
+      sendInteractionUpdate(INTERACTION_UPDATES.WALL_DRAG, {
+        visible: true,
+        x: ghostPoint.x,
+        y: ghostPoint.y,
+        isWallDragging: false,
+      });
+    } else {
+      sendInteractionUpdate(INTERACTION_UPDATES.WALL_DRAG, {
+        visible: false,
+        isWallDragging: false,
+      });
+    }
+
+    sendInteractionUpdate(INTERACTION_UPDATES.WALL_DROP_TARGET, {
+      dropTarget: canDropWall(snapshot, anchor, cursor) ? cursor : null,
+    });
+  };
+
+  const setKeyboardWallPreviewVisible = (visible, snapshot = readSnapshot()) => {
+    keyboardWallPreviewVisible = Boolean(visible);
+    refreshKeyboardWallPreview(snapshot);
+  };
+
+  const clearKeyboardWallPreviewState = (snapshot = readSnapshot()) => {
+    const hadVisiblePreview = keyboardWallPreviewVisible;
+    keyboardWallPreviewVisible = false;
+    if (!hadVisiblePreview) return;
+    refreshKeyboardWallPreview(snapshot);
+  };
+
+  const resolveBoardSelectionCursorForDisplay = (snapshot, cursor) => {
+    if (typeof boardNav.selectionKind === 'string') {
+      return cloneCursor(boardNav.selectionCursor) || cloneCursor(cursor);
+    }
+    if (
+      boardNav.transientSelectionVisible
+      && cloneCursor(cursor)
+      && !isBoardCursorInteractive(snapshot, cursor)
+    ) {
+      return cloneCursor(cursor);
+    }
+    return null;
+  };
+
   const emitBoardNavUpdate = () => {
     const snapshot = readSnapshot();
     const cursor = cloneCursor(boardNav.cursor);
+    const selectionKind = resolveBoardSelectionKindForDisplay(snapshot, cursor);
     const selection = cloneBoardSelection(
-      resolveBoardSelectionKindForDisplay(snapshot, cursor),
-      cursor,
+      selectionKind,
+      resolveBoardSelectionCursorForDisplay(snapshot, cursor),
     );
     const previewDelta = cloneDirectionDelta(boardNav.invalidMovePreviewDelta);
     const payload = {
@@ -402,6 +498,12 @@ export function createDomInputAdapter() {
     const nextSelectionKind = Object.prototype.hasOwnProperty.call(nextState, 'selectionKind')
       ? (typeof nextState.selectionKind === 'string' ? nextState.selectionKind : null)
       : boardNav.selectionKind;
+    const nextSelectionCursor = Object.prototype.hasOwnProperty.call(nextState, 'selectionCursor')
+      ? cloneCursor(nextState.selectionCursor)
+      : cloneCursor(boardNav.selectionCursor);
+    const normalizedSelectionCursor = nextSelectionKind
+      ? (nextSelectionCursor || cloneCursor(nextCursor))
+      : null;
     const nextNavActive = Object.prototype.hasOwnProperty.call(nextState, 'navActive')
       ? Boolean(nextState.navActive)
       : boardNav.navActive;
@@ -409,14 +511,26 @@ export function createDomInputAdapter() {
       (boardNav.cursor?.r ?? null) !== (nextCursor?.r ?? null)
       || (boardNav.cursor?.c ?? null) !== (nextCursor?.c ?? null)
       || (boardNav.selectionKind ?? null) !== (nextSelectionKind ?? null)
+      || (boardNav.selectionCursor?.r ?? null) !== (normalizedSelectionCursor?.r ?? null)
+      || (boardNav.selectionCursor?.c ?? null) !== (normalizedSelectionCursor?.c ?? null)
       || boardNav.navActive !== nextNavActive
     );
-    if (!changed) return false;
+    const shouldRefreshKeyboardWallPreview = (
+      keyboardWallPreviewVisible
+      || boardNav.selectionKind === BOARD_SELECTION_KINDS.WALL
+      || nextSelectionKind === BOARD_SELECTION_KINDS.WALL
+    );
+    if (!changed) {
+      if (shouldRefreshKeyboardWallPreview) refreshKeyboardWallPreview();
+      return false;
+    }
 
     boardNav.cursor = nextCursor;
+    boardNav.selectionCursor = normalizedSelectionCursor;
     boardNav.selectionKind = nextSelectionKind;
     boardNav.navActive = nextNavActive;
     boardNav.invalidMovePreviewDelta = null;
+    if (shouldRefreshKeyboardWallPreview) refreshKeyboardWallPreview();
     emitBoardNavUpdate();
     return true;
   };
@@ -454,8 +568,10 @@ export function createDomInputAdapter() {
     pendingKeyboardDiagonalReplacement = null;
     boardNav.transientSelectionVisible = false;
     boardNav.invalidMovePreviewDelta = null;
+    clearKeyboardWallPreviewState();
     commitBoardNavState({
       cursor: null,
+      selectionCursor: null,
       selectionKind: null,
       navActive: false,
     });
@@ -540,16 +656,26 @@ export function createDomInputAdapter() {
     const levelIndex = Number.isInteger(snapshot.levelIndex) ? snapshot.levelIndex : null;
     const levelChanged = levelIndex !== lastBoardNavLevelIndex;
     let nextSelectionKind = levelChanged ? null : boardNav.selectionKind;
+    let nextSelectionCursor = levelChanged ? null : cloneCursor(boardNav.selectionCursor);
     let nextCursor = levelChanged ? null : cloneCursor(boardNav.cursor);
+    if (levelChanged) keyboardWallPreviewVisible = false;
 
     if (nextSelectionKind === BOARD_SELECTION_KINDS.WALL) {
-      if (!isPointInBounds(snapshot, nextCursor) || snapshot.gridData?.[nextCursor.r]?.[nextCursor.c] !== CELL_TYPES.MOVABLE_WALL) {
+      if (
+        !isPointInBounds(snapshot, nextSelectionCursor)
+        || snapshot.gridData?.[nextSelectionCursor.r]?.[nextSelectionCursor.c] !== CELL_TYPES.MOVABLE_WALL
+      ) {
         nextSelectionKind = null;
+        nextSelectionCursor = null;
+        keyboardWallPreviewVisible = false;
+      } else if (!isPointInBounds(snapshot, nextCursor)) {
+        nextCursor = cloneCursor(nextSelectionCursor);
       }
     } else if (
       nextSelectionKind === BOARD_SELECTION_KINDS.PATH_START
       || nextSelectionKind === BOARD_SELECTION_KINDS.PATH_END
     ) {
+      keyboardWallPreviewVisible = false;
       if (!Array.isArray(snapshot.path) || snapshot.path.length === 0) {
         nextSelectionKind = null;
       } else if (snapshot.path.length <= 1) {
@@ -558,7 +684,11 @@ export function createDomInputAdapter() {
       const endpoint = resolveSelectedPathEndpoint(snapshot, nextSelectionKind);
       if (endpoint) {
         nextCursor = { r: endpoint.r, c: endpoint.c };
+        nextSelectionCursor = { r: endpoint.r, c: endpoint.c };
       }
+    } else {
+      nextSelectionCursor = null;
+      keyboardWallPreviewVisible = false;
     }
 
     if (!nextCursor || !isPointInBounds(snapshot, nextCursor)) {
@@ -568,6 +698,7 @@ export function createDomInputAdapter() {
     lastBoardNavLevelIndex = levelIndex;
     commitBoardNavState({
       cursor: nextCursor,
+      selectionCursor: nextSelectionCursor,
       selectionKind: nextSelectionKind,
       navActive: Boolean(nextCursor),
     });
@@ -599,8 +730,10 @@ export function createDomInputAdapter() {
   const suspendBoardNavForPointerInteraction = () => {
     if (!keyboardGamepadControlsEnabled) return;
     boardNav.transientSelectionVisible = false;
+    clearKeyboardWallPreviewState();
     commitBoardNavState({
       cursor: boardNav.cursor,
+      selectionCursor: null,
       selectionKind: null,
       navActive: false,
     });
@@ -787,6 +920,7 @@ export function createDomInputAdapter() {
           || boardNav.selectionKind === BOARD_SELECTION_KINDS.PATH_END)
       ) {
         const { afterSnapshot, changed } = runGameCommand(GAME_COMMANDS.FINALIZE_PATH);
+        clearKeyboardWallPreviewState(afterSnapshot);
         commitBoardNavState({
           cursor,
           selectionKind: null,
@@ -795,6 +929,28 @@ export function createDomInputAdapter() {
         syncBoardNavSnapshot(afterSnapshot);
         return changed || true;
       }
+      if (boardNav.selectionKind === BOARD_SELECTION_KINDS.WALL) {
+        const anchor = cloneCursor(boardNav.selectionCursor) || cursor;
+        if (anchor && canDropWall(snapshot, anchor, cursor)) {
+          const target = { r: cursor.r, c: cursor.c };
+          const { afterSnapshot, changed } = runGameCommand(GAME_COMMANDS.WALL_MOVE_ATTEMPT, {
+            from: anchor,
+            to: target,
+          });
+          if (changed) {
+            clearKeyboardWallPreviewState(afterSnapshot);
+            commitBoardNavState({
+              cursor: target,
+              selectionCursor: target,
+              selectionKind: BOARD_SELECTION_KINDS.WALL,
+              navActive: true,
+            });
+            syncBoardNavSnapshot(afterSnapshot);
+            return true;
+          }
+        }
+      }
+      clearKeyboardWallPreviewState(snapshot);
       return commitBoardNavState({
         cursor,
         selectionKind: null,
@@ -804,8 +960,10 @@ export function createDomInputAdapter() {
 
     const cellType = snapshot.gridData?.[cursor.r]?.[cursor.c];
     if (cellType === CELL_TYPES.MOVABLE_WALL) {
+      setKeyboardWallPreviewVisible(true, snapshot);
       return commitBoardNavState({
         cursor,
+        selectionCursor: cursor,
         selectionKind: BOARD_SELECTION_KINDS.WALL,
         navActive: true,
       });
@@ -866,17 +1024,12 @@ export function createDomInputAdapter() {
         c: cursor.c + delta.c,
       };
       if (!isPointInBounds(snapshot, target)) return false;
-      const { afterSnapshot, changed } = runGameCommand(GAME_COMMANDS.WALL_MOVE_ATTEMPT, {
-        from: cursor,
-        to: target,
-      });
-      if (!changed) return false;
+      keyboardWallPreviewVisible = true;
       commitBoardNavState({
         cursor: target,
         selectionKind: BOARD_SELECTION_KINDS.WALL,
         navActive: true,
       });
-      syncBoardNavSnapshot(afterSnapshot);
       return true;
     }
 
@@ -964,6 +1117,7 @@ export function createDomInputAdapter() {
     }
 
     if (shortcut === 'reset') {
+      clearKeyboardWallPreviewState(snapshot);
       commitBoardNavState({
         cursor,
         selectionKind: null,
@@ -974,6 +1128,7 @@ export function createDomInputAdapter() {
     }
 
     if (shortcut === 'reverse') {
+      clearKeyboardWallPreviewState(snapshot);
       commitBoardNavState({
         cursor,
         selectionKind: null,
@@ -984,6 +1139,7 @@ export function createDomInputAdapter() {
     }
 
     if (shortcut === 'nextLevel') {
+      clearKeyboardWallPreviewState(snapshot);
       commitBoardNavState({
         cursor,
         selectionKind: null,
@@ -995,6 +1151,7 @@ export function createDomInputAdapter() {
 
     if (shortcut === 'prevLevel') {
       if (!snapshot || !Number.isInteger(snapshot.levelIndex) || snapshot.levelIndex <= 0) return false;
+      clearKeyboardWallPreviewState(snapshot);
       commitBoardNavState({
         cursor,
         selectionKind: null,
@@ -1512,6 +1669,7 @@ export function createDomInputAdapter() {
   const onGridBlur = () => {
     clearKeyboardDirectionPressed();
     clearKeyboardConfirmPressed();
+    clearKeyboardWallPreviewState();
     refreshBoardNavVisibility();
     scheduleGamepadPolling();
   };
@@ -1972,6 +2130,7 @@ export function createDomInputAdapter() {
       boardControlSuppressed = nextSuppressed;
       clearKeyboardDirectionPressed();
       clearKeyboardConfirmPressed();
+      clearKeyboardWallPreviewState();
       if (boardControlSuppressed) {
         stopGamepadPolling();
       } else if (keyboardGamepadControlsEnabled) {

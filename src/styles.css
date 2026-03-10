@@ -2159,6 +2159,7 @@ body:not(.isPathDragging) .cell.pathEnd:active {
 }
 
 .wallDragGhost {
+  --board-nav-marker-ease: cubic-bezier(0, 0.9, 0.1, 1);
   position: absolute;
   width: var(--cell);
   height: var(--cell);
@@ -2170,6 +2171,11 @@ body:not(.isPathDragging) .cell.pathEnd:active {
   z-index: 6;
   mix-blend-mode: normal;
   opacity: 0.92;
+  transition:
+    left 140ms var(--board-nav-marker-ease),
+    top 140ms var(--board-nav-marker-ease),
+    opacity 100ms var(--board-nav-marker-ease);
+  will-change: left, top, opacity;
 }
 
 .wallDragGhostMark {

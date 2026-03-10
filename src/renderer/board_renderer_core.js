@@ -3048,6 +3048,16 @@ export function createBoardRendererCore(options = {}) {
     }
 
     const selection = interactionModel?.boardSelection;
+    const cursor = interactionModel?.boardCursor;
+    if (
+      selection?.kind === 'wall'
+      && Number.isInteger(cursor?.r)
+      && Number.isInteger(cursor?.c)
+      && gridCells[cursor.r]?.[cursor.c]
+      && !pointsMatch(selection, cursor)
+    ) {
+      return { r: cursor.r, c: cursor.c, variant: 'cursor' };
+    }
     if (
       Number.isInteger(selection?.r)
       && Number.isInteger(selection?.c)
@@ -3056,7 +3066,6 @@ export function createBoardRendererCore(options = {}) {
       return { r: selection.r, c: selection.c, variant: 'selected' };
     }
 
-    const cursor = interactionModel?.boardCursor;
     if (
       Number.isInteger(cursor?.r)
       && Number.isInteger(cursor?.c)

@@ -720,6 +720,63 @@ test('createBoardRendererCore keeps refs, interaction state, and ghosts isolated
   assert.notEqual(firstMarker?.style.transform, previousSelectionTransform);
 });
 
+test('createBoardRendererCore positions wall ghosts from interaction coordinates', (t) => {
+  installRendererEnv(t);
+  const core = createBoardRendererCore();
+  const refs = createShellRefs();
+  const snapshot = createSnapshot({
+    gridData: [['.', '.']],
+  });
+
+  core.mount(refs);
+  core.rebuildGrid(snapshot);
+  core.updateInteraction({
+    wallGhost: { visible: true, x: 50, y: 80 },
+  });
+
+  const ghost = refs.boardWrap.querySelector('.wallDragGhost');
+  assert.equal(ghost !== null, true);
+  assert.equal(ghost?.style.left, '40px');
+  assert.equal(ghost?.style.top, '60px');
+});
+
+test('createBoardRendererCore moves the nav marker with wall preview cursor while keeping the wall selected', (t) => {
+  const env = installRendererEnv(t);
+  const core = createBoardRendererCore();
+  const refs = createShellRefs();
+  const snapshot = createSnapshot({
+    gridData: [['.', 'm', '.']],
+  });
+
+  core.mount(refs);
+  core.rebuildGrid(snapshot);
+  core.updateInteraction({
+    isBoardNavActive: true,
+    boardCursor: { r: 0, c: 1 },
+    boardSelection: { kind: 'wall', r: 0, c: 1 },
+    boardSelectionInteractive: true,
+  });
+  flushNextRaf(env, 16);
+
+  const marker = getBoardNavMarker(refs);
+  const initialTransform = marker?.style.transform || '';
+  assert.equal(marker?.classList.contains('isSelected'), true);
+  assert.equal(marker?.classList.contains('isCursor'), false);
+
+  core.updateInteraction({
+    isBoardNavActive: true,
+    boardCursor: { r: 0, c: 2 },
+    boardSelection: { kind: 'wall', r: 0, c: 1 },
+    boardSelectionInteractive: true,
+  });
+  flushNextRaf(env, 32);
+
+  assert.equal(marker?.classList.contains('isSelected'), false);
+  assert.equal(marker?.classList.contains('isCursor'), true);
+  assert.notEqual(marker?.style.transform, initialTransform);
+  assert.equal(getGridCell(refs, 0, 1, 3).classList.contains('pathTipDragSelected'), true);
+});
+
 test('createBoardRendererCore hides the nav marker when inactive or daily locked', (t) => {
   const env = installRendererEnv(t);
   const snapshot = createSnapshot({
@@ -1797,4 +1854,55 @@ test('createDomRenderer defers solved completion classes while a keyboard path t
 
   assert.equal(refs.boardWrap.classList.contains('isComplete'), true);
   assert.equal(refs.boardWrap.classList.contains('isCompleting'), true);
+});
+
+test('createDomRenderer does not apply pointer wall-drag body styling for keyboard wall previews', (t) => {
+  const env = installRendererEnv(t);
+  const snapshot = createSnapshot({
+    gridData: [['.', 'm', '.']],
+  });
+  const renderer = createDomRenderer();
+  const refs = createShellRefs();
+
+  renderer.mount(refs);
+  renderer.rebuildGrid(snapshot);
+  renderer.renderFrame({
+    snapshot,
+    evaluation: {},
+    completion: null,
+    uiModel: {},
+    interactionModel: {
+      isWallDragging: false,
+      wallGhost: { visible: true, x: 50, y: 80 },
+      dropTarget: { r: 0, c: 2 },
+      isBoardNavActive: true,
+      boardCursor: { r: 0, c: 2 },
+      boardSelection: { kind: 'wall', r: 0, c: 1 },
+      boardSelectionInteractive: true,
+    },
+  });
+  flushNextRaf(env, 16);
+
+  assert.equal(globalThis.document.body.classList.contains('isWallDragging'), false);
+  assert.equal(refs.boardWrap.querySelector('.wallDragGhost') !== null, true);
+  assert.equal(getGridCell(refs, 0, 2, 3).classList.contains('dropTarget'), true);
+
+  renderer.renderFrame({
+    snapshot,
+    evaluation: {},
+    completion: null,
+    uiModel: {},
+    interactionModel: {
+      isWallDragging: true,
+      wallGhost: { visible: true, x: 50, y: 80 },
+      dropTarget: { r: 0, c: 2 },
+      isBoardNavActive: true,
+      boardCursor: { r: 0, c: 2 },
+      boardSelection: { kind: 'wall', r: 0, c: 1 },
+      boardSelectionInteractive: true,
+    },
+  });
+  flushNextRaf(env, 32);
+
+  assert.equal(globalThis.document.body.classList.contains('isWallDragging'), true);
 });

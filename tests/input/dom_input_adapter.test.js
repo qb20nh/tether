@@ -158,6 +158,24 @@ const getLastBoardNavIntent = (harness) => getLastIntent(
   ),
 );
 
+const getLastInteractionIntent = (harness, updateType) => getLastIntent(
+  harness,
+  (intent) => (
+    intent?.type === INTENT_TYPES.INTERACTION_UPDATE
+    && intent.payload?.updateType === updateType
+  ),
+);
+
+const getLastWallDragIntent = (harness) => getLastInteractionIntent(
+  harness,
+  INTERACTION_UPDATES.WALL_DRAG,
+);
+
+const getLastWallDropTargetIntent = (harness) => getLastInteractionIntent(
+  harness,
+  INTERACTION_UPDATES.WALL_DROP_TARGET,
+);
+
 const getLastGameCommandIntent = (harness) => getLastIntent(
   harness,
   (intent) => intent?.type === INTENT_TYPES.GAME_COMMAND,
@@ -807,7 +825,7 @@ test('dom input adapter nudges board nav toward invalid keyboard moves only whil
   );
 });
 
-test('dom input adapter selects and moves movable walls with keyboard', (t) => {
+test('dom input adapter previews movable wall placement before keyboard confirm and keeps selection after move', (t) => {
   const harness = createGridHarness(t, {
     level: {
       name: 'Wall Move',
@@ -838,16 +856,205 @@ test('dom input adapter selects and moves movable walls with keyboard', (t) => {
     r: 0,
     c: 1,
   });
+  assert.equal(getLastWallDragIntent(harness)?.payload.visible, true);
+  assert.equal(getLastWallDragIntent(harness)?.payload.isWallDragging, false);
+  assert.equal(getLastWallDragIntent(harness)?.payload.x, 20 + (20 * (2 / 3)));
+  assert.equal(getLastWallDragIntent(harness)?.payload.y, 20 * (2 / 3));
+  assert.equal(getLastWallDropTargetIntent(harness)?.payload.dropTarget, null);
 
   tapDirectionalKeys(harness, ['ArrowLeft']);
-  const snapshot = harness.store.getSnapshot();
-  assert.equal(snapshot.gridData[0][0], 'm');
-  assert.equal(snapshot.gridData[0][1], '.');
+  const previewSnapshot = harness.store.getSnapshot();
+  assert.equal(previewSnapshot.gridData[0][0], '.');
+  assert.equal(previewSnapshot.gridData[0][1], 'm');
+  assert.deepEqual(getLastBoardNavIntent(harness)?.payload.boardCursor, { r: 0, c: 0 });
+  assert.deepEqual(getLastBoardNavIntent(harness)?.payload.boardSelection, {
+    kind: 'wall',
+    r: 0,
+    c: 1,
+  });
+  assert.equal(getLastWallDragIntent(harness)?.payload.visible, true);
+  assert.equal(getLastWallDragIntent(harness)?.payload.isWallDragging, false);
+  assert.equal(getLastWallDragIntent(harness)?.payload.x, 20 * (2 / 3));
+  assert.equal(getLastWallDragIntent(harness)?.payload.y, 20 * (2 / 3));
+  assert.deepEqual(getLastWallDropTargetIntent(harness)?.payload.dropTarget, { r: 0, c: 0 });
+
+  harness.gridEl.dispatch('keydown', createKeyEvent('Enter'));
+  const movedSnapshot = harness.store.getSnapshot();
+  assert.equal(movedSnapshot.gridData[0][0], 'm');
+  assert.equal(movedSnapshot.gridData[0][1], '.');
   assert.deepEqual(getLastBoardNavIntent(harness)?.payload.boardSelection, {
     kind: 'wall',
     r: 0,
     c: 0,
   });
+  assert.equal(getLastWallDragIntent(harness)?.payload.visible, false);
+  assert.equal(getLastWallDragIntent(harness)?.payload.isWallDragging, false);
+  assert.equal(getLastWallDropTargetIntent(harness)?.payload.dropTarget, null);
+
+  tapDirectionalKeys(harness, ['ArrowRight']);
+  assert.deepEqual(getLastBoardNavIntent(harness)?.payload.boardSelection, {
+    kind: 'wall',
+    r: 0,
+    c: 0,
+  });
+  assert.deepEqual(getLastBoardNavIntent(harness)?.payload.boardCursor, { r: 0, c: 1 });
+  assert.equal(getLastWallDragIntent(harness)?.payload.visible, true);
+  assert.deepEqual(getLastWallDropTargetIntent(harness)?.payload.dropTarget, { r: 0, c: 1 });
+});
+
+test('dom input adapter lets keyboard wall previews cross hint cells before confirming on a legal empty cell', (t) => {
+  const harness = createGridHarness(t, {
+    level: {
+      name: 'Hint Ring',
+      grid: [
+        '.....',
+        '.ttt.',
+        '.tmt.',
+        '.ttt.',
+        '.....',
+      ],
+      stitches: [],
+      cornerCounts: [],
+    },
+    metrics: {
+      rows: 5,
+      cols: 5,
+      left: 0,
+      top: 0,
+      right: 100,
+      bottom: 100,
+      size: 20,
+      gap: 0,
+      pad: 0,
+      step: 20,
+    },
+  });
+  harness.adapter.setKeyboardGamepadControlsEnabled(true);
+  harness.gridEl.focus();
+
+  tapDirectionalKeys(harness, ['ArrowDown']);
+  tapDirectionalKeys(harness, ['ArrowDown']);
+  tapDirectionalKeys(harness, ['ArrowRight']);
+  tapDirectionalKeys(harness, ['ArrowRight']);
+
+  harness.gridEl.dispatch('keydown', createKeyEvent('Enter'));
+  assert.deepEqual(getLastBoardNavIntent(harness)?.payload.boardSelection, {
+    kind: 'wall',
+    r: 2,
+    c: 2,
+  });
+  assert.equal(getLastWallDragIntent(harness)?.payload.visible, true);
+  assert.equal(getLastWallDragIntent(harness)?.payload.x, 40 + (20 * (2 / 3)));
+  assert.equal(getLastWallDragIntent(harness)?.payload.y, 40 + (20 * (2 / 3)));
+
+  tapDirectionalKeys(harness, ['ArrowUp']);
+  assert.equal(harness.store.getSnapshot().gridData[2][2], 'm');
+  assert.deepEqual(getLastBoardNavIntent(harness)?.payload.boardCursor, { r: 1, c: 2 });
+  assert.equal(getLastWallDragIntent(harness)?.payload.visible, true);
+  assert.equal(getLastWallDragIntent(harness)?.payload.x, 40 + (20 * (2 / 3)));
+  assert.equal(getLastWallDragIntent(harness)?.payload.y, 20 + (20 * (2 / 3)));
+  assert.equal(getLastWallDropTargetIntent(harness)?.payload.dropTarget, null);
+
+  tapDirectionalKeys(harness, ['ArrowUp']);
+  assert.deepEqual(getLastBoardNavIntent(harness)?.payload.boardCursor, { r: 0, c: 2 });
+  assert.deepEqual(getLastWallDropTargetIntent(harness)?.payload.dropTarget, { r: 0, c: 2 });
+
+  harness.gridEl.dispatch('keydown', createKeyEvent('Enter'));
+  const movedSnapshot = harness.store.getSnapshot();
+  assert.equal(movedSnapshot.gridData[0][2], 'm');
+  assert.equal(movedSnapshot.gridData[2][2], '.');
+  assert.equal(getLastWallDragIntent(harness)?.payload.visible, false);
+  assert.equal(getLastWallDropTargetIntent(harness)?.payload.dropTarget, null);
+  assert.deepEqual(getLastBoardNavIntent(harness)?.payload.boardSelection, {
+    kind: 'wall',
+    r: 0,
+    c: 2,
+  });
+});
+
+test('dom input adapter cancels keyboard wall previews from source and invalid hint targets', (t) => {
+  const harness = createGridHarness(t, {
+    level: {
+      name: 'Wall Cancel',
+      grid: ['.mt'],
+      stitches: [],
+      cornerCounts: [],
+    },
+    metrics: {
+      rows: 1,
+      cols: 3,
+      left: 0,
+      top: 0,
+      right: 60,
+      bottom: 20,
+      size: 20,
+      gap: 0,
+      pad: 0,
+      step: 20,
+    },
+  });
+  harness.adapter.setKeyboardGamepadControlsEnabled(true);
+  harness.gridEl.focus();
+
+  tapDirectionalKeys(harness, ['ArrowRight']);
+  harness.gridEl.dispatch('keydown', createKeyEvent('Enter'));
+  harness.gridEl.dispatch('keydown', createKeyEvent('Enter'));
+
+  assert.equal(harness.store.getSnapshot().gridData[0][1], 'm');
+  assert.equal(getLastWallDragIntent(harness)?.payload.visible, false);
+  assert.equal(getLastWallDropTargetIntent(harness)?.payload.dropTarget, null);
+  assert.equal(getLastBoardNavIntent(harness)?.payload.boardSelection, null);
+
+  harness.gridEl.dispatch('keydown', createKeyEvent('Enter'));
+  tapDirectionalKeys(harness, ['ArrowRight']);
+  assert.deepEqual(getLastBoardNavIntent(harness)?.payload.boardCursor, { r: 0, c: 2 });
+  assert.equal(getLastWallDropTargetIntent(harness)?.payload.dropTarget, null);
+
+  harness.gridEl.dispatch('keydown', createKeyEvent('Enter'));
+  assert.equal(harness.store.getSnapshot().gridData[0][1], 'm');
+  assert.equal(getLastWallDragIntent(harness)?.payload.visible, false);
+  assert.equal(getLastWallDropTargetIntent(harness)?.payload.dropTarget, null);
+  assert.equal(getLastBoardNavIntent(harness)?.payload.boardSelection, null);
+});
+
+test('dom input adapter clears keyboard wall previews on blur and controls disable', (t) => {
+  const harness = createGridHarness(t, {
+    level: {
+      name: 'Wall Blur',
+      grid: ['.m.'],
+      stitches: [],
+      cornerCounts: [],
+    },
+    metrics: {
+      rows: 1,
+      cols: 3,
+      left: 0,
+      top: 0,
+      right: 60,
+      bottom: 20,
+      size: 20,
+      gap: 0,
+      pad: 0,
+      step: 20,
+    },
+  });
+  harness.adapter.setKeyboardGamepadControlsEnabled(true);
+  harness.gridEl.focus();
+
+  tapDirectionalKeys(harness, ['ArrowRight']);
+  harness.gridEl.dispatch('keydown', createKeyEvent('Enter'));
+  tapDirectionalKeys(harness, ['ArrowLeft']);
+  assert.equal(getLastWallDragIntent(harness)?.payload.visible, true);
+  assert.deepEqual(getLastWallDropTargetIntent(harness)?.payload.dropTarget, { r: 0, c: 0 });
+
+  harness.gridEl.blur();
+  assert.equal(getLastWallDragIntent(harness)?.payload.visible, false);
+  assert.equal(getLastWallDropTargetIntent(harness)?.payload.dropTarget, null);
+  assert.equal(getLastBoardNavIntent(harness)?.payload.isBoardNavActive, false);
+
+  harness.adapter.setKeyboardGamepadControlsEnabled(false);
+  assert.equal(getLastWallDragIntent(harness)?.payload.visible, false);
+  assert.equal(getLastWallDropTargetIntent(harness)?.payload.dropTarget, null);
 });
 
 test('dom input adapter does not snap the keyboard cursor to the last clicked cell', (t) => {
