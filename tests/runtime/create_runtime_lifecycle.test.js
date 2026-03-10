@@ -712,6 +712,39 @@ test('createRuntime replaces the prior session save after a new level is attempt
   harness.runtime.destroy();
 });
 
+test('createRuntime saves in-progress keyboard path steps after the debounce window', (t) => {
+  const env = installBrowserEnv(t);
+  const harness = createRuntimeHarness();
+
+  harness.runtime.start();
+
+  harness.runtime.emitIntent({
+    type: INTENT_TYPES.GAME_COMMAND,
+    payload: {
+      commandType: GAME_COMMANDS.START_OR_STEP,
+      r: 0,
+      c: 0,
+    },
+  });
+  harness.runtime.emitIntent({
+    type: INTENT_TYPES.GAME_COMMAND,
+    payload: {
+      commandType: GAME_COMMANDS.START_OR_STEP,
+      r: 0,
+      c: 1,
+    },
+  });
+  flushCallbacks(env.timeoutCallbacks);
+
+  assert.deepEqual(harness.persistence.readBootState().sessionBoard, {
+    levelIndex: 0,
+    path: [[0, 0], [0, 1]],
+    movableWalls: [],
+    dailyId: null,
+  });
+  harness.runtime.destroy();
+});
+
 test('createRuntime locale changes keep only the latest async selection', async (t) => {
   installBrowserEnv(t);
   let currentLocale = 'en';

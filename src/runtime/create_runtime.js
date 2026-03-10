@@ -2027,9 +2027,12 @@ export function createRuntime(options) {
       needsResize: transition.rebuildGrid,
     });
 
+    const shouldPersistPathStepState = isPathStepCommand && transition.changed && !interactionState.isPathDragging;
     const shouldPersistInputState = Boolean(transition.validate) && !interactionState.isPathDragging;
     const shouldPersistResetState = commandType === GAME_COMMANDS.RESET_PATH && transition.changed;
-    if (shouldPersistInputState || shouldPersistResetState) queueSessionSave();
+    if (shouldPersistPathStepState || shouldPersistInputState || shouldPersistResetState) {
+      queueSessionSave();
+    }
   };
 
   const emitIntent = (intent) => {
