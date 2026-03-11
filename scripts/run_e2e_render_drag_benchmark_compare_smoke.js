@@ -18,7 +18,9 @@ const run = () => new Promise((resolve, reject) => {
   });
 });
 
-run().catch((error) => {
+try {
+  await run();
+} catch (error) {
   process.stderr.write(`${error?.stack || error}\n`);
   process.exitCode = 1;
-});
+}

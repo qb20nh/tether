@@ -22,7 +22,7 @@ import { solveLevel } from './verify_level_properties.js';
 const HINT_CODES = new Set(['t', 'r', 'l', 's', 'h', 'v']);
 const RPS_CODES = new Set(['g', 'b', 'p']);
 const DEFAULT_FEATURE_UNIQUE_RATIO = Object.freeze(
-  Object.fromEntries(INFINITE_FEATURE_CYCLE.map((feature) => [feature, feature === 'corner' ? 0.10 : 0.25])),
+  Object.fromEntries(INFINITE_FEATURE_CYCLE.map((feature) => [feature, feature === 'corner' ? 0.1 : 0.25])),
 );
 
 const DEFAULTS = {
@@ -33,7 +33,7 @@ const DEFAULTS = {
   retrySolveTimeMs: 5000,
   perfRuns: 500,
   perfBudgetMsP95: 300,
-  minUniqueRatio: 0.40,
+  minUniqueRatio: 0.4,
   minFeatureUniqueRatio: DEFAULT_FEATURE_UNIQUE_RATIO,
   json: false,
 };
@@ -54,36 +54,44 @@ const toRatio = (name, value) => {
   return parsed;
 };
 
+const parseJsonFeatureUniqueRatio = (input) => {
+  let raw;
+  try {
+    raw = JSON.parse(input);
+  } catch (error) {
+    throw new Error(`--min-feature-unique-ratio JSON parse failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new Error('--min-feature-unique-ratio JSON must be an object');
+  }
+  return raw;
+};
+
+const parseKvFeatureUniqueRatio = (input) => {
+  const raw = {};
+  const pairs = input.split(',').map((part) => part.trim()).filter(Boolean);
+  if (pairs.length === 0) {
+    throw new Error('--min-feature-unique-ratio requires key=value pairs or JSON object');
+  }
+  for (const pair of pairs) {
+    const eq = pair.indexOf('=');
+    if (eq <= 0 || eq >= pair.length - 1) {
+      throw new Error(`Invalid feature ratio pair: ${pair}`);
+    }
+    const key = pair.slice(0, eq).trim();
+    const ratio = pair.slice(eq + 1).trim();
+    raw[key] = ratio;
+  }
+  return raw;
+};
+
 const parseFeatureUniqueRatio = (value) => {
   const input = String(value || '').trim();
   if (!input) return {};
 
-  let raw;
-  if (input.startsWith('{')) {
-    try {
-      raw = JSON.parse(input);
-    } catch (error) {
-      throw new Error(`--min-feature-unique-ratio JSON parse failed: ${error instanceof Error ? error.message : String(error)}`);
-    }
-    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
-      throw new Error('--min-feature-unique-ratio JSON must be an object');
-    }
-  } else {
-    raw = {};
-    const pairs = input.split(',').map((part) => part.trim()).filter(Boolean);
-    if (pairs.length === 0) {
-      throw new Error('--min-feature-unique-ratio requires key=value pairs or JSON object');
-    }
-    for (const pair of pairs) {
-      const eq = pair.indexOf('=');
-      if (eq <= 0 || eq >= pair.length - 1) {
-        throw new Error(`Invalid feature ratio pair: ${pair}`);
-      }
-      const key = pair.slice(0, eq).trim();
-      const ratio = pair.slice(eq + 1).trim();
-      raw[key] = ratio;
-    }
-  }
+  const raw = input.startsWith('{')
+    ? parseJsonFeatureUniqueRatio(input)
+    : parseKvFeatureUniqueRatio(input);
 
   const out = {};
   for (const [feature, ratio] of Object.entries(raw)) {
@@ -177,20 +185,22 @@ const analyzeFeatures = (level) => {
   let cellConstraintCount = 0;
 
   for (const row of level.grid || []) {
-    for (let i = 0; i < row.length; i++) {
-      const ch = row[i];
-      if (ch === '#' || ch === 'm') wallCount += 1;
-      if (HINT_CODES.has(ch)) {
+    for (const element of row) {
+      const ch = element;
+      if (ch === '#') {
+        wallCount += 1;
+      } else if (ch === 'm') {
+        wallCount += 1;
+        hasMovable = true;
+      } else if (HINT_CODES.has(ch)) {
         hasHint = true;
         hintCount += 1;
         cellConstraintCount += 1;
-      }
-      if (RPS_CODES.has(ch)) {
+      } else if (RPS_CODES.has(ch)) {
         hasRps = true;
         rpsCount += 1;
         cellConstraintCount += 1;
       }
-      if (ch === 'm') hasMovable = true;
     }
   }
 
@@ -223,7 +233,7 @@ const analyzeFeatures = (level) => {
 };
 
 const constraintDensity = (level, features) => {
-  if (!(features.nonWallCellCount > 0)) return 0;
+  if (features.nonWallCellCount <= 0) return 0;
   return features.constraintTokenCount / features.nonWallCellCount;
 };
 
@@ -231,7 +241,7 @@ const wallDensity = (level, features) => {
   const rows = level.grid?.length || 0;
   const cols = rows > 0 ? level.grid[0].length : 0;
   const totalCells = rows * cols;
-  if (!(totalCells > 0)) return 0;
+  if (totalCells <= 0) return 0;
   return features.wallCount / totalCells;
 };
 
@@ -242,43 +252,44 @@ const isWallCell = (level, r, c) => {
   return ch === '#' || ch === 'm';
 };
 
+const checkUnsatisfiableCorner = (level, vr, vc, count) => {
+  const nw = isWallCell(level, vr - 1, vc - 1);
+  const ne = isWallCell(level, vr - 1, vc);
+  const sw = isWallCell(level, vr, vc - 1);
+  const se = isWallCell(level, vr, vc);
+  const wallCount = [nw, ne, sw, se].filter(Boolean).length;
+  const diagonalWalls = (nw && se) || (ne && sw);
+
+  if (wallCount > 3) {
+    return 'more_than_3_walls';
+  }
+  if (count === 0 && diagonalWalls) {
+    return 'zero_with_diagonal_walls';
+  }
+
+  const maxPossible = [
+    !nw && !ne,
+    !nw && !sw,
+    !ne && !se,
+    !sw && !se,
+  ].filter(Boolean).length;
+
+  if (count > maxPossible) {
+    return 'count_exceeds_local_max';
+  }
+
+  return null;
+};
+
 const hasUnsatisfiableCorner = (level) => {
   for (const [vr, vc, count] of level.cornerCounts || []) {
-    const nw = isWallCell(level, vr - 1, vc - 1);
-    const ne = isWallCell(level, vr - 1, vc);
-    const sw = isWallCell(level, vr, vc - 1);
-    const se = isWallCell(level, vr, vc);
-    const wallCount = (nw ? 1 : 0) + (ne ? 1 : 0) + (sw ? 1 : 0) + (se ? 1 : 0);
-    const diagonalWalls = (nw && se) || (ne && sw);
-
-    let maxPossible = 0;
-    if (!nw && !ne) maxPossible += 1;
-    if (!nw && !sw) maxPossible += 1;
-    if (!ne && !se) maxPossible += 1;
-    if (!sw && !se) maxPossible += 1;
-
-    if (wallCount > 3) {
+    const reason = checkUnsatisfiableCorner(level, vr, vc, count);
+    if (reason) {
       return {
         vr,
         vc,
         count,
-        reason: 'more_than_3_walls',
-      };
-    }
-    if (count === 0 && diagonalWalls) {
-      return {
-        vr,
-        vc,
-        count,
-        reason: 'zero_with_diagonal_walls',
-      };
-    }
-    if (count > maxPossible) {
-      return {
-        vr,
-        vc,
-        count,
-        reason: 'count_exceeds_local_max',
+        reason,
       };
     }
   }
@@ -302,55 +313,62 @@ const buildStitchReq = (stitches) => {
   return req;
 };
 
-const verifyWitnessReplay = (level) => {
+const getGridDimensions = (level) => {
   const rows = level.grid?.length || 0;
   const cols = rows > 0 ? level.grid[0].length : 0;
-  if (!(rows > 0 && cols > 0)) return { ok: false, reason: 'empty_grid' };
+  return { rows, cols };
+};
 
-  const meta = level?.infiniteMeta || {};
+const validateWitnessMeta = (meta) => {
+  if (!meta) return { ok: false, reason: 'missing_witness_path' };
   if (!Array.isArray(meta.witnessPath) || meta.witnessPath.length === 0) {
     return { ok: false, reason: 'missing_witness_path' };
   }
   if (!Array.isArray(meta.witnessMovableWalls)) {
     return { ok: false, reason: 'missing_witness_movable_walls' };
   }
+  return { ok: true };
+};
 
-  const path = [];
-  for (let i = 0; i < meta.witnessPath.length; i++) {
-    const entry = meta.witnessPath[i];
+const parseWitnessCoords = (coords, rows, cols, invalidReason, oobReason) => {
+  const result = [];
+  for (let i = 0; i < coords.length; i++) {
+    const entry = coords[i];
     if (!Array.isArray(entry) || entry.length < 2) {
-      return { ok: false, reason: 'invalid_witness_path_entry', at: i };
+      return { ok: false, reason: invalidReason, at: i };
     }
     const r = entry[0];
     const c = entry[1];
     if (!Number.isInteger(r) || !Number.isInteger(c) || !inBounds(rows, cols, r, c)) {
-      return { ok: false, reason: 'witness_path_out_of_bounds', at: i };
+      return { ok: false, reason: oobReason, at: i };
     }
-    path.push({ r, c });
+    result.push([r, c]);
   }
+  return { ok: true, coords: result };
+};
 
-  const witnessMovableWalls = [];
-  for (let i = 0; i < meta.witnessMovableWalls.length; i++) {
-    const entry = meta.witnessMovableWalls[i];
-    if (!Array.isArray(entry) || entry.length < 2) {
-      return { ok: false, reason: 'invalid_witness_movable_entry', at: i };
-    }
-    const r = entry[0];
-    const c = entry[1];
-    if (!Number.isInteger(r) || !Number.isInteger(c) || !inBounds(rows, cols, r, c)) {
-      return { ok: false, reason: 'witness_movable_out_of_bounds', at: i };
-    }
-    witnessMovableWalls.push([r, c]);
-  }
-
-  const gridData = level.grid.map((row) => row.split(''));
-
+const extractMovableWalls = (gridData, rows, cols) => {
   const currentMovable = [];
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
       if (gridData[r][c] === 'm') currentMovable.push([r, c]);
     }
   }
+  return currentMovable;
+};
+
+const countUsableCells = (gridData, rows, cols) => {
+  let totalUsable = 0;
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      if (!isObstacle(gridData[r][c])) totalUsable += 1;
+    }
+  }
+  return totalUsable;
+};
+
+const applyWitnessMovableWalls = (gridData, rows, cols, witnessMovableWalls) => {
+  const currentMovable = extractMovableWalls(gridData, rows, cols);
 
   if (currentMovable.length !== witnessMovableWalls.length) {
     return {
@@ -373,24 +391,22 @@ const verifyWitnessReplay = (level) => {
     gridData[r][c] = 'm';
   }
 
-  let totalUsable = 0;
-  for (let r = 0; r < rows; r++) {
-    for (let c = 0; c < cols; c++) {
-      if (!isObstacle(gridData[r][c])) totalUsable += 1;
-    }
-  }
-  if (path.length !== totalUsable) {
-    return {
-      ok: false,
-      reason: 'witness_path_length_mismatch',
-      pathLength: path.length,
-      totalUsable,
-    };
-  }
+  const totalUsable = countUsableCells(gridData, rows, cols);
 
-  const stitches = (level.stitches || []).map(([vr, vc]) => [vr, vc]);
-  const stitchSet = new Set(stitches.map(([vr, vc]) => keyV(vr, vc)));
+  return { ok: true, totalUsable };
+};
 
+const isValidStep = (prev, cur, stitchSet) => {
+  const dr = Math.abs(prev.r - cur.r);
+  const dc = Math.abs(prev.c - cur.c);
+  if (dr + dc === 1) return true;
+  if (dr === 1 && dc === 1) {
+    return stitchSet.has(keyV(Math.max(prev.r, cur.r), Math.max(prev.c, cur.c)));
+  }
+  return false;
+};
+
+const validateWitnessPathTrajectory = (path, gridData, stitchSet) => {
   const visited = new Set();
   for (let i = 0; i < path.length; i++) {
     const cur = path[i];
@@ -402,34 +418,15 @@ const verifyWitnessReplay = (level) => {
     if (visited.has(curKey)) {
       return { ok: false, reason: 'witness_path_revisits_cell', at: i, r: cur.r, c: cur.c };
     }
-    if (i > 0) {
-      const prev = path[i - 1];
-      const dr = Math.abs(prev.r - cur.r);
-      const dc = Math.abs(prev.c - cur.c);
-      const orth = dr + dc === 1;
-      const diagonalWithStitch = dr === 1 && dc === 1 && stitchSet.has(keyV(Math.max(prev.r, cur.r), Math.max(prev.c, cur.c)));
-      if (!orth && !diagonalWithStitch) {
-        return { ok: false, reason: 'witness_path_non_adjacent_step', at: i };
-      }
+    if (i > 0 && !isValidStep(path[i - 1], cur, stitchSet)) {
+      return { ok: false, reason: 'witness_path_non_adjacent_step', at: i };
     }
     visited.add(curKey);
   }
+  return { ok: true, visited };
+};
 
-  const idxByKey = new Map(path.map((p, i) => [keyOf(p.r, p.c), i]));
-  const snapshot = {
-    rows,
-    cols,
-    totalUsable,
-    gridData,
-    path,
-    visited,
-    stitches,
-    stitchSet,
-    stitchReq: buildStitchReq(stitches),
-    cornerCounts: level.cornerCounts || [],
-    idxByKey,
-  };
-
+const evaluateWitnessCompletion = (snapshot) => {
   const hintStatus = evaluateHints(snapshot);
   const stitchStatus = evaluateStitches(snapshot);
   const rpsStatus = evaluateRPS(snapshot);
@@ -453,8 +450,69 @@ const verifyWitnessReplay = (level) => {
       rpsOk: completion.rpsOk,
     };
   }
-
   return { ok: true };
+};
+
+const verifyWitnessReplay = (level) => {
+  const { rows, cols } = getGridDimensions(level);
+  if (!(rows > 0 && cols > 0)) return { ok: false, reason: 'empty_grid' };
+
+  const metaResult = validateWitnessMeta(level.infiniteMeta);
+  if (!metaResult.ok) return metaResult;
+  const meta = level.infiniteMeta;
+
+  const parsedPath = parseWitnessCoords(
+    meta.witnessPath, rows, cols,
+    'invalid_witness_path_entry', 'witness_path_out_of_bounds'
+  );
+  if (!parsedPath.ok) return parsedPath;
+  const path = parsedPath.coords.map(([r, c]) => ({ r, c }));
+
+  const parsedWalls = parseWitnessCoords(
+    meta.witnessMovableWalls, rows, cols,
+    'invalid_witness_movable_entry', 'witness_movable_out_of_bounds'
+  );
+  if (!parsedWalls.ok) return parsedWalls;
+  const witnessMovableWalls = parsedWalls.coords;
+
+  const gridData = level.grid.map((row) => row.split(''));
+
+  const wallResult = applyWitnessMovableWalls(gridData, rows, cols, witnessMovableWalls);
+  if (!wallResult.ok) return wallResult;
+  const { totalUsable } = wallResult;
+
+  if (path.length !== totalUsable) {
+    return {
+      ok: false,
+      reason: 'witness_path_length_mismatch',
+      pathLength: path.length,
+      totalUsable,
+    };
+  }
+
+  const stitches = (level.stitches || []).map(([vr, vc]) => [vr, vc]);
+  const stitchSet = new Set(stitches.map(([vr, vc]) => keyV(vr, vc)));
+
+  const trajResult = validateWitnessPathTrajectory(path, gridData, stitchSet);
+  if (!trajResult.ok) return trajResult;
+  const { visited } = trajResult;
+
+  const idxByKey = new Map(path.map((p, i) => [keyOf(p.r, p.c), i]));
+  const snapshot = {
+    rows,
+    cols,
+    totalUsable,
+    gridData,
+    path,
+    visited,
+    stitches,
+    stitchSet,
+    stitchReq: buildStitchReq(stitches),
+    cornerCounts: level.cornerCounts || [],
+    idxByKey,
+  };
+
+  return evaluateWitnessCompletion(snapshot);
 };
 
 const percentile = (values, q) => {
@@ -471,22 +529,34 @@ const mean = (values) => {
 
 const round = (value) => Math.round(value * 1000) / 1000;
 
-function main() {
-  const opts = parseArgs(process.argv.slice(2));
-  const failures = [];
-  const determinismMismatches = [];
-  const coverageMismatches = [];
-  const minimumFeatureMismatches = [];
-  const rpsHintMinimumMismatches = [];
-  const densityMismatches = [];
-  const wallDensityMismatches = [];
-  const cornerUnsatMismatches = [];
-  const witnessProofFailures = [];
-  const singletonRpsMismatches = [];
-  const canonicalCollisions = [];
-  const solvabilityFailures = [];
-  const uniqueRatioMismatches = [];
+const analyzeFeatureUniqueness = (opts, featureSampleCounts, featureSampleSignatures) => {
+  const perFeatureUniqueRatios = {};
+  const featureMismatches = [];
 
+  for (const feature of INFINITE_FEATURE_CYCLE) {
+    const count = featureSampleCounts[feature];
+    const unique = featureSampleSignatures[feature].size;
+    const ratio = count > 0 ? unique / count : 1;
+    const required = opts.minFeatureUniqueRatio[feature] ?? opts.minUniqueRatio;
+    
+    perFeatureUniqueRatios[feature] = {
+      samples: count,
+      uniqueSignatures: unique,
+      ratio: round(ratio),
+      requiredRatio: required,
+    };
+    
+    if (count > 0 && ratio < required) {
+      featureMismatches.push({ scope: feature, observed: ratio, required });
+    }
+  }
+
+  return { perFeatureUniqueRatios, featureMismatches };
+};
+
+const checkDeterminismAndUniqueness = (opts, failures) => {
+  const determinismMismatches = [];
+  const uniqueRatioMismatches = [];
   const featureSampleCounts = Object.fromEntries(INFINITE_FEATURE_CYCLE.map((feature) => [feature, 0]));
   const featureSampleSignatures = Object.fromEntries(
     INFINITE_FEATURE_CYCLE.map((feature) => [feature, new Set()]),
@@ -536,235 +606,22 @@ function main() {
     );
   }
 
-  const perFeatureUniqueRatios = {};
-  for (const feature of INFINITE_FEATURE_CYCLE) {
-    const count = featureSampleCounts[feature];
-    const unique = featureSampleSignatures[feature].size;
-    const ratio = count > 0 ? unique / count : 1;
-    const required = opts.minFeatureUniqueRatio[feature] ?? opts.minUniqueRatio;
-    perFeatureUniqueRatios[feature] = {
-      samples: count,
-      uniqueSignatures: unique,
-      ratio: round(ratio),
-      requiredRatio: required,
-    };
-    if (count > 0 && ratio < required) {
-      uniqueRatioMismatches.push({
-        scope: feature,
-        observed: ratio,
-        required,
-      });
-    }
-  }
-  if (uniqueRatioMismatches.some((entry) => entry.scope !== 'global')) {
+  const { perFeatureUniqueRatios, featureMismatches } = analyzeFeatureUniqueness(
+    opts,
+    featureSampleCounts,
+    featureSampleSignatures,
+  );
+  uniqueRatioMismatches.push(...featureMismatches);
+
+  if (featureMismatches.length > 0) {
     failures.push(
-      `Per-feature unique-signature ratios below threshold: ${uniqueRatioMismatches
-        .filter((entry) => entry.scope !== 'global')
+      `Per-feature unique-signature ratios below threshold: ${featureMismatches
         .map((entry) => `${entry.scope}(${round(entry.observed)}/${entry.required})`)
         .join(', ')}`,
     );
   }
 
-  for (let i = 0; i < opts.coverage; i++) {
-    const expectedFeature = INFINITE_FEATURE_CYCLE[i % INFINITE_FEATURE_CYCLE.length];
-    const level = generateInfiniteLevel(i);
-    const features = analyzeFeatures(level);
-    const density = constraintDensity(level, features);
-    const wallRatio = wallDensity(level, features);
-    if (!features[expectedFeature]) {
-      coverageMismatches.push({
-        index: i,
-        expectedFeature,
-        detected: features,
-      });
-    }
-    if (density < MIN_CONSTRAINT_DENSITY || density > MAX_CONSTRAINT_DENSITY) {
-      densityMismatches.push({
-        index: i,
-        density,
-        requiredMinDensity: MIN_CONSTRAINT_DENSITY,
-        requiredMaxDensity: MAX_CONSTRAINT_DENSITY,
-        detected: features,
-      });
-    }
-    if (wallRatio > MAX_WALL_DENSITY) {
-      wallDensityMismatches.push({
-        index: i,
-        wallDensity: wallRatio,
-        requiredMaxWallDensity: MAX_WALL_DENSITY,
-        detected: features,
-      });
-    }
-    const unsatCorner = hasUnsatisfiableCorner(level);
-    if (unsatCorner) {
-      cornerUnsatMismatches.push({
-        index: i,
-        ...unsatCorner,
-      });
-    }
-    if (features.featureCount < 2) {
-      minimumFeatureMismatches.push({
-        index: i,
-        featureCount: features.featureCount,
-        detected: features,
-      });
-    }
-    if (expectedFeature === 'rps' && features.hintCount < 2) {
-      rpsHintMinimumMismatches.push({
-        index: i,
-        hintCount: features.hintCount,
-        detected: features,
-      });
-    }
-    if (features.rpsCount === 1) {
-      singletonRpsMismatches.push({
-        index: i,
-        detected: features,
-      });
-    }
-  }
-
-  if (coverageMismatches.length > 0) {
-    failures.push(`Feature coverage mismatches: ${coverageMismatches.length}`);
-  }
-  if (minimumFeatureMismatches.length > 0) {
-    failures.push(`Minimum feature-family mismatches: ${minimumFeatureMismatches.length}`);
-  }
-  if (rpsHintMinimumMismatches.length > 0) {
-    failures.push(`RPS hint-minimum mismatches: ${rpsHintMinimumMismatches.length}`);
-  }
-  if (densityMismatches.length > 0) {
-    failures.push(`Constraint-density mismatches: ${densityMismatches.length}`);
-  }
-  if (wallDensityMismatches.length > 0) {
-    failures.push(`Wall-density mismatches: ${wallDensityMismatches.length}`);
-  }
-  if (cornerUnsatMismatches.length > 0) {
-    failures.push(`Corner-unsatisfiable mismatches: ${cornerUnsatMismatches.length}`);
-  }
-
-  const canonicalSeen = new Map();
-  for (let i = 0; i < opts.canonicalScan; i++) {
-    const level = generateInfiniteLevel(i);
-    const features = analyzeFeatures(level);
-    if (features.rpsCount === 1) {
-      singletonRpsMismatches.push({
-        index: i,
-        detected: features,
-      });
-    }
-    const unsatCorner = hasUnsatisfiableCorner(level);
-    if (unsatCorner) {
-      cornerUnsatMismatches.push({
-        index: i,
-        ...unsatCorner,
-      });
-    }
-    const witnessProof = verifyWitnessReplay(level);
-    if (!witnessProof.ok) {
-      witnessProofFailures.push({
-        index: i,
-        ...witnessProof,
-      });
-    }
-    const canonicalSignature = canonicalConstraintSignature(level);
-    if (!canonicalSeen.has(canonicalSignature)) {
-      canonicalSeen.set(canonicalSignature, i);
-      continue;
-    }
-    canonicalCollisions.push({
-      firstIndex: canonicalSeen.get(canonicalSignature),
-      index: i,
-    });
-  }
-  if (canonicalCollisions.length > 0) {
-    failures.push(`Canonical collisions: ${canonicalCollisions.length}`);
-  }
-  if (witnessProofFailures.length > 0) {
-    failures.push(`Witness-proof failures: ${witnessProofFailures.length}`);
-  }
-  const singletonRpsMismatchList = [...new Map(
-    singletonRpsMismatches.map((entry) => [entry.index, entry]),
-  ).values()].sort((a, b) => a.index - b.index);
-  if (singletonRpsMismatchList.length > 0) {
-    failures.push(`Singleton-RPS mismatches: ${singletonRpsMismatchList.length}`);
-  }
-
-  const solveOpts = {
-    timeMs: opts.solveTimeMs,
-    minRaw: 1,
-    minCanonical: 0,
-    minHintOrders: 0,
-    minCornerOrders: 0,
-    maxSolutions: 1,
-  };
-  const retrySolveOpts = {
-    ...solveOpts,
-    timeMs: Math.max(opts.retrySolveTimeMs, opts.solveTimeMs),
-  };
-
-  let solvedCount = 0;
-  let timedOutCount = 0;
-  let finalTimedOutCount = 0;
-  let retriedCount = 0;
-  let retryResolvedCount = 0;
-  for (let i = 0; i < opts.samples; i++) {
-    const level = generateInfiniteLevel(i);
-    const firstPass = solveLevel(level, solveOpts);
-    let finalMetrics = firstPass;
-    let retried = false;
-
-    if (firstPass.timedOut) timedOutCount += 1;
-    if (firstPass.rawSolutions <= 0 && firstPass.timedOut && retrySolveOpts.timeMs > solveOpts.timeMs) {
-      retried = true;
-      retriedCount += 1;
-      finalMetrics = solveLevel(level, retrySolveOpts);
-      if (finalMetrics.rawSolutions > 0 && !finalMetrics.timedOut) {
-        retryResolvedCount += 1;
-      }
-    }
-
-    if (finalMetrics.timedOut) finalTimedOutCount += 1;
-    if (finalMetrics.rawSolutions > 0) solvedCount += 1;
-    if (finalMetrics.rawSolutions <= 0 || finalMetrics.timedOut) {
-      solvabilityFailures.push({
-        index: i,
-        rawSolutions: finalMetrics.rawSolutions,
-        timedOut: finalMetrics.timedOut,
-        retried,
-        firstPassTimedOut: firstPass.timedOut,
-      });
-    }
-  }
-
-  // Solver sampling is advisory; authoritative solvability proof is witness replay.
-  if (solvabilityFailures.length > 0 && witnessProofFailures.length > 0) {
-    failures.push(`Solvability failures: ${solvabilityFailures.length}`);
-  }
-
-  const perfDurations = [];
-  for (let i = 0; i < opts.perfRuns; i++) {
-    const index = i % Math.max(1, opts.samples);
-    const t0 = performance.now();
-    generateInfiniteLevel(index);
-    perfDurations.push(performance.now() - t0);
-  }
-
-  const perfSummary = {
-    runs: opts.perfRuns,
-    meanMs: round(mean(perfDurations)),
-    p95Ms: round(percentile(perfDurations, 0.95)),
-    maxMs: round(percentile(perfDurations, 1)),
-    budgetMsP95: opts.perfBudgetMsP95,
-  };
-
-  if (perfSummary.p95Ms > opts.perfBudgetMsP95) {
-    failures.push(`Generation p95 ${perfSummary.p95Ms}ms exceeded budget ${opts.perfBudgetMsP95}ms`);
-  }
-
-  const result = {
-    ok: failures.length === 0,
-    options: opts,
+  return {
     determinism: {
       checked: opts.samples,
       mismatches: determinismMismatches,
@@ -794,32 +651,276 @@ function main() {
         ]),
       ),
     },
-    coverage: {
-      checked: opts.coverage,
-      cycle: INFINITE_FEATURE_CYCLE,
-      mismatches: coverageMismatches,
+    uniqueSignatureCount,
+    uniqueRatio,
+    determinismMismatches,
+  };
+};
+
+const analyzeLevelCoverage = (i, state) => {
+  const expectedFeature = INFINITE_FEATURE_CYCLE[i % INFINITE_FEATURE_CYCLE.length];
+  const level = generateInfiniteLevel(i);
+  const features = analyzeFeatures(level);
+  const density = constraintDensity(level, features);
+  const wallRatio = wallDensity(level, features);
+
+  if (!features[expectedFeature]) {
+    state.coverageMismatches.push({ index: i, expectedFeature, detected: features });
+  }
+  if (density < MIN_CONSTRAINT_DENSITY || density > MAX_CONSTRAINT_DENSITY) {
+    state.densityMismatches.push({
+      index: i, density, requiredMinDensity: MIN_CONSTRAINT_DENSITY,
+      requiredMaxDensity: MAX_CONSTRAINT_DENSITY, detected: features,
+    });
+  }
+  if (wallRatio > MAX_WALL_DENSITY) {
+    state.wallDensityMismatches.push({
+      index: i, wallDensity: wallRatio, requiredMaxWallDensity: MAX_WALL_DENSITY, detected: features,
+    });
+  }
+  const unsatCorner = hasUnsatisfiableCorner(level);
+  if (unsatCorner) {
+    state.cornerUnsatMismatches.push({ index: i, ...unsatCorner });
+  }
+  if (features.featureCount < 2) {
+    state.minimumFeatureMismatches.push({ index: i, featureCount: features.featureCount, detected: features });
+  }
+  if (expectedFeature === 'rps' && features.hintCount < 2) {
+    state.rpsHintMinimumMismatches.push({ index: i, hintCount: features.hintCount, detected: features });
+  }
+  if (features.rpsCount === 1) {
+    state.singletonRpsMismatches.push({ index: i, detected: features });
+  }
+};
+
+const checkCoverage = (opts, failures, cornerUnsatMismatches, singletonRpsMismatches) => {
+  const state = {
+    coverageMismatches: [],
+    minimumFeatureMismatches: [],
+    rpsHintMinimumMismatches: [],
+    densityMismatches: [],
+    wallDensityMismatches: [],
+    cornerUnsatMismatches,
+    singletonRpsMismatches,
+  };
+
+  for (let i = 0; i < opts.coverage; i++) {
+    analyzeLevelCoverage(i, state);
+  }
+
+  if (state.coverageMismatches.length > 0) failures.push(`Feature coverage mismatches: ${state.coverageMismatches.length}`);
+  if (state.minimumFeatureMismatches.length > 0) failures.push(`Minimum feature-family mismatches: ${state.minimumFeatureMismatches.length}`);
+  if (state.rpsHintMinimumMismatches.length > 0) failures.push(`RPS hint-minimum mismatches: ${state.rpsHintMinimumMismatches.length}`);
+  if (state.densityMismatches.length > 0) failures.push(`Constraint-density mismatches: ${state.densityMismatches.length}`);
+  if (state.wallDensityMismatches.length > 0) failures.push(`Wall-density mismatches: ${state.wallDensityMismatches.length}`);
+
+  return {
+    coverage: { checked: opts.coverage, cycle: INFINITE_FEATURE_CYCLE, mismatches: state.coverageMismatches },
+    minimumFeatures: { checked: opts.coverage, required: 2, mismatches: state.minimumFeatureMismatches },
+    rpsHintMinimum: { checked: opts.coverage, requiredHintCount: 2, mismatches: state.rpsHintMinimumMismatches },
+    constraintDensity: { checked: opts.coverage, requiredMinDensity: MIN_CONSTRAINT_DENSITY, requiredMaxDensity: MAX_CONSTRAINT_DENSITY, mismatches: state.densityMismatches },
+    wallDensity: { checked: opts.coverage, requiredMaxDensity: MAX_WALL_DENSITY, mismatches: state.wallDensityMismatches },
+  };
+};
+
+const checkCanonicalScan = (opts, failures, cornerUnsatMismatches, singletonRpsMismatches) => {
+  const witnessProofFailures = [];
+  const canonicalCollisions = [];
+  const canonicalSeen = new Map();
+
+  for (let i = 0; i < opts.canonicalScan; i++) {
+    const level = generateInfiniteLevel(i);
+    const features = analyzeFeatures(level);
+    if (features.rpsCount === 1) {
+      singletonRpsMismatches.push({ index: i, detected: features });
+    }
+    const unsatCorner = hasUnsatisfiableCorner(level);
+    if (unsatCorner) {
+      cornerUnsatMismatches.push({ index: i, ...unsatCorner });
+    }
+    const witnessProof = verifyWitnessReplay(level);
+    if (!witnessProof.ok) {
+      witnessProofFailures.push({ index: i, ...witnessProof });
+    }
+    const canonicalSignature = canonicalConstraintSignature(level);
+    if (!canonicalSeen.has(canonicalSignature)) {
+      canonicalSeen.set(canonicalSignature, i);
+      continue;
+    }
+    canonicalCollisions.push({ firstIndex: canonicalSeen.get(canonicalSignature), index: i });
+  }
+
+  if (canonicalCollisions.length > 0) failures.push(`Canonical collisions: ${canonicalCollisions.length}`);
+  if (witnessProofFailures.length > 0) failures.push(`Witness-proof failures: ${witnessProofFailures.length}`);
+
+  return {
+    canonicalUniqueness: {
+      scanned: opts.canonicalScan,
+      collisions: canonicalCollisions,
+      uniqueSignatures: opts.canonicalScan - canonicalCollisions.length,
     },
-    minimumFeatures: {
-      checked: opts.coverage,
-      required: 2,
-      mismatches: minimumFeatureMismatches,
+    witnessProof: {
+      checked: opts.canonicalScan,
+      failures: witnessProofFailures,
     },
-    rpsHintMinimum: {
-      checked: opts.coverage,
-      requiredHintCount: 2,
-      mismatches: rpsHintMinimumMismatches,
-    },
-    constraintDensity: {
-      checked: opts.coverage,
-      requiredMinDensity: MIN_CONSTRAINT_DENSITY,
-      requiredMaxDensity: MAX_CONSTRAINT_DENSITY,
-      mismatches: densityMismatches,
-    },
-    wallDensity: {
-      checked: opts.coverage,
-      requiredMaxDensity: MAX_WALL_DENSITY,
-      mismatches: wallDensityMismatches,
-    },
+    witnessProofFailuresCount: witnessProofFailures.length,
+  };
+};
+
+const processLevelSolvability = (i, solveOpts, retrySolveOpts, counts) => {
+  const level = generateInfiniteLevel(i);
+  const firstPass = solveLevel(level, solveOpts);
+  let finalMetrics = firstPass;
+  let retried = false;
+
+  const requiresRetry = firstPass.rawSolutions <= 0 && firstPass.timedOut && retrySolveOpts.timeMs > solveOpts.timeMs;
+  if (requiresRetry) {
+    retried = true;
+    counts.retried += 1;
+    finalMetrics = solveLevel(level, retrySolveOpts);
+    if (finalMetrics.rawSolutions > 0 && !finalMetrics.timedOut) {
+      counts.retryResolved += 1;
+    }
+  }
+
+  if (firstPass.timedOut) counts.timedOut += 1;
+  if (finalMetrics.timedOut) counts.finalTimedOut += 1;
+  if (finalMetrics.rawSolutions > 0) counts.solved += 1;
+
+  if (finalMetrics.rawSolutions <= 0 || finalMetrics.timedOut) {
+    counts.failures.push({
+      index: i,
+      rawSolutions: finalMetrics.rawSolutions,
+      timedOut: finalMetrics.timedOut,
+      retried,
+      firstPassTimedOut: firstPass.timedOut,
+    });
+  }
+};
+
+const checkSolvability = (opts, failures, witnessProofFailuresCount) => {
+  const solveOpts = {
+    timeMs: opts.solveTimeMs,
+    minRaw: 1,
+    minCanonical: 0,
+    minHintOrders: 0,
+    minCornerOrders: 0,
+    maxSolutions: 1,
+  };
+  const retrySolveOpts = {
+    ...solveOpts,
+    timeMs: Math.max(opts.retrySolveTimeMs, opts.solveTimeMs),
+  };
+
+  const counts = {
+    solved: 0,
+    timedOut: 0,
+    finalTimedOut: 0,
+    retried: 0,
+    retryResolved: 0,
+    failures: [],
+  };
+
+  for (let i = 0; i < opts.samples; i++) {
+    processLevelSolvability(i, solveOpts, retrySolveOpts, counts);
+  }
+
+  // Solver sampling is advisory; authoritative solvability proof is witness replay.
+  if (counts.failures.length > 0 && witnessProofFailuresCount > 0) {
+    failures.push(`Solvability failures: ${counts.failures.length}`);
+  }
+
+  return {
+    checked: opts.samples,
+    solved: counts.solved,
+    timedOut: counts.timedOut,
+    finalTimedOut: counts.finalTimedOut,
+    retried: counts.retried,
+    retryResolved: counts.retryResolved,
+    retrySolveTimeMs: retrySolveOpts.timeMs,
+    failures: counts.failures,
+  };
+};
+
+const checkPerformance = (opts, failures) => {
+  const perfDurations = [];
+  for (let i = 0; i < opts.perfRuns; i++) {
+    const index = i % Math.max(1, opts.samples);
+    const t0 = performance.now();
+    generateInfiniteLevel(index);
+    perfDurations.push(performance.now() - t0);
+  }
+
+  const perfSummary = {
+    runs: opts.perfRuns,
+    meanMs: round(mean(perfDurations)),
+    p95Ms: round(percentile(perfDurations, 0.95)),
+    maxMs: round(percentile(perfDurations, 1)),
+    budgetMsP95: opts.perfBudgetMsP95,
+  };
+
+  if (perfSummary.p95Ms > opts.perfBudgetMsP95) {
+    failures.push(`Generation p95 ${perfSummary.p95Ms}ms exceeded budget ${opts.perfBudgetMsP95}ms`);
+  }
+
+  return perfSummary;
+};
+
+const printTextSummary = (opts, detAndDedupObj, coverageObj, scanObj, checkSolversObj, perfSummary, failures) => {
+  console.log(`Determinism: ${opts.samples - detAndDedupObj.determinismMismatches.length}/${opts.samples} exact matches`);
+  console.log(
+    `Uniqueness: ${detAndDedupObj.uniqueSignatureCount}/${opts.samples} unique signatures (${detAndDedupObj.uniqueRatio} ratio, threshold ${opts.minUniqueRatio})`,
+  );
+  console.log(`Coverage: ${opts.coverage - coverageObj.coverage.mismatches.length}/${opts.coverage} satisfied expected feature`);
+  console.log(`Canonical scan: ${opts.canonicalScan - scanObj.canonicalUniqueness.collisions.length}/${opts.canonicalScan} unique`);
+  console.log(
+    `Solvability: ${checkSolversObj.solved}/${opts.samples} solved (timeouts: ${checkSolversObj.timedOut}, retries resolved: ${checkSolversObj.retryResolved}/${checkSolversObj.retried})`,
+  );
+  console.log(`Performance: mean ${perfSummary.meanMs}ms, p95 ${perfSummary.p95Ms}ms, max ${perfSummary.maxMs}ms`);
+  if (failures.length > 0) {
+    console.log('Failures:');
+    for (const failure of failures) {
+      console.log(`  - ${failure}`);
+    }
+  } else {
+    console.log('All checks passed.');
+  }
+};
+
+function main() {
+  const opts = parseArgs(process.argv.slice(2));
+  const failures = [];
+  const cornerUnsatMismatches = [];
+  const singletonRpsMismatches = [];
+
+  const detAndDedupObj = checkDeterminismAndUniqueness(opts, failures);
+  const coverageObj = checkCoverage(opts, failures, cornerUnsatMismatches, singletonRpsMismatches);
+  if (cornerUnsatMismatches.length > 0) {
+    failures.push(`Corner-unsatisfiable mismatches: ${cornerUnsatMismatches.length}`);
+  }
+  const scanObj = checkCanonicalScan(opts, failures, cornerUnsatMismatches, singletonRpsMismatches);
+
+  const singletonRpsMismatchList = [...new Map(
+    singletonRpsMismatches.map((entry) => [entry.index, entry]),
+  ).values()].sort((a, b) => a.index - b.index);
+
+  if (singletonRpsMismatchList.length > 0) {
+    failures.push(`Singleton-RPS mismatches: ${singletonRpsMismatchList.length}`);
+  }
+
+  const checkSolversObj = checkSolvability(opts, failures, scanObj.witnessProofFailuresCount);
+  const perfSummary = checkPerformance(opts, failures);
+
+  const result = {
+    ok: failures.length === 0,
+    options: opts,
+    determinism: detAndDedupObj.determinism,
+    uniqueness: detAndDedupObj.uniqueness,
+    coverage: coverageObj.coverage,
+    minimumFeatures: coverageObj.minimumFeatures,
+    rpsHintMinimum: coverageObj.rpsHintMinimum,
+    constraintDensity: coverageObj.constraintDensity,
+    wallDensity: coverageObj.wallDensity,
     cornerUnsatisfiable: {
       checkedCoverage: opts.coverage,
       checkedCanonicalScan: opts.canonicalScan,
@@ -832,25 +933,9 @@ function main() {
       checkedCanonicalScan: opts.canonicalScan,
       mismatches: singletonRpsMismatchList,
     },
-    canonicalUniqueness: {
-      scanned: opts.canonicalScan,
-      collisions: canonicalCollisions,
-      uniqueSignatures: opts.canonicalScan - canonicalCollisions.length,
-    },
-    witnessProof: {
-      checked: opts.canonicalScan,
-      failures: witnessProofFailures,
-    },
-    solvability: {
-      checked: opts.samples,
-      solved: solvedCount,
-      timedOut: timedOutCount,
-      finalTimedOut: finalTimedOutCount,
-      retried: retriedCount,
-      retryResolved: retryResolvedCount,
-      retrySolveTimeMs: retrySolveOpts.timeMs,
-      failures: solvabilityFailures,
-    },
+    canonicalUniqueness: scanObj.canonicalUniqueness,
+    witnessProof: scanObj.witnessProof,
+    solvability: checkSolversObj,
     performance: perfSummary,
     failures,
   };
@@ -858,24 +943,7 @@ function main() {
   if (opts.json) {
     console.log(JSON.stringify(result, null, 2));
   } else {
-    console.log(`Determinism: ${opts.samples - determinismMismatches.length}/${opts.samples} exact matches`);
-    console.log(
-      `Uniqueness: ${uniqueSignatureCount}/${opts.samples} unique signatures (${round(uniqueRatio)} ratio, threshold ${opts.minUniqueRatio})`,
-    );
-    console.log(`Coverage: ${opts.coverage - coverageMismatches.length}/${opts.coverage} satisfied expected feature`);
-    console.log(`Canonical scan: ${opts.canonicalScan - canonicalCollisions.length}/${opts.canonicalScan} unique`);
-    console.log(
-      `Solvability: ${solvedCount}/${opts.samples} solved (timeouts: ${timedOutCount}, retries resolved: ${retryResolvedCount}/${retriedCount})`,
-    );
-    console.log(`Performance: mean ${perfSummary.meanMs}ms, p95 ${perfSummary.p95Ms}ms, max ${perfSummary.maxMs}ms`);
-    if (failures.length > 0) {
-      console.log('Failures:');
-      for (const failure of failures) {
-        console.log(`  - ${failure}`);
-      }
-    } else {
-      console.log('All checks passed.');
-    }
+    printTextSummary(opts, detAndDedupObj, coverageObj, scanObj, checkSolversObj, perfSummary, failures);
   }
 
   if (failures.length > 0) process.exitCode = 1;

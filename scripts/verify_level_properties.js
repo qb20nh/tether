@@ -30,7 +30,7 @@ const UINT32 = 0x100000000;
 const GOLDEN_RATIO_32 = 0x9e3779b9;
 const DIFFICULTY_VERSION = 1;
 const LEVELS_FILE_PATH = fileURLToPath(new URL('../src/levels.js', import.meta.url));
-const KNOWN_LEVEL_KEYS = [
+const KNOWN_LEVEL_KEYS = new Set([
   'name',
   'nameKey',
   'desc',
@@ -39,7 +39,7 @@ const KNOWN_LEVEL_KEYS = [
   'stitches',
   'cornerCounts',
   'difficulty',
-];
+]);
 
 export const DIFFICULTY_PROFILES = {
   standard256: {
@@ -143,41 +143,56 @@ function parseArgs(argv) {
       return argv[i];
     };
 
-    if (a === '--help' || a === '-h') {
-      usage();
-      process.exit(0);
-    } else if (a === '--json') {
-      opts.json = true;
-    } else if (a === '--difficulty') {
-      opts.difficulty = true;
-    } else if (a === '--difficulty-profile') {
-      const profile = next();
-      if (!Object.hasOwn(DIFFICULTY_PROFILES, profile)) {
-        throw new Error(
-          `--difficulty-profile must be one of ${Object.keys(DIFFICULTY_PROFILES).join(', ')}, got: ${profile}`,
-        );
+    switch (a) {
+      case '--help':
+      case '-h':
+        usage();
+        process.exit(0);
+      case '--json':
+        opts.json = true;
+        break;
+      case '--difficulty':
+        opts.difficulty = true;
+        break;
+      case '--difficulty-profile': {
+        const profile = next();
+        if (!Object.hasOwn(DIFFICULTY_PROFILES, profile)) {
+          throw new Error(
+            `--difficulty-profile must be one of ${Object.keys(DIFFICULTY_PROFILES).join(', ')}, got: ${profile}`,
+          );
+        }
+        opts.difficultyProfile = profile;
+        break;
       }
-      opts.difficultyProfile = profile;
-    } else if (a === '--difficulty-proof-time-ms') {
-      opts.difficultyProofTimeMs = toInt('--difficulty-proof-time-ms', next());
-    } else if (a === '--difficulty-proof-node-cap') {
-      opts.difficultyProofNodeCap = toInt('--difficulty-proof-node-cap', next());
-    } else if (a === '--level') {
-      opts.levels.push(next());
-    } else if (a === '--min-raw') {
-      opts.minRaw = toInt('--min-raw', next());
-    } else if (a === '--min-canonical') {
-      opts.minCanonical = toInt('--min-canonical', next());
-    } else if (a === '--min-hint-orders') {
-      opts.minHintOrders = toInt('--min-hint-orders', next());
-    } else if (a === '--min-corner-orders') {
-      opts.minCornerOrders = toInt('--min-corner-orders', next());
-    } else if (a === '--max-solutions') {
-      opts.maxSolutions = toInt('--max-solutions', next());
-    } else if (a === '--time-ms') {
-      opts.timeMs = toInt('--time-ms', next());
-    } else {
-      throw new Error(`Unknown option: ${a}`);
+      case '--difficulty-proof-time-ms':
+        opts.difficultyProofTimeMs = toInt('--difficulty-proof-time-ms', next());
+        break;
+      case '--difficulty-proof-node-cap':
+        opts.difficultyProofNodeCap = toInt('--difficulty-proof-node-cap', next());
+        break;
+      case '--level':
+        opts.levels.push(next());
+        break;
+      case '--min-raw':
+        opts.minRaw = toInt('--min-raw', next());
+        break;
+      case '--min-canonical':
+        opts.minCanonical = toInt('--min-canonical', next());
+        break;
+      case '--min-hint-orders':
+        opts.minHintOrders = toInt('--min-hint-orders', next());
+        break;
+      case '--min-corner-orders':
+        opts.minCornerOrders = toInt('--min-corner-orders', next());
+        break;
+      case '--max-solutions':
+        opts.maxSolutions = toInt('--max-solutions', next());
+        break;
+      case '--time-ms':
+        opts.timeMs = toInt('--time-ms', next());
+        break;
+      default:
+        throw new Error(`Unknown option: ${a}`);
     }
   }
 
@@ -205,7 +220,7 @@ function resolveLevelSelector(selector) {
 const pathKey = (path) => path.map((p) => `${p.r},${p.c}`).join('|');
 const canonicalPathKey = (path) => {
   const f = pathKey(path);
-  const b = [...path].reverse().map((p) => `${p.r},${p.c}`).join('|');
+  const b = pathKey(path.toReversed());
   return f < b ? f : b;
 };
 
@@ -301,8 +316,8 @@ const cloneGrid = (grid) => grid.map((row) => row.slice());
 
 const hashString32 = (input) => {
   let h = 0x811c9dc5;
-  for (let i = 0; i < input.length; i++) {
-    h ^= input.charCodeAt(i);
+  for (const char of input) {
+    h ^= char.codePointAt(0);
     h = Math.imul(h, 0x01000193);
   }
   return h >>> 0;
@@ -419,6 +434,44 @@ export function buildLevelContext(level) {
   };
 }
 
+function getUsableCells(gridData, rows, cols) {
+  const usableCells = [];
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const ch = gridData[r][c];
+      if (ch === '#' || ch === 'm') continue;
+      usableCells.push({ r, c });
+    }
+  }
+  return usableCells;
+}
+
+function getCellNeighbors(cell, gridData, rows, cols, stitchSet) {
+  const out = [];
+  for (const [dr, dc] of ALL_DIRS) {
+    const nr = cell.r + dr;
+    const nc = cell.c + dc;
+    if (nr < 0 || nr >= rows || nc < 0 || nc >= cols) continue;
+    const target = gridData[nr][nc];
+    if (target === '#' || target === 'm') continue;
+
+    const next = { r: nr, c: nc };
+    const adr = Math.abs(cell.r - next.r);
+    const adc = Math.abs(cell.c - next.c);
+
+    if (adr + adc === 1) {
+      out.push(next);
+    } else if (adr === 1 && adc === 1) {
+      const vr = Math.max(cell.r, next.r);
+      const vc = Math.max(cell.c, next.c);
+      if (stitchSet.has(keyV(vr, vc))) {
+        out.push(next);
+      }
+    }
+  }
+  return out;
+}
+
 function buildPlacementState(levelCtx, wallCells) {
   const gridData = cloneGrid(levelCtx.baseGrid);
 
@@ -431,40 +484,14 @@ function buildPlacementState(levelCtx, wallCells) {
     }
   }
 
-  const usableCells = [];
-  for (let r = 0; r < levelCtx.rows; r++) {
-    for (let c = 0; c < levelCtx.cols; c++) {
-      const ch = gridData[r][c];
-      if (ch === '#' || ch === 'm') continue;
-      usableCells.push({ r, c });
-    }
-  }
+  const usableCells = getUsableCells(gridData, levelCtx.rows, levelCtx.cols);
 
   const neighborMap = new Map();
   for (const cell of usableCells) {
-    const out = [];
-    for (const [dr, dc] of ALL_DIRS) {
-      const nr = cell.r + dr;
-      const nc = cell.c + dc;
-      if (nr < 0 || nr >= levelCtx.rows || nc < 0 || nc >= levelCtx.cols) continue;
-      const target = gridData[nr][nc];
-      if (target === '#' || target === 'm') continue;
-
-      const next = { r: nr, c: nc };
-      const adr = Math.abs(cell.r - next.r);
-      const adc = Math.abs(cell.c - next.c);
-
-      if (adr + adc === 1) {
-        out.push(next);
-      } else if (adr === 1 && adc === 1) {
-        const vr = Math.max(cell.r, next.r);
-        const vc = Math.max(cell.c, next.c);
-        if (levelCtx.stitchSet.has(keyV(vr, vc))) {
-          out.push(next);
-        }
-      }
-    }
-    neighborMap.set(keyOf(cell.r, cell.c), out);
+    neighborMap.set(
+      keyOf(cell.r, cell.c),
+      getCellNeighbors(cell, gridData, levelCtx.rows, levelCtx.cols, levelCtx.stitchSet)
+    );
   }
 
   const startCells = usableCells.filter((cell) => !HINT_CODES.has(gridData[cell.r][cell.c]));
@@ -975,7 +1002,7 @@ function measureDifficulty(level, opts, baselineCache) {
     30,
   );
   const volatility = clamp(
-    19 * Math.min(1, relativeVolatility / 1.0),
+    19 * Math.min(1, relativeVolatility / 1),
     0,
     19,
   );
@@ -1050,11 +1077,11 @@ function verifyResult(result, opts) {
 function deepCloneLevel(level) {
   const cloned = {
     ...level,
-    grid: (level.grid || []).map((row) => String(row)),
+    grid: (level.grid || []).map(String),
     stitches: (level.stitches || []).map((entry) => [entry[0], entry[1]]),
   };
 
-  if (Object.prototype.hasOwnProperty.call(level, 'cornerCounts')) {
+  if (Object.hasOwn(level, 'cornerCounts')) {
     cloned.cornerCounts = (level.cornerCounts || []).map((entry) => [entry[0], entry[1], entry[2]]);
   }
 
@@ -1068,15 +1095,15 @@ function deepCloneLevel(level) {
 function canonicalizeLevel(level) {
   const out = {};
 
-  if (Object.prototype.hasOwnProperty.call(level, 'name')) out.name = level.name;
-  if (Object.prototype.hasOwnProperty.call(level, 'nameKey')) out.nameKey = level.nameKey;
-  if (Object.prototype.hasOwnProperty.call(level, 'desc')) out.desc = level.desc;
-  if (Object.prototype.hasOwnProperty.call(level, 'descKey')) out.descKey = level.descKey;
+  if (Object.hasOwn(level, 'name')) out.name = level.name;
+  if (Object.hasOwn(level, 'nameKey')) out.nameKey = level.nameKey;
+  if (Object.hasOwn(level, 'desc')) out.desc = level.desc;
+  if (Object.hasOwn(level, 'descKey')) out.descKey = level.descKey;
 
-  out.grid = (level.grid || []).map((row) => String(row));
+  out.grid = (level.grid || []).map(String);
   out.stitches = (level.stitches || []).map((entry) => [entry[0], entry[1]]);
 
-  if (Object.prototype.hasOwnProperty.call(level, 'cornerCounts')) {
+  if (Object.hasOwn(level, 'cornerCounts')) {
     out.cornerCounts = (level.cornerCounts || []).map((entry) => [entry[0], entry[1], entry[2]]);
   }
 
@@ -1085,8 +1112,8 @@ function canonicalizeLevel(level) {
   }
 
   const extras = Object.keys(level)
-    .filter((key) => !KNOWN_LEVEL_KEYS.includes(key))
-    .sort();
+    .filter((key) => !KNOWN_LEVEL_KEYS.has(key))
+    .sort((a, b) => a.localeCompare(b));
   for (const key of extras) {
     out[key] = level[key];
   }
@@ -1101,27 +1128,100 @@ function writeCanonicalLevels(levels) {
   fs.writeFileSync(LEVELS_FILE_PATH, fileText, 'utf8');
 }
 
-function main() {
-  let opts;
+function writeDifficultyUpdates(results) {
+  const byIndex = new Map(results.map((r) => [r.index, r.difficulty]));
+  const levelsForWrite = LEVELS.map((level, index) => {
+    const clone = deepCloneLevel(level);
+    if (byIndex.has(index)) {
+      clone.difficulty = normalizeDifficultyMetadata(byIndex.get(index));
+    } else if (clone.difficulty) {
+      clone.difficulty = normalizeDifficultyMetadata(clone.difficulty);
+    }
+    return clone;
+  });
+  writeCanonicalLevels(levelsForWrite);
+}
+
+function getCliOptions() {
   try {
-    opts = parseArgs(process.argv.slice(2));
+    return parseArgs(process.argv.slice(2));
   } catch (err) {
     console.error(String(err.message || err));
     usage();
     process.exit(2);
   }
+}
 
-  let selected = [];
+function getSelectedLevels(opts) {
   try {
     if (opts.levels.length === 0) {
-      selected = LEVELS.map((level, index) => ({ index, level }));
-    } else {
-      selected = opts.levels.map(resolveLevelSelector);
+      return LEVELS.map((level, index) => ({ index, level }));
     }
+    return opts.levels.map(resolveLevelSelector);
   } catch (err) {
     console.error(String(err.message || err));
     process.exit(2);
   }
+}
+
+function getLevelLabel(r) {
+  if (r.nameKey) return r.nameKey;
+  if (r.name) return r.name;
+  return `level[${r.index}]`;
+}
+
+function printDifficultyResults(opts, summary, results) {
+  for (const r of results) {
+    const label = getLevelLabel(r);
+    const status = r.pass ? 'PASS' : 'FAIL';
+    const d = r.difficulty;
+    console.log(
+      `[DIFF] idx=${r.index} ${label} score=${d.score} label=${d.label}` +
+      ` successRate=${d.metrics.successRate}` +
+      ` meanBacktracks=${d.metrics.meanBacktracksSolved}` +
+      ` unsat=${d.metrics.unsatProofStatus} verify=${status}`,
+    );
+  }
+  console.log(
+    `Summary: checked=${summary.checked} passed=${summary.passed} failed=${summary.failed}` +
+    ` profile=${opts.difficultyProfile} proofTimeMs=${opts.difficultyProofTimeMs}` +
+    ` proofNodeCap=${opts.difficultyProofNodeCap}`,
+  );
+  console.log(`Updated: ${LEVELS_FILE_PATH}`);
+}
+
+function printStandardResults(opts, summary, results) {
+  for (const r of results) {
+    const label = getLevelLabel(r);
+    const status = r.pass ? 'PASS' : 'FAIL';
+    const note = r.failures.length ? ` :: ${r.failures.join('; ')}` : '';
+    const movableNote = r.movableWallsPresent
+      ? ` movableWalls=${r.movableWallsCount} placements=${r.wallPlacementsChecked}/${r.wallPlacementsTotal}`
+      : '';
+    console.log(
+      `[${status}] idx=${r.index} ${label} raw=${r.rawSolutions} canonical=${r.canonicalSolutions}` +
+      ` hintOrders=${r.distinctHintOrders} cornerOrders=${r.distinctCornerOrders}` +
+      `${movableNote}${note}`,
+    );
+  }
+  console.log(
+    `Summary: checked=${summary.checked} passed=${summary.passed} failed=${summary.failed}`,
+  );
+}
+
+function printResults(opts, summary, results) {
+  if (opts.json) {
+    console.log(JSON.stringify({ summary, results }, null, 2));
+  } else if (opts.difficulty) {
+    printDifficultyResults(opts, summary, results);
+  } else {
+    printStandardResults(opts, summary, results);
+  }
+}
+
+function main() {
+  const opts = getCliOptions();
+  const selected = getSelectedLevels(opts);
 
   const baselineCache = new Map();
   const results = [];
@@ -1146,17 +1246,7 @@ function main() {
   }
 
   if (opts.difficulty) {
-    const byIndex = new Map(results.map((r) => [r.index, r.difficulty]));
-    const levelsForWrite = LEVELS.map((level, index) => {
-      const clone = deepCloneLevel(level);
-      if (byIndex.has(index)) {
-        clone.difficulty = normalizeDifficultyMetadata(byIndex.get(index));
-      } else if (clone.difficulty) {
-        clone.difficulty = normalizeDifficultyMetadata(clone.difficulty);
-      }
-      return clone;
-    });
-    writeCanonicalLevels(levelsForWrite);
+    writeDifficultyUpdates(results);
   }
 
   const summary = {
@@ -1184,46 +1274,7 @@ function main() {
     };
   }
 
-  if (opts.json) {
-    console.log(JSON.stringify({ summary, results }, null, 2));
-  } else {
-    if (opts.difficulty) {
-      for (const r of results) {
-        const label = r.nameKey || r.name || `level[${r.index}]`;
-        const status = r.pass ? 'PASS' : 'FAIL';
-        const d = r.difficulty;
-        console.log(
-          `[DIFF] idx=${r.index} ${label} score=${d.score} label=${d.label}` +
-          ` successRate=${d.metrics.successRate}` +
-          ` meanBacktracks=${d.metrics.meanBacktracksSolved}` +
-          ` unsat=${d.metrics.unsatProofStatus} verify=${status}`,
-        );
-      }
-      console.log(
-        `Summary: checked=${summary.checked} passed=${summary.passed} failed=${summary.failed}` +
-        ` profile=${opts.difficultyProfile} proofTimeMs=${opts.difficultyProofTimeMs}` +
-        ` proofNodeCap=${opts.difficultyProofNodeCap}`,
-      );
-      console.log(`Updated: ${LEVELS_FILE_PATH}`);
-    } else {
-      for (const r of results) {
-        const label = r.nameKey || r.name || `level[${r.index}]`;
-        const status = r.pass ? 'PASS' : 'FAIL';
-        const note = r.failures.length ? ` :: ${r.failures.join('; ')}` : '';
-        const movableNote = r.movableWallsPresent
-          ? ` movableWalls=${r.movableWallsCount} placements=${r.wallPlacementsChecked}/${r.wallPlacementsTotal}`
-          : '';
-        console.log(
-          `[${status}] idx=${r.index} ${label} raw=${r.rawSolutions} canonical=${r.canonicalSolutions}` +
-          ` hintOrders=${r.distinctHintOrders} cornerOrders=${r.distinctCornerOrders}` +
-          `${movableNote}${note}`,
-        );
-      }
-      console.log(
-        `Summary: checked=${summary.checked} passed=${summary.passed} failed=${summary.failed}`,
-      );
-    }
-  }
+  printResults(opts, summary, results);
 
   process.exit(summary.failed === 0 ? 0 : 1);
 }

@@ -118,6 +118,22 @@ const encodeOverridesPayload = (overrides, maxVariantUsed) => {
   };
 };
 
+function resolveCollision(levelIndex, maxVariantProbe, acceptedBySignature) {
+  for (let probeVariantId = INFINITE_CANDIDATE_VARIANTS; probeVariantId <= maxVariantProbe; probeVariantId++) {
+    let probeLevel = null;
+    try {
+      probeLevel = generateInfiniteLevelFromVariant(levelIndex, probeVariantId);
+    } catch {
+      continue;
+    }
+    const probeSignature = canonicalConstraintSignature(probeLevel);
+    if (!acceptedBySignature.has(probeSignature)) {
+      return { variantId: probeVariantId, signature: probeSignature };
+    }
+  }
+  return null;
+}
+
 function main() {
   const opts = parseArgs(process.argv.slice(2));
 
@@ -129,36 +145,22 @@ function main() {
   for (let i = 0; i < opts.maxLevels; i++) {
     const selected = selectDefaultInfiniteCandidate(i);
 
-    let acceptedVariantId = selected.variantId;
     let acceptedSignature = selected.canonicalSignature;
 
     if (acceptedBySignature.has(acceptedSignature)) {
-      let found = false;
-      for (let probeVariantId = INFINITE_CANDIDATE_VARIANTS; probeVariantId <= opts.maxVariantProbe; probeVariantId++) {
-        let probeLevel = null;
-        try {
-          probeLevel = generateInfiniteLevelFromVariant(i, probeVariantId);
-        } catch {
-          continue;
-        }
-        const probeSignature = canonicalConstraintSignature(probeLevel);
-        if (acceptedBySignature.has(probeSignature)) continue;
+      const resolved = resolveCollision(i, opts.maxVariantProbe, acceptedBySignature);
 
-        acceptedVariantId = probeVariantId;
-        acceptedSignature = probeSignature;
-        overrides.set(i, probeVariantId);
-        collisionsResolved += 1;
-        if (probeVariantId > maxVariantUsed) maxVariantUsed = probeVariantId;
-        found = true;
-        break;
-      }
-
-      if (!found) {
+      if (!resolved) {
         const firstIndex = acceptedBySignature.get(selected.canonicalSignature);
         throw new Error(
           `Unable to resolve canonical collision at index ${i}. First seen at ${firstIndex}. Increase --max-variant-probe.`,
         );
       }
+
+      acceptedSignature = resolved.signature;
+      overrides.set(i, resolved.variantId);
+      collisionsResolved += 1;
+      if (resolved.variantId > maxVariantUsed) maxVariantUsed = resolved.variantId;
     }
 
     acceptedBySignature.set(acceptedSignature, i);

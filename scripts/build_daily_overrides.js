@@ -59,39 +59,58 @@ const parseArgs = (argv) => {
       return argv[i];
     };
 
-    if (arg === '--max-slots') opts.maxSlots = toInt('--max-slots', nextValue());
-    else if (arg === '--max-variant-probe') opts.maxVariantProbe = toInt('--max-variant-probe', nextValue());
-    else if (arg === '--difficulty-variant-window') {
-      opts.difficultyVariantWindow = toInt('--difficulty-variant-window', nextValue());
-    }
-    else if (arg === '--out' || arg === '--out-bin') opts.outBinFile = path.resolve(process.cwd(), nextValue());
-    else if (arg === '--out-manifest') opts.outManifestFile = path.resolve(process.cwd(), nextValue());
-    else if (arg === '--generated-at-utc-ms') opts.generatedAtUtcMs = toNonNegativeInt('--generated-at-utc-ms', nextValue());
-    else if (arg === '--pool-version') opts.poolVersion = String(nextValue()).trim();
-    else if (arg === '--epoch-utc-date') opts.epochUtcDate = String(nextValue()).trim();
-    else if (arg === '--json') opts.json = true;
-    else if (arg === '--help' || arg === '-h') {
-      console.log(
-        [
-          'Usage:',
-          '  node scripts/build_daily_overrides.js [options]',
-          '',
-          'Options:',
-          `  --max-slots <n>           Daily pool slots to build (default: ${DEFAULTS.maxSlots})`,
-          `  --max-variant-probe <n>   Variant probe cap per slot (default: ${DEFAULTS.maxVariantProbe})`,
-          `  --difficulty-variant-window <n> Difficulty probe width for harder picks (default: ${DEFAULTS.difficultyVariantWindow})`,
-          `  --out-bin <path>          Daily override payload path (default: ${DEFAULTS.outBinFile})`,
-          `  --out-manifest <path>     Manifest output path (default: ${DEFAULTS.outManifestFile})`,
-          `  --generated-at-utc-ms <ms> Metadata timestamp (default: ${DEFAULTS.generatedAtUtcMs}, deterministic)`,
-          `  --pool-version <id>       Pool version label (default: ${DEFAULTS.poolVersion})`,
-          `  --epoch-utc-date <date>   Epoch date YYYY-MM-DD (default: ${DEFAULTS.epochUtcDate})`,
-          '  --json                    Emit JSON summary',
-          '  --help                    Show this help',
-        ].join('\n'),
-      );
-      process.exit(0);
-    } else {
-      throw new Error(`Unknown option: ${arg}`);
+    switch (arg) {
+      case '--max-slots':
+        opts.maxSlots = toInt('--max-slots', nextValue());
+        break;
+      case '--max-variant-probe':
+        opts.maxVariantProbe = toInt('--max-variant-probe', nextValue());
+        break;
+      case '--difficulty-variant-window':
+        opts.difficultyVariantWindow = toInt('--difficulty-variant-window', nextValue());
+        break;
+      case '--out':
+      case '--out-bin':
+        opts.outBinFile = path.resolve(process.cwd(), nextValue());
+        break;
+      case '--out-manifest':
+        opts.outManifestFile = path.resolve(process.cwd(), nextValue());
+        break;
+      case '--generated-at-utc-ms':
+        opts.generatedAtUtcMs = toNonNegativeInt('--generated-at-utc-ms', nextValue());
+        break;
+      case '--pool-version':
+        opts.poolVersion = String(nextValue()).trim();
+        break;
+      case '--epoch-utc-date':
+        opts.epochUtcDate = String(nextValue()).trim();
+        break;
+      case '--json':
+        opts.json = true;
+        break;
+      case '--help':
+      case '-h':
+        console.log(
+          [
+            'Usage:',
+            '  node scripts/build_daily_overrides.js [options]',
+            '',
+            'Options:',
+            `  --max-slots <n>           Daily pool slots to build (default: ${DEFAULTS.maxSlots})`,
+            `  --max-variant-probe <n>   Variant probe cap per slot (default: ${DEFAULTS.maxVariantProbe})`,
+            `  --difficulty-variant-window <n> Difficulty probe width for harder picks (default: ${DEFAULTS.difficultyVariantWindow})`,
+            `  --out-bin <path>          Daily override payload path (default: ${DEFAULTS.outBinFile})`,
+            `  --out-manifest <path>     Manifest output path (default: ${DEFAULTS.outManifestFile})`,
+            `  --generated-at-utc-ms <ms> Metadata timestamp (default: ${DEFAULTS.generatedAtUtcMs}, deterministic)`,
+            `  --pool-version <id>       Pool version label (default: ${DEFAULTS.poolVersion})`,
+            `  --epoch-utc-date <date>   Epoch date YYYY-MM-DD (default: ${DEFAULTS.epochUtcDate})`,
+            '  --json                    Emit JSON summary',
+            '  --help                    Show this help',
+          ].join('\n'),
+        );
+        process.exit(0);
+      default:
+        throw new Error(`Unknown option: ${arg}`);
     }
   }
 

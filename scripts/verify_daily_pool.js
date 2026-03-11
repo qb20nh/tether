@@ -71,74 +71,47 @@ const parseArgs = (argv) => {
 
 const readJson = (filePath) => JSON.parse(fs.readFileSync(filePath, 'utf8'));
 
-function main() {
-  const opts = parseArgs(process.argv.slice(2));
-
-  const manifest = readJson(opts.manifestFile);
-  const maxSlots = opts.maxSlots || manifest.maxSlots || DAILY_POOL_MAX_SLOTS;
-  if (maxSlots > (manifest.maxSlots || DAILY_POOL_MAX_SLOTS)) {
-    throw new Error(`--max-slots ${maxSlots} exceeds manifest.maxSlots ${manifest.maxSlots}`);
+function processSlot(slot, overrides, baseVariantId, infiniteCanonicalSet, dailyCanonicalSet, digestRecords, failures) {
+  let materialized;
+  try {
+    materialized = materializeDailyLevelForSlot(slot, overrides, baseVariantId);
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    failures.push(`slot ${slot}: materialization failed (${errorMsg})`);
+    return;
   }
 
-  const baseVariantId = Number.isInteger(manifest.baseVariantId)
-    ? manifest.baseVariantId
-    : DAILY_POOL_BASE_VARIANT_ID;
+  const { canonicalKey, level, variantId } = materialized;
 
-  const overrides = readDailyOverridesGzipFile(opts.overridesFile);
-  const infiniteCanonicalSet = buildInfiniteCanonicalKeySet(INFINITE_MAX_LEVELS);
-
-  const dailyCanonicalSet = new Set();
-  const digestRecords = [];
-  const failures = [];
-
-  for (let slot = 0; slot < maxSlots; slot++) {
-    let materialized;
-    try {
-      materialized = materializeDailyLevelForSlot(slot, overrides, baseVariantId);
-    } catch (error) {
-      failures.push(`slot ${slot}: materialization failed (${error instanceof Error ? error.message : String(error)})`);
-      continue;
-    }
-
-    const { canonicalKey, level, variantId } = materialized;
-
-    if (infiniteCanonicalSet.has(canonicalKey)) {
-      failures.push(`slot ${slot}: canonical key collides with infinite pool`);
-      continue;
-    }
-
-    if (dailyCanonicalSet.has(canonicalKey)) {
-      failures.push(`slot ${slot}: canonical key duplicates a prior daily slot`);
-      continue;
-    }
-
-    if (!replayWitnessAndValidate(level)) {
-      failures.push(`slot ${slot}: witness replay failed solvability validation`);
-      continue;
-    }
-
-    dailyCanonicalSet.add(canonicalKey);
-    digestRecords.push(`${slot}:${variantId}:${canonicalKey}`);
-
-    if ((slot + 1) % 500 === 0 || (slot + 1) === maxSlots) {
-      process.stdout.write(`Verified ${slot + 1}/${maxSlots}\n`);
-    }
+  if (infiniteCanonicalSet.has(canonicalKey)) {
+    failures.push(`slot ${slot}: canonical key collides with infinite pool`);
+    return;
   }
 
+  if (dailyCanonicalSet.has(canonicalKey)) {
+    failures.push(`slot ${slot}: canonical key duplicates a prior daily slot`);
+    return;
+  }
+
+  if (!replayWitnessAndValidate(level)) {
+    failures.push(`slot ${slot}: witness replay failed solvability validation`);
+    return;
+  }
+
+  dailyCanonicalSet.add(canonicalKey);
+  digestRecords.push(`${slot}:${variantId}:${canonicalKey}`);
+}
+
+function verifyPoolDigest(maxSlots, manifest, digestRecords, failures) {
   if (maxSlots === manifest.maxSlots && typeof manifest.poolDigest === 'string') {
     const digest = computePoolDigest(digestRecords);
     if (digest !== manifest.poolDigest) {
       failures.push(`Pool digest mismatch: expected ${manifest.poolDigest}, got ${digest}`);
     }
   }
+}
 
-  const summary = {
-    ok: failures.length === 0,
-    checkedSlots: maxSlots,
-    verifiedUniqueSlots: dailyCanonicalSet.size,
-    failures,
-  };
-
+function printSummary(opts, summary, failures) {
   if (opts.json) {
     console.log(JSON.stringify(summary, null, 2));
   } else {
@@ -154,6 +127,55 @@ function main() {
       }
     }
   }
+}
+
+function main() {
+  const opts = parseArgs(process.argv.slice(2));
+
+  const manifest = readJson(opts.manifestFile);
+  const defaultMaxSlots = manifest.maxSlots || DAILY_POOL_MAX_SLOTS;
+  const maxSlots = opts.maxSlots || defaultMaxSlots;
+  
+  if (maxSlots > defaultMaxSlots) {
+    throw new Error(`--max-slots ${maxSlots} exceeds manifest.maxSlots ${manifest.maxSlots}`);
+  }
+
+  const baseVariantId = Number.isInteger(manifest.baseVariantId)
+    ? manifest.baseVariantId
+    : DAILY_POOL_BASE_VARIANT_ID;
+
+  const overrides = readDailyOverridesGzipFile(opts.overridesFile);
+  const infiniteCanonicalSet = buildInfiniteCanonicalKeySet(INFINITE_MAX_LEVELS);
+
+  const dailyCanonicalSet = new Set();
+  const digestRecords = [];
+  const failures = [];
+
+  for (let slot = 0; slot < maxSlots; slot++) {
+    processSlot(
+      slot,
+      overrides,
+      baseVariantId,
+      infiniteCanonicalSet,
+      dailyCanonicalSet,
+      digestRecords,
+      failures,
+    );
+    if ((slot + 1) % 500 === 0 || (slot + 1) === maxSlots) {
+      process.stdout.write(`Verified ${slot + 1}/${maxSlots}\n`);
+    }
+  }
+
+  verifyPoolDigest(maxSlots, manifest, digestRecords, failures);
+
+  const summary = {
+    ok: failures.length === 0,
+    checkedSlots: maxSlots,
+    verifiedUniqueSlots: dailyCanonicalSet.size,
+    failures,
+  };
+
+  printSummary(opts, summary, failures);
 
   if (failures.length > 0) {
     process.exit(1);

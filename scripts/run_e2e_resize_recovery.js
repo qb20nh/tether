@@ -80,7 +80,9 @@ const runE2e = async () => {
   }
 };
 
-runE2e().catch((error) => {
+try {
+  await runE2e();
+} catch (error) {
   process.stderr.write(`${error?.stack || error}\n`);
   process.exitCode = 1;
-});
+}

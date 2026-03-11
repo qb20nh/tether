@@ -41,8 +41,8 @@ const parsePair = (entry) => {
 const countMovableWalls = (level) => {
   let count = 0;
   for (const row of level.grid || []) {
-    for (let i = 0; i < row.length; i++) {
-      if (row[i] === 'm') count += 1;
+    for (const element of row) {
+      if (element === 'm') count += 1;
     }
   }
   return count;
@@ -51,8 +51,8 @@ const countMovableWalls = (level) => {
 const countCellType = (level, matcher) => {
   let count = 0;
   for (const row of level?.grid || []) {
-    for (let i = 0; i < row.length; i++) {
-      if (matcher(row[i])) count += 1;
+    for (const element of row) {
+      if (matcher(element)) count += 1;
     }
   }
   return count;
@@ -143,8 +143,8 @@ export const replayWitnessAndValidate = (level) => {
   if (!Array.isArray(witnessPathRaw) || witnessPathRaw.length === 0) return false;
 
   const witnessPath = [];
-  for (let i = 0; i < witnessPathRaw.length; i++) {
-    const parsed = parsePair(witnessPathRaw[i]);
+  for (const element of witnessPathRaw) {
+    const parsed = parsePair(element);
     if (!parsed) return false;
     witnessPath.push(parsed);
   }
@@ -167,8 +167,8 @@ export const replayWitnessAndValidate = (level) => {
     if (!restored) return false;
   }
 
-  for (let i = 0; i < witnessPath.length; i++) {
-    const point = witnessPath[i];
+  for (const element of witnessPath) {
+    const point = element;
     const transition = store.dispatch({
       type: 'path/start-or-step',
       payload: { r: point.r, c: point.c },
@@ -215,6 +215,38 @@ export const materializeDailyLevelForSlot = (slot, overridesBySlot = null, baseV
   };
 };
 
+const isBetterDailyCandidate = (candidate, bestCandidate) => (
+  !bestCandidate
+  || candidate.difficultyScore > bestCandidate.difficultyScore
+  || (
+    candidate.difficultyScore === bestCandidate.difficultyScore
+    && candidate.variantId < bestCandidate.variantId
+  )
+);
+
+const generateAndValidateDailyCandidate = (slot, variantId, infiniteCanonicalKeys, dailyCanonicalKeys) => {
+  let level = null;
+  try {
+    level = generateInfiniteLevelFromVariant(slot, variantId);
+  } catch {
+    return null;
+  }
+
+  const canonicalKey = canonicalConstraintFingerprint(level).key;
+  if (infiniteCanonicalKeys?.has(canonicalKey)) return null;
+  if (dailyCanonicalKeys?.has(canonicalKey)) return null;
+  if (!replayWitnessAndValidate(level)) return null;
+
+  return {
+    slot,
+    infiniteIndex: slot,
+    variantId,
+    canonicalKey,
+    level,
+    difficultyScore: estimateDailyDifficultyScore(level),
+  };
+};
+
 export const selectDailyCandidateForSlot = (
   slot,
   {
@@ -237,46 +269,22 @@ export const selectDailyCandidateForSlot = (
   let firstFallbackCandidate = null;
 
   for (let variantId = baseVariantId; variantId <= maxVariantProbe; variantId++) {
-    let level = null;
-    try {
-      level = generateInfiniteLevelFromVariant(slot, variantId);
-    } catch {
-      continue;
-    }
-
-    const canonicalKey = canonicalConstraintFingerprint(level).key;
-    if (infiniteCanonicalKeys?.has(canonicalKey)) continue;
-    if (dailyCanonicalKeys?.has(canonicalKey)) continue;
-    if (!replayWitnessAndValidate(level)) continue;
-
-    const candidate = {
+    const candidate = generateAndValidateDailyCandidate(
       slot,
-      infiniteIndex: slot,
       variantId,
-      canonicalKey,
-      level,
-      difficultyScore: estimateDailyDifficultyScore(level),
-    };
+      infiniteCanonicalKeys,
+      dailyCanonicalKeys,
+    );
+    if (!candidate) continue;
 
-    if (variantId <= windowEnd) {
-      if (
-        !bestWindowCandidate
-        || candidate.difficultyScore > bestWindowCandidate.difficultyScore
-        || (
-          candidate.difficultyScore === bestWindowCandidate.difficultyScore
-          && candidate.variantId < bestWindowCandidate.variantId
-        )
-      ) {
-        bestWindowCandidate = candidate;
-      }
-      continue;
-    }
-
-    if (!bestWindowCandidate) {
-      firstFallbackCandidate = candidate;
+    if (variantId > windowEnd) {
+      if (!bestWindowCandidate) firstFallbackCandidate = candidate;
       break;
     }
-    break;
+
+    if (isBetterDailyCandidate(candidate, bestWindowCandidate)) {
+      bestWindowCandidate = candidate;
+    }
   }
 
   if (bestWindowCandidate) return bestWindowCandidate;
@@ -312,7 +320,7 @@ export const utcStartMsFromDateId = (dateId) => {
 
 export const addUtcDaysToDateId = (dateId, deltaDays) => {
   if (!Number.isInteger(deltaDays)) {
-    throw new Error(`deltaDays must be an integer, got ${deltaDays}`);
+    throw new TypeError(`deltaDays must be an integer, got ${deltaDays}`);
   }
   return utcDateIdFromMs(utcStartMsFromDateId(dateId) + (deltaDays * DAY_MS));
 };

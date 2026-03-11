@@ -1,6 +1,5 @@
 import { createHash } from 'node:crypto';
-import { spawn } from 'node:child_process';
-import { execFileSync } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
 import { cp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -50,7 +49,7 @@ const median = (values) => {
 const mean = (values) => {
   if (!Array.isArray(values) || values.length === 0) return 0;
   let total = 0;
-  for (let i = 0; i < values.length; i += 1) total += values[i];
+  for (const element of values) total += element;
   return total / values.length;
 };
 
@@ -64,112 +63,37 @@ const percentile = (values, ratio) => {
 
 const formatMetric = (value) => Number.isFinite(value) ? value.toFixed(3) : 'n/a';
 
-const parseArgs = (argv) => {
-  const args = {
-    nextRev: DEFAULT_NEXT_REV,
-    prevRev: DEFAULT_PREV_REV,
-    seed: DEFAULT_SEED,
-    boards: DEFAULT_BOARD_COUNT,
-    repeats: DEFAULT_REPEAT_COUNT,
-    out: '',
-    keepTemp: false,
-    modes: DEFAULT_MODES.slice(),
-  };
-  const positionals = [];
-
-  for (let i = 0; i < argv.length; i += 1) {
-    const token = argv[i];
-    const takeValue = () => {
-      if ((i + 1) >= argv.length) throw new Error(`Missing value for ${token}`);
-      const next = argv[i + 1];
-      i += 1;
-      return next;
-    };
-
-    if (token === '--next') {
-      args.nextRev = takeValue();
-      continue;
-    }
-    if (token.startsWith('--next=')) {
-      args.nextRev = token.slice('--next='.length);
-      continue;
-    }
-    if (token === '--prev') {
-      args.prevRev = takeValue();
-      continue;
-    }
-    if (token.startsWith('--prev=')) {
-      args.prevRev = token.slice('--prev='.length);
-      continue;
-    }
-    if (token === '--candidate-rev') {
-      args.nextRev = takeValue();
-      continue;
-    }
-    if (token.startsWith('--candidate-rev=')) {
-      args.nextRev = token.slice('--candidate-rev='.length);
-      continue;
-    }
-    if (token === '--baseline-rev') {
-      args.prevRev = takeValue();
-      continue;
-    }
-    if (token.startsWith('--baseline-rev=')) {
-      args.prevRev = token.slice('--baseline-rev='.length);
-      continue;
-    }
-    if (token === '--seed') {
-      args.seed = takeValue();
-      continue;
-    }
-    if (token.startsWith('--seed=')) {
-      args.seed = token.slice('--seed='.length);
-      continue;
-    }
-    if (token === '--boards') {
-      args.boards = Number.parseInt(takeValue(), 10);
-      continue;
-    }
-    if (token.startsWith('--boards=')) {
-      args.boards = Number.parseInt(token.slice('--boards='.length), 10);
-      continue;
-    }
-    if (token === '--repeats') {
-      args.repeats = Number.parseInt(takeValue(), 10);
-      continue;
-    }
-    if (token.startsWith('--repeats=')) {
-      args.repeats = Number.parseInt(token.slice('--repeats='.length), 10);
-      continue;
-    }
-    if (token === '--out') {
-      args.out = takeValue();
-      continue;
-    }
-    if (token.startsWith('--out=')) {
-      args.out = token.slice('--out='.length);
-      continue;
-    }
-    if (token === '--modes') {
-      args.modes = takeValue().split(',').map((value) => value.trim()).filter(Boolean);
-      continue;
-    }
-    if (token.startsWith('--modes=')) {
-      args.modes = token.slice('--modes='.length).split(',').map((value) => value.trim()).filter(Boolean);
-      continue;
-    }
-    if (token === '--keep-temp') {
-      args.keepTemp = true;
-      continue;
-    }
-    if (!token.startsWith('-')) {
-      positionals.push(token);
-      continue;
-    }
-
-    throw new Error(`Unknown argument: ${token}`);
+const applyArg = (args, key, value, token) => {
+  switch (key) {
+    case '--next':
+    case '--candidate-rev':
+      args.nextRev = value;
+      break;
+    case '--prev':
+    case '--baseline-rev':
+      args.prevRev = value;
+      break;
+    case '--seed':
+      args.seed = value;
+      break;
+    case '--boards':
+      args.boards = Number.parseInt(value, 10);
+      break;
+    case '--repeats':
+      args.repeats = Number.parseInt(value, 10);
+      break;
+    case '--out':
+      args.out = value;
+      break;
+    case '--modes':
+      args.modes = value.split(',').map((v) => v.trim()).filter(Boolean);
+      break;
+    default:
+      throw new Error(`Unknown argument: ${token}`);
   }
+};
 
+const validateArgs = (args, positionals) => {
   if (positionals.length > 2) {
     throw new Error(`Expected at most two positional inputs: prev [next], got ${positionals.length}`);
   }
@@ -187,11 +111,48 @@ const parseArgs = (argv) => {
   if (!Array.isArray(args.modes) || args.modes.length === 0) {
     throw new Error('--modes must specify at least one benchmark mode');
   }
-  args.modes.forEach((mode) => {
+  for (const mode of args.modes) {
     if (!DEFAULT_MODES.includes(mode)) {
       throw new Error(`Unsupported benchmark mode: ${mode}`);
     }
-  });
+  }
+};
+
+const parseArgs = (argv) => {
+  const args = {
+    nextRev: DEFAULT_NEXT_REV,
+    prevRev: DEFAULT_PREV_REV,
+    seed: DEFAULT_SEED,
+    boards: DEFAULT_BOARD_COUNT,
+    repeats: DEFAULT_REPEAT_COUNT,
+    out: '',
+    keepTemp: false,
+    modes: DEFAULT_MODES.slice(),
+  };
+  const positionals = [];
+
+  for (let i = 0; i < argv.length; i += 1) {
+    const token = argv[i];
+    if (token === '--keep-temp') {
+      args.keepTemp = true;
+      continue;
+    }
+    if (!token.startsWith('-')) {
+      positionals.push(token);
+      continue;
+    }
+
+    const eqIdx = token.indexOf('=');
+    if (eqIdx >= 0) {
+      applyArg(args, token.slice(0, eqIdx), token.slice(eqIdx + 1), token);
+    } else {
+      if ((i + 1) >= argv.length) throw new Error(`Missing value for ${token}`);
+      applyArg(args, token, argv[i + 1], token);
+      i += 1;
+    }
+  }
+
+  validateArgs(args, positionals);
 
   return args;
 };
@@ -301,8 +262,8 @@ const resolveWorkloadGuardValue = (revision, relativePath) => {
 
 const assertSharedWorkloadInputs = async (candidateRevision, baselineRevision) => {
   const mismatches = [];
-  for (let i = 0; i < WORKLOAD_GUARD_FILES.length; i += 1) {
-    const relativePath = WORKLOAD_GUARD_FILES[i];
+  for (const element of WORKLOAD_GUARD_FILES) {
+    const relativePath = element;
     const candidateBlob = await resolveWorkloadGuardValue(candidateRevision, relativePath);
     const baselineBlob = await resolveWorkloadGuardValue(baselineRevision, relativePath);
     if (candidateBlob === baselineBlob) continue;
@@ -523,8 +484,8 @@ const buildComparison = ({
   candidateRevision,
 }) => {
   const output = {};
-  for (let i = 0; i < modes.length; i += 1) {
-    const mode = modes[i];
+  for (const element of modes) {
+    const mode = element;
     const baselineSuites = results.filter(
       (suite) => suite.mode === mode && suite.role === 'baseline',
     );
@@ -589,6 +550,60 @@ const maybeReadPlaywright = async () => {
   }
 };
 
+const runComparisonSuites = async ({
+  args,
+  browser,
+  baselineRevision,
+  candidateRevision,
+  baselineSnapshotDir,
+  candidateSnapshotDir,
+  workload,
+}) => {
+  const results = [];
+  for (let repeatIndex = 0; repeatIndex < args.repeats; repeatIndex += 1) {
+    for (const element of args.modes) {
+      const mode = element;
+      const suiteOrder = [
+        {
+          role: 'baseline',
+          revision: baselineRevision,
+          snapshotDir: baselineSnapshotDir,
+          port: DEFAULT_PORTS.baseline,
+        },
+        {
+          role: 'candidate',
+          revision: candidateRevision,
+          snapshotDir: candidateSnapshotDir,
+          port: DEFAULT_PORTS.candidate,
+        },
+      ];
+
+      for (const element of suiteOrder) {
+        const suite = element;
+        const preview = await startPreviewServer(suite.snapshotDir, suite.port);
+        try {
+          const result = await runRenderDragBenchmarkSuite({
+            browser,
+            baseUrl: preview.baseUrl,
+            workload,
+            revisionLabel: suite.revision.short,
+            mode,
+            repeatIndex,
+          });
+          results.push({
+            ...result,
+            role: suite.role,
+            revisionFull: suite.revision.full,
+          });
+        } finally {
+          await preview.stop();
+        }
+      }
+    }
+  }
+  return results;
+};
+
 export const runRenderDragBenchmarkCompare = async (rawArgs = process.argv.slice(2)) => {
   const args = parseArgs(rawArgs);
   const candidateRevision = resolveRevision(args.nextRev);
@@ -641,47 +656,15 @@ export const runRenderDragBenchmarkCompare = async (rawArgs = process.argv.slice
     const { chromium } = await maybeReadPlaywright();
     browser = await chromium.launch({ headless: true });
 
-    for (let repeatIndex = 0; repeatIndex < args.repeats; repeatIndex += 1) {
-      for (let modeIndex = 0; modeIndex < args.modes.length; modeIndex += 1) {
-        const mode = args.modes[modeIndex];
-        const suiteOrder = [
-          {
-            role: 'baseline',
-            revision: baselineRevision,
-            snapshotDir: baselineSnapshotDir,
-            port: DEFAULT_PORTS.baseline,
-          },
-          {
-            role: 'candidate',
-            revision: candidateRevision,
-            snapshotDir: candidateSnapshotDir,
-            port: DEFAULT_PORTS.candidate,
-          },
-        ];
-
-        for (let suiteIndex = 0; suiteIndex < suiteOrder.length; suiteIndex += 1) {
-          const suite = suiteOrder[suiteIndex];
-          const preview = await startPreviewServer(suite.snapshotDir, suite.port);
-          try {
-            const result = await runRenderDragBenchmarkSuite({
-              browser,
-              baseUrl: preview.baseUrl,
-              workload,
-              revisionLabel: suite.revision.short,
-              mode,
-              repeatIndex,
-            });
-            report.results.push({
-              ...result,
-              role: suite.role,
-              revisionFull: suite.revision.full,
-            });
-          } finally {
-            await preview.stop();
-          }
-        }
-      }
-    }
+    report.results = await runComparisonSuites({
+      args,
+      browser,
+      baselineRevision,
+      candidateRevision,
+      baselineSnapshotDir,
+      candidateSnapshotDir,
+      workload,
+    });
 
     report.comparison = buildComparison({
       results: report.results,
@@ -693,8 +676,8 @@ export const runRenderDragBenchmarkCompare = async (rawArgs = process.argv.slice
     await mkdir(path.dirname(outputPath), { recursive: true });
     await writeFile(outputPath, `${JSON.stringify(report, null, 2)}\n`, 'utf8');
 
-    for (let i = 0; i < args.modes.length; i += 1) {
-      const mode = args.modes[i];
+    for (const element of args.modes) {
+      const mode = element;
       printModeSummary(mode, report.comparison[mode]);
     }
     process.stdout.write(`\nReport written to ${outputPath}\n`);
@@ -722,8 +705,10 @@ export const runRenderDragBenchmarkCompare = async (rawArgs = process.argv.slice
 };
 
 if (process.argv[1] === new URL(import.meta.url).pathname) {
-  runRenderDragBenchmarkCompare().catch((error) => {
+  try {
+    await runRenderDragBenchmarkCompare();
+  } catch (error) {
     process.stderr.write(`${error?.stack || error}\n`);
     process.exitCode = 1;
-  });
+  }
 }

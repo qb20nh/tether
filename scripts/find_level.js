@@ -1,4 +1,3 @@
-import fs from 'node:fs';
 import { solveLevel, buildLevelContext, runRandomSolveBatch, DIFFICULTY_PROFILES } from './verify_level_properties.js';
 
 function getRandomInt(max) {
@@ -9,7 +8,7 @@ function generateCandidate() {
   const size = 7;
   const grid = [];
   for (let i = 0; i < size; i++) {
-    grid.push(Array(size).fill('.'));
+    grid.push(new Array(size).fill('.'));
   }
 
   const rps = ['g', 'b', 'p'];
@@ -30,10 +29,7 @@ function generateCandidate() {
     do {
       r = getRandomInt(size);
       c = getRandomInt(size);
-      avoid = false;
-      for (let st of stitches) {
-        if (Math.abs(r - (st[0] - 0.5)) < 1 && Math.abs(c - (st[1] - 0.5)) < 1) avoid = true;
-      }
+      avoid = stitches.some(st => Math.abs(r - (st[0] - 0.5)) < 1 && Math.abs(c - (st[1] - 0.5)) < 1);
     } while (grid[r][c] !== '.' || avoid);
     grid[r][c] = '#';
   }
@@ -96,7 +92,7 @@ while (validCandidatesFound < targetCandidates) {
       }
       validCandidatesFound++;
     }
-  } catch (e) { }
+  } catch { }
 }
 
 console.log("\n\n=============== SEARCH COMPLETE ===============");

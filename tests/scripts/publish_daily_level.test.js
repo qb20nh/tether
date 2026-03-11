@@ -244,3 +244,38 @@ test('publish_daily_level trims history to manifest maxSlots', () => {
   assert.equal(history.entries.some((entry) => entry.dailyId === '2025-12-27'), false);
   assert.equal(history.entries.some((entry) => entry.dailyId === '2026-01-01'), true);
 });
+
+test('publish_daily_level evicts the oldest entry even when history is unsorted on disk', () => {
+  const fx = createFixture();
+  writeFixtureHistory(fx.historyFile, [
+    {
+      dailyId: '2026-01-02',
+      dailySlot: 2,
+      canonicalKey: 'key-2',
+      poolVersion: 'test-v1',
+      publishedAtUtcMs: Date.UTC(2026, 0, 2),
+    },
+    {
+      dailyId: '2026-01-01',
+      dailySlot: 1,
+      canonicalKey: 'key-1',
+      poolVersion: 'test-v1',
+      publishedAtUtcMs: Date.UTC(2026, 0, 1),
+    },
+  ]);
+
+  publishDailyLevel({
+    manifestFile: fx.manifestFile,
+    overridesFile: fx.overridesFile,
+    historyFile: fx.historyFile,
+    todayFile: fx.todayFile,
+    nowMs: Date.UTC(2026, 0, 3, 0, 0, 1),
+    dailySecret: 'test-secret',
+  });
+
+  const history = JSON.parse(fs.readFileSync(fx.historyFile, 'utf8'));
+  assert.deepEqual(
+    history.entries.map((entry) => entry.dailyId),
+    ['2026-01-02', '2026-01-03'],
+  );
+});

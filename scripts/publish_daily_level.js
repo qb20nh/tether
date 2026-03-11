@@ -100,7 +100,7 @@ const writeJson = (filePath, value) => {
 };
 
 const sortHistoryEntriesByDailyId = (entries = []) =>
-  [...entries].sort((a, b) => (a.dailyId < b.dailyId ? -1 : (a.dailyId > b.dailyId ? 1 : 0)));
+  [...entries].sort((a, b) => a.dailyId.localeCompare(b.dailyId));
 
 const trimHistoryEntries = (entries = [], maxEntries = DAILY_POOL_MAX_SLOTS) => {
   if (!Number.isInteger(maxEntries) || maxEntries <= 0) return [];
@@ -187,8 +187,7 @@ export const publishDailyLevel = (rawOptions = {}) => {
   if (todayEntry) {
     const existingTodayPayload = normalizeTodayPayload(readJson(opts.todayFile, null));
     const payloadMatchesHistory = Boolean(
-      existingTodayPayload
-      && existingTodayPayload.dailyId === dailyId
+      existingTodayPayload?.dailyId === dailyId
       && existingTodayPayload.dailySlot === todayEntry.dailySlot
       && existingTodayPayload.canonicalKey === todayEntry.canonicalKey
     );
@@ -245,8 +244,7 @@ export const publishDailyLevel = (rawOptions = {}) => {
 
   const existingTodayPayload = normalizeTodayPayload(readJson(opts.todayFile, null));
   const stableGeneratedAtUtcMs = (
-    existingTodayPayload
-      && existingTodayPayload.dailyId === dailyId
+    existingTodayPayload?.dailyId === dailyId
       && existingTodayPayload.dailySlot === dailySlot
       && existingTodayPayload.canonicalKey === materialized.canonicalKey
       && existingTodayPayload.generatedAtUtcMs > 0
