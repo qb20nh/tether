@@ -50,6 +50,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Check duplication threshold
+        run: pnpm run verify:duplication
+
       - name: Resolve app build identity (ignore daily-content-only commits)
         run: node scripts/resolve_build_identity.js >> "$GITHUB_ENV"
         

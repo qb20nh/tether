@@ -10,10 +10,17 @@ const readText = (...parts) => fs.readFileSync(repoFile(...parts), 'utf8');
 
 test('package metadata standardizes on pnpm and only-allow', () => {
   const pkg = readJson('package.json');
+  const jscpdConfig = readJson('.jscpd.json');
   assert.equal(pkg.packageManager, 'pnpm@10.30.3');
   assert.equal(pkg.scripts.preinstall, 'npx --yes only-allow pnpm');
   assert.equal(pkg.scripts.build, 'vite build');
+  assert.equal(pkg.scripts['verify:duplication'], 'jscpd --config .jscpd.json src scripts src-tauri/src vite.config.js');
   assert.equal(pkg.scripts['verify:release-no-debug'], 'node scripts/verify_release_no_debug_artifacts.js');
+  assert.equal(jscpdConfig.threshold, 2);
+  assert.equal(jscpdConfig.gitignore, true);
+  assert.equal(jscpdConfig.maxLines, 10000);
+  assert.equal(jscpdConfig.maxSize, '1mb');
+  assert.deepEqual(jscpdConfig.ignore, ['**/generated/**']);
   assert.equal(fs.existsSync(repoFile('package-lock.json')), false);
 });
 
@@ -28,6 +35,7 @@ test('tauri and CI workflows use pnpm with cached store settings', () => {
   assert.match(deployWorkflow, /cache:\s+pnpm/);
   assert.match(deployWorkflow, /cache-dependency-path:\s+pnpm-lock\.yaml/);
   assert.match(deployWorkflow, /pnpm install --frozen-lockfile/);
+  assert.match(deployWorkflow, /pnpm run verify:duplication/);
   assert.doesNotMatch(deployWorkflow, /^\s*cache:\s+npm\s*$/m);
   assert.doesNotMatch(deployWorkflow, /^\s*run:\s+npm ci\s*$/m);
   assert.doesNotMatch(deployWorkflow, /^\s*run:\s+npm install\s*$/m);
@@ -38,6 +46,7 @@ test('tauri and CI workflows use pnpm with cached store settings', () => {
   assert.match(releaseWorkflow, /cache:\s+pnpm/);
   assert.match(releaseWorkflow, /cache-dependency-path:\s+pnpm-lock\.yaml/);
   assert.match(releaseWorkflow, /pnpm install --frozen-lockfile/);
+  assert.match(releaseWorkflow, /pnpm run verify:duplication/);
   assert.doesNotMatch(releaseWorkflow, /^\s*cache:\s+npm\s*$/m);
   assert.doesNotMatch(releaseWorkflow, /^\s*run:\s+npm ci\s*$/m);
   assert.doesNotMatch(releaseWorkflow, /^\s*run:\s+npm run build\s*$/m);

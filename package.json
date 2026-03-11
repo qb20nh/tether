@@ -13,6 +13,7 @@
     "dev": "vite",
     "build": "vite build",
     "build:native": "NATIVE_BUILD=1 vite build",
+    "verify:duplication": "jscpd --config .jscpd.json src scripts src-tauri/src vite.config.js",
     "verify:release-no-debug": "node scripts/verify_release_no_debug_artifacts.js",
     "preview": "vite preview",
     "tauri": "pnpm run build:native && env NO_STRIP=1 tauri",
@@ -27,6 +28,7 @@
     "@capacitor/assets": "^3.0.5",
     "@capacitor/cli": "^8.1.0",
     "@tauri-apps/cli": "^2.10.0",
+    "jscpd": "^4.0.8",
     "playwright": "^1.58.2",
     "terser": "^5.46.0",
     "vite": "^7.3.1"

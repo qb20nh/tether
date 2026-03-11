@@ -197,6 +197,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Check duplication threshold
+        run: pnpm run verify:duplication
+
       - name: Build web assets (native mode)
         env:
           NATIVE_BUILD: "1"

@@ -1,0 +1,12 @@
+{
+  "threshold": 2,
+  "gitignore": true,
+  "maxLines": 10000,
+  "maxSize": "1mb",
+  "reporters": [
+    "console"
+  ],
+  "ignore": [
+    "**/generated/**"
+  ]
+}
