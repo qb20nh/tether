@@ -51,6 +51,7 @@ export class FakeElement {
   constructor(tagName = 'div') {
     this.tagName = String(tagName).toUpperCase();
     this.id = '';
+    this.ownerDocument = null;
     this.parentNode = null;
     this.children = [];
     this.listeners = new Map();
@@ -90,6 +91,7 @@ export class FakeElement {
 
   appendChild(child) {
     child.parentNode = this;
+    child.ownerDocument = this.ownerDocument;
     child.isConnected = this.isConnected;
     this.children.push(child);
     return child;
@@ -121,6 +123,20 @@ export class FakeElement {
     const key = String(eventName);
     if (!this.listeners.has(key)) this.listeners.set(key, []);
     this.listeners.get(key).push(handler);
+  }
+
+  focus() {
+    if (this.ownerDocument) {
+      this.ownerDocument.activeElement = this;
+    }
+    this.dispatchEvent({ type: 'focus', target: this });
+  }
+
+  blur() {
+    if (this.ownerDocument?.activeElement === this) {
+      this.ownerDocument.activeElement = this.ownerDocument.body || null;
+    }
+    this.dispatchEvent({ type: 'blur', target: this });
   }
 
   dispatchEvent(event) {
@@ -176,11 +192,15 @@ export class FakeElement {
 export const createDocumentMock = () => {
   const elements = new Map();
   const listeners = new Map();
+  const body = new FakeElement('body');
   const documentObj = {
     visibilityState: 'visible',
-    body: new FakeElement('body'),
+    body,
+    activeElement: body,
     createElement(tagName) {
-      return new FakeElement(tagName);
+      const element = new FakeElement(tagName);
+      element.ownerDocument = documentObj;
+      return element;
     },
     getElementById(id) {
       return elements.get(id) || null;
@@ -196,11 +216,14 @@ export const createDocumentMock = () => {
     },
     register(id, element) {
       element.id = id;
+      element.ownerDocument = documentObj;
       elements.set(id, element);
       documentObj.body.appendChild(element);
       return element;
     },
   };
+
+  body.ownerDocument = documentObj;
 
   return documentObj;
 };

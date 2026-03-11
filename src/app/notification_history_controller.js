@@ -11,6 +11,7 @@ const HISTORY_RELATIVE_TIME_REFRESH_MS = 60 * 1000;
 const HISTORY_MAX_ENTRIES = 10;
 const HISTORY_DYING_START_INDEX = 5;
 const HISTORY_EMPTY_PLACEHOLDER_TEXT = 'No notifications yet.';
+const isHistoryActionActivationKey = (key) => key === 'Enter' || key === ' ' || key === 'Spacebar';
 
 export function createNotificationHistoryController(options = {}) {
   const {
@@ -206,12 +207,17 @@ export function createNotificationHistoryController(options = {}) {
 
       if (actionableEntry) {
         row.classList.add('isActionable');
+        row.setAttribute('role', 'button');
+        row.setAttribute('tabindex', '0');
         row.setAttribute('data-action-type', actionableEntry.type);
         if (actionableEntry.type === 'apply-update') {
           row.setAttribute('data-action-build-number', String(actionableEntry.buildNumber));
         } else if (actionableEntry.type === 'open-daily') {
           row.setAttribute('data-action-daily-id', actionableEntry.dailyId);
         }
+      } else {
+        row.removeAttribute('role');
+        row.removeAttribute('tabindex');
       }
 
       const deathRank = (
@@ -414,6 +420,17 @@ export function createNotificationHistoryController(options = {}) {
     }
   };
 
+  const handleNotificationHistoryItemKeydown = (event) => {
+    if (!isHistoryActionActivationKey(event?.key)) return;
+    const target = event?.target;
+    if (!target || typeof target.closest !== 'function') return;
+    const row = target.closest('.notificationHistoryItem');
+    if (!row || !notificationHistoryListEl?.contains(row)) return;
+    if (!row.getAttribute('data-action-type')) return;
+    event.preventDefault?.();
+    handleNotificationHistoryItemAction(event);
+  };
+
   const shouldIgnoreOutsideCloseTarget = (target) => {
     if (!target) return false;
     if (containsOpenDialogTarget(target)) return true;
@@ -438,6 +455,7 @@ export function createNotificationHistoryController(options = {}) {
       toggleNotificationHistoryPanel();
     });
     notificationHistoryListEl.addEventListener('click', handleNotificationHistoryItemAction);
+    notificationHistoryListEl.addEventListener('keydown', handleNotificationHistoryItemKeydown);
 
     const settingsToggle = documentObj.getElementById(elementIds.SETTINGS_TOGGLE);
     if (settingsToggle) {

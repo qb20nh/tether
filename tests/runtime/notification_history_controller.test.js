@@ -24,8 +24,7 @@ const createHarness = (overrides = {}) => {
 
   const toggleEl = documentObj.register(ELEMENT_IDS.NOTIFICATION_HISTORY_TOGGLE, new FakeElement('button'));
   const badgeEl = documentObj.register(ELEMENT_IDS.NOTIFICATION_HISTORY_BADGE, new FakeElement('span'));
-  const settingsToggleEl = documentObj.register(ELEMENT_IDS.SETTINGS_TOGGLE, new FakeElement('button'));
-  void settingsToggleEl;
+  documentObj.register(ELEMENT_IDS.SETTINGS_TOGGLE, new FakeElement('button'));
 
   const calls = {
     postMessages: [],
@@ -160,6 +159,83 @@ test('history controller dispatches apply-update and open-daily row actions', as
   assert.equal(calls.openRequests[0].dailyId, '2026-03-07');
   assert.equal(calls.openRequests[0].kind, 'new-level');
   assert.equal(typeof calls.openRequests[0].requestMoveDailyConfirmation, 'function');
+});
+
+test('history controller makes actionable rows keyboard focusable and keyboard activatable', async () => {
+  const { controller, listEl, calls } = createHarness();
+  controller.bind();
+
+  controller.applyHistoryPayload({
+    historyVersion: 4,
+    entries: [
+      {
+        id: 'apply-2',
+        source: 'system',
+        kind: 'new-version-available',
+        title: 'update',
+        body: 'available',
+        createdAtUtcMs: Date.UTC(2026, 2, 7, 2, 2, 0),
+        marker: 'older',
+        action: { type: 'apply-update', buildNumber: 124 },
+      },
+      {
+        id: 'daily-2',
+        source: 'system',
+        kind: 'new-level',
+        title: 'daily',
+        body: 'open',
+        createdAtUtcMs: Date.UTC(2026, 2, 7, 2, 3, 0),
+        marker: 'older',
+        action: { type: 'open-daily', dailyId: '2026-03-08' },
+      },
+      {
+        id: 'passive-1',
+        source: 'toast',
+        kind: 'toast',
+        title: 'passive',
+        body: 'info',
+        createdAtUtcMs: Date.UTC(2026, 2, 7, 2, 4, 0),
+        marker: 'older',
+      },
+    ],
+  });
+  controller.refreshUi();
+
+  const rows = listEl.querySelectorAll('.notificationHistoryItem');
+  assert.equal(rows[0].getAttribute('role'), 'button');
+  assert.equal(rows[0].getAttribute('tabindex'), '0');
+  assert.equal(rows[1].getAttribute('role'), 'button');
+  assert.equal(rows[1].getAttribute('tabindex'), '0');
+  assert.equal(rows[2].getAttribute('role'), null);
+  assert.equal(rows[2].getAttribute('tabindex'), null);
+
+  let enterPrevented = false;
+  listEl.dispatchEvent({
+    type: 'keydown',
+    key: 'Enter',
+    target: rows[0],
+    preventDefault() {
+      enterPrevented = true;
+    },
+  });
+
+  let spacePrevented = false;
+  listEl.dispatchEvent({
+    type: 'keydown',
+    key: ' ',
+    target: rows[1],
+    preventDefault() {
+      spacePrevented = true;
+    },
+  });
+  await flushMicrotasks();
+
+  assert.equal(enterPrevented, true);
+  assert.equal(spacePrevented, true);
+  assert.equal(calls.applyRequests.length, 1);
+  assert.equal(calls.applyRequests[0].buildNumber, 124);
+  assert.equal(calls.openRequests.length, 1);
+  assert.equal(calls.openRequests[0].dailyId, '2026-03-08');
 });
 
 test('history controller read-ack posts once per history version and skips duplicates', async () => {

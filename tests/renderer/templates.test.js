@@ -60,6 +60,32 @@ test('app shell renders a hidden first-tab-stop control for focusing the puzzle 
   assert.ok(stylesheet.includes('.boardFocusProxy:focus-visible {'));
 });
 
+test('app shell restores visible focus styles for shared interactive controls', () => {
+  const stylesheet = readFileSync(new URL('../../src/styles.css', import.meta.url), 'utf8');
+  const controlFocusRule = stylesheet.match(/button:focus-visible,\s*select:focus-visible\s*\{[^}]+\}/);
+  const checkboxFocusRule = stylesheet.match(/\.settingsCheckbox input\[type='checkbox'\]:focus-visible\s*\{[^}]+\}/);
+
+  assert.ok(controlFocusRule);
+  assert.ok(controlFocusRule[0].includes('outline: 2px solid'));
+  assert.ok(controlFocusRule[0].includes('outline-offset: -2px;'));
+  assert.ok(controlFocusRule[0].includes('border-color: var(--accent);'));
+  assert.ok(checkboxFocusRule);
+  assert.ok(checkboxFocusRule[0].includes('outline: 2px solid'));
+});
+
+test('app shell places notification history markup before the settings toggle for native tab order', () => {
+  const markup = renderAppShellMarkup();
+  const notificationToggleIndex = markup.indexOf('id="notificationHistoryToggle"');
+  const historyPanelIndex = markup.indexOf('id="notificationHistoryPanel"');
+  const settingsToggleIndex = markup.indexOf('id="settingsToggle"');
+
+  assert.notEqual(notificationToggleIndex, -1);
+  assert.notEqual(historyPanelIndex, -1);
+  assert.notEqual(settingsToggleIndex, -1);
+  assert.ok(notificationToggleIndex < historyPanelIndex);
+  assert.ok(historyPanelIndex < settingsToggleIndex);
+});
+
 test('boot shell board keeps the same outer inset as the live board grid', () => {
   const stylesheet = readFileSync(new URL('../../src/styles.css', import.meta.url), 'utf8');
 

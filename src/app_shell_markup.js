@@ -173,6 +173,9 @@ const buildHeaderMarkup = ({ t, localeOptions, currentLocale, boot = false }) =>
             <span class="uiIconMaterial" aria-hidden="true">notifications</span>
             <span id="${ELEMENT_IDS.NOTIFICATION_HISTORY_BADGE}" class="notificationHistoryBadge" hidden></span>
           </button>
+          <div id="${ELEMENT_IDS.NOTIFICATION_HISTORY_PANEL}" class="notificationHistoryPanel" hidden>
+            <div id="${ELEMENT_IDS.NOTIFICATION_HISTORY_LIST}" class="notificationHistoryList"></div>
+          </div>
           <button
             id="${ELEMENT_IDS.SETTINGS_TOGGLE}"
             class="settingsToggle"
@@ -232,9 +235,6 @@ const buildHeaderMarkup = ({ t, localeOptions, currentLocale, boot = false }) =>
               </label>
             </div>
             <div id="${ELEMENT_IDS.SETTINGS_VERSION}" class="settingsVersion" hidden></div>
-          </div>
-          <div id="${ELEMENT_IDS.NOTIFICATION_HISTORY_PANEL}" class="notificationHistoryPanel" hidden>
-            <div id="${ELEMENT_IDS.NOTIFICATION_HISTORY_LIST}" class="notificationHistoryList"></div>
           </div>
           ${buildConfirmDialogTemplate(t, {
     dialogId: ELEMENT_IDS.THEME_SWITCH_DIALOG,

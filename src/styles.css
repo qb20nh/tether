@@ -567,9 +567,15 @@ header h1.brandTitle {
   cursor: pointer;
 }
 
-.notificationHistoryItem.isActionable:hover {
+.notificationHistoryItem.isActionable:hover,
+.notificationHistoryItem.isActionable:focus-visible {
   border-color: color-mix(in srgb, var(--accent), var(--panel-outline) 35%);
   background: color-mix(in srgb, var(--accent), var(--panel2) 88%);
+}
+
+.notificationHistoryItem.isActionable:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent), transparent 32%);
+  outline-offset: -2px;
 }
 
 .notificationHistoryItem__dot {
@@ -709,6 +715,11 @@ header h1.brandTitle {
   block-size: 16px;
   margin: 0;
   accent-color: var(--accent);
+}
+
+.settingsCheckbox input[type='checkbox']:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent), transparent 32%);
+  outline-offset: 2px;
 }
 
 .settingsStepper {
@@ -1082,6 +1093,13 @@ button {
   cursor: pointer;
   outline: none;
   color-scheme: inherit;
+}
+
+button:focus-visible,
+select:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent), transparent 32%);
+  outline-offset: -2px;
+  border-color: var(--accent);
 }
 
 select,
