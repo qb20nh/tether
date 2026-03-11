@@ -588,17 +588,11 @@ export function createDomInputAdapter() {
     && point.c < snapshot.cols
   );
 
-  const findFirstUsableBoardCursor = (snapshot) => {
-    if (!snapshot) return null;
-    for (let r = 0; r < snapshot.rows; r += 1) {
-      for (let c = 0; c < snapshot.cols; c += 1) {
-        if (isUsableCell(snapshot, r, c)) {
-          return { r, c };
-        }
-      }
-    }
-    return null;
-  };
+  const resolveBoardOriginCursor = (snapshot) => (
+    snapshot && snapshot.rows > 0 && snapshot.cols > 0
+      ? { r: 0, c: 0 }
+      : null
+  );
 
   const pointsMatch = (left, right) => (
     Number.isInteger(left?.r)
@@ -692,7 +686,7 @@ export function createDomInputAdapter() {
     }
 
     if (!nextCursor || !isPointInBounds(snapshot, nextCursor)) {
-      nextCursor = findFirstUsableBoardCursor(snapshot);
+      nextCursor = resolveBoardOriginCursor(snapshot);
     }
 
     lastBoardNavLevelIndex = levelIndex;
@@ -708,7 +702,7 @@ export function createDomInputAdapter() {
     if (!snapshot) return null;
     const cursor = cloneCursor(boardNav.cursor);
     if (cursor && isPointInBounds(snapshot, cursor)) return cursor;
-    return findFirstUsableBoardCursor(snapshot);
+    return resolveBoardOriginCursor(snapshot);
   };
 
   const runGameCommand = (commandType, payload = {}) => {

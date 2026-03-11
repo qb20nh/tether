@@ -669,6 +669,54 @@ test('dom input adapter forwards the board focus proxy to the grid', (t) => {
   assert.equal(globalThis.document.activeElement, harness.gridEl);
 });
 
+test('dom input adapter starts keyboard nav at the top-left movable wall on first focus', (t) => {
+  const harness = createGridHarness(t, {
+    level: {
+      name: 'Top Left Movable Wall',
+      grid: [
+        'm.',
+        '..',
+      ],
+      stitches: [],
+      cornerCounts: [],
+    },
+  });
+  harness.adapter.setKeyboardGamepadControlsEnabled(true);
+  harness.gridEl.focus();
+
+  assert.deepEqual(getLastBoardNavIntent(harness)?.payload, {
+    updateType: INTERACTION_UPDATES.BOARD_NAV,
+    isBoardNavActive: true,
+    boardCursor: { r: 0, c: 0 },
+    boardSelection: null,
+    boardSelectionInteractive: null,
+  });
+});
+
+test('dom input adapter starts keyboard nav at the top-left wall on first focus', (t) => {
+  const harness = createGridHarness(t, {
+    level: {
+      name: 'Top Left Wall',
+      grid: [
+        '#.',
+        '..',
+      ],
+      stitches: [],
+      cornerCounts: [],
+    },
+  });
+  harness.adapter.setKeyboardGamepadControlsEnabled(true);
+  harness.gridEl.focus();
+
+  assert.deepEqual(getLastBoardNavIntent(harness)?.payload, {
+    updateType: INTERACTION_UPDATES.BOARD_NAV,
+    isBoardNavActive: true,
+    boardCursor: { r: 0, c: 0 },
+    boardSelection: null,
+    boardSelectionInteractive: null,
+  });
+});
+
 test('dom input adapter drives board cursor and path selection with keyboard when enabled', (t) => {
   const harness = createGridHarness(t);
   harness.adapter.setKeyboardGamepadControlsEnabled(true);
