@@ -5,9 +5,6 @@ on:
     tags:
       - "v*"
 
-permissions:
-  contents: read
-
 concurrency:
   group: release-${{ github.ref_name }}
   cancel-in-progress: false
@@ -15,6 +12,8 @@ concurrency:
 jobs:
   validate_and_plan_release:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     outputs:
       tag_name: ${{ steps.validate.outputs.tag_name }}
       core_version: ${{ steps.validate.outputs.core_version }}
@@ -176,6 +175,8 @@ jobs:
     needs: validate_and_plan_release
     if: needs.validate_and_plan_release.outputs.should_release == 'true'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -210,6 +211,8 @@ jobs:
       - verify_release_web_bundle
     if: needs.validate_and_plan_release.outputs.should_release == 'true'
     runs-on: ${{ matrix.runs_on }}
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -301,6 +304,8 @@ jobs:
       - verify_release_web_bundle
     if: needs.validate_and_plan_release.outputs.should_release == 'true'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - name: Checkout
         uses: actions/checkout@v4
