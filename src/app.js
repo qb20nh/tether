@@ -1,29 +1,29 @@
-import { mountStyles } from './styles.js';
-import { APP_SHELL_TEMPLATE, buildLegendTemplate } from './templates.js';
-import { BADGE_DEFINITIONS, ICONS, ICON_X } from './icons.js';
-import { ELEMENT_IDS } from './config.js';
-import { createDefaultAdapters } from './runtime/default_adapters.js';
-import { createRuntime } from './runtime/create_runtime.js';
-import { uiActionIntent, UI_ACTIONS } from './runtime/intents.js';
-import { mountRuntimePlugins, resolveServiceWorkerRegistrationUrl } from './plugins/runtime_plugins.js';
-import { DAILY_PAYLOAD_FILE } from './shared/paths.js';
-import { createUpdateFlow } from './app/update_flow.js';
-import { resolveLatestUpdateBuildNumber as resolveLatestUpdateBuildNumberCore } from './app/update_build_resolver.js';
+import { createDailyPayloadService } from './app/daily_payload_service.js';
+import { createLocaleController } from './app/locale_controller.js';
+import { createNotificationCenter } from './app/notification_center.js';
 import {
   AUTO_UPDATE_ENABLED_KEY,
   NOTIFICATION_AUTO_PROMPT_DECISIONS,
   NOTIFICATION_ENABLED_KEY,
   createNotificationPreferences,
 } from './app/notification_preferences.js';
-import { createDailyPayloadService } from './app/daily_payload_service.js';
-import { createNotificationCenter } from './app/notification_center.js';
+import { resolveLatestUpdateBuildNumber as resolveLatestUpdateBuildNumberCore } from './app/update_build_resolver.js';
+import { createUpdateFlow } from './app/update_flow.js';
+import { ELEMENT_IDS } from './config.js';
+import { BADGE_DEFINITIONS, ICONS, ICON_X } from './icons.js';
+import { mountRuntimePlugins, resolveServiceWorkerRegistrationUrl } from './plugins/runtime_plugins.js';
+import { createRuntime } from './runtime/create_runtime.js';
+import { createDefaultAdapters } from './runtime/default_adapters.js';
+import { UI_ACTIONS, uiActionIntent } from './runtime/intents.js';
 import {
   UPDATE_APPLY_STATUS,
   UPDATE_CHECK_DECISION,
   resolveUpdateCheckDecision,
   shouldResyncManualUpdatePolicy,
 } from './runtime/update_flow_policy.js';
-import { createLocaleController } from './app/locale_controller.js';
+import { DAILY_PAYLOAD_FILE } from './shared/paths.js';
+import { mountStyles } from './styles.js';
+import { APP_SHELL_TEMPLATE, buildLegendTemplate } from './templates.js';
 
 const BUILD_NUMBER_META_NAME = 'tether-build-number';
 const BUILD_LABEL_META_NAME = 'tether-build-label';
@@ -88,7 +88,7 @@ const localBuildDateTime = (() => {
 
 const resolveShortBuildHash = (buildLabel) => {
   if (typeof buildLabel !== 'string' || buildLabel.length === 0) return '';
-  const match = buildLabel.match(BUILD_LABEL_HASH_RE);
+  const match = new RegExp(BUILD_LABEL_HASH_RE).exec(buildLabel);
   if (!match) return '';
   return match[0].slice(0, 7).toLowerCase();
 };
@@ -280,7 +280,7 @@ const showInAppToast = (text, options = {}) => {
   window.setTimeout(() => {
     toastEl.classList.remove('isVisible');
     window.setTimeout(() => {
-      if (toastEl.parentNode) toastEl.parentNode.removeChild(toastEl);
+      if (toastEl.parentNode) toastEl.remove();
     }, 220);
   }, APP_TOAST_VISIBLE_MS);
 
@@ -395,7 +395,7 @@ const clearAppliedUpdateHistoryActions = async (appliedBuildNumber = localBuildN
   updateFlow.clearAppliedUpdateHistoryActions(appliedBuildNumber);
 
 const isOpenDailyHistoryActionable = (entry) => {
-  if (!entry || !entry.action || entry.action.type !== 'open-daily') return false;
+  if (entry?.action?.type !== 'open-daily') return false;
   if (entry.kind !== 'new-level' && entry.kind !== 'unsolved-warning') return true;
   if (!latestDailyState.dailyId) return false;
   return entry.action.dailyId === latestDailyState.dailyId;
@@ -803,14 +803,14 @@ export async function initTetherApp() {
     }
   }
 
-  if (!updateFlow.getRegistration()) {
-    void registerServiceWorker();
-  } else {
+  if (updateFlow.getRegistration()) {
     void (async () => {
       await syncUpdatePolicyToServiceWorker();
       await ensureServiceWorkerUpdatePolicyConsistency();
     })();
     void postMessageToServiceWorker({ type: SW_MESSAGE_TYPES.GET_HISTORY }, { queueWhenUnavailable: true });
+  } else {
+    void registerServiceWorker();
   }
 }
 

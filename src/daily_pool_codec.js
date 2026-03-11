@@ -15,7 +15,7 @@ const toSortedOverrideEntries = (overrides) => {
 };
 
 const bitsRequired = (maxValueInclusive) => {
-  if (!(maxValueInclusive > 0)) return 1;
+  if (maxValueInclusive <= 0) return 1;
   return Math.max(1, Math.ceil(Math.log2(maxValueInclusive + 1)));
 };
 

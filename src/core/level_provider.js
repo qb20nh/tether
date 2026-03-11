@@ -1,5 +1,5 @@
-import { LEVELS } from '../levels.js';
 import { INFINITE_MAX_LEVELS, generateInfiniteLevel } from '../infinite.js';
+import { LEVELS } from '../levels.js';
 
 export function createLevelProvider(options = {}) {
   const campaignLevels = Array.isArray(options.levels) ? options.levels : LEVELS;

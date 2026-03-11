@@ -2,8 +2,8 @@ export function createNotificationDialogController(options = {}) {
   const {
     elementIds,
     translateNow = (key) => key,
-    windowObj = typeof window !== 'undefined' ? window : undefined,
-    documentObj = typeof document !== 'undefined' ? document : undefined,
+    windowObj = typeof window === 'undefined' ? undefined : window,
+    documentObj = typeof document === 'undefined' ? undefined : document,
   } = options;
 
   if (!elementIds || typeof elementIds !== 'object') {

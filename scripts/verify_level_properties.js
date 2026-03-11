@@ -1,15 +1,15 @@
 #!/usr/bin/env node
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { DEFAULT_LEVEL_INDEX, LEVELS } from '../src/levels.js';
 import { HINT_CODES } from '../src/config.js';
-import { parseLevel, keyOf, keyV } from '../src/utils.js';
+import { DEFAULT_LEVEL_INDEX, LEVELS } from '../src/levels.js';
 import {
   evaluateBlockedCells,
   evaluateHints,
   evaluateRPS,
   evaluateStitches,
 } from '../src/rules.js';
+import { keyOf, keyV, parseLevel } from '../src/utils.js';
 
 const CONSTRAINT_CODES = new Set(['t', 'r', 'l', 's', 'h', 'v', 'g', 'b', 'p']);
 const ORTH_DIRS = [

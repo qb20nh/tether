@@ -1,13 +1,13 @@
-import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createGameStateStore } from '../../src/state/game_state_store.js';
+import test from 'node:test';
 import { createDomInputAdapter } from '../../src/input/dom_input_adapter.js';
 import {
   GAME_COMMANDS,
   INTENT_TYPES,
-  UI_ACTIONS,
   INTERACTION_UPDATES,
+  UI_ACTIONS,
 } from '../../src/runtime/intents.js';
+import { createGameStateStore } from '../../src/state/game_state_store.js';
 
 const LEVEL = {
   name: 'Input Adapter',
@@ -25,7 +25,7 @@ class FakeElement {
     this.listeners = new Map();
     this.style = {
       getPropertyValue: () => '',
-      setProperty() {},
+      setProperty() { },
     };
     this.dataset = {};
     this.parentElement = null;
@@ -113,7 +113,7 @@ const createPointerEvent = (pointerId, clientX, clientY) => ({
   clientX,
   clientY,
   cancelable: true,
-  preventDefault() {},
+  preventDefault() { },
 });
 
 const createKeyEvent = (key, overrides = {}) => ({
@@ -122,7 +122,7 @@ const createKeyEvent = (key, overrides = {}) => ({
   altKey: false,
   ctrlKey: false,
   metaKey: false,
-  preventDefault() {},
+  preventDefault() { },
   ...overrides,
 });
 
@@ -215,10 +215,10 @@ const installDomGlobals = (t, metrics, elementFromPoint, windowState = null) => 
     pageYOffset: 0,
   };
   if (typeof windowTarget.addEventListener !== 'function') {
-    windowTarget.addEventListener = () => {};
+    windowTarget.addEventListener = () => { };
   }
   if (typeof windowTarget.removeEventListener !== 'function') {
-    windowTarget.removeEventListener = () => {};
+    windowTarget.removeEventListener = () => { };
   }
   if (!windowTarget.visualViewport) {
     windowTarget.visualViewport = null;
@@ -302,7 +302,7 @@ const createGridHarness = (t, options = {}) => {
   let rectReads = 0;
   const gridEl = new FakeElement();
   gridEl.id = 'grid';
-  gridEl.setPointerCapture = () => {};
+  gridEl.setPointerCapture = () => { };
   gridEl.getBoundingClientRect = () => {
     rectReads += 1;
     return {
@@ -497,8 +497,8 @@ test('dom input adapter does not read window scroll during pointermove when metr
       scrollReads += 1;
       return 0;
     },
-    addEventListener() {},
-    removeEventListener() {},
+    addEventListener() { },
+    removeEventListener() { },
     visualViewport: null,
   };
   const harness = createGridHarness(t, {
@@ -663,7 +663,7 @@ test('dom input adapter forwards the board focus proxy to the grid', (t) => {
 
   assert.notEqual(globalThis.document.activeElement, harness.gridEl);
   harness.refs.boardFocusProxy.dispatch('click', {
-    preventDefault() {},
+    preventDefault() { },
   });
 
   assert.equal(globalThis.document.activeElement, harness.gridEl);
@@ -813,7 +813,7 @@ test('dom input adapter shows a held-only selection highlight for non-interactiv
   harness.gridEl.dispatch('keyup', createKeyEvent('Enter'));
   assert.equal(getLastBoardNavIntent(harness)?.payload.boardSelection, null);
   assert.equal(
-    Object.prototype.hasOwnProperty.call(getLastBoardNavIntent(harness)?.payload || {}, 'isBoardNavPressing'),
+    Object.hasOwn(getLastBoardNavIntent(harness)?.payload || {}, 'isBoardNavPressing'),
     false,
   );
   assert.equal(getLastBoardNavIntent(harness)?.payload.boardSelectionInteractive, null);
@@ -864,11 +864,11 @@ test('dom input adapter nudges board nav toward invalid keyboard moves only whil
   harness.gridEl.dispatch('keyup', createKeyEvent('ArrowLeft'));
   assert.deepEqual(getLastBoardNavIntent(harness)?.payload.boardCursor, { r: 0, c: 0 });
   assert.equal(
-    Object.prototype.hasOwnProperty.call(getLastBoardNavIntent(harness)?.payload || {}, 'isBoardNavPressing'),
+    Object.hasOwn(getLastBoardNavIntent(harness)?.payload || {}, 'isBoardNavPressing'),
     false,
   );
   assert.equal(
-    Object.prototype.hasOwnProperty.call(getLastBoardNavIntent(harness)?.payload || {}, 'boardNavPreviewDelta'),
+    Object.hasOwn(getLastBoardNavIntent(harness)?.payload || {}, 'boardNavPreviewDelta'),
     false,
   );
 });

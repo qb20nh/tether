@@ -1,18 +1,18 @@
 import {
   FALLBACK_EN_LOCALE,
   LOCALE_STORAGE_KEY,
+  t as createTranslatorCore,
   getLocaleOptions as getLocaleOptionsCore,
   isLocaleAvailable as isLocaleAvailableCore,
   loadLocaleMessages as loadLocaleMessagesCore,
   markLocaleUnavailable as markLocaleUnavailableCore,
   preloadAllLocales as preloadAllLocalesCore,
   resolveLocale as resolveLocaleCore,
-  t as createTranslatorCore,
 } from '../i18n.js';
 
 export function createLocaleController(options = {}) {
-  const navigatorObj = options.navigatorObj || (typeof navigator !== 'undefined' ? navigator : undefined);
-  const storage = options.storage || (typeof window !== 'undefined' ? window.localStorage : null);
+  const navigatorObj = options.navigatorObj || (typeof navigator === 'undefined' ? undefined : navigator);
+  const storage = options.storage || (typeof window === 'undefined' ? null : window.localStorage);
   const resolveLocale = options.resolveLocale || resolveLocaleCore;
   const loadLocaleMessages = options.loadLocaleMessages || loadLocaleMessagesCore;
   const preloadAllLocales = options.preloadAllLocales || preloadAllLocalesCore;
@@ -20,7 +20,7 @@ export function createLocaleController(options = {}) {
   const isLocaleAvailable = options.isLocaleAvailable || isLocaleAvailableCore;
   const markLocaleUnavailable = options.markLocaleUnavailable || markLocaleUnavailableCore;
   let activeLocale = resolveLocale(options.initialLocale);
-  let activeTranslator = (key) => key;
+  let activeTranslator = (key, _vars = {}) => key;
   let localeChangeToken = 0;
 
   const isOnline = () => navigatorObj?.onLine !== false;
@@ -60,9 +60,12 @@ export function createLocaleController(options = {}) {
       }
     }
 
+    const fallbackLocale = loadedLocales.has(FALLBACK_EN_LOCALE)
+      ? FALLBACK_EN_LOCALE
+      : resolvedInitialLocale;
     activeLocale = loadedLocales.has(resolvedInitialLocale)
       ? resolvedInitialLocale
-      : (loadedLocales.has(FALLBACK_EN_LOCALE) ? FALLBACK_EN_LOCALE : resolvedInitialLocale);
+      : fallbackLocale;
     refreshTranslator();
     return activeLocale;
   };

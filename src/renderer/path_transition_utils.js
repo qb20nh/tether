@@ -4,7 +4,7 @@ export const getPathTipFromPath = (path, side) => {
   if (!Array.isArray(path) || path.length <= 0) return null;
   if (side === 'start') return path[0] || null;
   if (path.length <= 1) return path[0] || null;
-  return path[path.length - 1] || null;
+  return path.at(-1) || null;
 };
 
 export const pathsMatch = (aPath, bPath) => {
@@ -36,7 +36,7 @@ export const normalizeFlowOffset = (value, cycle = 128) => {
 export const resolvePathSignature = (path) => {
   if (!Array.isArray(path) || path.length <= 0) return '0|_|_';
   const head = path[0] || null;
-  const tail = path[path.length - 1] || null;
+  const tail = path.at(-1) || null;
   const headSig = `${Number(head?.r)},${Number(head?.c)}`;
   const tailSig = `${Number(tail?.r)},${Number(tail?.c)}`;
   return `${path.length}|${headSig}|${tailSig}`;
@@ -91,7 +91,7 @@ export const isRetractUnturnTransition = (side, retractedTip, nextTip, nextPath)
   if (!retractedTip || !nextTip || !Array.isArray(nextPath)) return false;
   let neighbor = null;
   if (side === 'start') neighbor = nextPath[1] || null;
-  else if (side === 'end') neighbor = nextPath[nextPath.length - 2] || null;
+  else if (side === 'end') neighbor = nextPath.at(-2) || null;
   if (!neighbor) return false;
 
   const inR = neighbor.r - nextTip.r;

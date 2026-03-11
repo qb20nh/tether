@@ -1,7 +1,7 @@
-import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ELEMENT_IDS } from '../../src/config.js';
+import test from 'node:test';
 import { createNotificationHistoryController } from '../../src/app/notification_history_controller.js';
+import { ELEMENT_IDS } from '../../src/config.js';
 import {
   FakeElement,
   createDocumentMock,
@@ -112,6 +112,49 @@ test('history controller refreshes unread badge state from system unread entries
 
   assert.equal(badgeEl.hidden, false);
   assert.equal(toggleEl.classList.contains('hasUnread'), true);
+});
+
+test('history controller renders localized entry text for mapped notification kinds', () => {
+  const translations = {
+    'ui.notificationUnsolvedTitle': 'Unsolved',
+    'ui.notificationUnsolvedBody': 'Come back later',
+    'ui.newVersionAvailableToast': 'Update ready',
+  };
+  const { controller, listEl } = createHarness({
+    translateNow: (key) => translations[key] || key,
+  });
+  controller.bind();
+
+  controller.applyHistoryPayload({
+    historyVersion: 2,
+    entries: [
+      {
+        id: 'localized-1',
+        source: 'system',
+        kind: 'unsolved-warning',
+        title: 'fallback title',
+        body: 'fallback body',
+        createdAtUtcMs: Date.UTC(2026, 2, 7, 1, 0, 0),
+        marker: 'older',
+      },
+      {
+        id: 'localized-2',
+        source: 'toast',
+        kind: 'new-version-toast',
+        title: 'fallback toast title',
+        body: 'toast body stays',
+        createdAtUtcMs: Date.UTC(2026, 2, 7, 1, 1, 0),
+        marker: 'older',
+      },
+    ],
+  });
+  controller.refreshUi();
+
+  const rows = listEl.querySelectorAll('.notificationHistoryItem');
+  assert.equal(rows[0].querySelector('.notificationHistoryItem__title')?.textContent, 'Unsolved');
+  assert.equal(rows[0].querySelector('.notificationHistoryItem__body')?.textContent, 'Come back later');
+  assert.equal(rows[1].querySelector('.notificationHistoryItem__title')?.textContent, 'Update ready');
+  assert.equal(rows[1].querySelector('.notificationHistoryItem__body')?.textContent, 'toast body stays');
 });
 
 test('history controller dispatches apply-update and open-daily row actions', async () => {
@@ -238,6 +281,38 @@ test('history controller makes actionable rows keyboard focusable and keyboard a
   assert.equal(calls.openRequests[0].dailyId, '2026-03-08');
 });
 
+test('history controller leaves blocked open-daily rows non-actionable', () => {
+  const { controller, listEl } = createHarness({
+    isOpenDailyHistoryActionable: () => false,
+  });
+  controller.bind();
+
+  controller.applyHistoryPayload({
+    historyVersion: 5,
+    entries: [
+      {
+        id: 'daily-blocked-1',
+        source: 'system',
+        kind: 'new-level',
+        title: 'daily',
+        body: 'blocked',
+        createdAtUtcMs: Date.UTC(2026, 2, 7, 2, 5, 0),
+        marker: 'older',
+        action: { type: 'open-daily', dailyId: '2026-03-09' },
+      },
+    ],
+  });
+  controller.refreshUi();
+
+  const row = listEl.querySelector('.notificationHistoryItem');
+  assert.ok(row);
+  assert.equal(row.classList.contains('isActionable'), false);
+  assert.equal(row.getAttribute('role'), null);
+  assert.equal(row.getAttribute('tabindex'), null);
+  assert.equal(row.dataset.actionType, undefined);
+  assert.equal(row.dataset.actionDailyId, undefined);
+});
+
 test('history controller read-ack posts once per history version and skips duplicates', async () => {
   const { controller, toggleEl, calls } = createHarness();
   controller.bind();
@@ -279,6 +354,49 @@ test('history controller read-ack posts once per history version and skips dupli
     ({ message }) => message.type === SW_MESSAGE_TYPES.MARK_HISTORY_READ,
   );
   assert.equal(markCallsAfterVersionChange.length, 2);
+});
+
+test('history controller read-ack waits until unread rows are visibly rendered', async () => {
+  const { controller, toggleEl, calls, windowObj } = createHarness();
+  controller.bind();
+
+  controller.applyHistoryPayload({
+    historyVersion: 12,
+    entries: [
+      {
+        id: 'sys-ack-hidden-1',
+        source: 'system',
+        kind: 'new-level',
+        title: 'new',
+        body: 'body',
+        createdAtUtcMs: Date.UTC(2026, 2, 7, 3, 1, 0),
+        marker: 'unread',
+      },
+    ],
+  });
+
+  windowObj.getComputedStyle = (node) => {
+    if (node.dataset.entryId === 'sys-ack-hidden-1') {
+      return {
+        display: 'none',
+        visibility: 'visible',
+        opacity: '1',
+      };
+    }
+    return {
+      display: 'block',
+      visibility: 'visible',
+      opacity: '1',
+    };
+  };
+
+  toggleEl.dispatchEvent({ type: 'click' });
+  await flushMicrotasks();
+
+  const markCalls = calls.postMessages.filter(
+    ({ message }) => message.type === SW_MESSAGE_TYPES.MARK_HISTORY_READ,
+  );
+  assert.equal(markCalls.length, 0);
 });
 
 test('history controller closes panel on outside click and Escape', async () => {

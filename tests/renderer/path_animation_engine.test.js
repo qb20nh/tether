@@ -1,8 +1,9 @@
-import test from 'node:test';
 import assert from 'node:assert/strict';
+import test from 'node:test';
 import {
   createPathAnimationEngine,
   resolveHeadShiftTransitionWindow,
+  resolveTipArrivalSyntheticPrevPath,
 } from '../../src/renderer/path_animation_engine.js';
 
 test('resolveHeadShiftTransitionWindow returns pure head-shift window', () => {
@@ -91,6 +92,93 @@ test('resolveHeadShiftTransitionWindow does not use single-overlap fallback when
   ];
 
   assert.equal(resolveHeadShiftTransitionWindow(nextPath, previousPath), null);
+});
+
+test('resolveTipArrivalSyntheticPrevPath uses start hint to synthesize the previous tip step', () => {
+  const nextPath = [
+    { r: 0, c: 1 },
+    { r: 0, c: 2 },
+    { r: 0, c: 3 },
+  ];
+
+  assert.deepEqual(
+    resolveTipArrivalSyntheticPrevPath('start', nextPath, nextPath, {
+      side: 'start',
+      from: { r: 0, c: 0 },
+      to: { r: 0, c: 1 },
+    }),
+    [
+      { r: 0, c: 0 },
+      { r: 0, c: 1 },
+      { r: 0, c: 2 },
+      { r: 0, c: 3 },
+    ],
+  );
+});
+
+test('resolveTipArrivalSyntheticPrevPath trims the changed end tip on equal-length transitions', () => {
+  const previousPath = [
+    { r: 1, c: 1 },
+    { r: 1, c: 2 },
+    { r: 1, c: 3 },
+  ];
+  const nextPath = [
+    { r: 1, c: 1 },
+    { r: 1, c: 2 },
+    { r: 2, c: 2 },
+  ];
+
+  assert.deepEqual(
+    resolveTipArrivalSyntheticPrevPath('end', previousPath, nextPath),
+    [
+      { r: 1, c: 1 },
+      { r: 1, c: 2 },
+    ],
+  );
+});
+
+test('resolveTipArrivalSyntheticPrevPath reconstructs a prior start step for multi-cell advance', () => {
+  const previousPath = [
+    { r: 2, c: 2 },
+    { r: 2, c: 3 },
+  ];
+  const nextPath = [
+    { r: 2, c: 0 },
+    { r: 2, c: 1 },
+    { r: 2, c: 2 },
+    { r: 2, c: 3 },
+  ];
+
+  assert.deepEqual(
+    resolveTipArrivalSyntheticPrevPath('start', previousPath, nextPath),
+    [
+      { r: 2, c: 1 },
+      { r: 2, c: 2 },
+      { r: 2, c: 3 },
+    ],
+  );
+});
+
+test('resolveTipArrivalSyntheticPrevPath restores the previous start tip for multi-cell retract', () => {
+  const previousPath = [
+    { r: 0, c: 0 },
+    { r: 0, c: 1 },
+    { r: 0, c: 2 },
+    { r: 0, c: 3 },
+  ];
+  const nextPath = [
+    { r: 0, c: 2 },
+    { r: 0, c: 3 },
+  ];
+
+  assert.deepEqual(
+    resolveTipArrivalSyntheticPrevPath('start', previousPath, nextPath),
+    [
+      { r: 0, c: 1 },
+      { r: 0, c: 2 },
+      { r: 0, c: 3 },
+    ],
+  );
 });
 
 test('drawAll schedules animation frame when delegate signals animation', () => {
@@ -256,8 +344,8 @@ test('flow visibility and start-pin presence transition state resolves as expect
     scale: 1,
     active: false,
     mode: 'none',
-    anchorR: NaN,
-    anchorC: NaN,
+    anchorR: Number.NaN,
+    anchorC: Number.NaN,
   };
 
   const oneNode = [{ r: 0, c: 0 }];
@@ -295,19 +383,19 @@ test('end/start rotate transitions and reverse states follow expected lifecycles
   const endPrev = [{ r: 0, c: 0 }, { r: 0, c: 1 }, { r: 1, c: 1 }];
   const endNext = [{ r: 0, c: 0 }, { r: 0, c: 1 }];
   engine.updatePathEndArrowRotateState(endPrev, endNext, 0);
-  const endDir = engine.resolvePathEndArrowDirection(endNext, 0, { x: NaN, y: NaN, active: false });
+  const endDir = engine.resolvePathEndArrowDirection(endNext, 0, { x: Number.NaN, y: Number.NaN, active: false });
   assert.equal(endDir.active, true);
   assert.equal(Number.isFinite(endDir.x), true);
   assert.equal(Number.isFinite(endDir.y), true);
-  const endDirGone = engine.resolvePathEndArrowDirection(endNext, 300, { x: NaN, y: NaN, active: false });
+  const endDirGone = engine.resolvePathEndArrowDirection(endNext, 300, { x: Number.NaN, y: Number.NaN, active: false });
   assert.equal(endDirGone.active, false);
 
   const startPrev = [{ r: 1, c: 0 }, { r: 0, c: 0 }, { r: 0, c: 1 }];
   const startNext = [{ r: 0, c: 0 }, { r: 0, c: 1 }];
   engine.updatePathStartFlowRotateState(startPrev, startNext, 0);
-  const startDir = engine.resolvePathStartFlowDirection(startNext, 0, { x: NaN, y: NaN, active: false });
+  const startDir = engine.resolvePathStartFlowDirection(startNext, 0, { x: Number.NaN, y: Number.NaN, active: false });
   assert.equal(startDir.active, true);
-  const startDirGone = engine.resolvePathStartFlowDirection(startNext, 300, { x: NaN, y: NaN, active: false });
+  const startDirGone = engine.resolvePathStartFlowDirection(startNext, 300, { x: Number.NaN, y: Number.NaN, active: false });
   assert.equal(startDirGone.active, false);
 
   const revPrev = [{ r: 0, c: 0 }, { r: 0, c: 1 }, { r: 0, c: 2 }];

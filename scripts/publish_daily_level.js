@@ -3,6 +3,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
+  DAILY_OVERRIDES_REPO_FILE,
+  DAILY_POOL_MANIFEST_REPO_FILE,
+  PUBLIC_DAILY_HISTORY_REPO_FILE,
+  PUBLIC_DAILY_PAYLOAD_REPO_FILE,
+} from '../src/shared/paths.js';
+import {
   DAILY_POOL_BASE_VARIANT_ID,
   DAILY_POOL_MAX_SLOTS,
   addUtcDaysToDateId,
@@ -15,12 +21,6 @@ import {
   utcDateIdFromMs,
   utcStartMsFromDateId,
 } from './daily_pool_tools.js';
-import {
-  DAILY_OVERRIDES_REPO_FILE,
-  DAILY_POOL_MANIFEST_REPO_FILE,
-  PUBLIC_DAILY_HISTORY_REPO_FILE,
-  PUBLIC_DAILY_PAYLOAD_REPO_FILE,
-} from '../src/shared/paths.js';
 
 const HISTORY_SCHEMA_VERSION = 1;
 const PAYLOAD_SCHEMA_VERSION = 1;

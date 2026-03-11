@@ -111,9 +111,12 @@ const trimCacheEntries = async (cacheName, maxEntries, { matcher = null } = {}) 
 };
 
 const cleanupCurrentBuildCaches = async (retainedBuildCaches = CURRENT_BUILD_CACHES) => {
+  const retainedCacheNames = Array.isArray(retainedBuildCaches)
+    ? retainedBuildCaches
+    : CURRENT_BUILD_CACHES;
   const retainedSet = retainedBuildCaches instanceof Set
     ? retainedBuildCaches
-    : new Set(Array.isArray(retainedBuildCaches) ? retainedBuildCaches : CURRENT_BUILD_CACHES);
+    : new Set(retainedCacheNames);
 
   if (isLocalhostHostname(self.location.hostname)) {
     const keys = await caches.keys();

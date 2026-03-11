@@ -1,5 +1,5 @@
-import test from 'node:test';
 import assert from 'node:assert/strict';
+import test from 'node:test';
 import { createBoardRendererCore } from '../../src/renderer/board_renderer_core.js';
 import { createDomRenderer } from '../../src/renderer/dom_renderer.js';
 
@@ -277,20 +277,20 @@ class FakeElement {
         set lineJoin(value) {
           lineJoin = String(value || '');
         },
-        save() {},
-        restore() {},
-        setTransform() {},
+        save() { },
+        restore() { },
+        setTransform() { },
         getTransform() {
           return { a: 1, d: 1 };
         },
-        clearRect() {},
-        beginPath() {},
-        arc() {},
-        stroke() {},
-        fill() {},
-        moveTo() {},
-        lineTo() {},
-        fillText() {},
+        clearRect() { },
+        beginPath() { },
+        arc() { },
+        stroke() { },
+        fill() { },
+        moveTo() { },
+        lineTo() { },
+        fillText() { },
       };
     }
     return this._context2d;
@@ -459,40 +459,40 @@ const createFakeWebgl2 = () => {
       UNSIGNED_SHORT: 0x1403,
       FLOAT: 0x1406,
       createShader() { return { id: nextId++ }; },
-      shaderSource() {},
-      compileShader() {},
+      shaderSource() { },
+      compileShader() { },
       getShaderParameter() { return true; },
       getShaderInfoLog() { return ''; },
-      deleteShader() {},
+      deleteShader() { },
       createProgram() { return { id: nextId++ }; },
-      attachShader() {},
-      linkProgram() {},
+      attachShader() { },
+      linkProgram() { },
       getProgramParameter() { return true; },
       getProgramInfoLog() { return ''; },
-      deleteProgram() {},
+      deleteProgram() { },
       createVertexArray() { return { id: nextId++ }; },
       createBuffer() { return { id: nextId++ }; },
-      bindVertexArray() {},
-      bindBuffer() {},
-      enableVertexAttribArray() {},
-      vertexAttribPointer() {},
-      disable() {},
-      enable() {},
-      blendFunc() {},
-      clearColor() {},
-      clear() {},
-      viewport() {},
-      useProgram() {},
-      bufferData() {},
-      bufferSubData() {},
-      uniform2f() {},
-      uniform1f() {},
-      uniform3f() {},
+      bindVertexArray() { },
+      bindBuffer() { },
+      enableVertexAttribArray() { },
+      vertexAttribPointer() { },
+      disable() { },
+      enable() { },
+      blendFunc() { },
+      clearColor() { },
+      clear() { },
+      viewport() { },
+      useProgram() { },
+      bufferData() { },
+      bufferSubData() { },
+      uniform2f() { },
+      uniform1f() { },
+      uniform3f() { },
       drawElements() {
         stats.drawCalls += 1;
       },
-      deleteBuffer() {},
-      deleteVertexArray() {},
+      deleteBuffer() { },
+      deleteVertexArray() { },
       getUniformLocation() { return { id: nextId++ }; },
     },
   };
@@ -508,6 +508,8 @@ const createFakePathRenderer = () => ({
       flowOffset: payload.flowOffset,
       geometryToken: payload.geometryToken,
       pointCount: Array.isArray(payload.points) ? payload.points.length : 0,
+      mainColorRgb: payload.mainColorRgb ? { ...payload.mainColorRgb } : null,
+      completeColorRgb: payload.completeColorRgb ? { ...payload.completeColorRgb } : null,
     });
     return 64;
   },
@@ -1797,6 +1799,33 @@ test('createBoardRendererCore keeps path flow moving across consecutive state re
 
   assert.equal(firstFlowOffset, 0);
   assert.equal(secondFlowOffset > firstFlowOffset, true);
+});
+
+test('createBoardRendererCore parses rgba theme colors with signed decimal alpha values', (t) => {
+  const env = installRendererEnv(t);
+  const snapshot = createSnapshot({
+    gridData: [['.', '.']],
+    path: [
+      { r: 0, c: 0 },
+      { r: 0, c: 1 },
+    ],
+  });
+  const core = createBoardRendererCore();
+  const refs = createShellRefs();
+  refs.boardWrap.style.setProperty('--good', 'rgba(10, 20, 30, .5)');
+
+  core.mount(refs);
+  core.rebuildGrid(snapshot);
+  core.renderFrame({
+    snapshot,
+    evaluation: {},
+    completion: null,
+    uiModel: {},
+    interactionModel: {},
+  });
+  flushNextRaf(env, 16);
+
+  assert.deepEqual(refs.pathRenderer.calls.at(-1)?.completeColorRgb, { r: 10, g: 20, b: 30 });
 });
 
 test('createDomRenderer defers solved completion classes while a keyboard path tip is still selected', (t) => {

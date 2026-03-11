@@ -28,8 +28,8 @@ const ORTH_DIRS = Object.freeze([
 
 const hashString32 = (input) => {
   let h = 0x811c9dc5;
-  for (let i = 0; i < input.length; i++) {
-    h ^= input.charCodeAt(i);
+  for (const char of input) {
+    h ^= char.codePointAt(0) ?? 0;
     h = Math.imul(h, 0x01000193);
   }
   return h >>> 0;
@@ -59,13 +59,21 @@ const makeRng = (seedInput) => {
 };
 
 const intFromRng = (rng, maxExclusive) => {
-  if (!(maxExclusive > 0)) return 0;
+  if (maxExclusive <= 0) return 0;
   return Math.floor(rng() * maxExclusive);
 };
 
 const clamp = (value, lo, hi) => Math.max(lo, Math.min(hi, value));
 
 const keyOf = (r, c) => `${r},${c}`;
+const isWallToken = (ch) => ch === '#' || ch === 'm';
+const isRpsToken = (ch) => RPS_CODES.includes(ch);
+
+const minimumHintCountForFeature = (requiredFeature) => {
+  if (requiredFeature === 'hint') return 3;
+  if (requiredFeature === 'rps') return 2;
+  return 1;
+};
 
 const edgeKey = (a, b) => {
   const ka = a.r * 1000 + a.c;
@@ -154,14 +162,82 @@ const chooseDimensions = (rng) => ({
 
 const countMissingCoverage = (counts) => {
   let missing = 0;
-  for (let i = 0; i < counts.length; i++) {
-    if (counts[i] <= 0) missing += 1;
+  for (const element of counts) {
+    if (element <= 0) missing += 1;
   }
   return missing;
 };
 
 const hasFullCoverage = (rowCoverage, colCoverage) =>
   countMissingCoverage(rowCoverage) === 0 && countMissingCoverage(colCoverage) === 0;
+
+const isInBounds = (rows, cols, r, c) => r >= 0 && r < rows && c >= 0 && c < cols;
+
+const canCoverRemainingRowsAndCols = (missingRows, missingCols, remaining) =>
+  missingRows <= remaining && missingCols <= remaining;
+
+const countOnwardMoves = (rows, cols, r, c, visited, previous) => {
+  let onward = 0;
+  for (const [dr, dc] of ORTH_DIRS) {
+    const nr = r + dr;
+    const nc = c + dc;
+    if (!isInBounds(rows, cols, nr, nc)) continue;
+    if (!visited[nr][nc] && !(nr === previous.r && nc === previous.c)) onward += 1;
+  }
+  return onward;
+};
+
+const collectOrthPathCandidates = ({
+  rows,
+  cols,
+  cur,
+  visited,
+  rowCoverage,
+  colCoverage,
+  missingRows,
+  missingCols,
+  remaining,
+  rng,
+}) => {
+  const candidates = [];
+  for (const [dr, dc] of ORTH_DIRS) {
+    const nr = cur.r + dr;
+    const nc = cur.c + dc;
+    if (!isInBounds(rows, cols, nr, nc) || visited[nr][nc]) continue;
+
+    const rowNovel = rowCoverage[nr] === 0 ? 1 : 0;
+    const colNovel = colCoverage[nc] === 0 ? 1 : 0;
+    const remainingAfter = remaining - 1;
+    if (!canCoverRemainingRowsAndCols(missingRows - rowNovel, missingCols - colNovel, remainingAfter)) {
+      continue;
+    }
+
+    const onward = countOnwardMoves(rows, cols, nr, nc, visited, cur);
+    candidates.push({
+      r: nr,
+      c: nc,
+      onward,
+      score: ((rowNovel + colNovel) * 10) + ((4 - onward) * 2) + rng(),
+    });
+  }
+
+  candidates.sort((a, b) => (b.score - a.score) || (a.onward - b.onward));
+  return candidates;
+};
+
+const pushPathCandidate = (path, candidate, visited, rowCoverage, colCoverage) => {
+  visited[candidate.r][candidate.c] = true;
+  rowCoverage[candidate.r] += 1;
+  colCoverage[candidate.c] += 1;
+  path.push({ r: candidate.r, c: candidate.c });
+};
+
+const popPathCandidate = (path, candidate, visited, rowCoverage, colCoverage) => {
+  path.pop();
+  rowCoverage[candidate.r] -= 1;
+  colCoverage[candidate.c] -= 1;
+  visited[candidate.r][candidate.c] = false;
+};
 
 const choosePathLength = (rows, cols, requiredFeature, plan, rng) => {
   const total = rows * cols;
@@ -175,23 +251,21 @@ const choosePathLength = (rows, cols, requiredFeature, plan, rng) => {
       break;
     case 'stitch':
       minFill = 0.77;
-      maxFill = 0.90;
+      maxFill = 0.9;
       break;
     case 'mixed':
       minFill = 0.75;
       maxFill = 0.88;
       break;
     case 'hint':
-      minFill = 0.80;
+      minFill = 0.8;
       maxFill = 0.94;
       break;
     case 'rps':
-      minFill = 0.78;
-      maxFill = 0.90;
+      maxFill = 0.9;
       break;
     case 'corner':
       minFill = 0.77;
-      maxFill = 0.92;
       break;
     default:
       break;
@@ -220,9 +294,9 @@ const buildRandomOrthPath = (rows, cols, targetLen, rng) => {
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     const start = { r: intFromRng(rng, rows), c: intFromRng(rng, cols) };
-    const visited = Array.from({ length: rows }, () => Array(cols).fill(false));
-    const rowCoverage = Array(rows).fill(0);
-    const colCoverage = Array(cols).fill(0);
+    const visited = Array.from({ length: rows }, () => new Array(cols).fill(false));
+    const rowCoverage = new Array(rows).fill(0);
+    const colCoverage = new Array(cols).fill(0);
     const path = [start];
     let nodeCount = 0;
 
@@ -239,58 +313,29 @@ const buildRandomOrthPath = (rows, cols, targetLen, rng) => {
 
       const missingRows = countMissingCoverage(rowCoverage);
       const missingCols = countMissingCoverage(colCoverage);
-      if (missingRows > remaining || missingCols > remaining) return false;
+      if (!canCoverRemainingRowsAndCols(missingRows, missingCols, remaining)) return false;
 
-      if (depth === targetLen) {
-        return hasFullCoverage(rowCoverage, colCoverage);
-      }
+      if (depth === targetLen) return hasFullCoverage(rowCoverage, colCoverage);
 
       const cur = path[depth - 1];
-      const candidates = [];
-      for (const [dr, dc] of ORTH_DIRS) {
-        const nr = cur.r + dr;
-        const nc = cur.c + dc;
-        if (nr < 0 || nr >= rows || nc < 0 || nc >= cols) continue;
-        if (visited[nr][nc]) continue;
-
-        const rowNovel = rowCoverage[nr] === 0 ? 1 : 0;
-        const colNovel = colCoverage[nc] === 0 ? 1 : 0;
-        const remainingAfter = remaining - 1;
-        if ((missingRows - rowNovel) > remainingAfter || (missingCols - colNovel) > remainingAfter) {
-          continue;
-        }
-
-        let onward = 0;
-        for (const [ndr, ndc] of ORTH_DIRS) {
-          const ar = nr + ndr;
-          const ac = nc + ndc;
-          if (ar < 0 || ar >= rows || ac < 0 || ac >= cols) continue;
-          if (!visited[ar][ac] && !(ar === cur.r && ac === cur.c)) onward += 1;
-        }
-
-        candidates.push({
-          r: nr,
-          c: nc,
-          onward,
-          score: ((rowNovel + colNovel) * 10) + ((4 - onward) * 2) + rng(),
-        });
-      }
-
+      const candidates = collectOrthPathCandidates({
+        rows,
+        cols,
+        cur,
+        visited,
+        rowCoverage,
+        colCoverage,
+        missingRows,
+        missingCols,
+        remaining,
+        rng,
+      });
       if (candidates.length === 0) return false;
-      candidates.sort((a, b) => (b.score - a.score) || (a.onward - b.onward));
 
       for (const candidate of candidates) {
-        visited[candidate.r][candidate.c] = true;
-        rowCoverage[candidate.r] += 1;
-        colCoverage[candidate.c] += 1;
-        path.push({ r: candidate.r, c: candidate.c });
-
+        pushPathCandidate(path, candidate, visited, rowCoverage, colCoverage);
         if (dfs()) return true;
-
-        path.pop();
-        rowCoverage[candidate.r] -= 1;
-        colCoverage[candidate.c] -= 1;
-        visited[candidate.r][candidate.c] = false;
+        popPathCandidate(path, candidate, visited, rowCoverage, colCoverage);
       }
 
       return false;
@@ -364,8 +409,8 @@ const pickStitchTransitions = (transitions, wantedCount, rng) => {
 
   for (const candidate of shuffled) {
     let overlaps = false;
-    for (let i = 0; i < selected.length; i++) {
-      if (Math.abs(candidate.start - selected[i].start) < 4) {
+    for (const element of selected) {
+      if (Math.abs(candidate.start - element.start) < 4) {
         overlaps = true;
         break;
       }
@@ -520,41 +565,62 @@ const rotateRps = (start, steps) => {
   return RPS_CODES[(idx + (steps % 3)) % 3];
 };
 
-const analyzeFeatures = (level) => {
-  let hasHint = false;
-  let hasRps = false;
-  let hasMovable = false;
-  let hintCount = 0;
-  let rpsCount = 0;
-  let wallCount = 0;
-  let cellConstraintCount = 0;
+const createFeatureStats = () => ({
+  hasHint: false,
+  hasRps: false,
+  hasMovable: false,
+  hintCount: 0,
+  rpsCount: 0,
+  wallCount: 0,
+  cellConstraintCount: 0,
+});
 
-  for (const row of level.grid) {
-    for (let i = 0; i < row.length; i++) {
-      const ch = row[i];
-      if (ch === '#' || ch === 'm') wallCount += 1;
-      if (HINT_CODES.has(ch)) {
-        hasHint = true;
-        hintCount += 1;
-        cellConstraintCount += 1;
-      }
-      if (RPS_CODES.includes(ch)) {
-        hasRps = true;
-        rpsCount += 1;
-        cellConstraintCount += 1;
-      }
-      if (ch === 'm') hasMovable = true;
+const recordGridFeatureCell = (stats, ch) => {
+  if (isWallToken(ch)) stats.wallCount += 1;
+  if (HINT_CODES.has(ch)) {
+    stats.hasHint = true;
+    stats.hintCount += 1;
+    stats.cellConstraintCount += 1;
+  }
+  if (isRpsToken(ch)) {
+    stats.hasRps = true;
+    stats.rpsCount += 1;
+    stats.cellConstraintCount += 1;
+  }
+  if (ch === 'm') stats.hasMovable = true;
+};
+
+const scanGridFeatureStats = (grid) => {
+  const stats = createFeatureStats();
+  for (const row of grid) {
+    for (const ch of row) {
+      recordGridFeatureCell(stats, ch);
     }
   }
+  return stats;
+};
+
+const analyzeFeatures = (level) => {
+  const {
+    hasHint,
+    hasRps,
+    hasMovable,
+    hintCount,
+    rpsCount,
+    wallCount,
+    cellConstraintCount,
+  } = scanGridFeatureStats(level.grid);
 
   const rows = level.grid.length;
   const cols = rows > 0 ? level.grid[0].length : 0;
   const totalCells = rows * cols;
   const nonWallCellCount = Math.max(0, totalCells - wallCount);
-  const hasStitch = (level.stitches || []).length > 0;
-  const hasCorner = (level.cornerCounts || []).length > 0;
-  const stitchCount = (level.stitches || []).length;
-  const cornerCount = (level.cornerCounts || []).length;
+  const stitches = level.stitches || [];
+  const cornerCounts = level.cornerCounts || [];
+  const hasStitch = stitches.length > 0;
+  const hasCorner = cornerCounts.length > 0;
+  const stitchCount = stitches.length;
+  const cornerCount = cornerCounts.length;
   const constraintTokenCount = cellConstraintCount + stitchCount + cornerCount;
   const featureCount = [hasStitch, hasMovable, hasCorner, hasRps, hasHint].filter(Boolean).length;
 
@@ -576,7 +642,7 @@ const analyzeFeatures = (level) => {
 
 const constraintDensity = (level, features = analyzeFeatures(level)) => {
   const denom = features.nonWallCellCount;
-  if (!(denom > 0)) return 0;
+  if (denom <= 0) return 0;
   return features.constraintTokenCount / denom;
 };
 
@@ -584,8 +650,72 @@ const wallDensity = (level, features = analyzeFeatures(level)) => {
   const rows = level.grid.length;
   const cols = rows > 0 ? level.grid[0].length : 0;
   const total = rows * cols;
-  if (!(total > 0)) return 0;
+  if (total <= 0) return 0;
   return features.wallCount / total;
+};
+
+const collectAvailablePathIndices = (grid, path, occupied) => {
+  const pathIndices = [];
+  for (let i = 1; i < path.length - 1; i++) {
+    const p = path[i];
+    const k = keyOf(p.r, p.c);
+    if (!occupied.has(k) && grid[p.r][p.c] === '.') pathIndices.push(i);
+  }
+  return pathIndices;
+};
+
+const normalizeTargetRps = (requireRps, rpsCount) => {
+  let targetRps = Math.max(0, rpsCount);
+  if (requireRps) targetRps = Math.max(2, targetRps);
+  if (targetRps === 1) return 2;
+  return targetRps;
+};
+
+const placeRpsSequence = (grid, path, pathIndices, targetRps, occupied, rng) => {
+  if (targetRps <= 0) return;
+  const picks = pickDistinct(pathIndices, Math.min(targetRps, pathIndices.length), rng)
+    .sort((a, b) => a - b);
+  if (picks.length === 0) return;
+
+  const start = RPS_CODES[intFromRng(rng, RPS_CODES.length)];
+  for (let i = 0; i < picks.length; i++) {
+    const p = path[picks[i]];
+    grid[p.r][p.c] = rotateRps(start, i);
+    occupied.add(keyOf(p.r, p.c));
+  }
+};
+
+const countHintsOnPath = (grid, path) => {
+  let hintCount = 0;
+  for (let i = 1; i < path.length - 1; i++) {
+    const p = path[i];
+    if (HINT_CODES.has(grid[p.r][p.c])) hintCount += 1;
+  }
+  return hintCount;
+};
+
+const collectHintCandidates = (grid, path, occupied) => {
+  const candidates = [];
+  for (let i = 1; i < path.length - 1; i++) {
+    const p = path[i];
+    const k = keyOf(p.r, p.c);
+    if (occupied.has(k) || grid[p.r][p.c] !== '.') continue;
+
+    const choices = getHintChoicesAtIndex(path, i);
+    if (choices.length === 0) continue;
+    candidates.push({ i, choices });
+  }
+  return candidates;
+};
+
+const placeHintCandidates = (grid, path, candidates, needed, occupied, rng) => {
+  const selected = pickDistinct(candidates, Math.min(candidates.length, needed), rng);
+  for (const entry of selected) {
+    const choice = entry.choices[intFromRng(rng, entry.choices.length)];
+    const p = path[entry.i];
+    grid[p.r][p.c] = choice;
+    occupied.add(keyOf(p.r, p.c));
+  }
 };
 
 const enforceMinimumFeatures = (grid, path, rng, options = {}) => {
@@ -596,58 +726,52 @@ const enforceMinimumFeatures = (grid, path, rng, options = {}) => {
     occupied = new Set(),
   } = options;
 
-  const pathIndices = [];
-  for (let i = 1; i < path.length - 1; i++) {
-    const p = path[i];
-    const k = keyOf(p.r, p.c);
-    if (!occupied.has(k) && grid[p.r][p.c] === '.') {
-      pathIndices.push(i);
+  const pathIndices = collectAvailablePathIndices(grid, path, occupied);
+  const targetRps = normalizeTargetRps(requireRps, rpsCount);
+  placeRpsSequence(grid, path, pathIndices, targetRps, occupied, rng);
+
+  const hintPlaced = countHintsOnPath(grid, path);
+  if (hintPlaced >= minHints) return;
+
+  const candidates = collectHintCandidates(grid, path, occupied);
+  placeHintCandidates(grid, path, candidates, minHints - hintPlaced, occupied, rng);
+};
+
+const collectCornerCandidates = (rows, cols, orthEdges, forbiddenVertices = new Set(), grid = null) => {
+  const candidates = [];
+  for (let vr = 1; vr < rows; vr++) {
+    for (let vc = 1; vc < cols; vc++) {
+      const vk = `${vr},${vc}`;
+      if (forbiddenVertices.has(vk)) continue;
+
+      const count = countCornerOrthConnections(vr, vc, orthEdges);
+      if (count < 0 || count > 3) continue;
+      if (isUnsatisfiableCornerConstraint(grid, vr, vc, count)) continue;
+      candidates.push([vr, vc, count]);
     }
   }
+  return candidates;
+};
 
-  let targetRps = Math.max(0, rpsCount);
-  if (requireRps) targetRps = Math.max(2, targetRps);
-  if (targetRps === 1) targetRps = 2;
+const chooseCornerTargetCount = (requiredFeature, candidateCount, rng) => {
+  let targetCount = 1 + intFromRng(rng, 2);
+  if (requiredFeature === 'corner') targetCount = 2 + intFromRng(rng, 2);
+  return Math.min(targetCount, 4, candidateCount);
+};
 
-  if (targetRps > 0) {
-    const picks = pickDistinct(pathIndices, Math.min(targetRps, pathIndices.length), rng)
-      .sort((a, b) => a - b);
-    const start = RPS_CODES[intFromRng(rng, RPS_CODES.length)];
-    for (let i = 0; i < picks.length; i++) {
-      const p = path[picks[i]];
-      grid[p.r][p.c] = rotateRps(start, i);
-      occupied.add(keyOf(p.r, p.c));
-    }
+const addUniqueCornerEntries = (picked, used, entries) => {
+  for (const entry of entries) {
+    const k = `${entry[0]},${entry[1]}`;
+    if (used.has(k)) continue;
+    used.add(k);
+    picked.push(entry);
   }
+};
 
-  let hintPlaced = 0;
-  for (let i = 1; i < path.length - 1; i++) {
-    const p = path[i];
-    if (HINT_CODES.has(grid[p.r][p.c])) hintPlaced += 1;
-  }
-
-  if (hintPlaced < minHints) {
-    const candidates = [];
-    for (let i = 1; i < path.length - 1; i++) {
-      const p = path[i];
-      const k = keyOf(p.r, p.c);
-      if (occupied.has(k)) continue;
-      if (grid[p.r][p.c] !== '.') continue;
-      const choices = getHintChoicesAtIndex(path, i);
-      if (choices.length === 0) continue;
-      candidates.push({ i, choices });
-    }
-
-    const needed = Math.min(candidates.length, minHints - hintPlaced);
-    const selected = pickDistinct(candidates, needed, rng);
-    for (const entry of selected) {
-      const choice = entry.choices[intFromRng(rng, entry.choices.length)];
-      const p = path[entry.i];
-      grid[p.r][p.c] = choice;
-      occupied.add(keyOf(p.r, p.c));
-      hintPlaced += 1;
-    }
-  }
+const maybeAddZeroCornerEntry = (picked, used, zeroCandidates, requiredFeature, rng) => {
+  if (zeroCandidates.length === 0) return;
+  if (requiredFeature !== 'corner' && rng() >= 0.25) return;
+  addUniqueCornerEntries(picked, used, [zeroCandidates[intFromRng(rng, zeroCandidates.length)]]);
 };
 
 const buildCornerCounts = (
@@ -659,51 +783,23 @@ const buildCornerCounts = (
   forbiddenVertices = new Set(),
   grid = null,
 ) => {
-  const candidates = [];
-  for (let vr = 1; vr < rows; vr++) {
-    for (let vc = 1; vc < cols; vc++) {
-      const vk = `${vr},${vc}`;
-      if (forbiddenVertices.has(vk)) continue;
-      const count = countCornerOrthConnections(vr, vc, orthEdges);
-      if (count < 0 || count > 3) continue;
-      if (isUnsatisfiableCornerConstraint(grid, vr, vc, count)) continue;
-      candidates.push([vr, vc, count]);
-    }
-  }
-
+  const candidates = collectCornerCandidates(rows, cols, orthEdges, forbiddenVertices, grid);
   if (candidates.length === 0) return [];
 
   const zeroCandidates = candidates.filter((entry) => entry[2] === 0);
   const nonZeroCandidates = candidates.filter((entry) => entry[2] !== 0);
-
-  let targetCount = 1 + intFromRng(rng, 2);
-  if (requiredFeature === 'corner') targetCount = 2 + intFromRng(rng, 2);
-  targetCount = Math.min(targetCount, 4, candidates.length);
+  const targetCount = chooseCornerTargetCount(requiredFeature, candidates.length, rng);
 
   const picked = [];
   const used = new Set();
-
-  const addEntry = (entry) => {
-    const k = `${entry[0]},${entry[1]}`;
-    if (used.has(k)) return;
-    used.add(k);
-    picked.push(entry);
-  };
-
-  if (zeroCandidates.length > 0 && (requiredFeature === 'corner' || rng() < 0.25)) {
-    addEntry(zeroCandidates[intFromRng(rng, zeroCandidates.length)]);
-  }
+  maybeAddZeroCornerEntry(picked, used, zeroCandidates, requiredFeature, rng);
 
   const primaryPool = nonZeroCandidates.length > 0 ? nonZeroCandidates : candidates;
   const primaryNeeded = Math.max(0, targetCount - picked.length);
-  for (const entry of pickDistinct(primaryPool, primaryNeeded, rng)) {
-    addEntry(entry);
-  }
+  addUniqueCornerEntries(picked, used, pickDistinct(primaryPool, primaryNeeded, rng));
 
   if (picked.length < targetCount) {
-    for (const entry of pickDistinct(candidates, targetCount - picked.length, rng)) {
-      addEntry(entry);
-    }
+    addUniqueCornerEntries(picked, used, pickDistinct(candidates, targetCount - picked.length, rng));
   }
 
   return sortCornerCounts(picked);
@@ -735,95 +831,117 @@ const removeArrayAt = (arr, index) => {
   return true;
 };
 
+const measureConstraintDensity = (grid, stitches, cornerCounts) => {
+  let hintCount = 0;
+  let rpsCount = 0;
+  let wallCount = 0;
+  for (const row of grid) {
+    for (const ch of row) {
+      if (isWallToken(ch)) wallCount += 1;
+      if (HINT_CODES.has(ch)) hintCount += 1;
+      if (isRpsToken(ch)) rpsCount += 1;
+    }
+  }
+
+  const total = grid.length * (grid[0]?.length || 0);
+  const nonWall = Math.max(0, total - wallCount);
+  if (nonWall <= 0) return 0;
+  return (hintCount + rpsCount + stitches.length + cornerCounts.length) / nonWall;
+};
+
+const collectHintCellsOnPath = (grid, path) => {
+  const removableHints = [];
+  for (let i = 1; i < path.length - 1; i++) {
+    const p = path[i];
+    if (HINT_CODES.has(grid[p.r][p.c])) removableHints.push(p);
+  }
+  return removableHints;
+};
+
+const collectRpsPathIndices = (grid, path) => {
+  const rpsPathIndices = [];
+  for (let i = 1; i < path.length - 1; i++) {
+    const p = path[i];
+    if (isRpsToken(grid[p.r][p.c])) rpsPathIndices.push(i);
+  }
+  return rpsPathIndices;
+};
+
+const clearPathCell = (grid, path, index) => {
+  const p = path[index];
+  grid[p.r][p.c] = '.';
+};
+
+const tryRemoveRpsDensity = (grid, path, minRps, rng) => {
+  const rpsPathIndices = collectRpsPathIndices(grid, path);
+  const rpsCount = rpsPathIndices.length;
+  if (rpsCount <= minRps) return false;
+
+  if (rpsCount === 2 && minRps === 0) {
+    clearPathCell(grid, path, rpsPathIndices[0]);
+    clearPathCell(grid, path, rpsPathIndices[1]);
+    return true;
+  }
+
+  if (rpsCount - 1 < minRps || rpsCount - 1 === 1) return false;
+  const removeFromStart = rng() < 0.5;
+  const removeIndex = removeFromStart ? rpsPathIndices[0] : rpsPathIndices[rpsCount - 1];
+  clearPathCell(grid, path, removeIndex);
+  return true;
+};
+
+const tryReduceConstraintDensity = (grid, path, cornerCounts, minHints, minCorners, minRps, rng) => {
+  const removableHints = collectHintCellsOnPath(grid, path);
+  if (removableHints.length > minHints) {
+    const pick = removableHints[intFromRng(rng, removableHints.length)];
+    grid[pick.r][pick.c] = '.';
+    return true;
+  }
+
+  if (cornerCounts.length > minCorners) {
+    return removeArrayAt(cornerCounts, intFromRng(rng, cornerCounts.length));
+  }
+
+  return tryRemoveRpsDensity(grid, path, minRps, rng);
+};
+
+const collectAddableHintCandidates = (grid, path) => {
+  const addableHints = [];
+  for (let i = 1; i < path.length - 1; i++) {
+    const p = path[i];
+    if (grid[p.r][p.c] !== '.') continue;
+
+    const choices = getHintChoicesAtIndex(path, i);
+    if (choices.length === 0) continue;
+    addableHints.push({ p, choices });
+  }
+  return addableHints;
+};
+
+const tryIncreaseConstraintDensity = (grid, path, rng) => {
+  const addableHints = collectAddableHintCandidates(grid, path);
+  if (addableHints.length === 0) return false;
+
+  const picked = addableHints[intFromRng(rng, addableHints.length)];
+  grid[picked.p.r][picked.p.c] = picked.choices[intFromRng(rng, picked.choices.length)];
+  return true;
+};
+
 const enforceConstraintDensityBand = (grid, path, stitches, cornerCounts, requiredFeature, rng) => {
-  const minHints = requiredFeature === 'hint' ? 3 : (requiredFeature === 'rps' ? 2 : 1);
+  const minHints = minimumHintCountForFeature(requiredFeature);
   const minRps = requiredFeature === 'rps' ? 2 : 0;
   const minCorners = 1;
 
-  const snapshot = () => {
-    let hintCount = 0;
-    let rpsCount = 0;
-    let wallCount = 0;
-    for (let r = 0; r < grid.length; r++) {
-      for (let c = 0; c < grid[r].length; c++) {
-        const ch = grid[r][c];
-        if (ch === '#' || ch === 'm') wallCount += 1;
-        if (HINT_CODES.has(ch)) hintCount += 1;
-        if (RPS_CODES.includes(ch)) rpsCount += 1;
-      }
-    }
-    const total = grid.length * (grid[0]?.length || 0);
-    const nonWall = Math.max(0, total - wallCount);
-    const tokenCount = hintCount + rpsCount + stitches.length + cornerCounts.length;
-    const density = nonWall > 0 ? tokenCount / nonWall : 0;
-    return {
-      hintCount,
-      rpsCount,
-      wallCount,
-      nonWall,
-      tokenCount,
-      density,
-    };
-  };
-
   for (let iter = 0; iter < 256; iter++) {
-    const state = snapshot();
-    if (state.density >= MIN_CONSTRAINT_DENSITY && state.density <= MAX_CONSTRAINT_DENSITY) return true;
+    const density = measureConstraintDensity(grid, stitches, cornerCounts);
+    if (density >= MIN_CONSTRAINT_DENSITY && density <= MAX_CONSTRAINT_DENSITY) return true;
 
-    if (state.density > MAX_CONSTRAINT_DENSITY) {
-      let changed = false;
-
-      const removableHints = [];
-      for (let i = 1; i < path.length - 1; i++) {
-        const p = path[i];
-        if (HINT_CODES.has(grid[p.r][p.c])) removableHints.push(p);
-      }
-      if (removableHints.length > minHints) {
-        const pick = removableHints[intFromRng(rng, removableHints.length)];
-        grid[pick.r][pick.c] = '.';
-        changed = true;
-      } else if (cornerCounts.length > minCorners) {
-        changed = removeArrayAt(cornerCounts, intFromRng(rng, cornerCounts.length));
-      } else {
-        const rpsPathIndices = [];
-        for (let i = 1; i < path.length - 1; i++) {
-          const p = path[i];
-          if (RPS_CODES.includes(grid[p.r][p.c])) rpsPathIndices.push(i);
-        }
-
-        const rpsCount = rpsPathIndices.length;
-        if (rpsCount > minRps) {
-          if (rpsCount === 2 && minRps === 0) {
-            const a = path[rpsPathIndices[0]];
-            const b = path[rpsPathIndices[1]];
-            grid[a.r][a.c] = '.';
-            grid[b.r][b.c] = '.';
-            changed = true;
-          } else if (rpsCount - 1 >= minRps && rpsCount - 1 !== 1) {
-            const removeFromStart = rng() < 0.5;
-            const removeIndex = removeFromStart ? rpsPathIndices[0] : rpsPathIndices[rpsCount - 1];
-            const p = path[removeIndex];
-            grid[p.r][p.c] = '.';
-            changed = true;
-          }
-        }
-      }
-
-      if (!changed) return false;
+    if (density > MAX_CONSTRAINT_DENSITY) {
+      if (!tryReduceConstraintDensity(grid, path, cornerCounts, minHints, minCorners, minRps, rng)) return false;
       continue;
     }
 
-    const addableHints = [];
-    for (let i = 1; i < path.length - 1; i++) {
-      const p = path[i];
-      if (grid[p.r][p.c] !== '.') continue;
-      const choices = getHintChoicesAtIndex(path, i);
-      if (choices.length === 0) continue;
-      addableHints.push({ p, choices });
-    }
-    if (addableHints.length === 0) return false;
-    const picked = addableHints[intFromRng(rng, addableHints.length)];
-    grid[picked.p.r][picked.p.c] = picked.choices[intFromRng(rng, picked.choices.length)];
+    if (!tryIncreaseConstraintDensity(grid, path, rng)) return false;
   }
 
   return false;
@@ -837,39 +955,40 @@ const chooseMovableCount = (requiredFeature, plan, wallCellCount, rng) => {
   return rng() < 0.2 ? 2 : 1;
 };
 
-const scrambleMovableStartPositions = (grid, path, solvedMovableCells, rng) => {
-  if (!Array.isArray(solvedMovableCells) || solvedMovableCells.length === 0) return false;
-
-  const solvedKeySet = new Set(solvedMovableCells.map((cell) => keyOf(cell.r, cell.c)));
+const collectOpenPathCells = (grid, path, solvedKeySet) => {
   const openPathCells = [];
-  for (let i = 0; i < path.length; i++) {
-    const p = path[i];
+  for (const p of path) {
     if (grid[p.r][p.c] !== '.') continue;
-    const k = keyOf(p.r, p.c);
-    if (solvedKeySet.has(k)) continue;
+    if (solvedKeySet.has(keyOf(p.r, p.c))) continue;
     openPathCells.push({ r: p.r, c: p.c });
   }
-  if (openPathCells.length === 0) return false;
+  return openPathCells;
+};
 
-  const sourceOrder = pickDistinct(solvedMovableCells, solvedMovableCells.length, rng);
-  const targetOrder = pickDistinct(openPathCells, openPathCells.length, rng);
-
-  for (let i = 0; i < sourceOrder.length; i++) {
-    const source = sourceOrder[i];
+const tryRelocateMovableStart = (grid, sourceOrder, targetOrder) => {
+  for (const source of sourceOrder) {
     if (grid[source.r][source.c] !== 'm') continue;
-
-    for (let j = 0; j < targetOrder.length; j++) {
-      const target = targetOrder[j];
+    for (const target of targetOrder) {
       if (grid[target.r][target.c] !== '.') continue;
       if (source.r === target.r && source.c === target.c) continue;
-
       grid[source.r][source.c] = '.';
       grid[target.r][target.c] = 'm';
       return true;
     }
   }
-
   return false;
+};
+
+const scrambleMovableStartPositions = (grid, path, solvedMovableCells, rng) => {
+  if (!Array.isArray(solvedMovableCells) || solvedMovableCells.length === 0) return false;
+
+  const solvedKeySet = new Set(solvedMovableCells.map((cell) => keyOf(cell.r, cell.c)));
+  const openPathCells = collectOpenPathCells(grid, path, solvedKeySet);
+  if (openPathCells.length === 0) return false;
+
+  const sourceOrder = pickDistinct(solvedMovableCells, solvedMovableCells.length, rng);
+  const targetOrder = pickDistinct(openPathCells, openPathCells.length, rng);
+  return tryRelocateMovableStart(grid, sourceOrder, targetOrder);
 };
 
 const buildPathForLevel = (rows, cols, requiredFeature, plan, rng) => {
@@ -917,49 +1036,45 @@ const buildPathForLevel = (rows, cols, requiredFeature, plan, rng) => {
   };
 };
 
-const createCoreLevel = (infiniteIndex, variantId) => {
-  assertInfiniteIndex(infiniteIndex);
-  assertVariantId(variantId);
-
-  const requiredFeature = INFINITE_FEATURE_CYCLE[infiniteIndex % INFINITE_FEATURE_CYCLE.length];
-  const seed = mix32(hashString32(`${INFINITE_GLOBAL_SEED}:${infiniteIndex}:variant:${variantId}`));
-  const rng = makeRng(seed);
-
-  const plan = buildFeaturePlan(requiredFeature, rng);
-  const dims = chooseDimensions(rng);
-
-  const { rows, cols } = dims;
-  const { path, transitions } = buildPathForLevel(rows, cols, requiredFeature, plan, rng);
-  const grid = Array.from({ length: rows }, () => Array(cols).fill('#'));
-  for (let i = 0; i < path.length; i++) {
-    const p = path[i];
+const buildGridFromPath = (rows, cols, path) => {
+  const grid = Array.from({ length: rows }, () => new Array(cols).fill('#'));
+  for (const p of path) {
     grid[p.r][p.c] = '.';
   }
+  return grid;
+};
 
+const collectWallCells = (grid) => {
   const wallCells = [];
-  for (let r = 0; r < rows; r++) {
-    for (let c = 0; c < cols; c++) {
+  for (let r = 0; r < grid.length; r++) {
+    for (let c = 0; c < grid[r].length; c++) {
       if (grid[r][c] === '#') wallCells.push({ r, c });
     }
   }
+  return wallCells;
+};
 
-  let solvedMovableCells = [];
-  if (plan.movable && wallCells.length > 0) {
-    const movableCount = chooseMovableCount(requiredFeature, plan, wallCells.length, rng);
-    solvedMovableCells = pickDistinct(wallCells, movableCount, rng);
-    for (const cell of solvedMovableCells) {
-      grid[cell.r][cell.c] = 'm';
-    }
+const placeSolvedMovableCells = (grid, wallCells, plan, requiredFeature, rng) => {
+  if (!plan.movable || wallCells.length === 0) return [];
+  const movableCount = chooseMovableCount(requiredFeature, plan, wallCells.length, rng);
+  const solvedMovableCells = pickDistinct(wallCells, movableCount, rng);
+  for (const cell of solvedMovableCells) {
+    grid[cell.r][cell.c] = 'm';
   }
+  return solvedMovableCells;
+};
 
-  let stitchTransitions = [];
-  if (plan.stitch && transitions.length > 0) {
+const selectStitchTransitions = (plan, requiredFeature, transitions, rng) => {
+  if (transitions.length === 0) return [];
+  if (plan.stitch) {
     const wanted = 1 + intFromRng(rng, Math.min(2, transitions.length));
-    stitchTransitions = pickStitchTransitions(transitions, wanted, rng);
-  } else if (requiredFeature === 'stitch' && transitions.length > 0) {
-    stitchTransitions = pickStitchTransitions(transitions, 1, rng);
+    return pickStitchTransitions(transitions, wanted, rng);
   }
+  if (requiredFeature === 'stitch') return pickStitchTransitions(transitions, 1, rng);
+  return [];
+};
 
+const collectValidatedStitches = (path, stitchTransitions, infiniteIndex, variantId) => {
   applyStitchTransitions(path, stitchTransitions);
   const stitchCollect = collectStitchVerticesFromPath(path);
   if (stitchCollect.invalidStep) {
@@ -969,64 +1084,66 @@ const createCoreLevel = (infiniteIndex, variantId) => {
       + ` to ${stitchCollect.invalidStep.to.join(',')}`,
     );
   }
-  let stitches = stitchCollect.stitches;
-  const stitchVertexSet = new Set(stitches.map(([vr, vc]) => `${vr},${vc}`));
 
+  const stitches = stitchCollect.stitches;
+  return {
+    stitches,
+    stitchVertexSet: new Set(stitches.map(([vr, vc]) => `${vr},${vc}`)),
+  };
+};
+
+const applyMinimumGridFeatures = (grid, path, plan, requiredFeature, rng) => {
   const occupied = new Set();
-  let requestedRps = 0;
-  if (plan.rps) {
-    requestedRps = 2 + intFromRng(rng, 2);
-  }
-
+  const requestedRps = plan.rps ? 2 + intFromRng(rng, 2) : 0;
   enforceMinimumFeatures(grid, path, rng, {
-    minHints:
-      requiredFeature === 'hint'
-        ? 3
-        : (requiredFeature === 'rps' ? 2 : 1),
+    minHints: minimumHintCountForFeature(requiredFeature),
     requireRps: plan.rps,
     rpsCount: requestedRps,
     occupied,
   });
+};
 
-  if (solvedMovableCells.length > 0) {
-    const scrambled = scrambleMovableStartPositions(grid, path, solvedMovableCells, rng);
-    if (!scrambled) {
-      throw new Error(
-        `Failed to scramble movable start positions for infinite index ${infiniteIndex} variant ${variantId}`,
-      );
-    }
-  }
-
-  const orthEdges = buildOrthEdgeSet(path);
-  let cornerCounts = buildCornerCounts(rows, cols, orthEdges, rng, requiredFeature, stitchVertexSet, grid);
-
-  if (!enforceConstraintDensityBand(grid, path, stitches, cornerCounts, requiredFeature, rng)) {
+const scrambleMovableStartPositionsOrThrow = (grid, path, solvedMovableCells, infiniteIndex, variantId, rng) => {
+  if (solvedMovableCells.length === 0) return;
+  const scrambled = scrambleMovableStartPositions(grid, path, solvedMovableCells, rng);
+  if (!scrambled) {
     throw new Error(
-      `Failed to enforce constraint density band for infinite index ${infiniteIndex} variant ${variantId}`,
+      `Failed to scramble movable start positions for infinite index ${infiniteIndex} variant ${variantId}`,
     );
   }
+};
 
-  stitches = sortPairs(stitches);
-  cornerCounts = sortCornerCounts(cornerCounts);
+const enforceConstraintDensityBandOrThrow = (
+  { grid, path, stitches, cornerCounts, requiredFeature, rng },
+  { infiniteIndex, variantId },
+) => {
+  if (enforceConstraintDensityBand(grid, path, stitches, cornerCounts, requiredFeature, rng)) return;
+  throw new Error(
+    `Failed to enforce constraint density band for infinite index ${infiniteIndex} variant ${variantId}`,
+  );
+};
 
-  const level = {
-    grid: toGridStrings(grid),
-    stitches,
-    cornerCounts,
-  };
+const buildGeneratedLevel = (grid, stitches, cornerCounts) => ({
+  grid: toGridStrings(grid),
+  stitches: sortPairs(stitches),
+  cornerCounts: sortCornerCounts(cornerCounts),
+});
 
-  const features = analyzeFeatures(level);
-  const density = constraintDensity(level, features);
-  const walls = wallDensity(level, features);
-
-  if (!features.corner && level.cornerCounts.length === 0) {
-    const fallback = findFallbackCornerCount(rows, cols, orthEdges, stitchVertexSet, grid);
-    if (!fallback) {
-      throw new Error(`No available non-stitch corner vertex for index ${infiniteIndex} variant ${variantId}`);
-    }
-    level.cornerCounts = [fallback];
+const ensureFallbackCornerCount = (
+  level,
+  features,
+  { rows, cols, orthEdges, stitchVertexSet, grid },
+  { infiniteIndex, variantId },
+) => {
+  if (features.corner || level.cornerCounts.length > 0) return;
+  const fallback = findFallbackCornerCount(rows, cols, orthEdges, stitchVertexSet, grid);
+  if (!fallback) {
+    throw new Error(`No available non-stitch corner vertex for index ${infiniteIndex} variant ${variantId}`);
   }
+  level.cornerCounts = [fallback];
+};
 
+const validateGeneratedLevel = (level, requiredFeature, features, density, walls, infiniteIndex, variantId) => {
   if (requiredFeature === 'stitch' && level.stitches.length === 0) {
     throw new Error(`Failed to create stitch constraints for infinite index ${infiniteIndex} variant ${variantId}`);
   }
@@ -1055,22 +1172,61 @@ const createCoreLevel = (infiniteIndex, variantId) => {
       `Constraint density out of bounds (${density.toFixed(3)}) for infinite index ${infiniteIndex} variant ${variantId}`,
     );
   }
+};
 
+const buildCoreMeta = ({ rows, cols, path, stitches, solvedMovableCells, requiredFeature, seed, variantId }) => {
   const profileId = (rows * 10000) + (cols * 1000) + (path.length * 10) + Math.min(9, stitches.length);
-
   const witnessPath = path.map((p) => [p.r, p.c]);
   const witnessMovableWalls = sortCells(solvedMovableCells).map((cell) => [cell.r, cell.c]);
 
   return {
+    requiredFeature,
+    seed,
+    profileId,
+    variantId,
+    witnessPath,
+    witnessMovableWalls,
+  };
+};
+
+const createCoreLevel = (infiniteIndex, variantId) => {
+  assertInfiniteIndex(infiniteIndex);
+  assertVariantId(variantId);
+
+  const requiredFeature = INFINITE_FEATURE_CYCLE[infiniteIndex % INFINITE_FEATURE_CYCLE.length];
+  const seed = mix32(hashString32(`${INFINITE_GLOBAL_SEED}:${infiniteIndex}:variant:${variantId}`));
+  const rng = makeRng(seed);
+  const variantContext = { infiniteIndex, variantId };
+
+  const plan = buildFeaturePlan(requiredFeature, rng);
+  const dims = chooseDimensions(rng);
+
+  const { rows, cols } = dims;
+  const { path, transitions } = buildPathForLevel(rows, cols, requiredFeature, plan, rng);
+  const grid = buildGridFromPath(rows, cols, path);
+  const wallCells = collectWallCells(grid);
+  const solvedMovableCells = placeSolvedMovableCells(grid, wallCells, plan, requiredFeature, rng);
+  const stitchTransitions = selectStitchTransitions(plan, requiredFeature, transitions, rng);
+  const { stitches, stitchVertexSet } = collectValidatedStitches(path, stitchTransitions, infiniteIndex, variantId);
+
+  applyMinimumGridFeatures(grid, path, plan, requiredFeature, rng);
+  scrambleMovableStartPositionsOrThrow(grid, path, solvedMovableCells, infiniteIndex, variantId, rng);
+
+  const orthEdges = buildOrthEdgeSet(path);
+  let cornerCounts = buildCornerCounts(rows, cols, orthEdges, rng, requiredFeature, stitchVertexSet, grid);
+  enforceConstraintDensityBandOrThrow({ grid, path, stitches, cornerCounts, requiredFeature, rng }, variantContext);
+
+  const level = buildGeneratedLevel(grid, stitches, cornerCounts);
+
+  const features = analyzeFeatures(level);
+  const density = constraintDensity(level, features);
+  const walls = wallDensity(level, features);
+  ensureFallbackCornerCount(level, features, { rows, cols, orthEdges, stitchVertexSet, grid }, variantContext);
+  validateGeneratedLevel(level, requiredFeature, features, density, walls, infiniteIndex, variantId);
+
+  return {
     level,
-    meta: {
-      requiredFeature,
-      seed,
-      profileId,
-      variantId,
-      witnessPath,
-      witnessMovableWalls,
-    },
+    meta: buildCoreMeta({ rows, cols, path, stitches, solvedMovableCells, requiredFeature, seed, variantId }),
   };
 };
 
@@ -1099,37 +1255,49 @@ const decorateInfiniteLevel = (infiniteIndex, core) => {
 export const generateInfiniteLevelFromVariant = (infiniteIndex, variantId) =>
   decorateInfiniteLevel(infiniteIndex, createCoreLevel(infiniteIndex, variantId));
 
+const summarizeGridStyle = (grid) => {
+  const summary = {
+    walls: 0,
+    movable: 0,
+    hints: 0,
+    rps: 0,
+  };
+
+  for (const row of grid) {
+    for (const ch of row) {
+      if (ch === '#') summary.walls += 1;
+      if (ch === 'm') summary.movable += 1;
+      if (HINT_CODES.has(ch)) summary.hints += 1;
+      if (isRpsToken(ch)) summary.rps += 1;
+    }
+  }
+
+  return summary;
+};
+
+const countZeroCorners = (cornerCounts = []) => {
+  let cornerZero = 0;
+  for (const entry of cornerCounts) {
+    if (entry[2] === 0) cornerZero += 1;
+  }
+  return cornerZero;
+};
+
 const summarizeStyle = (level) => {
   const rows = level.grid.length;
   const cols = rows > 0 ? level.grid[0].length : 0;
-  let walls = 0;
-  let movable = 0;
-  let hints = 0;
-  let rps = 0;
-  for (const row of level.grid) {
-    for (let i = 0; i < row.length; i++) {
-      const ch = row[i];
-      if (ch === '#') walls++;
-      else if (ch === 'm') movable++;
-      if (HINT_CODES.has(ch)) hints++;
-      if (RPS_CODES.includes(ch)) rps++;
-    }
-  }
-  let cornerZero = 0;
-  for (const entry of level.cornerCounts || []) {
-    if (entry[2] === 0) cornerZero++;
-  }
+  const gridSummary = summarizeGridStyle(level.grid);
 
   return {
     rows,
     cols,
-    walls,
-    movable,
-    hints,
-    rps,
+    walls: gridSummary.walls,
+    movable: gridSummary.movable,
+    hints: gridSummary.hints,
+    rps: gridSummary.rps,
     stitches: (level.stitches || []).length,
     corners: (level.cornerCounts || []).length,
-    cornerZero,
+    cornerZero: countZeroCorners(level.cornerCounts),
   };
 };
 

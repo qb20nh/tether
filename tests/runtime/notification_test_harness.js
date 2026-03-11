@@ -159,10 +159,11 @@ export class FakeElement {
   closest(selector) {
     if (!selector.startsWith('.')) return null;
     const className = selector.slice(1);
-    let current = this;
-    while (current) {
-      if (current.classList.contains(className)) return current;
-      current = current.parentNode;
+    if (this.classList.contains(className)) return this;
+    let node = this.parentNode;
+    while (node) {
+      if (node.classList.contains(className)) return node;
+      node = node.parentNode;
     }
     return null;
   }

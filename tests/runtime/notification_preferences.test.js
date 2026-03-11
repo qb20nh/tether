@@ -1,5 +1,5 @@
-import test from 'node:test';
 import assert from 'node:assert/strict';
+import test from 'node:test';
 import {
   AUTO_UPDATE_ENABLED_KEY,
   LAST_NOTIFIED_REMOTE_BUILD_KEY,

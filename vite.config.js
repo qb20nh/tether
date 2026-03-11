@@ -1,10 +1,10 @@
-import path from 'node:path';
 import { execSync } from 'node:child_process';
 import { readFile, writeFile } from 'node:fs/promises';
+import path from 'node:path';
 import { defineConfig, loadEnv } from 'vite';
+import { verifyReleaseNoDebugArtifacts } from './scripts/verify_release_no_debug_artifacts.js';
 import { injectBootShellIntoIndexHtml } from './src/index_boot_shell.js';
 import { DAILY_PAYLOAD_FILE } from './src/shared/paths.js';
-import { verifyReleaseNoDebugArtifacts } from './scripts/verify_release_no_debug_artifacts.js';
 
 const BUILD_NUMBER_META_NAME = 'tether-build-number';
 const BUILD_LABEL_META_NAME = 'tether-build-label';
@@ -27,7 +27,7 @@ const resolveBuildNumber = (env) => {
 };
 
 const resolveDailyPayloadPathname = (env) => {
-    const fallback = `/${DAILY_PAYLOAD_FILE}`.replace(/\/{2,}/g, '/');
+    const fallback = `/${DAILY_PAYLOAD_FILE}`.replaceAll(/\/{2,}/g, '/');
     const configuredRaw = (process.env.VITE_DAILY_URL ?? env.VITE_DAILY_URL ?? '').trim();
     if (configuredRaw.length === 0) return fallback;
     try {

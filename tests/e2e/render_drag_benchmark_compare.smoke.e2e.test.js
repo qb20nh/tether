@@ -1,9 +1,9 @@
-import test from 'node:test';
 import assert from 'node:assert/strict';
+import { execFile } from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { execFile } from 'node:child_process';
+import test from 'node:test';
 import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
@@ -57,13 +57,13 @@ test('e2e: render drag benchmark compare smoke run produces a valid report', asy
   assert.equal(report.results.length, 2);
   assert.deepEqual(report.failures, []);
 
-  for (let i = 0; i < report.results.length; i += 1) {
-    const suite = report.results[i];
+  for (const element of report.results) {
+    const suite = element;
     assert.equal(suite.mode, 'normal');
     assert.equal(Array.isArray(suite.caseResults), true);
     assert.equal(suite.caseResults.length, 2);
-    for (let j = 0; j < suite.caseResults.length; j += 1) {
-      const caseResult = suite.caseResults[j];
+    for (const element of suite.caseResults) {
+      const caseResult = element;
       assert.deepEqual(caseResult.actualPathCells, caseResult.pathCells);
     }
   }

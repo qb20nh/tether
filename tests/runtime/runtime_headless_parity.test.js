@@ -1,11 +1,11 @@
-import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createLevelProvider } from '../../src/core/level_provider.js';
+import test from 'node:test';
 import { createDefaultCore } from '../../src/core/default_core.js';
-import { createGameStateStore } from '../../src/state/game_state_store.js';
+import { createLevelProvider } from '../../src/core/level_provider.js';
 import { createMemoryPersistence } from '../../src/persistence/memory_persistence.js';
-import { createRuntime, createHeadlessRuntime } from '../../src/runtime/create_runtime.js';
+import { createHeadlessRuntime, createRuntime } from '../../src/runtime/create_runtime.js';
 import { GAME_COMMANDS, INTENT_TYPES } from '../../src/runtime/intents.js';
+import { createGameStateStore } from '../../src/state/game_state_store.js';
 
 const CAMPAIGN_LEVEL = {
   name: 'Campaign',
@@ -72,8 +72,8 @@ const createElement = () => ({
   dataset: {},
   style: {},
   classList: createClassList(),
-  setAttribute() {},
-  removeAttribute() {},
+  setAttribute() { },
+  removeAttribute() { },
   querySelector() {
     return createElement();
   },
@@ -158,9 +158,13 @@ const installBrowserEnv = (t) => {
       this.callback = callback;
     }
 
-    observe() {}
+    observe() {
+      // noop
+    }
 
-    disconnect() {}
+    disconnect() {
+      // noop
+    }
   }
 
   globalThis.window = {
@@ -185,7 +189,7 @@ const installBrowserEnv = (t) => {
       lang: '',
       dataset: {},
       classList: createClassList(),
-      setAttribute() {},
+      setAttribute() { },
     },
     body: null,
   };
@@ -271,23 +275,23 @@ const createUiHarness = ({ levels, infiniteMaxLevels = 4, generateInfiniteLevel,
     state,
     persistence,
     renderer: {
-      mount() {},
+      mount() { },
       getRefs() {
         return refs;
       },
-      rebuildGrid() {},
-      renderFrame() {},
-      resize() {},
-      notifyResizeInteraction() {},
-      unmount() {},
-      recordPathTransition() {},
-      clearPathTransitionCompensation() {},
-      updateInteraction() {},
-      setPathFlowFreezeImmediate() {},
+      rebuildGrid() { },
+      renderFrame() { },
+      resize() { },
+      notifyResizeInteraction() { },
+      unmount() { },
+      recordPathTransition() { },
+      clearPathTransitionCompensation() { },
+      updateInteraction() { },
+      setPathFlowFreezeImmediate() { },
     },
     input: {
-      bind() {},
-      unbind() {},
+      bind() { },
+      unbind() { },
     },
     i18n: {
       resolveLocale: () => 'en',
@@ -342,13 +346,13 @@ const createHeadlessHarness = ({ levels, infiniteMaxLevels = 4, generateInfinite
 };
 
 const emitUiPath = (runtime, cells) => {
-  for (let i = 0; i < cells.length; i += 1) {
+  for (const element of cells) {
     runtime.emitIntent({
       type: INTENT_TYPES.GAME_COMMAND,
       payload: {
         commandType: GAME_COMMANDS.START_OR_STEP,
-        r: cells[i][0],
-        c: cells[i][1],
+        r: element[0],
+        c: element[1],
       },
     });
   }
@@ -359,8 +363,8 @@ const emitUiPath = (runtime, cells) => {
 };
 
 const dispatchHeadlessPath = (runtime, cells, finalize = true) => {
-  for (let i = 0; i < cells.length; i += 1) {
-    runtime.dispatch('path/start-or-step', { r: cells[i][0], c: cells[i][1] });
+  for (const element of cells) {
+    runtime.dispatch('path/start-or-step', { r: element[0], c: element[1] });
   }
   if (finalize) runtime.dispatch('path/finalize-after-pointer', {});
 };

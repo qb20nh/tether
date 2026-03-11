@@ -1,22 +1,21 @@
 import { CELL_TYPES, ELEMENT_IDS } from '../config.js';
-import { keyOf } from '../utils.js';
 import { cellCenter, getCellSize, vertexPos } from '../geometry.js';
 import { ICONS } from '../icons.js';
+import {
+  angleDeltaSigned,
+  cellDistance,
+  clampNumber,
+  clampUnit,
+  pointsMatch,
+} from '../math.js';
+import { isReducedMotionPreferred as readReducedMotionPreference } from '../reduced_motion.js';
+import { keyOf } from '../utils.js';
 import { buildBoardCellViewModel } from './board_view_model.js';
-import { createPathWebglRenderer } from './path_webgl_renderer.js';
 import {
   createPathAnimationEngine,
-  resolveHeadShiftStepCount,
-  resolveHeadShiftTransitionWindow,
-  resolveTipArrivalSyntheticPrevPath,
+  resolveHeadShiftTransitionWindow
 } from './path_animation_engine.js';
-import {
-  pointsMatch,
-  cellDistance,
-  clampUnit,
-  angleDeltaSigned,
-  clampNumber,
-} from '../math.js';
+import { createPathTransitionCompensationBuffer } from './path_transition_compensation_buffer.js';
 import {
   getPathTipFromPath,
   isEndRetractTransition,
@@ -24,13 +23,112 @@ import {
   isRetractUnturnTransition,
   isStartRetractTransition,
   normalizeFlowOffset,
-  pathsMatch,
-  resolvePathSignature,
+  pathsMatch
 } from './path_transition_utils.js';
-import { createPathTransitionCompensationBuffer } from './path_transition_compensation_buffer.js';
-import { isReducedMotionPreferred as readReducedMotionPreference } from '../reduced_motion.js';
+import { createPathWebglRenderer } from './path_webgl_renderer.js';
 
 const DEBUG_COUNTER_NOOP = () => { };
+const ZERO_OFFSET = Object.freeze({ x: 0, y: 0 });
+const RGB_HEX_RE = /^#[0-9a-f]{6}$/i;
+const CSS_ANGLE_UNITS = ['deg', 'rad', 'turn'];
+const IS_TETHER_DEV_RUNTIME = typeof __TETHER_DEV__ === 'boolean' ? __TETHER_DEV__ : true;
+
+const parseCssFunctionArguments = (value, functionName, expectedCount = null) => {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  const openIndex = trimmed.indexOf('(');
+  const closeIndex = trimmed.lastIndexOf(')');
+  if (openIndex <= 0 || closeIndex !== trimmed.length - 1) return null;
+  const name = trimmed.slice(0, openIndex).trim().toLowerCase();
+  if (name !== functionName) return null;
+
+  const args = trimmed
+    .slice(openIndex + 1, closeIndex)
+    .split(',')
+    .map((part) => part.trim());
+  if (expectedCount !== null && args.length !== expectedCount) return null;
+  return args;
+};
+
+const isSignedNumberString = (value) => {
+  const trimmed = String(value).trim();
+  if (!trimmed) return false;
+
+  let index = (trimmed.startsWith('+') || trimmed.startsWith('-')) ? 1 : 0;
+  let sawDigit = false;
+  let sawDot = false;
+
+  if (index >= trimmed.length) return false;
+
+  for (; index < trimmed.length; index++) {
+    const char = trimmed[index];
+    if (char >= '0' && char <= '9') {
+      sawDigit = true;
+      continue;
+    }
+    if (char === '.' && !sawDot) {
+      sawDot = true;
+      continue;
+    }
+    return false;
+  }
+
+  return sawDigit && trimmed.at(-1) !== '.';
+};
+
+const isCssPercentageValue = (value) => {
+  const trimmed = String(value).trim();
+  return trimmed.endsWith('%') && isSignedNumberString(trimmed.slice(0, -1));
+};
+
+const isCssAngleValue = (value) => {
+  const trimmed = String(value).trim().toLowerCase();
+  for (const unit of CSS_ANGLE_UNITS) {
+    if (trimmed.endsWith(unit)) {
+      return isSignedNumberString(trimmed.slice(0, -unit.length));
+    }
+  }
+  return isSignedNumberString(trimmed);
+};
+
+const resolveOpaqueFunctionColor = (value, sourceName, targetName, validators) => {
+  const args = parseCssFunctionArguments(value, sourceName, validators.length);
+  if (!args) return null;
+  if (!validators.every((validator, index) => validator(args[index]))) return null;
+  return `${targetName}(${args[0]}, ${args[1]}, ${args[2]})`;
+};
+
+const resolveRgbColorParts = (value) => {
+  const rgbArgs = parseCssFunctionArguments(value, 'rgb', 3);
+  if (rgbArgs?.every((part) => isSignedNumberString(part))) {
+    return rgbArgs;
+  }
+  const rgbaArgs = parseCssFunctionArguments(value, 'rgba', 4);
+  if (rgbaArgs?.slice(0, 3).every((part) => isSignedNumberString(part))) {
+    return rgbaArgs.slice(0, 3);
+  }
+  return null;
+};
+
+function setLegendIcons(icons, refs, iconX) {
+  const map = {
+    bTurn: icons['t'],
+    bCW: icons['r'],
+    bCCW: icons['l'],
+    bStraight: icons['s'],
+    bH: icons['h'],
+    bV: icons['v'],
+    bX: iconX,
+    bSc: icons['g'],
+    bRo: icons['b'],
+    bPa: icons['p'],
+    bMoveWall: icons['m'],
+  };
+
+  Object.keys(map).forEach((id) => {
+    if (refs[id]) refs[id].innerHTML = map[id] || '';
+  });
+}
 
 const createDebugCounterFnsDev = (debugCounters = null) => {
   if (!debugCounters) {
@@ -57,7 +155,7 @@ const createDebugCounterFnsDev = (debugCounters = null) => {
   ];
 };
 
-const createDebugCounterFns = (typeof __TETHER_DEV__ === 'boolean' ? __TETHER_DEV__ : true)
+const createDebugCounterFns = IS_TETHER_DEV_RUNTIME
   ? createDebugCounterFnsDev
   : () => [
     DEBUG_COUNTER_NOOP,
@@ -113,7 +211,7 @@ export function createBoardRendererCore(options = {}) {
   let reusableTutorialBracketPoints = [];
   let reusableCellViewModel = null;
   let resizeCanvasSignature = '';
-  let lastFlowMetricCell = NaN;
+  let lastFlowMetricCell = Number.NaN;
   let pathThemeCacheInitialized = false;
   let pathThemeLineRaw = '';
   let pathThemeGoodRaw = '';
@@ -126,10 +224,10 @@ export function createBoardRendererCore(options = {}) {
   let pathGeometryToken = 0;
   let cachedPathRef = null;
   let cachedPathLength = -1;
-  let cachedPathHeadR = NaN;
-  let cachedPathHeadC = NaN;
-  let cachedPathTailR = NaN;
-  let cachedPathTailC = NaN;
+  let cachedPathHeadR = Number.NaN;
+  let cachedPathHeadC = Number.NaN;
+  let cachedPathTailR = Number.NaN;
+  let cachedPathTailC = Number.NaN;
   let cachedPathLayoutVersion = -1;
   let pathStartRetainedArcState = null;
   let pathEndRetainedArcState = null;
@@ -219,16 +317,16 @@ export function createBoardRendererCore(options = {}) {
     tutorialBracketPulseEnabled: false,
     tutorialBracketColorRgb: null,
     drawTutorialBracketsInPathLayer: false,
-    endArrowDirX: NaN,
-    endArrowDirY: NaN,
-    startFlowDirX: NaN,
-    startFlowDirY: NaN,
+    endArrowDirX: Number.NaN,
+    endArrowDirY: Number.NaN,
+    startFlowDirX: Number.NaN,
+    startFlowDirY: Number.NaN,
     retainedStartArcWidth: 0,
     retainedEndArcWidth: 0,
     retainedStartArcPoints: [],
     retainedEndArcPoints: [],
-    retainedStartArcGeometryToken: NaN,
-    retainedEndArcGeometryToken: NaN,
+    retainedStartArcGeometryToken: Number.NaN,
+    retainedEndArcGeometryToken: Number.NaN,
   };
 
   const PATH_FLOW_SPEED = -32;
@@ -275,8 +373,8 @@ export function createBoardRendererCore(options = {}) {
     scale: 1,
     active: false,
     mode: 'none',
-    anchorR: NaN,
-    anchorC: NaN,
+    anchorR: Number.NaN,
+    anchorC: Number.NaN,
   };
   const flowVisibilityMixScratch = { mix: 1, active: false };
   const pathTipHoverScaleScratch = { startScale: 1, endScale: 1, active: false };
@@ -292,22 +390,22 @@ export function createBoardRendererCore(options = {}) {
     fromTravelSpan: 0,
     active: false,
   };
-  const endArrowDirectionScratch = { x: NaN, y: NaN, active: false };
-  const startFlowDirectionScratch = { x: NaN, y: NaN, active: false };
+  const endArrowDirectionScratch = { x: Number.NaN, y: Number.NaN, active: false };
+  const startFlowDirectionScratch = { x: Number.NaN, y: Number.NaN, active: false };
   const retainedArcRenderScratchA = {
     points: [],
-    geometryToken: NaN,
+    geometryToken: Number.NaN,
     active: false,
   };
   const retainedArcRenderScratchB = {
     points: [],
-    geometryToken: NaN,
+    geometryToken: Number.NaN,
     active: false,
   };
   let reusableStartRetainedArcPoints = [];
   let reusableEndRetainedArcPoints = [];
-  const pathStartTipHoverScaleState = { fromScale: 1, toScale: 1, startTimeMs: NaN };
-  const pathEndTipHoverScaleState = { fromScale: 1, toScale: 1, startTimeMs: NaN };
+  const pathStartTipHoverScaleState = { fromScale: 1, toScale: 1, startTimeMs: Number.NaN };
+  const pathEndTipHoverScaleState = { fromScale: 1, toScale: 1, startTimeMs: Number.NaN };
 
   const clearPendingRenderDirty = () => {
     pendingRenderDirty.cells = false;
@@ -410,10 +508,10 @@ export function createBoardRendererCore(options = {}) {
   const clearPathTipHoverScaleStates = () => {
     pathStartTipHoverScaleState.fromScale = 1;
     pathStartTipHoverScaleState.toScale = 1;
-    pathStartTipHoverScaleState.startTimeMs = NaN;
+    pathStartTipHoverScaleState.startTimeMs = Number.NaN;
     pathEndTipHoverScaleState.fromScale = 1;
     pathEndTipHoverScaleState.toScale = 1;
-    pathEndTipHoverScaleState.startTimeMs = NaN;
+    pathEndTipHoverScaleState.startTimeMs = Number.NaN;
   };
 
   const updatePathEndArrowRotateState = (
@@ -435,8 +533,8 @@ export function createBoardRendererCore(options = {}) {
 
   const applyPathEndArrowDirectionToPayload = (path, nowMs = getNowMs()) => {
     const direction = resolvePathEndArrowDirection(path, nowMs, endArrowDirectionScratch);
-    pathFramePayload.endArrowDirX = direction.active ? direction.x : NaN;
-    pathFramePayload.endArrowDirY = direction.active ? direction.y : NaN;
+    pathFramePayload.endArrowDirX = direction.active ? direction.x : Number.NaN;
+    pathFramePayload.endArrowDirY = direction.active ? direction.y : Number.NaN;
     return direction.active;
   };
 
@@ -459,8 +557,8 @@ export function createBoardRendererCore(options = {}) {
 
   const applyPathStartFlowDirectionToPayload = (path, nowMs = getNowMs()) => {
     const direction = resolvePathStartFlowDirection(path, nowMs, startFlowDirectionScratch);
-    pathFramePayload.startFlowDirX = direction.active ? direction.x : NaN;
-    pathFramePayload.startFlowDirY = direction.active ? direction.y : NaN;
+    pathFramePayload.startFlowDirX = direction.active ? direction.x : Number.NaN;
+    pathFramePayload.startFlowDirY = direction.active ? direction.y : Number.NaN;
     return direction.active;
   };
 
@@ -506,10 +604,11 @@ export function createBoardRendererCore(options = {}) {
       return;
     }
 
+    pathRetainedArcTokenSeed += 1;
     const nextState = {
       side,
       startTimeMs: nowMs,
-      settleStartTimeMs: NaN,
+      settleStartTimeMs: Number.NaN,
       cornerR: nextTip.r,
       cornerC: nextTip.c,
       movingR: prevTip.r,
@@ -518,7 +617,7 @@ export function createBoardRendererCore(options = {}) {
       arcInC: side === 'start' ? prevTip.c : neighbor.c,
       arcOutR: side === 'start' ? neighbor.r : prevTip.r,
       arcOutC: side === 'start' ? neighbor.c : prevTip.c,
-      geometryTokenSeed: (pathRetainedArcTokenSeed += 1),
+      geometryTokenSeed: pathRetainedArcTokenSeed,
     };
     if (side === 'start') pathStartRetainedArcState = nextState;
     else pathEndRetainedArcState = nextState;
@@ -546,7 +645,7 @@ export function createBoardRendererCore(options = {}) {
       const head = path[0];
       return Boolean(head && head.r === state.cornerR && head.c === state.cornerC);
     }
-    const tail = path[path.length - 1];
+    const tail = path.at(-1);
     return Boolean(tail && tail.r === state.cornerR && tail.c === state.cornerC);
   };
 
@@ -590,7 +689,7 @@ export function createBoardRendererCore(options = {}) {
     settleUnit = 0,
   ) => {
     clearArcPointPool(outPoints);
-    if (!state || !(width > 0)) return null;
+    if (!state || width <= 0) return null;
     const p0 = getCellPointFromLayout(state.arcInR, state.arcInC, headPointScratchA);
     const p1 = getCellPointFromLayout(state.cornerR, state.cornerC, headPointScratchB);
     const p2 = getCellPointFromLayout(state.arcOutR, state.arcOutC, headPointScratchC);
@@ -602,7 +701,7 @@ export function createBoardRendererCore(options = {}) {
     const outDy = p2.y - p1.y;
     const inLen = Math.hypot(inDx, inDy);
     const outLen = Math.hypot(outDx, outDy);
-    if (!(inLen > 0) || !(outLen > 0)) return null;
+    if (inLen <= 0 || outLen <= 0) return null;
     const inUx = inDx / inLen;
     const inUy = inDy / inLen;
     const outUx = outDx / outLen;
@@ -621,7 +720,7 @@ export function createBoardRendererCore(options = {}) {
     const targetAbsTurn = Math.min(absTurn, Math.PI / 4);
     const unit = clampUnit(settleUnit);
     const desiredAbsTurn = absTurn + ((targetAbsTurn - absTurn) * easeOutCubic(unit));
-    if (!(desiredAbsTurn > FLOW_TRAVEL_ANGLE_TOLERANCE)) return null;
+    if (desiredAbsTurn <= FLOW_TRAVEL_ANGLE_TOLERANCE) return null;
 
     const turnSign = turn < 0 ? -1 : 1;
     const desiredOutAngle = inAngle + (turnSign * desiredAbsTurn);
@@ -630,7 +729,7 @@ export function createBoardRendererCore(options = {}) {
 
     const radius = width * 0.5;
     const tangentOffset = radius * Math.tan(desiredAbsTurn * 0.5);
-    if (!(tangentOffset > 0) || !Number.isFinite(tangentOffset)) return null;
+    if (tangentOffset <= 0 || !Number.isFinite(tangentOffset)) return null;
 
     const tangentInX = p1.x - inUx * tangentOffset;
     const tangentInY = p1.y - inUy * tangentOffset;
@@ -653,8 +752,8 @@ export function createBoardRendererCore(options = {}) {
   ) => {
     if (!Array.isArray(points) || points.length <= 0) return Infinity;
     let maxDistance = 0;
-    for (let i = 0; i < points.length; i++) {
-      const point = points[i];
+    for (const element of points) {
+      const point = element;
       const x = Number(point?.x);
       const y = Number(point?.y);
       if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
@@ -663,52 +762,86 @@ export function createBoardRendererCore(options = {}) {
     return maxDistance;
   };
 
+  const resetRetainedArcRenderResult = (out) => {
+    out.points = [];
+    out.geometryToken = Number.NaN;
+    out.active = false;
+    return out;
+  };
+
+  const getRetainedArcStateForSide = (side) => (
+    side === 'start' ? pathStartRetainedArcState : pathEndRetainedArcState
+  );
+
+  const getRetainedArcPointPool = (side) => (
+    side === 'start' ? reusableStartRetainedArcPoints : reusableEndRetainedArcPoints
+  );
+
+  const syncRetainedArcSettleStartTime = (state, tipMotion, nowMs) => {
+    if (tipMotion?.moving) {
+      state.settleStartTimeMs = Number.NaN;
+      return;
+    }
+    if (!Number.isFinite(state.settleStartTimeMs)) {
+      state.settleStartTimeMs = nowMs;
+    }
+  };
+
+  const getRetainedArcAnimationUnits = (state, nowMs) => ({
+    settleUnit: Number.isFinite(state.settleStartTimeMs)
+      ? clampUnit((nowMs - state.settleStartTimeMs) / PATH_RETAINED_ARC_SETTLE_DURATION_MS)
+      : 0,
+    retractUnit: Number.isFinite(state.startTimeMs)
+      ? clampUnit((nowMs - state.startTimeMs) / PATH_TIP_ARRIVAL_DURATION_MS)
+      : 0,
+  });
+
+  const isRetainedArcFullyCovered = (tipMotion, coverageRadius, width, arcPoints) => {
+    if (!Number.isFinite(tipMotion?.centerX) || !Number.isFinite(tipMotion?.centerY) || coverageRadius <= 0) {
+      return false;
+    }
+    const maxCenterlineDistance = getMaxDistancePointToPoints(
+      tipMotion.centerX,
+      tipMotion.centerY,
+      arcPoints,
+    );
+    const fullyCoveredDistance = coverageRadius - (width * 0.5) - RETAINED_ARC_COVERAGE_EPSILON_PX;
+    return fullyCoveredDistance > 0 && maxCenterlineDistance <= fullyCoveredDistance;
+  };
+
   const resolveSinglePathRetainedArc = (
     side,
     path,
     width,
     coverageRadius,
     nowMs,
-    tipMoving,
-    tipCenterX,
-    tipCenterY,
+    tipMotion,
     out,
   ) => {
-    out.points = [];
-    out.geometryToken = NaN;
-    out.active = false;
+    resetRetainedArcRenderResult(out);
 
     if (isReducedMotionPreferred()) {
       clearPathRetainedArcStates();
       return out;
     }
 
-    const state = side === 'start' ? pathStartRetainedArcState : pathEndRetainedArcState;
+    const state = getRetainedArcStateForSide(side);
     if (!state) return out;
     if (!isRetainedArcStateCompatibleWithPath(state, path)) {
       clearSinglePathRetainedArcState(side);
       return out;
     }
 
-    if (tipMoving) {
-      state.settleStartTimeMs = NaN;
-    } else if (!Number.isFinite(state.settleStartTimeMs)) {
-      state.settleStartTimeMs = nowMs;
-    }
-    const settleUnit = Number.isFinite(state.settleStartTimeMs)
-      ? clampUnit((nowMs - state.settleStartTimeMs) / PATH_RETAINED_ARC_SETTLE_DURATION_MS)
-      : 0;
-    const retractUnit = Number.isFinite(state.startTimeMs)
-      ? clampUnit((nowMs - state.startTimeMs) / PATH_TIP_ARRIVAL_DURATION_MS)
-      : 0;
-    if (tipMoving || retractUnit > 0) {
+    syncRetainedArcSettleStartTime(state, tipMotion, nowMs);
+    const { settleUnit, retractUnit } = getRetainedArcAnimationUnits(state, nowMs);
+    if (tipMotion?.moving || retractUnit > 0) {
       clearSinglePathRetainedArcState(side);
       return out;
     }
     const arcPoints = buildRetainedArcPolyline(
       state,
       width,
-      side === 'start' ? reusableStartRetainedArcPoints : reusableEndRetainedArcPoints,
+      getRetainedArcPointPool(side),
       settleUnit,
     );
     if (!arcPoints || arcPoints.length < 2) {
@@ -716,13 +849,9 @@ export function createBoardRendererCore(options = {}) {
       return out;
     }
 
-    if (Number.isFinite(tipCenterX) && Number.isFinite(tipCenterY) && coverageRadius > 0) {
-      const maxCenterlineDistance = getMaxDistancePointToPoints(tipCenterX, tipCenterY, arcPoints);
-      const fullyCoveredDistance = coverageRadius - (width * 0.5) - RETAINED_ARC_COVERAGE_EPSILON_PX;
-      if (fullyCoveredDistance > 0 && maxCenterlineDistance <= fullyCoveredDistance) {
-        clearSinglePathRetainedArcState(side);
-        return out;
-      }
+    if (isRetainedArcFullyCovered(tipMotion, coverageRadius, width, arcPoints)) {
+      clearSinglePathRetainedArcState(side);
+      return out;
     }
 
     out.points = arcPoints;
@@ -819,9 +948,9 @@ export function createBoardRendererCore(options = {}) {
         active: Math.abs(toScale - 1) > PATH_TIP_HOVER_SCALE_EPSILON,
       };
     }
-    if (!(PATH_TIP_HOVER_SCALE_DURATION_MS > 0)) {
+    if (PATH_TIP_HOVER_SCALE_DURATION_MS <= 0) {
       state.fromScale = toScale;
-      state.startTimeMs = NaN;
+      state.startTimeMs = Number.NaN;
       return {
         scale: toScale,
         active: Math.abs(toScale - 1) > PATH_TIP_HOVER_SCALE_EPSILON,
@@ -834,7 +963,7 @@ export function createBoardRendererCore(options = {}) {
     const scale = fromScale + ((toScale - fromScale) * eased);
     if (linear >= 1) {
       state.fromScale = toScale;
-      state.startTimeMs = NaN;
+      state.startTimeMs = Number.NaN;
       return {
         scale: toScale,
         active: Math.abs(toScale - 1) > PATH_TIP_HOVER_SCALE_EPSILON,
@@ -873,7 +1002,7 @@ export function createBoardRendererCore(options = {}) {
     let targetEndScale = 1;
     if (!interactionModel?.isPathDragging && Array.isArray(path) && path.length > 0) {
       const head = path[0] || null;
-      const tail = path.length > 1 ? path[path.length - 1] : null;
+      const tail = path.length > 1 ? path.at(-1) : null;
       const startCell = head ? gridCells[head.r]?.[head.c] : null;
       const endCell = tail ? gridCells[tail.r]?.[tail.c] : null;
       if (isCellCurrentlyHovered(startCell)) targetStartScale = PATH_TIP_HOVER_UP_SCALE;
@@ -998,152 +1127,105 @@ export function createBoardRendererCore(options = {}) {
     return reverseTipScale.active;
   };
 
-  const getPathRenderPointsForFrame = (
+  const buildPathRenderPointsResult = (
+    points,
+    geometryToken,
+    retainedArcs,
+    flowTravelCompensation = 0,
+    segmentRetractTipScale = 1,
+  ) => ({
+    points,
+    geometryToken,
+    flowTravelCompensation,
+    segmentRetractTipScale,
+    ...retainedArcs,
+  });
+
+  const resolveRetainedArcRenderData = (
     path,
-    nowMs = getNowMs(),
-    flowWidth = pathFramePayload.width,
-    startRadius = pathFramePayload.startRadius,
-    endHalfWidth = pathFramePayload.endHalfWidth,
+    resolvedWidth,
+    startCoverageRadius,
+    endCoverageRadius,
+    nowMs,
+    startTipMotion = null,
+    endTipMotion = null,
   ) => {
-    if (isReducedMotionPreferred()) {
-      pathAnimationEngine.resetTransitionState({ preserveFlowFreeze: true });
-      clearPathRetainedArcStates();
-      return {
-        points: reusablePathPoints,
-        geometryToken: pathGeometryToken,
-        flowTravelCompensation: 0,
-        segmentRetractTipScale: 1,
-        retainedStartArcPoints: [],
-        retainedStartArcGeometryToken: NaN,
-        retainedEndArcPoints: [],
-        retainedEndArcGeometryToken: NaN,
-      };
-    }
-
-    const pathLength = Array.isArray(path) ? path.length : 0;
-    const resolvedWidth = Number.isFinite(flowWidth) && flowWidth > 0
-      ? flowWidth
-      : Math.max(1, Number(pathFramePayload.width) || 1);
-    const startCoverageRadius = Math.max(0, Number(startRadius) || 0);
-    const endCoverageRadius = Math.max(
-      resolvedWidth * 0.5,
-      Math.max(0, Number(endHalfWidth) || 0),
+    const startArc = resolveSinglePathRetainedArc(
+      'start',
+      path,
+      resolvedWidth,
+      startCoverageRadius,
+      nowMs,
+      startTipMotion,
+      retainedArcRenderScratchA,
     );
-
-    const resolveRetainedArcs = (
-      startTipCenterX = NaN,
-      startTipCenterY = NaN,
-      endTipCenterX = NaN,
-      endTipCenterY = NaN,
-      startTipMoving = false,
-      endTipMoving = false,
-    ) => {
-      const startArc = resolveSinglePathRetainedArc(
-        'start',
-        path,
-        resolvedWidth,
-        startCoverageRadius,
-        nowMs,
-        startTipMoving,
-        startTipCenterX,
-        startTipCenterY,
-        retainedArcRenderScratchA,
-      );
-      const endArc = resolveSinglePathRetainedArc(
-        'end',
-        path,
-        resolvedWidth,
-        endCoverageRadius,
-        nowMs,
-        endTipMoving,
-        endTipCenterX,
-        endTipCenterY,
-        retainedArcRenderScratchB,
-      );
-      return {
-        retainedStartArcPoints: startArc.points,
-        retainedStartArcGeometryToken: startArc.geometryToken,
-        retainedEndArcPoints: endArc.points,
-        retainedEndArcGeometryToken: endArc.geometryToken,
-      };
+    const endArc = resolveSinglePathRetainedArc(
+      'end',
+      path,
+      resolvedWidth,
+      endCoverageRadius,
+      nowMs,
+      endTipMotion,
+      retainedArcRenderScratchB,
+    );
+    return {
+      retainedStartArcPoints: startArc.points,
+      retainedStartArcGeometryToken: startArc.geometryToken,
+      retainedEndArcPoints: endArc.points,
+      retainedEndArcGeometryToken: endArc.geometryToken,
     };
+  };
 
-    if (pathLength <= 0 || reusablePathPoints.length !== pathLength) {
-      if (pathLength <= 0) {
-        const retainedArcs = resolveRetainedArcs();
-        const syntheticPoints = resolveStartPinDisappearRenderPoints(path, nowMs);
-        if (syntheticPoints) {
-          return {
-            points: syntheticPoints,
-            geometryToken: NaN,
-            flowTravelCompensation: 0,
-            segmentRetractTipScale: 1,
-            ...retainedArcs,
-          };
-        }
-        return {
-          points: reusablePathPoints,
-          geometryToken: pathGeometryToken,
-          flowTravelCompensation: 0,
-          segmentRetractTipScale: 1,
-          ...retainedArcs,
-        };
-      }
-      const retainedArcs = resolveRetainedArcs();
-      return {
-        points: reusablePathPoints,
-        geometryToken: pathGeometryToken,
-        flowTravelCompensation: 0,
-        segmentRetractTipScale: 1,
-        ...retainedArcs,
-      };
-    }
-
-    const startTip = getPathTipFromPath(path, 'start');
-    const endTip = getPathTipFromPath(path, 'end');
-    const startOffset = resolvePathTipArrivalOffset('start', startTip, nowMs, arrivalOffsetScratchA);
-    const endOffset = resolvePathTipArrivalOffset('end', endTip, nowMs, arrivalOffsetScratchB);
-    const startHasRetract = startOffset.active && startOffset.mode === 'retract';
-    const endHasRetract = endOffset.active && endOffset.mode === 'retract';
-    const startTargetPoint = reusablePathPoints[0] || null;
-    const endTargetPoint = reusablePathPoints[pathLength - 1] || null;
-    const startTipCenterX = startTargetPoint
-      ? startTargetPoint.x + (startHasRetract ? startOffset.x : 0)
-      : NaN;
-    const startTipCenterY = startTargetPoint
-      ? startTargetPoint.y + (startHasRetract ? startOffset.y : 0)
-      : NaN;
-    const endTipCenterX = endTargetPoint
-      ? endTargetPoint.x + (endHasRetract ? endOffset.x : 0)
-      : NaN;
-    const endTipCenterY = endTargetPoint
-      ? endTargetPoint.y + (endHasRetract ? endOffset.y : 0)
-      : NaN;
-    const retainedArcs = resolveRetainedArcs(
-      startTipCenterX,
-      startTipCenterY,
-      endTipCenterX,
-      endTipCenterY,
-      startHasRetract,
-      endHasRetract,
+  const resolveFallbackPathRenderPoints = (
+    path,
+    pathLength,
+    nowMs,
+    resolvedWidth,
+    startCoverageRadius,
+    endCoverageRadius,
+  ) => {
+    const retainedArcs = resolveRetainedArcRenderData(
+      path,
+      resolvedWidth,
+      startCoverageRadius,
+      endCoverageRadius,
+      nowMs,
     );
-    if (!startOffset.active && !endOffset.active) {
-      return {
-        points: reusablePathPoints,
-        geometryToken: pathGeometryToken,
-        flowTravelCompensation: 0,
-        segmentRetractTipScale: 1,
-        ...retainedArcs,
-      };
+    if (pathLength <= 0) {
+      const syntheticPoints = resolveStartPinDisappearRenderPoints(path, nowMs);
+      if (syntheticPoints) {
+        return buildPathRenderPointsResult(syntheticPoints, Number.NaN, retainedArcs);
+      }
     }
+    return buildPathRenderPointsResult(reusablePathPoints, pathGeometryToken, retainedArcs);
+  };
 
-    const renderLength = pathLength + (startHasRetract ? 1 : 0) + (endHasRetract ? 1 : 0);
-    if (reusableArrivalPathPoints.length < renderLength) {
-      for (let i = reusableArrivalPathPoints.length; i < renderLength; i++) {
+  const resolveTipCenterCoordinate = (targetPoint, axis, offset, hasRetract) => {
+    if (!targetPoint) return Number.NaN;
+    const baseValue = Number(targetPoint?.[axis]);
+    if (!Number.isFinite(baseValue)) return Number.NaN;
+    const delta = hasRetract ? Number(offset?.[axis]) || 0 : 0;
+    return baseValue + delta;
+  };
+
+  const ensureArrivalPathPointPoolLength = (length) => {
+    if (reusableArrivalPathPoints.length < length) {
+      for (let i = reusableArrivalPathPoints.length; i < length; i++) {
         reusableArrivalPathPoints.push({ x: 0, y: 0 });
       }
     }
-    reusableArrivalPathPoints.length = renderLength;
+    reusableArrivalPathPoints.length = length;
+  };
+
+  const buildArrivalPathRenderPoints = (
+    pathLength,
+    startOffset,
+    endOffset,
+    startHasRetract,
+    endHasRetract,
+  ) => {
+    const renderLength = pathLength + (startHasRetract ? 1 : 0) + (endHasRetract ? 1 : 0);
+    ensureArrivalPathPointPoolLength(renderLength);
     let writeIndex = 0;
 
     if (startHasRetract) {
@@ -1177,39 +1259,133 @@ export function createBoardRendererCore(options = {}) {
       ghost.y = target.y + endOffset.y;
     }
 
-    let flowTravelCompensation = 0;
-    if (pathLength > 1 && startOffset.active) {
-      const baseTravel = getPathMainTravelFromPoints(reusablePathPoints, resolvedWidth);
-      const renderTravel = getPathMainTravelFromPoints(
-        reusableArrivalPathPoints,
-        resolvedWidth,
-      );
-      if (Number.isFinite(baseTravel) && Number.isFinite(renderTravel)) {
-        flowTravelCompensation = baseTravel - renderTravel;
-      }
-    }
+    return reusableArrivalPathPoints;
+  };
+
+  const resolvePathFlowTravelCompensation = (
+    pathLength,
+    startOffset,
+    resolvedWidth,
+  ) => {
+    if (pathLength <= 1 || !startOffset.active) return 0;
+    const baseTravel = getPathMainTravelFromPoints(reusablePathPoints, resolvedWidth);
+    const renderTravel = getPathMainTravelFromPoints(reusableArrivalPathPoints, resolvedWidth);
+    if (!Number.isFinite(baseTravel) || !Number.isFinite(renderTravel)) return 0;
+    return baseTravel - renderTravel;
+  };
+
+  const resolvePathSegmentRetractTipScale = (
+    pathLength,
+    startHasRetract,
+    endHasRetract,
+    startOffset,
+    endOffset,
+  ) => {
+    if (pathLength !== 1) return 1;
     let segmentRetractTipScale = 1;
-    if (pathLength === 1) {
-      if (startHasRetract) {
-        segmentRetractTipScale = Math.min(
-          segmentRetractTipScale,
-          clampUnit(Number(startOffset.linearRemain)),
-        );
-      }
-      if (endHasRetract) {
-        segmentRetractTipScale = Math.min(
-          segmentRetractTipScale,
-          clampUnit(Number(endOffset.linearRemain)),
-        );
-      }
+    if (startHasRetract) {
+      segmentRetractTipScale = Math.min(
+        segmentRetractTipScale,
+        clampUnit(Number(startOffset.linearRemain)),
+      );
     }
-    return {
-      points: reusableArrivalPathPoints,
-      geometryToken: NaN,
-      flowTravelCompensation,
-      segmentRetractTipScale,
-      ...retainedArcs,
-    };
+    if (endHasRetract) {
+      segmentRetractTipScale = Math.min(
+        segmentRetractTipScale,
+        clampUnit(Number(endOffset.linearRemain)),
+      );
+    }
+    return segmentRetractTipScale;
+  };
+
+  const getPathRenderPointsForFrame = (
+    path,
+    nowMs = getNowMs(),
+    flowWidth = pathFramePayload.width,
+    startRadius = pathFramePayload.startRadius,
+    endHalfWidth = pathFramePayload.endHalfWidth,
+  ) => {
+    if (isReducedMotionPreferred()) {
+      pathAnimationEngine.resetTransitionState({ preserveFlowFreeze: true });
+      clearPathRetainedArcStates();
+      return buildPathRenderPointsResult(reusablePathPoints, pathGeometryToken, {
+        retainedStartArcPoints: [],
+        retainedStartArcGeometryToken: Number.NaN,
+        retainedEndArcPoints: [],
+        retainedEndArcGeometryToken: Number.NaN,
+      });
+    }
+
+    const pathLength = Array.isArray(path) ? path.length : 0;
+    const resolvedWidth = Number.isFinite(flowWidth) && flowWidth > 0
+      ? flowWidth
+      : Math.max(1, Number(pathFramePayload.width) || 1);
+    const startCoverageRadius = Math.max(0, Number(startRadius) || 0);
+    const endCoverageRadius = Math.max(
+      resolvedWidth * 0.5,
+      Math.max(0, Number(endHalfWidth) || 0),
+    );
+
+    if (pathLength <= 0 || reusablePathPoints.length !== pathLength) {
+      return resolveFallbackPathRenderPoints(
+        path,
+        pathLength,
+        nowMs,
+        resolvedWidth,
+        startCoverageRadius,
+        endCoverageRadius,
+      );
+    }
+
+    const startTip = getPathTipFromPath(path, 'start');
+    const endTip = getPathTipFromPath(path, 'end');
+    const startOffset = resolvePathTipArrivalOffset('start', startTip, nowMs, arrivalOffsetScratchA);
+    const endOffset = resolvePathTipArrivalOffset('end', endTip, nowMs, arrivalOffsetScratchB);
+    const startHasRetract = startOffset.active && startOffset.mode === 'retract';
+    const endHasRetract = endOffset.active && endOffset.mode === 'retract';
+    const startTargetPoint = reusablePathPoints[0] || null;
+    const endTargetPoint = reusablePathPoints[pathLength - 1] || null;
+    const retainedArcs = resolveRetainedArcRenderData(
+      path,
+      resolvedWidth,
+      startCoverageRadius,
+      endCoverageRadius,
+      nowMs,
+      {
+        moving: startHasRetract,
+        centerX: resolveTipCenterCoordinate(startTargetPoint, 'x', startOffset, startHasRetract),
+        centerY: resolveTipCenterCoordinate(startTargetPoint, 'y', startOffset, startHasRetract),
+      },
+      {
+        moving: endHasRetract,
+        centerX: resolveTipCenterCoordinate(endTargetPoint, 'x', endOffset, endHasRetract),
+        centerY: resolveTipCenterCoordinate(endTargetPoint, 'y', endOffset, endHasRetract),
+      },
+    );
+    if (!startOffset.active && !endOffset.active) {
+      return buildPathRenderPointsResult(reusablePathPoints, pathGeometryToken, retainedArcs);
+    }
+
+    buildArrivalPathRenderPoints(
+      pathLength,
+      startOffset,
+      endOffset,
+      startHasRetract,
+      endHasRetract,
+    );
+    return buildPathRenderPointsResult(
+      reusableArrivalPathPoints,
+      Number.NaN,
+      retainedArcs,
+      resolvePathFlowTravelCompensation(pathLength, startOffset, resolvedWidth),
+      resolvePathSegmentRetractTipScale(
+        pathLength,
+        startHasRetract,
+        endHasRetract,
+        startOffset,
+        endOffset,
+      ),
+    );
   };
 
 
@@ -1234,7 +1410,7 @@ export function createBoardRendererCore(options = {}) {
     const delta = currentRealTime - realTimeLastMs;
     realTimeLastMs = currentRealTime;
 
-    const speedMultiplier = typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.DEV && typeof window.TETHER_DEBUG_ANIM_SPEED === 'number'
+    const speedMultiplier = import.meta?.env?.DEV && typeof window.TETHER_DEBUG_ANIM_SPEED === 'number'
       ? Math.max(0.1, window.TETHER_DEBUG_ANIM_SPEED)
       : 1;
 
@@ -1243,7 +1419,7 @@ export function createBoardRendererCore(options = {}) {
   };
 
   const getCompletionProgress = (completionModel = latestCompletionModel) => {
-    if (!completionModel || !completionModel.isSolved) return 0;
+    if (!completionModel?.isSolved) return 0;
     if (!completionModel.isCompleting) return 1;
 
     const durationMs = Number(completionModel.durationMs);
@@ -1274,17 +1450,13 @@ export function createBoardRendererCore(options = {}) {
     return { cycle, pulse, speed };
   };
 
-  const getPathMainTravelFromPoints = (points, flowWidth, maxSegments = null) => {
-    const pointCount = Array.isArray(points) ? points.length : 0;
-    if (pointCount < 2) return 0;
-
-    const width = Number.isFinite(flowWidth) && flowWidth > 0 ? flowWidth : 1;
-    const cornerRadius = width * 0.5;
-    const segmentCount = pointCount - 1;
-    const segmentLengths = new Array(segmentCount).fill(0);
-    const segmentUx = new Array(segmentCount).fill(0);
-    const segmentUy = new Array(segmentCount).fill(0);
-
+  const populatePathSegmentMetrics = (
+    points,
+    segmentCount,
+    segmentLengths,
+    segmentUx,
+    segmentUy,
+  ) => {
     for (let i = 0; i < segmentCount; i++) {
       const start = points[i];
       const end = points[i + 1];
@@ -1303,18 +1475,26 @@ export function createBoardRendererCore(options = {}) {
       const dx = endX - startX;
       const dy = endY - startY;
       const len = Math.hypot(dx, dy);
-      if (!(len > 0)) continue;
+      if (len <= 0) continue;
       segmentLengths[i] = len;
       segmentUx[i] = dx / len;
       segmentUy[i] = dy / len;
     }
+  };
 
-    const cornerTangents = new Array(pointCount).fill(0);
-    const cornerArcs = new Array(pointCount).fill(0);
+  const populatePathCornerMetrics = (
+    pointCount,
+    cornerRadius,
+    segmentLengths,
+    segmentUx,
+    segmentUy,
+    cornerTangents,
+    cornerArcs,
+  ) => {
     for (let i = 1; i < pointCount - 1; i++) {
       const inLen = segmentLengths[i - 1];
       const outLen = segmentLengths[i];
-      if (!(inLen > 0) || !(outLen > 0)) continue;
+      if (inLen <= 0 || outLen <= 0) continue;
 
       const inAngle = Math.atan2(segmentUy[i - 1], segmentUx[i - 1]);
       const outAngle = Math.atan2(segmentUy[i], segmentUx[i]);
@@ -1327,16 +1507,41 @@ export function createBoardRendererCore(options = {}) {
       }
 
       const tangentScale = Math.tan(absTurn * 0.5);
-      if (!(tangentScale > 0) || !Number.isFinite(tangentScale)) continue;
+      if (tangentScale <= 0 || !Number.isFinite(tangentScale)) continue;
       const tangentOffset = cornerRadius * tangentScale;
       const maxTangentOffset = Math.max(0, Math.min(inLen, outLen));
       const effectiveTangentOffset = Math.min(tangentOffset, maxTangentOffset);
-      if (!(effectiveTangentOffset > 0) || !Number.isFinite(effectiveTangentOffset)) continue;
+      if (effectiveTangentOffset <= 0 || !Number.isFinite(effectiveTangentOffset)) continue;
       const effectiveRadius = effectiveTangentOffset / tangentScale;
-      if (!(effectiveRadius > 0) || !Number.isFinite(effectiveRadius)) continue;
+      if (effectiveRadius <= 0 || !Number.isFinite(effectiveRadius)) continue;
       cornerTangents[i] = effectiveTangentOffset;
       cornerArcs[i] = effectiveRadius * absTurn;
     }
+  };
+
+  const getPathMainTravelFromPoints = (points, flowWidth, maxSegments = null) => {
+    const pointCount = Array.isArray(points) ? points.length : 0;
+    if (pointCount < 2) return 0;
+
+    const width = Number.isFinite(flowWidth) && flowWidth > 0 ? flowWidth : 1;
+    const cornerRadius = width * 0.5;
+    const segmentCount = pointCount - 1;
+    const segmentLengths = new Array(segmentCount).fill(0);
+    const segmentUx = new Array(segmentCount).fill(0);
+    const segmentUy = new Array(segmentCount).fill(0);
+    populatePathSegmentMetrics(points, segmentCount, segmentLengths, segmentUx, segmentUy);
+
+    const cornerTangents = new Array(pointCount).fill(0);
+    const cornerArcs = new Array(pointCount).fill(0);
+    populatePathCornerMetrics(
+      pointCount,
+      cornerRadius,
+      segmentLengths,
+      segmentUx,
+      segmentUy,
+      cornerTangents,
+      cornerArcs,
+    );
 
     const segmentLimit = Number.isInteger(maxSegments)
       ? Math.max(0, Math.min(segmentCount, maxSegments))
@@ -1345,7 +1550,7 @@ export function createBoardRendererCore(options = {}) {
     let flowTravel = 0;
     for (let i = 0; i < segmentLimit; i++) {
       const len = segmentLengths[i];
-      if (!(len > 0)) continue;
+      if (len <= 0) continue;
 
       const trimStart = cornerTangents[i] > 0 ? Math.min(len, cornerTangents[i]) : 0;
       const trimEnd = cornerTangents[i + 1] > 0 ? Math.min(len, cornerTangents[i + 1]) : 0;
@@ -1367,11 +1572,22 @@ export function createBoardRendererCore(options = {}) {
     return Math.max(7, snapCssToDevicePixel(Math.floor(cell * 0.15), deviceScale));
   };
 
+  const createPathPointListFromCells = (path, refs, offset) => {
+    const { gridEl } = refs;
+    const points = new Array(path.length);
+    for (let i = 0; i < path.length; i += 1) {
+      const p = getCellPointFromLayout(path[i].r, path[i].c)
+        || getCellPoint(path[i].r, path[i].c, { gridEl }, offset);
+      points[i] = { x: p.x, y: p.y };
+    }
+    return points;
+  };
+
   const getPathPrefixTravelFromCells = (
     path,
     prefixLength,
     refs = {},
-    offset = { x: 0, y: 0 },
+    offset = ZERO_OFFSET,
     flowWidth = null,
   ) => {
     if (!Array.isArray(path) || path.length < 2) return 0;
@@ -1382,13 +1598,7 @@ export function createBoardRendererCore(options = {}) {
     if (!gridEl && !pathLayoutMetrics.ready) return 0;
 
     const resolvedWidth = resolveCompensationFlowWidth(gridEl, flowWidth);
-
-    const points = new Array(safePrefixLength);
-    for (let i = 0; i < safePrefixLength; i += 1) {
-      const p = getCellPointFromLayout(path[i].r, path[i].c)
-        || getCellPoint(path[i].r, path[i].c, { gridEl }, offset);
-      points[i] = { x: p.x, y: p.y };
-    }
+    const points = createPathPointListFromCells(path.slice(0, safePrefixLength), { gridEl }, offset);
     return getPathMainTravelFromPoints(points, resolvedWidth);
   };
 
@@ -1396,7 +1606,7 @@ export function createBoardRendererCore(options = {}) {
     path,
     segmentStartIndex,
     refs = {},
-    offset = { x: 0, y: 0 },
+    offset = ZERO_OFFSET,
     flowWidth = null,
   ) => {
     if (!Array.isArray(path) || path.length < 2) return 0;
@@ -1410,29 +1620,57 @@ export function createBoardRendererCore(options = {}) {
     if (!gridEl && !pathLayoutMetrics.ready) return 0;
 
     const resolvedWidth = resolveCompensationFlowWidth(gridEl, flowWidth);
-
-    const points = new Array(path.length);
-    for (let i = 0; i < path.length; i += 1) {
-      const p = getCellPointFromLayout(path[i].r, path[i].c)
-        || getCellPoint(path[i].r, path[i].c, { gridEl }, offset);
-      points[i] = { x: p.x, y: p.y };
-    }
+    const points = createPathPointListFromCells(path, { gridEl }, offset);
     return getPathMainTravelFromPoints(points, resolvedWidth, safeSegmentStartIndex);
   };
 
-  const getHeadShiftDelta = (nextPath, previousPath, refs = {}, offset = { x: 0, y: 0 }) => {
-    const { gridEl } = refs;
-    if (!Array.isArray(nextPath) || !Array.isArray(previousPath)) return 0;
+  const resolveTravelShift = (previousTravel, nextTravel) => {
+    const shift = previousTravel - nextTravel;
+    return Number.isFinite(shift) && shift !== 0 ? shift : 0;
+  };
 
-    const transitionWindow = resolveHeadShiftTransitionWindow(nextPath, previousPath);
-    if (!transitionWindow) return 0;
+  const resolvePureHeadShiftDelta = (
+    nextPath,
+    previousPath,
+    refs,
+    offset,
+    flowWidth,
+    isPureHeadShift,
+  ) => {
+    if (!isPureHeadShift) return 0;
+    const previousTravel = getPathPrefixTravelFromCells(
+      previousPath,
+      previousPath.length,
+      refs,
+      offset,
+      flowWidth,
+    );
+    const nextTravel = getPathPrefixTravelFromCells(
+      nextPath,
+      nextPath.length,
+      refs,
+      offset,
+      flowWidth,
+    );
+    return resolveTravelShift(previousTravel, nextTravel);
+  };
+
+  const resolveSegmentAnchorHeadShiftDelta = (
+    travelContext,
+    transitionWindow,
+  ) => {
     const {
-      shiftCount: headShiftStepCount,
+      nextPath,
+      previousPath,
+      refs,
+      offset,
+      flowWidth,
+    } = travelContext;
+    const {
       nextStart,
       prevStart,
       overlap,
       isFullLengthOverlap,
-      isPureHeadShift,
     } = transitionWindow;
     const shouldUseSegmentStartAnchor = (
       overlap >= 2
@@ -1440,6 +1678,78 @@ export function createBoardRendererCore(options = {}) {
       && nextStart > 0
       && prevStart > 0
     );
+    if (!shouldUseSegmentStartAnchor) return 0;
+
+    const previousSegmentStartTravel = getPathTravelToSegmentStartFromCells(
+      previousPath,
+      prevStart,
+      refs,
+      offset,
+      flowWidth,
+    );
+    const nextSegmentStartTravel = getPathTravelToSegmentStartFromCells(
+      nextPath,
+      nextStart,
+      refs,
+      offset,
+      flowWidth,
+    );
+    return resolveTravelShift(previousSegmentStartTravel, nextSegmentStartTravel);
+  };
+
+  const resolveNodeAnchorHeadShiftDelta = (
+    travelContext,
+    transitionWindow,
+  ) => {
+    const {
+      nextPath,
+      previousPath,
+      refs,
+      offset,
+      flowWidth,
+    } = travelContext;
+    const { nextStart, prevStart, overlap } = transitionWindow;
+    if (overlap < 1) return 0;
+    const previousNodeTravel = getPathPrefixTravelFromCells(
+      previousPath,
+      prevStart + 1,
+      refs,
+      offset,
+      flowWidth,
+    );
+    const nextNodeTravel = getPathPrefixTravelFromCells(
+      nextPath,
+      nextStart + 1,
+      refs,
+      offset,
+      flowWidth,
+    );
+    return resolveTravelShift(previousNodeTravel, nextNodeTravel);
+  };
+
+  const resolveFallbackHeadShiftDelta = (
+    headShiftStepCount,
+    safeCell,
+    nextPath,
+    previousPath,
+  ) => {
+    const fallbackStep = (path) => Math.max(1, cellDistance(path?.[0], path?.[1]) * safeCell);
+    const stepCount = Math.abs(headShiftStepCount);
+    return headShiftStepCount > 0
+      ? -(fallbackStep(nextPath) * stepCount)
+      : (fallbackStep(previousPath) * stepCount);
+  };
+
+  const getHeadShiftDelta = (nextPath, previousPath, refs = {}, offset = ZERO_OFFSET) => {
+    const { gridEl } = refs;
+    if (!Array.isArray(nextPath) || !Array.isArray(previousPath)) return 0;
+
+    const transitionWindow = resolveHeadShiftTransitionWindow(nextPath, previousPath);
+    if (!transitionWindow) return 0;
+    const {
+      shiftCount: headShiftStepCount,
+      isPureHeadShift,
+    } = transitionWindow;
 
     const resolvedCell = getCellSize(gridEl);
     const safeCell = Number.isFinite(resolvedCell) && resolvedCell > 0
@@ -1447,68 +1757,36 @@ export function createBoardRendererCore(options = {}) {
       : PATH_FLOW_BASE_CELL;
 
     const flowWidth = resolveCompensationFlowWidth(gridEl);
-    if (isPureHeadShift) {
-      const previousTravel = getPathPrefixTravelFromCells(
-        previousPath,
-        previousPath.length,
-        refs,
-        offset,
-        flowWidth,
-      );
-      const nextTravel = getPathPrefixTravelFromCells(
-        nextPath,
-        nextPath.length,
-        refs,
-        offset,
-        flowWidth,
-      );
-      const shift = previousTravel - nextTravel;
-      if (Number.isFinite(shift) && shift !== 0) return shift;
-    }
+    const travelContext = {
+      nextPath,
+      previousPath,
+      refs,
+      offset,
+      flowWidth,
+    };
+    const pureHeadShift = resolvePureHeadShiftDelta(
+      nextPath,
+      previousPath,
+      refs,
+      offset,
+      flowWidth,
+      isPureHeadShift,
+    );
+    if (pureHeadShift !== 0) return pureHeadShift;
 
-    if (shouldUseSegmentStartAnchor) {
-      const previousSegmentStartTravel = getPathTravelToSegmentStartFromCells(
-        previousPath,
-        prevStart,
-        refs,
-        offset,
-        flowWidth,
-      );
-      const nextSegmentStartTravel = getPathTravelToSegmentStartFromCells(
-        nextPath,
-        nextStart,
-        refs,
-        offset,
-        flowWidth,
-      );
-      const shift = previousSegmentStartTravel - nextSegmentStartTravel;
-      if (Number.isFinite(shift) && shift !== 0) return shift;
-    }
+    const segmentAnchorShift = resolveSegmentAnchorHeadShiftDelta(
+      travelContext,
+      transitionWindow,
+    );
+    if (segmentAnchorShift !== 0) return segmentAnchorShift;
 
-    if (overlap >= 1) {
-      const previousNodeTravel = getPathPrefixTravelFromCells(
-        previousPath,
-        prevStart + 1,
-        refs,
-        offset,
-        flowWidth,
-      );
-      const nextNodeTravel = getPathPrefixTravelFromCells(
-        nextPath,
-        nextStart + 1,
-        refs,
-        offset,
-        flowWidth,
-      );
-      const shift = previousNodeTravel - nextNodeTravel;
-      if (Number.isFinite(shift) && shift !== 0) return shift;
-    }
+    const nodeAnchorShift = resolveNodeAnchorHeadShiftDelta(
+      travelContext,
+      transitionWindow,
+    );
+    if (nodeAnchorShift !== 0) return nodeAnchorShift;
 
-    const fallbackStep = (path) => Math.max(1, cellDistance(path?.[0], path?.[1]) * safeCell);
-    const stepCount = Math.abs(headShiftStepCount);
-    return headShiftStepCount > 0
-      ? -(fallbackStep(nextPath) * stepCount)
-      : (fallbackStep(previousPath) * stepCount);
+    return resolveFallbackHeadShiftDelta(headShiftStepCount, safeCell, nextPath, previousPath);
   };
 
   const transitionCompensationBuffer = createPathTransitionCompensationBuffer({
@@ -1589,7 +1867,7 @@ export function createBoardRendererCore(options = {}) {
 
     if (
       pendingRenderDirty.message
-      && Object.prototype.hasOwnProperty.call(frame.uiModel || {}, 'messageHtml')
+      && Object.hasOwn(frame.uiModel || {}, 'messageHtml')
     ) {
       setMessage(refs.msgEl, frame.uiModel.messageKind || null, frame.uiModel.messageHtml || '');
     }
@@ -1620,6 +1898,42 @@ export function createBoardRendererCore(options = {}) {
     return shouldContinue;
   };
 
+  const resolvePathAnimationActivity = (
+    path,
+    nowMs,
+    flowCycle = pathFramePayload.flowCycle,
+    interactionModel = latestInteractionModel,
+  ) => {
+    const animateTipArrivals = hasActivePathTipArrivals(nowMs);
+    const animateRetainedArc = hasActivePathRetainedArc(path);
+    const animateEndArrowRotate = hasActivePathEndArrowRotate(path, nowMs);
+    const animateStartFlowRotate = hasActivePathStartFlowRotate(path, nowMs);
+    const animateStartPinPresence = hasActivePathStartPinPresence(path, nowMs);
+    const animateTipHoverScale = hasActivePathTipHoverScale(path, interactionModel, nowMs);
+    const animateReverseTipSwap = hasActivePathReverseTipSwap(path, nowMs);
+    const animateReverseGradientBlend = hasActivePathReverseGradientBlend(path, flowCycle, nowMs);
+    return {
+      animateTipArrivals,
+      animateRetainedArc,
+      animateEndArrowRotate,
+      animateStartFlowRotate,
+      animateStartPinPresence,
+      animateTipHoverScale,
+      animateReverseTipSwap,
+      animateReverseGradientBlend,
+      active: (
+        animateTipArrivals
+        || animateRetainedArc
+        || animateEndArrowRotate
+        || animateStartFlowRotate
+        || animateStartPinPresence
+        || animateTipHoverScale
+        || animateReverseTipSwap
+        || animateReverseGradientBlend
+      ),
+    };
+  };
+
   const runAnimationOnlyFrame = (timestamp) => {
     const nowMs = getNowMs();
 
@@ -1640,34 +1954,17 @@ export function createBoardRendererCore(options = {}) {
       hasActivePathFlowVisibility(latestPathSnapshot.path, nowMs)
       && flowFreeze.mix > PATH_FLOW_FREEZE_EPSILON
     );
-    const animateTipArrivals = hasActivePathTipArrivals(nowMs);
-    const animateRetainedArc = hasActivePathRetainedArc(latestPathSnapshot.path, nowMs);
-    const animateEndArrowRotate = hasActivePathEndArrowRotate(latestPathSnapshot.path, nowMs);
-    const animateStartFlowRotate = hasActivePathStartFlowRotate(latestPathSnapshot.path, nowMs);
-    const animateStartPinPresence = hasActivePathStartPinPresence(latestPathSnapshot.path, nowMs);
-    const animateTipHoverScale = hasActivePathTipHoverScale(
+    const animationActivity = resolvePathAnimationActivity(
       latestPathSnapshot.path,
-      latestInteractionModel,
       nowMs,
-    );
-    const animateReverseTipSwap = hasActivePathReverseTipSwap(latestPathSnapshot.path, nowMs);
-    const animateReverseGradientBlend = hasActivePathReverseGradientBlend(
-      latestPathSnapshot.path,
       pathFramePayload.flowCycle,
-      nowMs,
+      latestInteractionModel,
     );
     const shouldContinue = (
       flowFreeze.active
       || animateFlow
       || animateFlowVisibility
-      || animateTipArrivals
-      || animateRetainedArc
-      || animateEndArrowRotate
-      || animateStartFlowRotate
-      || animateStartPinPresence
-      || animateTipHoverScale
-      || animateReverseTipSwap
-      || animateReverseGradientBlend
+      || animationActivity.active
     );
 
     if (!shouldContinue) {
@@ -1741,17 +2038,17 @@ export function createBoardRendererCore(options = {}) {
 
 
   const parsePx = (value) => {
-    const parsed = parseFloat(value);
+    const parsed = Number.parseFloat(value);
     return Number.isFinite(parsed) ? parsed : 0;
   };
 
   const getDevicePixelScale = () => {
-    const dpr = typeof window !== 'undefined'
-      ? Number(window.devicePixelRatio)
-      : NaN;
+    const dpr = typeof window === 'undefined'
+      ? Number.NaN
+      : Number(window.devicePixelRatio);
     const safeDpr = Number.isFinite(dpr) && dpr > 0 ? dpr : 1;
-    if (!lowPowerModeEnabled) return safeDpr;
-    return Math.max(1, safeDpr / 2);
+    if (lowPowerModeEnabled) return Math.max(1, safeDpr / 2);
+    return safeDpr;
   };
 
   const snapCssToDevicePixel = (value, scale = getDevicePixelScale()) => {
@@ -1778,10 +2075,6 @@ export function createBoardRendererCore(options = {}) {
     return Math.max(1, Math.round(Math.max(0, Number(value) || 0) * safeScale)) / safeScale;
   };
 
-  const snapCanvasPoint = (value, scale) => {
-    const safeScale = scale > 0 ? scale : 1;
-    return Math.round((Number(value) || 0) * safeScale) / safeScale;
-  };
 
   const configureHiDPICanvas = (canvas, ctx, cssWidth, cssHeight, dpr = getDevicePixelScale()) => {
     const safeCssWidth = Math.max(1, cssWidth);
@@ -1822,22 +2115,19 @@ export function createBoardRendererCore(options = {}) {
   const forceOpaqueColor = (color) => {
     if (typeof color !== 'string') return '#ffffff';
     const trimmed = color.trim();
-
-    const rgba = trimmed.match(
-      /^rgba\s*\(\s*([+\-]?\d*\.?\d+)\s*,\s*([+\-]?\d*\.?\d+)\s*,\s*([+\-]?\d*\.?\d+)\s*,\s*([+\-]?\d*\.?\d+)\s*\)$/i,
-    );
-    if (rgba) {
-      return `rgb(${rgba[1]}, ${rgba[2]}, ${rgba[3]})`;
-    }
-
-    const hsla = trimmed.match(
-      /^hsla\s*\(\s*([+\-]?\d*\.?\d+(?:deg|rad|turn)?)\s*,\s*([+\-]?\d*\.?\d+%)\s*,\s*([+\-]?\d*\.?\d+%)\s*,\s*([+\-]?\d*\.?\d+)\s*\)$/i,
-    );
-    if (hsla) {
-      return `hsl(${hsla[1]}, ${hsla[2]}, ${hsla[3]})`;
-    }
-
-    return trimmed;
+    return resolveOpaqueFunctionColor(
+      trimmed,
+      'rgba',
+      'rgb',
+      [isSignedNumberString, isSignedNumberString, isSignedNumberString, isSignedNumberString],
+    )
+      || resolveOpaqueFunctionColor(
+        trimmed,
+        'hsla',
+        'hsl',
+        [isCssAngleValue, isCssPercentageValue, isCssPercentageValue, isSignedNumberString],
+      )
+      || trimmed;
   };
 
   const parseColorToRgb = (color, out = null) => {
@@ -1860,9 +2150,8 @@ export function createBoardRendererCore(options = {}) {
     const resolved = String(colorParserCtx.fillStyle || '').trim();
     if (!resolved) return null;
 
-    const hex = resolved.match(/^#([0-9a-f]{6})$/i);
-    if (hex) {
-      const value = parseInt(hex[1], 16);
+    if (RGB_HEX_RE.test(resolved)) {
+      const value = Number.parseInt(resolved.slice(1), 16);
       const target = out || { r: 0, g: 0, b: 0 };
       target.r = (value >> 16) & 0xff;
       target.g = (value >> 8) & 0xff;
@@ -1870,14 +2159,12 @@ export function createBoardRendererCore(options = {}) {
       return target;
     }
 
-    const rgb = resolved.match(
-      /^rgba?\(\s*([+\-]?\d*\.?\d+)\s*,\s*([+\-]?\d*\.?\d+)\s*,\s*([+\-]?\d*\.?\d+)/i,
-    );
-    if (rgb) {
+    const rgbParts = resolveRgbColorParts(resolved);
+    if (rgbParts) {
       const target = out || { r: 0, g: 0, b: 0 };
-      target.r = Math.max(0, Math.min(255, Math.round(Number(rgb[1]))));
-      target.g = Math.max(0, Math.min(255, Math.round(Number(rgb[2]))));
-      target.b = Math.max(0, Math.min(255, Math.round(Number(rgb[3]))));
+      target.r = Math.max(0, Math.min(255, Math.round(Number(rgbParts[0]))));
+      target.g = Math.max(0, Math.min(255, Math.round(Number(rgbParts[1]))));
+      target.b = Math.max(0, Math.min(255, Math.round(Number(rgbParts[2]))));
       return target;
     }
 
@@ -1979,7 +2266,7 @@ export function createBoardRendererCore(options = {}) {
       pathLayoutMetrics.gap = nextGap;
       pathLayoutMetrics.pad = nextPad;
       pathLayoutMetrics.version += 1;
-      lastFlowMetricCell = NaN;
+      lastFlowMetricCell = Number.NaN;
     }
     pathLayoutMetrics.ready = true;
     return pathLayoutMetrics;
@@ -2128,7 +2415,7 @@ export function createBoardRendererCore(options = {}) {
       || endArrowRotateActive
       || startFlowRotateActive
       || tipHoverScale.active
-    ) ? NaN : renderPoints.geometryToken;
+    ) ? Number.NaN : renderPoints.geometryToken;
     const flowVisibility = resolvePathFlowVisibilityMix(
       latestPathSnapshot.path,
       nowMs,
@@ -2196,6 +2483,53 @@ export function createBoardRendererCore(options = {}) {
     }
   };
 
+  const ensureTutorialBracketPoint = (index) => {
+    if (!reusableTutorialBracketPoints[index]) {
+      reusableTutorialBracketPoints[index] = { x: 0, y: 0 };
+    }
+    return reusableTutorialBracketPoints[index];
+  };
+
+  const visitTutorialBracketCells = (snapshot, pathEnabled, movableEnabled, visitor) => {
+    if (pathEnabled && snapshot.path.length > 0) {
+      const head = snapshot.path[0];
+      visitor(head.r, head.c);
+      if (snapshot.path.length > 1) {
+        const tail = snapshot.path[snapshot.path.length - 1];
+        visitor(tail.r, tail.c);
+      }
+    }
+
+    if (!movableEnabled) return;
+    for (let r = 0; r < snapshot.rows; r++) {
+      for (let c = 0; c < snapshot.cols; c++) {
+        if (snapshot.gridData[r][c] !== 'm') continue;
+        visitor(r, c);
+      }
+    }
+  };
+
+  const resolveTutorialBracketColor = (snapshot, pathEnabled, movableEnabled) => {
+    let firstCell = null;
+    let hoveredCell = null;
+    let activeCell = null;
+
+    visitTutorialBracketCells(snapshot, pathEnabled, movableEnabled, (r, c) => {
+      const cell = gridCells[r]?.[c];
+      if (!cell) return;
+      if (!firstCell) firstCell = cell;
+      if (typeof cell.matches !== 'function') return;
+      if (!activeCell && cell.matches(':active')) activeCell = cell;
+      if (!hoveredCell && cell.matches(':hover')) hoveredCell = cell;
+    });
+
+    const sourceCell = activeCell || hoveredCell || firstCell;
+    if (!sourceCell || typeof getComputedStyle !== 'function') return TUTORIAL_BRACKET_COLOR_RGB;
+    const cssColor = getComputedStyle(sourceCell).getPropertyValue('--interactive-corner-color');
+    const parsed = parseColorToRgb(cssColor, tutorialBracketColorScratch);
+    return parsed || TUTORIAL_BRACKET_COLOR_RGB;
+  };
+
   const updateTutorialBracketPayload = (snapshot, layout, tutorialFlags = null) => {
     const pathEnabled = Boolean(tutorialFlags?.path);
     const movableEnabled = Boolean(tutorialFlags?.movable);
@@ -2204,43 +2538,13 @@ export function createBoardRendererCore(options = {}) {
     let count = 0;
     let signature = `${layout.version}|${pathEnabled ? 1 : 0}|${movableEnabled ? 1 : 0}|`;
 
-    const ensurePoint = (index) => {
-      if (!reusableTutorialBracketPoints[index]) {
-        reusableTutorialBracketPoints[index] = { x: 0, y: 0 };
-      }
-      return reusableTutorialBracketPoints[index];
-    };
-
-    if (pathEnabled && snapshot.path.length > 0) {
-      const head = snapshot.path[0];
-      const headPoint = ensurePoint(count);
-      headPoint.x = layout.offsetX + layout.pad + (head.c * step) + half;
-      headPoint.y = layout.offsetY + layout.pad + (head.r * step) + half;
-      signature += `${head.r},${head.c};`;
+    visitTutorialBracketCells(snapshot, pathEnabled, movableEnabled, (r, c) => {
+      const point = ensureTutorialBracketPoint(count);
+      point.x = layout.offsetX + layout.pad + (c * step) + half;
+      point.y = layout.offsetY + layout.pad + (r * step) + half;
+      signature += `${r},${c};`;
       count += 1;
-
-      if (snapshot.path.length > 1) {
-        const tail = snapshot.path[snapshot.path.length - 1];
-        const tailPoint = ensurePoint(count);
-        tailPoint.x = layout.offsetX + layout.pad + (tail.c * step) + half;
-        tailPoint.y = layout.offsetY + layout.pad + (tail.r * step) + half;
-        signature += `${tail.r},${tail.c};`;
-        count += 1;
-      }
-    }
-
-    if (movableEnabled) {
-      for (let r = 0; r < snapshot.rows; r++) {
-        for (let c = 0; c < snapshot.cols; c++) {
-          if (snapshot.gridData[r][c] !== 'm') continue;
-          const point = ensurePoint(count);
-          point.x = layout.offsetX + layout.pad + (c * step) + half;
-          point.y = layout.offsetY + layout.pad + (r * step) + half;
-          signature += `${r},${c};`;
-          count += 1;
-        }
-      }
-    }
+    });
 
     if (reusableTutorialBracketPoints.length !== count) {
       reusableTutorialBracketPoints.length = count;
@@ -2250,50 +2554,15 @@ export function createBoardRendererCore(options = {}) {
       tutorialBracketGeometryToken += 1;
     }
 
-    const resolveTutorialBracketColor = () => {
-      let firstCell = null;
-      let hoveredCell = null;
-      let activeCell = null;
-
-      const considerCell = (r, c) => {
-        const cell = gridCells[r]?.[c];
-        if (!cell) return;
-        if (!firstCell) firstCell = cell;
-        if (typeof cell.matches !== 'function') return;
-        if (!activeCell && cell.matches(':active')) activeCell = cell;
-        if (!hoveredCell && cell.matches(':hover')) hoveredCell = cell;
-      };
-
-      if (pathEnabled && snapshot.path.length > 0) {
-        const head = snapshot.path[0];
-        considerCell(head.r, head.c);
-        if (snapshot.path.length > 1) {
-          const tail = snapshot.path[snapshot.path.length - 1];
-          considerCell(tail.r, tail.c);
-        }
-      }
-
-      if (movableEnabled) {
-        for (let r = 0; r < snapshot.rows; r++) {
-          for (let c = 0; c < snapshot.cols; c++) {
-            if (snapshot.gridData[r][c] !== 'm') continue;
-            considerCell(r, c);
-          }
-        }
-      }
-
-      const sourceCell = activeCell || hoveredCell || firstCell;
-      if (!sourceCell || typeof getComputedStyle !== 'function') return TUTORIAL_BRACKET_COLOR_RGB;
-      const cssColor = getComputedStyle(sourceCell).getPropertyValue('--interactive-corner-color');
-      const parsed = parseColorToRgb(cssColor, tutorialBracketColorScratch);
-      return parsed || TUTORIAL_BRACKET_COLOR_RGB;
-    };
-
     pathFramePayload.tutorialBracketCenters = reusableTutorialBracketPoints;
     pathFramePayload.tutorialBracketGeometryToken = tutorialBracketGeometryToken;
     pathFramePayload.tutorialBracketCellSize = layout.cell;
     pathFramePayload.tutorialBracketPulseEnabled = !isReducedMotionPreferred();
-    pathFramePayload.tutorialBracketColorRgb = resolveTutorialBracketColor();
+    pathFramePayload.tutorialBracketColorRgb = resolveTutorialBracketColor(
+      snapshot,
+      pathEnabled,
+      movableEnabled,
+    );
   };
 
 
@@ -2459,6 +2728,77 @@ export function createBoardRendererCore(options = {}) {
     pendingPathCanvasSwap = null;
   };
 
+  const canSwapPathCanvas = (canvas) => (
+    Boolean(canvas?.parentElement && typeof canvas.replaceWith === 'function')
+  );
+
+  const shouldReusePathRenderer = (renderer, rendererLost, antialiasMismatch) => (
+    Boolean(renderer && !rendererLost && !antialiasMismatch)
+  );
+
+  const shouldSkipPathRendererRecovery = (
+    allowRecovery,
+    currentRenderer,
+    currentCanvas,
+    rendererLost,
+    antialiasMismatch,
+  ) => {
+    if (shouldReusePathRenderer(currentRenderer, rendererLost, antialiasMismatch)) {
+      return currentRenderer;
+    }
+    if (antialiasMismatch && !allowRecovery) return currentRenderer;
+    if (!allowRecovery) return null;
+    if (antialiasMismatch && !canSwapPathCanvas(currentCanvas)) return currentRenderer;
+    return undefined;
+  };
+
+  const beginPathRendererRecovery = (antialiasMismatch) => {
+    if (antialiasMismatch) return true;
+    const currentNow = nowMs();
+    const elapsedMs = currentNow - lastPathRendererRecoveryAttemptMs;
+    if (elapsedMs < PATH_RENDERER_RECOVERY_COOLDOWN_MS) return false;
+    lastPathRendererRecoveryAttemptMs = currentNow;
+    return true;
+  };
+
+  const replacePathCanvasForRecovery = (
+    targetRefs,
+    currentCanvas,
+    rendererLost,
+    antialiasMismatch,
+  ) => {
+    if (!(rendererLost || antialiasMismatch) || !canSwapPathCanvas(currentCanvas)) {
+      return currentCanvas;
+    }
+    const replacement = createReplacementPathCanvas(currentCanvas);
+    pendingPathCanvasSwap = {
+      previousCanvas: currentCanvas,
+      nextCanvas: replacement,
+    };
+    targetRefs.canvas = replacement;
+    return replacement;
+  };
+
+  const destroyPathRendererInstance = (targetRefs, currentRenderer) => {
+    if (!currentRenderer) return;
+    try {
+      currentRenderer.destroy?.();
+    } catch {
+      // Keep recovery best-effort; a failed destroy should not prevent re-init.
+    }
+    targetRefs.pathRenderer = null;
+  };
+
+  const initializePathRenderer = (targetRefs, canvas) => {
+    try {
+      targetRefs.pathRenderer = createPathRenderer(canvas);
+      resizeCanvasSignature = '';
+      return targetRefs.pathRenderer;
+    } catch {
+      return null;
+    }
+  };
+
   const ensurePathRenderer = (refs) => {
     const allowRecovery = refs?.allowRecovery !== false;
     const targetRefs = refs?.refs || refs;
@@ -2469,47 +2809,24 @@ export function createBoardRendererCore(options = {}) {
 
     const rendererLost = Boolean(currentRenderer?.isContextLost?.());
     const antialiasMismatch = !rendererLost && pathRendererAntialiasMismatch(currentRenderer);
-    if (currentRenderer && !rendererLost && !antialiasMismatch) return currentRenderer;
-    if (antialiasMismatch && !allowRecovery) return currentRenderer;
-    if (!allowRecovery) return null;
-    if (antialiasMismatch && (!currentCanvas.parentElement || typeof currentCanvas.replaceWith !== 'function')) {
-      return currentRenderer;
-    }
+    const skippedRecovery = shouldSkipPathRendererRecovery(
+      allowRecovery,
+      currentRenderer,
+      currentCanvas,
+      rendererLost,
+      antialiasMismatch,
+    );
+    if (skippedRecovery !== undefined) return skippedRecovery;
+    if (!beginPathRendererRecovery(antialiasMismatch)) return null;
 
-    if (!antialiasMismatch) {
-      const currentNow = nowMs();
-      const elapsedMs = currentNow - lastPathRendererRecoveryAttemptMs;
-      if (elapsedMs < PATH_RENDERER_RECOVERY_COOLDOWN_MS) return null;
-      lastPathRendererRecoveryAttemptMs = currentNow;
-    }
-
-    let nextCanvas = currentCanvas;
-    if ((rendererLost || antialiasMismatch) && currentCanvas.parentElement && typeof currentCanvas.replaceWith === 'function') {
-      const replacement = createReplacementPathCanvas(currentCanvas);
-      pendingPathCanvasSwap = {
-        previousCanvas: currentCanvas,
-        nextCanvas: replacement,
-      };
-      targetRefs.canvas = replacement;
-      nextCanvas = replacement;
-    }
-
-    if (currentRenderer) {
-      try {
-        currentRenderer.destroy?.();
-      } catch {
-        // Keep recovery best-effort; a failed destroy should not prevent re-init.
-      }
-      targetRefs.pathRenderer = null;
-    }
-
-    try {
-      targetRefs.pathRenderer = createPathRenderer(nextCanvas);
-      resizeCanvasSignature = '';
-      return targetRefs.pathRenderer;
-    } catch {
-      return null;
-    }
+    const nextCanvas = replacePathCanvasForRecovery(
+      targetRefs,
+      currentCanvas,
+      rendererLost,
+      antialiasMismatch,
+    );
+    destroyPathRendererInstance(targetRefs, currentRenderer);
+    return initializePathRenderer(targetRefs, nextCanvas);
   };
 
   const flushInteractiveResize = () => {
@@ -2628,16 +2945,16 @@ export function createBoardRendererCore(options = {}) {
     }
     cachedBoardWrap = result.boardWrap;
     resizeCanvasSignature = '';
-    lastFlowMetricCell = NaN;
+    lastFlowMetricCell = Number.NaN;
     pathThemeCacheInitialized = false;
     reusablePathPoints.length = 0;
     pathGeometryToken = 0;
     cachedPathRef = null;
     cachedPathLength = -1;
-    cachedPathHeadR = NaN;
-    cachedPathHeadC = NaN;
-    cachedPathTailR = NaN;
-    cachedPathTailC = NaN;
+    cachedPathHeadR = Number.NaN;
+    cachedPathHeadC = Number.NaN;
+    cachedPathTailR = Number.NaN;
+    cachedPathTailC = Number.NaN;
     cachedPathLayoutVersion = -1;
     wallGhostOffsetLeft = 0;
     wallGhostOffsetTop = 0;
@@ -2689,16 +3006,16 @@ export function createBoardRendererCore(options = {}) {
     pathFramePayload.tutorialBracketPulseEnabled = false;
     pathFramePayload.tutorialBracketColorRgb = null;
     pathFramePayload.drawTutorialBracketsInPathLayer = false;
-    pathFramePayload.endArrowDirX = NaN;
-    pathFramePayload.endArrowDirY = NaN;
-    pathFramePayload.startFlowDirX = NaN;
-    pathFramePayload.startFlowDirY = NaN;
+    pathFramePayload.endArrowDirX = Number.NaN;
+    pathFramePayload.endArrowDirY = Number.NaN;
+    pathFramePayload.startFlowDirX = Number.NaN;
+    pathFramePayload.startFlowDirY = Number.NaN;
     pathFramePayload.retainedStartArcWidth = 0;
     pathFramePayload.retainedEndArcWidth = 0;
     pathFramePayload.retainedStartArcPoints = [];
     pathFramePayload.retainedEndArcPoints = [];
-    pathFramePayload.retainedStartArcGeometryToken = NaN;
-    pathFramePayload.retainedEndArcGeometryToken = NaN;
+    pathFramePayload.retainedStartArcGeometryToken = Number.NaN;
+    pathFramePayload.retainedEndArcGeometryToken = Number.NaN;
     latestTutorialFlags = null;
     latestInteractionModel = null;
     reusableTutorialBracketPoints = [];
@@ -2737,7 +3054,7 @@ export function createBoardRendererCore(options = {}) {
     return target;
   };
 
-  const getCellPoint = (r, c, refs, offset = { x: 0, y: 0 }, out = null) => {
+  const getCellPoint = (r, c, refs, offset = ZERO_OFFSET, out = null) => {
     const target = out || { x: 0, y: 0 };
     if (pathLayoutMetrics.ready) {
       const step = pathLayoutMetrics.cell + pathLayoutMetrics.gap;
@@ -2751,7 +3068,7 @@ export function createBoardRendererCore(options = {}) {
     return target;
   };
 
-  const getVertexPoint = (r, c, refs, offset = { x: 0, y: 0 }, out = null, dpr = 0) => {
+  const getVertexPoint = (r, c, refs, offset = ZERO_OFFSET, out = null, dpr = 0) => {
     const target = out || { x: 0, y: 0 };
     if (pathLayoutMetrics.ready) {
       const step = pathLayoutMetrics.cell + pathLayoutMetrics.gap;
@@ -2813,9 +3130,8 @@ export function createBoardRendererCore(options = {}) {
     wallGhostOffsetTop = 0;
   };
 
-  function setMessage(msgEl, kind, html) {
+  function setMessage(msgEl, kind, nextHtml = '') {
     const nextKind = kind || null;
-    const nextHtml = html || '';
     if (latestMessageKind === nextKind && latestMessageHtml === nextHtml) return;
 
     if (latestMessageKind !== nextKind) {
@@ -2827,26 +3143,6 @@ export function createBoardRendererCore(options = {}) {
       msgEl.innerHTML = nextHtml;
       latestMessageHtml = nextHtml;
     }
-  }
-
-  function setLegendIcons(icons, refs, iconX) {
-    const map = {
-      bTurn: icons['t'],
-      bCW: icons['r'],
-      bCCW: icons['l'],
-      bStraight: icons['s'],
-      bH: icons['h'],
-      bV: icons['v'],
-      bX: iconX,
-      bSc: icons['g'],
-      bRo: icons['b'],
-      bPa: icons['p'],
-      bMoveWall: icons['m'],
-    };
-
-    Object.keys(map).forEach((id) => {
-      if (refs[id]) refs[id].innerHTML = map[id] || '';
-    });
   }
 
   const resolveCellMarkHtml = (code, icons = ICONS) => {
@@ -2867,7 +3163,7 @@ export function createBoardRendererCore(options = {}) {
     gridEl.style.setProperty('--grid-cols', String(snapshot.cols));
     gridEl.style.setProperty('--grid-rows', String(snapshot.rows));
 
-    gridCells = Array.from({ length: snapshot.rows }, () => Array(snapshot.cols).fill(null));
+    gridCells = Array.from({ length: snapshot.rows }, () => new Array(snapshot.cols).fill(null));
 
     gridEl.innerHTML = '';
     gridEl.style.gridTemplateColumns = `repeat(var(--grid-cols), var(--cell))`;
@@ -3009,7 +3305,7 @@ export function createBoardRendererCore(options = {}) {
       return;
     }
     const { r, c } = parsedKey;
-    if (r >= 0 && c >= 0 && gridCells[r] && gridCells[r][c]) {
+    if (r >= 0 && c >= 0 && gridCells[r]?.[c]) {
       const cell = gridCells[r][c];
       cell.classList.remove('dropTarget', 'wallDropPreview');
       const preview = cell.querySelector('.wallGhostPreviewMarker');
@@ -3021,7 +3317,7 @@ export function createBoardRendererCore(options = {}) {
   function setDropTarget(r, c) {
     clearDropTarget();
     const key = keyOf(r, c);
-    if (gridCells[r] && gridCells[r][c]) {
+    if (gridCells[r]?.[c]) {
       const cell = gridCells[r][c];
       cell.classList.add('dropTarget', 'wallDropPreview');
 
@@ -3107,6 +3403,16 @@ export function createBoardRendererCore(options = {}) {
     return false;
   }
 
+  function resolveBoardSelectionInteractiveState(interactionModel = null) {
+    if (typeof interactionModel?.boardSelectionInteractive === 'boolean') {
+      return interactionModel.boardSelectionInteractive;
+    }
+    return isBoardNavSelectionInteractive(
+      pendingRenderState?.snapshot || latestPathSnapshot,
+      interactionModel?.boardSelection,
+    );
+  }
+
   function syncBoardNavHighlights(interactionModel = null) {
     const marker = ensureBoardNavMarker();
     if (!marker || !refs?.gridEl) return;
@@ -3131,16 +3437,10 @@ export function createBoardRendererCore(options = {}) {
       point.y += (previewDelta.r / previewMagnitude) * previewOffset;
     }
     const markerScale = target.variant === 'selected' ? 0.94 : 1.06;
-    const selectionIsInteractive = target.variant !== 'selected'
-      ? true
-      : (
-        typeof interactionModel?.boardSelectionInteractive === 'boolean'
-          ? interactionModel.boardSelectionInteractive
-          : isBoardNavSelectionInteractive(
-            pendingRenderState?.snapshot || latestPathSnapshot,
-            interactionModel?.boardSelection,
-          )
-      );
+    let selectionIsInteractive = true;
+    if (target.variant === 'selected') {
+      selectionIsInteractive = resolveBoardSelectionInteractiveState(interactionModel);
+    }
     marker.classList.add('isActive');
     marker.classList.toggle('isCursor', target.variant === 'cursor');
     marker.classList.toggle('isSelected', target.variant === 'selected');
@@ -3153,8 +3453,8 @@ export function createBoardRendererCore(options = {}) {
   const statusKeySet = (keys) => {
     const set = new Set();
     if (!Array.isArray(keys)) return set;
-    for (let i = 0; i < keys.length; i++) {
-      const key = keys[i];
+    for (const element of keys) {
+      const key = element;
       if (typeof key === 'string') set.add(key);
     }
     return set;
@@ -3179,8 +3479,8 @@ export function createBoardRendererCore(options = {}) {
 
   const addPathKeys = (path, out) => {
     if (!Array.isArray(path)) return;
-    for (let i = 0; i < path.length; i++) {
-      const point = path[i];
+    for (const element of path) {
+      const point = element;
       if (!point) continue;
       out.add(keyOf(point.r, point.c));
     }
@@ -3234,33 +3534,57 @@ export function createBoardRendererCore(options = {}) {
     return null;
   };
 
-  const applyCellSnapshotState = (snapshot, r, c, statusSets) => {
-    const cell = gridCells[r]?.[c];
-    if (!cell) return;
-    const key = keyOf(r, c);
-    const code = snapshot.gridData[r][c];
-    const classes = ['cell'];
+  const appendSnapshotPathEndpointClasses = (classes, snapshot, r, c) => {
+    if (snapshot.path.length === 0) return;
+    const head = snapshot.path[0];
+    if (head && head.r === r && head.c === c) classes.push('pathStart');
+    if (snapshot.path.length <= 1) return;
+    const tail = snapshot.path[snapshot.path.length - 1];
+    if (tail && tail.r === r && tail.c === c) classes.push('pathEnd');
+  };
 
+  const appendSnapshotStatusClasses = (classes, key, statusSets) => {
+    if (statusSets.badHint.has(key)) classes.push('badHint');
+    if (statusSets.goodHint.has(key)) classes.push('goodHint');
+    if (statusSets.badRps.has(key)) {
+      classes.push('badRps');
+    } else if (statusSets.goodRps.has(key)) {
+      classes.push('goodRps');
+    }
+    if (statusSets.badBlocked.has(key)) classes.push('badBlocked');
+  };
+
+  const collectSnapshotCellClasses = (snapshot, r, c, key, statusSets) => {
+    const classes = ['cell'];
+    const code = snapshot.gridData[r][c];
     if (code === 'm') classes.push('wall', 'movable');
     else if (code === '#') classes.push('wall');
 
     if (snapshot.visited.has(key)) classes.push('visited');
-    if (snapshot.path.length > 0) {
-      const head = snapshot.path[0];
-      if (head && head.r === r && head.c === c) classes.push('pathStart');
-      if (snapshot.path.length > 1) {
-        const tail = snapshot.path[snapshot.path.length - 1];
-        if (tail && tail.r === r && tail.c === c) classes.push('pathEnd');
+    appendSnapshotPathEndpointClasses(classes, snapshot, r, c);
+    appendSnapshotStatusClasses(classes, key, statusSets);
+    return classes;
+  };
+
+  const syncCellPathOrderValue = (cell, idxText) => {
+    const pathOrderValue = idxText ? String(Math.max(0, Number(idxText) - 1)) : '';
+    const currentPathOrder = cell.style.getPropertyValue('--path-order');
+    if (pathOrderValue) {
+      if (currentPathOrder !== pathOrderValue) {
+        cell.style.setProperty('--path-order', pathOrderValue);
       }
+      return;
     }
+    if (currentPathOrder) {
+      cell.style.removeProperty('--path-order');
+    }
+  };
 
-    if (statusSets.badHint.has(key)) classes.push('badHint');
-    if (statusSets.goodHint.has(key)) classes.push('goodHint');
-    if (statusSets.badRps.has(key)) classes.push('badRps');
-    if (statusSets.goodRps.has(key) && !statusSets.badRps.has(key)) classes.push('goodRps');
-    if (statusSets.badBlocked.has(key)) classes.push('badBlocked');
-
-    const targetClass = classes.join(' ');
+  const applyCellSnapshotState = (snapshot, r, c, statusSets) => {
+    const cell = gridCells[r]?.[c];
+    if (!cell) return;
+    const key = keyOf(r, c);
+    const targetClass = collectSnapshotCellClasses(snapshot, r, c, key, statusSets).join(' ');
     if (cell.className !== targetClass) {
       cell.className = targetClass;
     }
@@ -3272,16 +3596,7 @@ export function createBoardRendererCore(options = {}) {
     if (idxEl && idxEl.textContent !== idxText) {
       idxEl.textContent = idxText;
     }
-
-    const pathOrderValue = idxText ? String(Math.max(0, Number(idxText) - 1)) : '';
-    const currentPathOrder = cell.style.getPropertyValue('--path-order');
-    if (pathOrderValue) {
-      if (currentPathOrder !== pathOrderValue) {
-        cell.style.setProperty('--path-order', pathOrderValue);
-      }
-    } else if (currentPathOrder) {
-      cell.style.removeProperty('--path-order');
-    }
+    syncCellPathOrderValue(cell, idxText);
   };
 
   const clearPathTipDragHoverCell = () => {
@@ -3296,46 +3611,41 @@ export function createBoardRendererCore(options = {}) {
     lastPathTipDragSelectedCell = null;
   };
 
-  const resolvePathTipDragSelectedCell = (interactionModel = null, cells = gridCells) => {
-    if (interactionModel?.isPathDragging) {
-      const snapshot = pendingRenderState?.snapshot || latestPathSnapshot;
-      const path = Array.isArray(snapshot?.path) ? snapshot.path : [];
-      if (path.length <= 0) return null;
+  const resolvePathTipDragEndpointCell = (interactionModel = null, cells = gridCells) => {
+    if (!interactionModel?.isPathDragging) return null;
+    const snapshot = pendingRenderState?.snapshot || latestPathSnapshot;
+    const path = Array.isArray(snapshot?.path) ? snapshot.path : [];
+    if (path.length <= 0) return null;
 
-      const side = interactionModel.pathDragSide === 'start' ? 'start' : 'end';
-      const tip = side === 'start'
-        ? path[0]
-        : path[path.length - 1];
-      const tipR = Number(tip?.r);
-      const tipC = Number(tip?.c);
-      if (Number.isInteger(tipR) && Number.isInteger(tipC)) {
-        const cell = cells[tipR]?.[tipC];
-        if (cell && !cell.classList.contains('wall')) return cell;
-      }
+    const side = interactionModel.pathDragSide === 'start' ? 'start' : 'end';
+    const tip = side === 'start' ? path[0] : path[path.length - 1];
+    const tipR = Number(tip?.r);
+    const tipC = Number(tip?.c);
+    if (!Number.isInteger(tipR) || !Number.isInteger(tipC)) return null;
+    const cell = cells[tipR]?.[tipC];
+    if (cell && !cell.classList.contains('wall')) return cell;
+    return null;
+  };
+
+  const resolveBoardNavSelectedCell = (interactionModel = null, cells = gridCells) => {
+    const selection = interactionModel?.boardSelection;
+    if (interactionModel?.isBoardNavActive !== true || !selection) return null;
+
+    const selectionIsInteractive = resolveBoardSelectionInteractiveState(interactionModel);
+    if (!selectionIsInteractive && interactionModel?.isBoardNavPressing !== true) {
       return null;
     }
+    const selectionR = Number(selection?.r);
+    const selectionC = Number(selection?.c);
+    if (!Number.isInteger(selectionR) || !Number.isInteger(selectionC)) return null;
+    const cell = cells[selectionR]?.[selectionC];
+    if (cell && !cell.classList.contains('wall')) return cell;
+    return cell || null;
+  };
 
-    const selection = interactionModel?.boardSelection;
-    if (interactionModel?.isBoardNavActive === true && selection) {
-      const selectionIsInteractive = typeof interactionModel?.boardSelectionInteractive === 'boolean'
-        ? interactionModel.boardSelectionInteractive
-        : isBoardNavSelectionInteractive(
-          pendingRenderState?.snapshot || latestPathSnapshot,
-          selection,
-        );
-      if (!selectionIsInteractive && interactionModel?.isBoardNavPressing !== true) {
-        return null;
-      }
-      const selectionR = Number(selection?.r);
-      const selectionC = Number(selection?.c);
-      if (Number.isInteger(selectionR) && Number.isInteger(selectionC)) {
-        const cell = cells[selectionR]?.[selectionC];
-        if (cell && !cell.classList.contains('wall')) return cell;
-        if (cell) return cell;
-      }
-    }
-
-    return null;
+  const resolvePathTipDragSelectedCell = (interactionModel = null, cells = gridCells) => {
+    return resolvePathTipDragEndpointCell(interactionModel, cells)
+      || resolveBoardNavSelectedCell(interactionModel, cells);
   };
 
   const syncPathTipDragHoverCell = (interactionModel = null, cells = gridCells) => {
@@ -3378,6 +3688,34 @@ export function createBoardRendererCore(options = {}) {
     lastPathTipDragSelectedCell = nextCell;
   };
 
+  const addPathEndpointKeys = (path, out) => {
+    if (!Array.isArray(path) || path.length <= 0) return;
+    addPathKeys([path[0], path.at(-1)], out);
+  };
+
+  const addTouchedKeysForEndpointDelta = (delta, prevPath, nextPath, out) => {
+    if (delta.side === 'start' && delta.prevChanged.length !== delta.nextChanged.length) {
+      addPathKeys(prevPath, out);
+      addPathKeys(nextPath, out);
+      return;
+    }
+    addPathKeys(delta.prevChanged, out);
+    addPathKeys(delta.nextChanged, out);
+    addPathEndpointKeys(prevPath, out);
+    addPathEndpointKeys(nextPath, out);
+  };
+
+  const applyTouchedKeysToSnapshot = (snapshot, statusSets, touchedKeys) => {
+    touchedKeys.forEach((key) => {
+      const parsed = parseGridKey(key);
+      if (!parsed) return;
+      const r = parsed.r;
+      const c = parsed.c;
+      if (r < 0 || c < 0 || r >= snapshot.rows || c >= snapshot.cols) return;
+      applyCellSnapshotState(snapshot, r, c, statusSets);
+    });
+  };
+
   const collectIncrementalPathTouchedKeys = (
     prevSnapshot,
     snapshot,
@@ -3392,23 +3730,7 @@ export function createBoardRendererCore(options = {}) {
     if (!delta) return null;
 
     const touchedKeys = new Set();
-    if (delta.side === 'start') {
-      const preservesSharedSuffixOrder = delta.prevChanged.length === delta.nextChanged.length;
-      if (preservesSharedSuffixOrder) {
-        addPathKeys(delta.prevChanged, touchedKeys);
-        addPathKeys(delta.nextChanged, touchedKeys);
-        addPathKeys(prevSnapshot.path.length > 0 ? [prevSnapshot.path[0], prevSnapshot.path[prevSnapshot.path.length - 1]] : [], touchedKeys);
-        addPathKeys(snapshot.path.length > 0 ? [snapshot.path[0], snapshot.path[snapshot.path.length - 1]] : [], touchedKeys);
-      } else {
-        addPathKeys(prevSnapshot.path, touchedKeys);
-        addPathKeys(snapshot.path, touchedKeys);
-      }
-    } else {
-      addPathKeys(delta.prevChanged, touchedKeys);
-      addPathKeys(delta.nextChanged, touchedKeys);
-      addPathKeys(prevSnapshot.path.length > 0 ? [prevSnapshot.path[0], prevSnapshot.path[prevSnapshot.path.length - 1]] : [], touchedKeys);
-      addPathKeys(snapshot.path.length > 0 ? [snapshot.path[0], snapshot.path[snapshot.path.length - 1]] : [], touchedKeys);
-    }
+    addTouchedKeysForEndpointDelta(delta, prevSnapshot.path, snapshot.path, touchedKeys);
     addStatusDeltaKeys(statusSets.badHint, prevSets.badHint, touchedKeys);
     addStatusDeltaKeys(statusSets.goodHint, prevSets.goodHint, touchedKeys);
     addStatusDeltaKeys(statusSets.badRps, prevSets.badRps, touchedKeys);
@@ -3430,15 +3752,7 @@ export function createBoardRendererCore(options = {}) {
     );
     if (!touchedKeys) return false;
 
-    touchedKeys.forEach((key) => {
-      const parsed = parseGridKey(key);
-      if (!parsed) return;
-      const r = parsed.r;
-      const c = parsed.c;
-      if (r < 0 || c < 0 || r >= snapshot.rows || c >= snapshot.cols) return;
-      applyCellSnapshotState(snapshot, r, c, statusSets);
-    });
-
+    applyTouchedKeysToSnapshot(snapshot, statusSets, touchedKeys);
     countIncrementalCellPatches();
     return true;
   };
@@ -3458,16 +3772,35 @@ export function createBoardRendererCore(options = {}) {
     );
     if (!touchedKeys) return false;
 
-    touchedKeys.forEach((key) => {
-      const parsed = parseGridKey(key);
-      if (!parsed) return;
-      const r = parsed.r;
-      const c = parsed.c;
-      if (r < 0 || c < 0 || r >= snapshot.rows || c >= snapshot.cols) return;
-      applyCellSnapshotState(snapshot, r, c, statusSets);
-    });
-
+    applyTouchedKeysToSnapshot(snapshot, statusSets, touchedKeys);
     return true;
+  };
+
+  const applyCellViewState = (cell, state) => {
+    const targetStr = state.classes.join(' ');
+    if (cell.className !== targetStr) {
+      cell.className = targetStr;
+    }
+
+    const idxEl = cell.firstElementChild;
+    if (idxEl && idxEl.textContent !== state.idx) {
+      idxEl.textContent = state.idx;
+    }
+
+    const markEl = idxEl?.nextElementSibling;
+    if (markEl && markEl.innerHTML !== state.markHtml) {
+      markEl.innerHTML = state.markHtml;
+    }
+
+    syncCellPathOrderValue(cell, state.idx);
+  };
+
+  const applyFullCellViewModel = (snapshot, desired) => {
+    for (let r = 0; r < snapshot.rows; r++) {
+      for (let c = 0; c < snapshot.cols; c++) {
+        applyCellViewState(gridCells[r][c], desired[r][c]);
+      }
+    }
   };
 
   function updateCells(
@@ -3478,7 +3811,7 @@ export function createBoardRendererCore(options = {}) {
     interactionModel = null,
     tutorialFlags = null,
   ) {
-    const { hintStatus, stitchStatus, rpsStatus, blockedStatus } = results;
+    const { hintStatus, rpsStatus, blockedStatus } = results;
     const usedIncremental = tryApplyIncrementalPathUpdate(
       snapshot,
       { hintStatus, rpsStatus, blockedStatus },
@@ -3491,43 +3824,105 @@ export function createBoardRendererCore(options = {}) {
         resolveCellMarkHtml,
         reusableCellViewModel,
       );
-      const desired = reusableCellViewModel;
-
-      for (let r = 0; r < snapshot.rows; r++) {
-        for (let c = 0; c < snapshot.cols; c++) {
-          const cell = gridCells[r][c];
-          const state = desired[r][c];
-          const targetStr = state.classes.join(' ');
-
-          if (cell.className !== targetStr) {
-            cell.className = targetStr;
-          }
-
-          const idxEl = cell.firstElementChild;
-          if (idxEl && idxEl.textContent !== state.idx) {
-            idxEl.textContent = state.idx;
-          }
-
-          const markEl = idxEl?.nextElementSibling;
-          if (markEl && markEl.innerHTML !== state.markHtml) {
-            markEl.innerHTML = state.markHtml;
-          }
-
-          const pathOrderValue = state.idx ? String(Math.max(0, Number(state.idx) - 1)) : '';
-          const currentPathOrder = cell.style.getPropertyValue('--path-order');
-          if (pathOrderValue) {
-            if (currentPathOrder !== pathOrderValue) {
-              cell.style.setProperty('--path-order', pathOrderValue);
-            }
-          } else if (currentPathOrder) {
-            cell.style.removeProperty('--path-order');
-          }
-        }
-      }
+      applyFullCellViewModel(snapshot, reusableCellViewModel);
     }
     syncPathTipDragHoverCell(interactionModel);
     pathAnimationEngine.setInteractionModel(interactionModel);
   }
+
+  const updatePathTransitionStates = (previousPath, nextPath, layout, nowMs) => {
+    updatePathTipArrivalStates(
+      previousPath,
+      nextPath,
+      layout.cell,
+      layout.cell + layout.gap,
+      nowMs,
+    );
+    updatePathRetainedArcStates(previousPath, nextPath, nowMs);
+    updatePathEndArrowRotateState(previousPath, nextPath, nowMs);
+    updatePathStartFlowRotateState(previousPath, nextPath, nowMs);
+    updatePathStartPinPresenceState(previousPath, nextPath, nowMs);
+    updatePathFlowVisibilityState(previousPath, nextPath, nowMs);
+    updatePathReverseTipSwapState(previousPath, nextPath, nowMs);
+  };
+
+  const applyReversePathFlowOffset = (path, flow, nowMs) => {
+    clearPathTransitionCompensationBuffer();
+    const reverseFromFlowOffset = pathAnimationOffset;
+    const reverseTravel = latestPathMainFlowTravel;
+    if (reverseTravel > 0) {
+      const transitionAnchorUnit = Math.max(
+        0,
+        Math.min(1, (PATH_FLOW_RISE + PATH_FLOW_DROP) * 0.5),
+      );
+      const transitionAnchor = flow.pulse * transitionAnchorUnit;
+      pathAnimationOffset = normalizeFlowOffset(
+        (2 * transitionAnchor) - reverseTravel - pathAnimationOffset,
+        flow.cycle,
+      );
+    }
+    beginPathReverseGradientBlend(
+      path,
+      reverseFromFlowOffset,
+      latestPathMainFlowTravel,
+      pathAnimationOffset,
+      flow.cycle,
+      nowMs,
+    );
+  };
+
+  const applyHeadShiftPathFlowOffset = (path, previousPath, refs, flow) => {
+    const consumedCompensation = consumePathTransitionCompensation(path, flow.cycle);
+    if (consumedCompensation.consumed) return;
+    const shift = getHeadShiftDelta(
+      path,
+      previousPath,
+      refs,
+      getGridCanvasOffset(refs, headOffsetScratch),
+    );
+    if (shift !== 0) {
+      pathAnimationOffset = normalizeFlowOffset(
+        pathAnimationOffset + (shift * PATH_FLOW_ANCHOR_RATIO),
+        flow.cycle,
+      );
+    }
+  };
+
+  const syncPathAnimationOffsetForTransition = (
+    path,
+    previousPath,
+    refs,
+    flow,
+    pathChanged,
+    nowMs,
+  ) => {
+    if (isPathReversed(path, previousPath)) {
+      applyReversePathFlowOffset(path, flow, nowMs);
+      return;
+    }
+    if (pathChanged) {
+      applyHeadShiftPathFlowOffset(path, previousPath, refs, flow);
+      return;
+    }
+    if (transitionCompensationBuffer.hasPending()) {
+      clearPathTransitionCompensationBuffer();
+    }
+  };
+
+  const cacheLatestPathRenderState = (
+    snapshot,
+    refs,
+    statuses,
+    completionModel,
+    tutorialFlags,
+  ) => {
+    latestPathSnapshot = snapshot;
+    latestPathRefs = refs;
+    latestPathStatuses = statuses;
+    latestPathStatusSets = buildStatusSets(statuses || {});
+    latestCompletionModel = completionModel;
+    latestTutorialFlags = tutorialFlags;
+  };
 
   function drawAllImpl(
     snapshot,
@@ -3546,71 +3941,16 @@ export function createBoardRendererCore(options = {}) {
     const flowFreeze = resolvePathFlowFreezeMix(nowMs, pathFlowFreezeMixScratch);
     const baseAnimateFlow = shouldAnimatePathFlow(snapshot, completionModel, tutorialFlags);
     const animateFlow = baseAnimateFlow && flowFreeze.mix > PATH_FLOW_FREEZE_EPSILON;
-    updatePathTipArrivalStates(
-      previousPath,
+    updatePathTransitionStates(previousPath, snapshot.path, layout, nowMs);
+    syncPathAnimationOffsetForTransition(
       snapshot.path,
-      layout.cell,
-      layout.cell + layout.gap,
+      previousPath,
+      refs,
+      flow,
+      pathChanged,
       nowMs,
     );
-    updatePathRetainedArcStates(previousPath, snapshot.path, nowMs);
-    updatePathEndArrowRotateState(previousPath, snapshot.path, nowMs);
-    updatePathStartFlowRotateState(previousPath, snapshot.path, nowMs);
-    updatePathStartPinPresenceState(previousPath, snapshot.path, nowMs);
-    updatePathFlowVisibilityState(previousPath, snapshot.path, nowMs);
-    updatePathReverseTipSwapState(previousPath, snapshot.path, nowMs);
-    if (isPathReversed(snapshot.path, previousPath)) {
-      clearPathTransitionCompensationBuffer();
-      const reverseFromFlowOffset = pathAnimationOffset;
-      const reverseTravel = latestPathMainFlowTravel;
-      if (reverseTravel > 0) {
-        const transitionAnchorUnit = Math.max(
-          0,
-          Math.min(1, (PATH_FLOW_RISE + PATH_FLOW_DROP) * 0.5),
-        );
-        const transitionAnchor = flow.pulse * transitionAnchorUnit;
-        pathAnimationOffset = normalizeFlowOffset(
-          (2 * transitionAnchor) - reverseTravel - pathAnimationOffset,
-          flow.cycle,
-        );
-      }
-      beginPathReverseGradientBlend(
-        snapshot.path,
-        reverseFromFlowOffset,
-        latestPathMainFlowTravel,
-        pathAnimationOffset,
-        flow.cycle,
-        nowMs,
-      );
-    } else if (pathChanged) {
-      const consumedCompensation = consumePathTransitionCompensation(
-        snapshot.path,
-        flow.cycle,
-      );
-      if (!consumedCompensation.consumed) {
-        const shift = getHeadShiftDelta(
-          snapshot.path,
-          previousPath,
-          refs,
-          getGridCanvasOffset(refs, headOffsetScratch),
-        );
-        if (shift !== 0) {
-          pathAnimationOffset = normalizeFlowOffset(
-            pathAnimationOffset + (shift * PATH_FLOW_ANCHOR_RATIO),
-            flow.cycle,
-          );
-        }
-      }
-    } else if (transitionCompensationBuffer.hasPending()) {
-      clearPathTransitionCompensationBuffer();
-    }
-
-    latestPathSnapshot = snapshot;
-    latestPathRefs = refs;
-    latestPathStatuses = statuses;
-    latestPathStatusSets = buildStatusSets(statuses || {});
-    latestCompletionModel = completionModel;
-    latestTutorialFlags = tutorialFlags;
+    cacheLatestPathRenderState(snapshot, refs, statuses, completionModel, tutorialFlags);
 
     const animateFlowVisibility = (
       hasActivePathFlowVisibility(snapshot.path, nowMs)
@@ -3618,35 +3958,17 @@ export function createBoardRendererCore(options = {}) {
     );
     const offset = (animateFlow || animateFlowVisibility || flowFreeze.active) ? pathAnimationOffset : 0;
     drawAllInternal(snapshot, refs, statuses, offset, completionModel, tutorialFlags);
-
-    const animateTipArrivals = hasActivePathTipArrivals(nowMs);
-    const animateRetainedArc = hasActivePathRetainedArc(snapshot.path, nowMs);
-    const animateEndArrowRotate = hasActivePathEndArrowRotate(snapshot.path, nowMs);
-    const animateStartFlowRotate = hasActivePathStartFlowRotate(snapshot.path, nowMs);
-    const animateStartPinPresence = hasActivePathStartPinPresence(snapshot.path, nowMs);
-    const animateTipHoverScale = hasActivePathTipHoverScale(
+    const animationActivity = resolvePathAnimationActivity(
       snapshot.path,
-      latestInteractionModel,
       nowMs,
-    );
-    const animateReverseTipSwap = hasActivePathReverseTipSwap(snapshot.path, nowMs);
-    const animateReverseGradientBlend = hasActivePathReverseGradientBlend(
-      snapshot.path,
       flow.cycle,
-      nowMs,
+      latestInteractionModel,
     );
     return (
       flowFreeze.active
       || animateFlow
       || animateFlowVisibility
-      || animateTipArrivals
-      || animateRetainedArc
-      || animateEndArrowRotate
-      || animateStartFlowRotate
-      || animateStartPinPresence
-      || animateTipHoverScale
-      || animateReverseTipSwap
-      || animateReverseGradientBlend
+      || animationActivity.active
     );
   }
 
@@ -3704,8 +4026,8 @@ export function createBoardRendererCore(options = {}) {
     symbolCtx.shadowColor = `rgba(${drawR}, ${drawG}, ${drawB}, ${0.3 + (pulse * 0.1)})`;
     symbolCtx.shadowBlur = Math.max(0.5, cornerThickness * 1.25);
 
-    for (let i = 0; i < centers.length; i++) {
-      const center = centers[i];
+    for (const element of centers) {
+      const center = element;
       const cx = Number(center?.x);
       const cy = Number(center?.y);
       if (!Number.isFinite(cx) || !Number.isFinite(cy)) continue;
@@ -3730,6 +4052,174 @@ export function createBoardRendererCore(options = {}) {
     symbolCtx.restore();
   }
 
+  const syncPathGeometryCache = (path, layout, deviceScale) => {
+    const pathLength = path.length;
+    const head = pathLength > 0 ? path[0] : null;
+    const tail = pathLength > 0 ? path[pathLength - 1] : null;
+    if (pathLength > 0) {
+      const pointsChanged = (
+        cachedPathRef !== path
+        || cachedPathLayoutVersion !== layout.version
+        || cachedPathLength !== pathLength
+        || cachedPathHeadR !== head.r
+        || cachedPathHeadC !== head.c
+        || cachedPathTailR !== tail.r
+        || cachedPathTailC !== tail.c
+      );
+      if (!pointsChanged && reusablePathPoints.length === pathLength) {
+        return;
+      }
+
+      if (reusablePathPoints.length < pathLength) {
+        for (let i = reusablePathPoints.length; i < pathLength; i++) {
+          reusablePathPoints.push({ x: 0, y: 0 });
+        }
+      }
+      reusablePathPoints.length = pathLength;
+      const step = layout.cell + layout.gap;
+      const half = layout.cell * 0.5;
+      for (let i = 0; i < pathLength; i++) {
+        const point = path[i];
+        const pooled = reusablePathPoints[i];
+        pooled.x = snapCssToDevicePixel(
+          layout.offsetX + layout.pad + (point.c * step) + half,
+          deviceScale,
+        );
+        pooled.y = snapCssToDevicePixel(
+          layout.offsetY + layout.pad + (point.r * step) + half,
+          deviceScale,
+        );
+      }
+
+      cachedPathRef = path;
+      cachedPathLayoutVersion = layout.version;
+      cachedPathLength = pathLength;
+      cachedPathHeadR = head.r;
+      cachedPathHeadC = head.c;
+      cachedPathTailR = tail.r;
+      cachedPathTailC = tail.c;
+      pathGeometryToken += 1;
+      return;
+    }
+
+    reusablePathPoints.length = 0;
+    const emptyGeometryChanged = (
+      cachedPathLength !== 0
+      || cachedPathLayoutVersion !== layout.version
+      || cachedPathRef !== path
+    );
+    if (!emptyGeometryChanged) return;
+    cachedPathRef = path;
+    cachedPathLayoutVersion = layout.version;
+    cachedPathLength = 0;
+    cachedPathHeadR = Number.NaN;
+    cachedPathHeadC = Number.NaN;
+    cachedPathTailR = Number.NaN;
+    cachedPathTailC = Number.NaN;
+    pathGeometryToken += 1;
+  };
+
+  const setPathFrameBaseState = (renderPoints, sizing, path, nowMs) => {
+    pathFramePayload.baseStartRadius = sizing.startRadius;
+    pathFramePayload.baseArrowLength = sizing.arrowLength;
+    pathFramePayload.baseEndHalfWidth = sizing.endHalfWidth;
+    const reverseTipSwapActive = applyPathReverseTipSwapToPayload(path, nowMs);
+    pathFramePayload.points = renderPoints.points;
+    pathFramePayload.retainedStartArcPoints = renderPoints.retainedStartArcPoints;
+    pathFramePayload.retainedStartArcGeometryToken = renderPoints.retainedStartArcGeometryToken;
+    pathFramePayload.retainedEndArcPoints = renderPoints.retainedEndArcPoints;
+    pathFramePayload.retainedEndArcGeometryToken = renderPoints.retainedEndArcGeometryToken;
+    pathFramePayload.retainedStartArcWidth = sizing.width;
+    pathFramePayload.retainedEndArcWidth = sizing.width;
+    pathFramePayload.width = sizing.width;
+    if (!reverseTipSwapActive) {
+      pathFramePayload.startRadius = sizing.startRadius;
+      pathFramePayload.arrowLength = sizing.arrowLength;
+      pathFramePayload.endHalfWidth = sizing.endHalfWidth;
+    }
+    return reverseTipSwapActive;
+  };
+
+  const applyPathFrameTipAnimationState = (
+    path,
+    nowMs,
+    renderPoints,
+    sizing,
+    reverseTipSwapActive,
+  ) => {
+    const startPinPresenceActive = applyPathStartPinPresenceToPayload(path, nowMs);
+    const endArrowRotateActive = applyPathEndArrowDirectionToPayload(path, nowMs);
+    const startFlowRotateActive = applyPathStartFlowDirectionToPayload(path, nowMs);
+    const segmentRetractTipScale = clampUnit(
+      Number.isFinite(renderPoints.segmentRetractTipScale)
+        ? Math.sqrt(renderPoints.segmentRetractTipScale)
+        : 1,
+    );
+    pathFramePayload.arrowLength *= segmentRetractTipScale;
+    pathFramePayload.endHalfWidth *= segmentRetractTipScale;
+    const tipHoverScale = resolvePathTipHoverScales(
+      path,
+      latestInteractionModel,
+      nowMs,
+      pathTipHoverScaleScratch,
+    );
+    pathFramePayload.startRadius *= tipHoverScale.startScale;
+    pathFramePayload.arrowLength *= tipHoverScale.endScale;
+    pathFramePayload.endHalfWidth *= tipHoverScale.endScale;
+    const startTipWidthScale = sizing.startRadius > 0
+      ? clampUnit((Number(pathFramePayload.startRadius) || 0) / sizing.startRadius)
+      : 1;
+    const endTipWidthScale = sizing.endHalfWidth > 0
+      ? clampUnit((Number(pathFramePayload.endHalfWidth) || 0) / sizing.endHalfWidth)
+      : 1;
+    pathFramePayload.retainedStartArcWidth = Math.max(0.5, sizing.width * startTipWidthScale);
+    pathFramePayload.retainedEndArcWidth = Math.max(0.5, sizing.width * endTipWidthScale);
+    pathFramePayload.geometryToken = (
+      reverseTipSwapActive
+      || startPinPresenceActive
+      || endArrowRotateActive
+      || startFlowRotateActive
+      || tipHoverScale.active
+    ) ? Number.NaN : renderPoints.geometryToken;
+  };
+
+  const hasRenderablePathFlowPoints = () => (
+    (Array.isArray(pathFramePayload.points) && pathFramePayload.points.length > 1)
+    || (Array.isArray(pathFramePayload.retainedStartArcPoints) && pathFramePayload.retainedStartArcPoints.length > 1)
+    || (Array.isArray(pathFramePayload.retainedEndArcPoints) && pathFramePayload.retainedEndArcPoints.length > 1)
+  );
+
+  const syncPathFrameFlowState = (
+    path,
+    renderPoints,
+    flowOffset,
+    flowMetrics,
+    flowFreezeMix,
+    nowMs,
+  ) => {
+    const flowVisibility = resolvePathFlowVisibilityMix(path, nowMs, flowVisibilityMixScratch);
+    const flowMix = clampUnit(Number.isFinite(flowVisibility.mix) ? flowVisibility.mix : 1);
+    const effectiveFlowMix = flowMix * flowFreezeMix;
+    pathFramePayload.flowEnabled = (
+      !isReducedMotionPreferred()
+      && hasRenderablePathFlowPoints()
+      && effectiveFlowMix > PATH_FLOW_FREEZE_EPSILON
+    );
+    pathFramePayload.flowMix = effectiveFlowMix;
+    pathFramePayload.flowOffset = flowOffset + (Number(renderPoints.flowTravelCompensation) || 0);
+    pathFramePayload.flowCycle = flowMetrics.cycle;
+    pathFramePayload.flowPulse = flowMetrics.pulse;
+    pathFramePayload.flowBaseSpeed = flowMetrics.speed;
+    pathFramePayload.flowSpeed = flowMetrics.speed * flowFreezeMix;
+    if (effectiveFlowMix > PATH_FLOW_FREEZE_EPSILON) {
+      applyPathReverseGradientBlendToPayload(path, flowMetrics.cycle, nowMs);
+      return;
+    }
+    pathFramePayload.reverseColorBlend = 1;
+    pathFramePayload.reverseFromFlowOffset = 0;
+    pathFramePayload.reverseTravelSpan = 0;
+  };
+
   function drawAnimatedPathImpl(
     snapshot,
     refs,
@@ -3753,83 +4243,22 @@ export function createBoardRendererCore(options = {}) {
     const layout = ensurePathLayoutMetrics(refs);
     const size = layout.cell;
     const deviceScale = getDevicePixelScale();
-    const width = Math.max(7, snapCssToDevicePixel(Math.floor(size * 0.15), deviceScale));
-    const arrowLength = Math.max(13, snapCssToDevicePixel(Math.floor(size * 0.24), deviceScale));
-    const startRadius = Math.max(6, snapCssToDevicePixel(Math.floor(width * 0.9), deviceScale));
-    const endHalfWidth = Math.max(6, snapCssToDevicePixel(Math.floor(width * 0.95), deviceScale));
+    const sizing = {
+      width: Math.max(7, snapCssToDevicePixel(Math.floor(size * 0.15), deviceScale)),
+      arrowLength: Math.max(13, snapCssToDevicePixel(Math.floor(size * 0.24), deviceScale)),
+      startRadius: 0,
+      endHalfWidth: 0,
+    };
+    sizing.startRadius = Math.max(6, snapCssToDevicePixel(Math.floor(sizing.width * 0.9), deviceScale));
+    sizing.endHalfWidth = Math.max(6, snapCssToDevicePixel(Math.floor(sizing.width * 0.95), deviceScale));
 
     if (!pathThemeCacheInitialized) updatePathThemeCache(refs);
     const completionProgress = getCompletionProgress(completionModel);
     const isCompletionSolved = Boolean(completionModel?.isSolved);
     const flowMetrics = getCachedPathFlowMetrics(refs, size);
 
-    const step = size + layout.gap;
-    const half = size * 0.5;
     const path = snapshot.path;
-    const pathLength = path.length;
-    const head = pathLength > 0 ? path[0] : null;
-    const tail = pathLength > 0 ? path[pathLength - 1] : null;
-
-    if (pathLength > 0) {
-      const pointsChanged = (
-        cachedPathRef !== path
-        || cachedPathLayoutVersion !== layout.version
-        || cachedPathLength !== pathLength
-        || cachedPathHeadR !== head.r
-        || cachedPathHeadC !== head.c
-        || cachedPathTailR !== tail.r
-        || cachedPathTailC !== tail.c
-      );
-      if (!pointsChanged && reusablePathPoints.length === pathLength) {
-        // Keep previous pooled coordinates; no geometry mutation needed.
-      } else {
-        if (reusablePathPoints.length < pathLength) {
-          for (let i = reusablePathPoints.length; i < pathLength; i++) {
-            reusablePathPoints.push({ x: 0, y: 0 });
-          }
-        }
-        reusablePathPoints.length = pathLength;
-        for (let i = 0; i < pathLength; i++) {
-          const point = path[i];
-          const pooled = reusablePathPoints[i];
-          pooled.x = snapCssToDevicePixel(
-            layout.offsetX + layout.pad + (point.c * step) + half,
-            deviceScale,
-          );
-          pooled.y = snapCssToDevicePixel(
-            layout.offsetY + layout.pad + (point.r * step) + half,
-            deviceScale,
-          );
-        }
-
-        cachedPathRef = path;
-        cachedPathLayoutVersion = layout.version;
-        cachedPathLength = pathLength;
-        cachedPathHeadR = head.r;
-        cachedPathHeadC = head.c;
-        cachedPathTailR = tail.r;
-        cachedPathTailC = tail.c;
-        pathGeometryToken += 1;
-      }
-    } else {
-      reusablePathPoints.length = 0;
-      const emptyGeometryChanged = (
-        cachedPathLength !== 0
-        || cachedPathLayoutVersion !== layout.version
-        || cachedPathRef !== path
-      );
-      if (emptyGeometryChanged) {
-        cachedPathRef = path;
-        cachedPathLayoutVersion = layout.version;
-        cachedPathLength = 0;
-        cachedPathHeadR = NaN;
-        cachedPathHeadC = NaN;
-        cachedPathTailR = NaN;
-        cachedPathTailC = NaN;
-        pathGeometryToken += 1;
-      }
-    }
-
+    syncPathGeometryCache(path, layout, deviceScale);
     updateTutorialBracketPayload(snapshot, layout, tutorialFlags);
 
     const nowMs = getNowMs();
@@ -3840,61 +4269,12 @@ export function createBoardRendererCore(options = {}) {
     const renderPoints = getPathRenderPointsForFrame(
       path,
       nowMs,
-      width,
-      startRadius,
-      endHalfWidth,
+      sizing.width,
+      sizing.startRadius,
+      sizing.endHalfWidth,
     );
-    pathFramePayload.baseStartRadius = startRadius;
-    pathFramePayload.baseArrowLength = arrowLength;
-    pathFramePayload.baseEndHalfWidth = endHalfWidth;
-    const reverseTipSwapActive = applyPathReverseTipSwapToPayload(path, nowMs);
-    pathFramePayload.points = renderPoints.points;
-    pathFramePayload.retainedStartArcPoints = renderPoints.retainedStartArcPoints;
-    pathFramePayload.retainedStartArcGeometryToken = renderPoints.retainedStartArcGeometryToken;
-    pathFramePayload.retainedEndArcPoints = renderPoints.retainedEndArcPoints;
-    pathFramePayload.retainedEndArcGeometryToken = renderPoints.retainedEndArcGeometryToken;
-    pathFramePayload.retainedStartArcWidth = width;
-    pathFramePayload.retainedEndArcWidth = width;
-    pathFramePayload.width = width;
-    if (!reverseTipSwapActive) {
-      pathFramePayload.startRadius = startRadius;
-      pathFramePayload.arrowLength = arrowLength;
-      pathFramePayload.endHalfWidth = endHalfWidth;
-    }
-    const startPinPresenceActive = applyPathStartPinPresenceToPayload(path, nowMs);
-    const endArrowRotateActive = applyPathEndArrowDirectionToPayload(path, nowMs);
-    const startFlowRotateActive = applyPathStartFlowDirectionToPayload(path, nowMs);
-    const segmentRetractTipScale = clampUnit(
-      Number.isFinite(renderPoints.segmentRetractTipScale)
-        ? Math.sqrt(renderPoints.segmentRetractTipScale)
-        : 1,
-    );
-    pathFramePayload.arrowLength *= segmentRetractTipScale;
-    pathFramePayload.endHalfWidth *= segmentRetractTipScale;
-    const tipHoverScale = resolvePathTipHoverScales(
-      path,
-      latestInteractionModel,
-      nowMs,
-      pathTipHoverScaleScratch,
-    );
-    pathFramePayload.startRadius *= tipHoverScale.startScale;
-    pathFramePayload.arrowLength *= tipHoverScale.endScale;
-    pathFramePayload.endHalfWidth *= tipHoverScale.endScale;
-    const startTipWidthScale = startRadius > 0
-      ? clampUnit((Number(pathFramePayload.startRadius) || 0) / startRadius)
-      : 1;
-    const endTipWidthScale = endHalfWidth > 0
-      ? clampUnit((Number(pathFramePayload.endHalfWidth) || 0) / endHalfWidth)
-      : 1;
-    pathFramePayload.retainedStartArcWidth = Math.max(0.5, width * startTipWidthScale);
-    pathFramePayload.retainedEndArcWidth = Math.max(0.5, width * endTipWidthScale);
-    pathFramePayload.geometryToken = (
-      reverseTipSwapActive
-      || startPinPresenceActive
-      || endArrowRotateActive
-      || startFlowRotateActive
-      || tipHoverScale.active
-    ) ? NaN : renderPoints.geometryToken;
+    const reverseTipSwapActive = setPathFrameBaseState(renderPoints, sizing, path, nowMs);
+    applyPathFrameTipAnimationState(path, nowMs, renderPoints, sizing, reverseTipSwapActive);
     pathFramePayload.mainColorRgb = mixRgb(
       pathThemeMainRgb,
       FROZEN_PATH_GRAY_RGB,
@@ -3909,38 +4289,7 @@ export function createBoardRendererCore(options = {}) {
     );
     pathFramePayload.isCompletionSolved = isCompletionSolved;
     pathFramePayload.completionProgress = completionProgress;
-    const flowVisibility = resolvePathFlowVisibilityMix(path, nowMs, flowVisibilityMixScratch);
-    const flowMix = clampUnit(Number.isFinite(flowVisibility.mix) ? flowVisibility.mix : 1);
-    const effectiveFlowMix = flowMix * flowFreezeMix;
-    const hasRenderableMainFlowPoints = Array.isArray(pathFramePayload.points)
-      && pathFramePayload.points.length > 1;
-    const hasRenderableRetainedStartFlowPoints = Array.isArray(pathFramePayload.retainedStartArcPoints)
-      && pathFramePayload.retainedStartArcPoints.length > 1;
-    const hasRenderableRetainedEndFlowPoints = Array.isArray(pathFramePayload.retainedEndArcPoints)
-      && pathFramePayload.retainedEndArcPoints.length > 1;
-    const hasRenderableFlowPoints = (
-      hasRenderableMainFlowPoints
-      || hasRenderableRetainedStartFlowPoints
-      || hasRenderableRetainedEndFlowPoints
-    );
-    pathFramePayload.flowEnabled = (
-      !isReducedMotionPreferred()
-      && hasRenderableFlowPoints
-      && effectiveFlowMix > PATH_FLOW_FREEZE_EPSILON
-    );
-    pathFramePayload.flowMix = effectiveFlowMix;
-    pathFramePayload.flowOffset = flowOffset + (Number(renderPoints.flowTravelCompensation) || 0);
-    pathFramePayload.flowCycle = flowMetrics.cycle;
-    pathFramePayload.flowPulse = flowMetrics.pulse;
-    pathFramePayload.flowBaseSpeed = flowMetrics.speed;
-    pathFramePayload.flowSpeed = flowMetrics.speed * flowFreezeMix;
-    if (effectiveFlowMix > PATH_FLOW_FREEZE_EPSILON) {
-      applyPathReverseGradientBlendToPayload(path, flowMetrics.cycle, nowMs);
-    } else {
-      pathFramePayload.reverseColorBlend = 1;
-      pathFramePayload.reverseFromFlowOffset = 0;
-      pathFramePayload.reverseTravelSpan = 0;
-    }
+    syncPathFrameFlowState(path, renderPoints, flowOffset, flowMetrics, flowFreezeMix, nowMs);
     pathFramePayload.flowRise = PATH_FLOW_RISE;
     pathFramePayload.flowDrop = PATH_FLOW_DROP;
     pathFramePayload.drawTutorialBracketsInPathLayer = false;
@@ -4049,8 +4398,8 @@ export function createBoardRendererCore(options = {}) {
         centerX - stitchLineHalf,
         centerY + stitchLineHalf,
       );
-      drawLine(diagALine, shadowOpaque, stitchWidth * 2.0);
-      drawLine(diagBLine, shadowOpaque, stitchWidth * 2.0);
+      drawLine(diagALine, shadowOpaque, stitchWidth * 2);
+      drawLine(diagBLine, shadowOpaque, stitchWidth * 2);
     }
 
     const drawStatePass = (state, color) => {
@@ -4173,10 +4522,10 @@ export function createBoardRendererCore(options = {}) {
     syncBoardCellSize(refs);
 
     const styles = getComputedStyle(boardWrap);
-    const borderLeft = parseFloat(styles.borderLeftWidth || '0') || 0;
-    const borderRight = parseFloat(styles.borderRightWidth || '0') || 0;
-    const borderTop = parseFloat(styles.borderTopWidth || '0') || 0;
-    const borderBottom = parseFloat(styles.borderBottomWidth || '0') || 0;
+    const borderLeft = Number.parseFloat(styles.borderLeftWidth || '0') || 0;
+    const borderRight = Number.parseFloat(styles.borderRightWidth || '0') || 0;
+    const borderTop = Number.parseFloat(styles.borderTopWidth || '0') || 0;
+    const borderBottom = Number.parseFloat(styles.borderBottomWidth || '0') || 0;
     const cw = Math.max(0, wrapRect.width - borderLeft - borderRight);
     const ch = Math.max(0, wrapRect.height - borderTop - borderBottom);
     const innerLeft = wrapRect.left + boardWrap.clientLeft;
@@ -4300,7 +4649,7 @@ export function createBoardRendererCore(options = {}) {
     reusableTutorialBracketPoints = [];
     reusableCellViewModel = null;
     resizeCanvasSignature = '';
-    lastFlowMetricCell = NaN;
+    lastFlowMetricCell = Number.NaN;
     pathThemeCacheInitialized = false;
     pathThemeLineRaw = '';
     pathThemeGoodRaw = '';
@@ -4309,10 +4658,10 @@ export function createBoardRendererCore(options = {}) {
     pathGeometryToken = 0;
     cachedPathRef = null;
     cachedPathLength = -1;
-    cachedPathHeadR = NaN;
-    cachedPathHeadC = NaN;
-    cachedPathTailR = NaN;
-    cachedPathTailC = NaN;
+    cachedPathHeadR = Number.NaN;
+    cachedPathHeadC = Number.NaN;
+    cachedPathTailR = Number.NaN;
+    cachedPathTailC = Number.NaN;
     cachedPathLayoutVersion = -1;
     pathStartRetainedArcState = null;
     pathEndRetainedArcState = null;
@@ -4385,7 +4734,7 @@ export function createBoardRendererCore(options = {}) {
       pendingRenderDirty.path = true;
       pendingRenderDirty.symbols = true;
       pendingRenderDirty.interaction = true;
-      if (Object.prototype.hasOwnProperty.call(uiModel, 'messageHtml')) {
+      if (Object.hasOwn(uiModel, 'messageHtml')) {
         pendingRenderDirty.message = true;
       }
       scheduleRendererFrame();
@@ -4411,7 +4760,6 @@ export function createBoardRendererCore(options = {}) {
         if (pendingRenderState || pendingRenderDirty.interaction || shouldContinue) {
           scheduleRendererFrame();
         }
-        return;
       }
     },
 

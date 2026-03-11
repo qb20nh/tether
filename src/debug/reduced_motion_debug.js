@@ -4,12 +4,12 @@ const MATCH_MEDIA_PATCH_FLAG = '__tetherDebugReducedMotionPatchApplied';
 
 export const DEBUG_REDUCED_MOTION_CLASS = 'isDebugReducedMotion';
 
-const normalizeMediaQuery = (query) => String(query || '').trim().replace(/\s+/g, ' ');
+const normalizeMediaQuery = (query) => String(query || '').trim().replaceAll(/\s+/g, ' ');
 
 const isReducedMotionQuery = (query) => normalizeMediaQuery(query) === REDUCED_MOTION_MEDIA_QUERY;
 
 const resolveDebugScope = () => (
-  typeof window !== 'undefined' ? window : globalThis
+  typeof window === 'undefined' ? globalThis : window
 );
 
 const toggleReducedMotionClass = (target, enabled) => {

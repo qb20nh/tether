@@ -376,7 +376,7 @@ const buildBoardMarkup = ({ t, boot = false }) => {
     : `
           <canvas id="${ELEMENT_IDS.CANVAS}"></canvas>
           <canvas id="${ELEMENT_IDS.SYMBOL_CANVAS}"></canvas>
-          <div id="${ELEMENT_IDS.GRID}" role="application" tabindex="${boot ? '-1' : '0'}" aria-label="${t('ui.puzzleGridAria')}" data-i18n-aria-label="ui.puzzleGridAria"></div>`;
+          <div id="${ELEMENT_IDS.GRID}" role="application" tabindex="0" aria-label="${t('ui.puzzleGridAria')}" data-i18n-aria-label="ui.puzzleGridAria"></div>`;
 
   return `
       <div class="panel">

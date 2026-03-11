@@ -122,7 +122,7 @@ const shapeSignatureWithTransform = (level, transformIndex, rpsShift) => {
   const rows = level.grid.length;
   const cols = rows > 0 ? level.grid[0].length : 0;
   const dims = transformedDimensions(rows, cols, transformIndex);
-  const dstGrid = Array.from({ length: dims.rows }, () => Array(dims.cols).fill('.'));
+  const dstGrid = Array.from({ length: dims.rows }, () => new Array(dims.cols).fill('.'));
   let movableCount = 0;
 
   for (let r = 0; r < rows; r++) {
@@ -166,8 +166,8 @@ export const canonicalConstraintSignature = (level) => {
   let hasRps = false;
   for (let r = 0; r < rows.length && !hasRps; r++) {
     const row = rows[r];
-    for (let c = 0; c < row.length; c++) {
-      if (row[c] === 'g' || row[c] === 'b' || row[c] === 'p') {
+    for (const element of row) {
+      if (element === 'g' || element === 'b' || element === 'p') {
         hasRps = true;
         break;
       }
@@ -188,7 +188,7 @@ export const canonicalConstraintSignature = (level) => {
 const fnv1a64 = (input, seed) => {
   let hash = (FNV_OFFSET_BASIS_64 ^ (seed & MASK_64)) & MASK_64;
   for (let i = 0; i < input.length; i++) {
-    const code = input.charCodeAt(i);
+    const code = input.codePointAt(i);
     hash ^= BigInt(code & 0xff);
     hash = (hash * FNV_PRIME_64) & MASK_64;
     hash ^= BigInt((code >>> 8) & 0xff);

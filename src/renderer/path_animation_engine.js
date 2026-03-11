@@ -1,9 +1,10 @@
 import {
-  pointsMatch,
+  angleDeltaSigned,
   cellDistance,
   clampUnit,
-  angleDeltaSigned,
+  pointsMatch,
 } from '../math.js';
+import { isReducedMotionPreferred as readReducedMotionPreference } from '../reduced_motion.js';
 import {
   getPathTipFromPath,
   isEndAdvanceTransition,
@@ -15,7 +16,6 @@ import {
   normalizeFlowOffset,
   pathsMatch,
 } from './path_transition_utils.js';
-import { isReducedMotionPreferred as readReducedMotionPreference } from '../reduced_motion.js';
 
 const PATH_FLOW_CYCLE = 128;
 const PATH_FLOW_FREEZE_DURATION_MS = 2500;
@@ -42,49 +42,100 @@ const hasShiftedPathPrefixMatch = (longerPath, shorterPath, shiftCount) => {
   return true;
 };
 
+const isPathSide = (side) => side === 'start' || side === 'end';
+
+const hasIntegerPointCoordinates = (point) => (
+  Number.isInteger(point?.r) && Number.isInteger(point?.c)
+);
+
+const clonePoint = (point) => ({ r: point.r, c: point.c });
+
+const getPathTipForSide = (path, side) => (
+  side === 'start' ? path[0] : path.at(-1)
+);
+
+const getPathTipNeighborForSide = (path, side) => (
+  side === 'start' ? path[1] : path.at(-2)
+);
+
+const trimPathTipForSide = (path, side) => (
+  side === 'start' ? path.slice(1) : path.slice(0, -1)
+);
+
+const insertPointAtPathTipForSide = (path, side, point) => (
+  side === 'start'
+    ? [clonePoint(point), ...path]
+    : [...path, clonePoint(point)]
+);
+
+const pathContainsPoint = (path, point) => (
+  Array.isArray(path) && path.some((node) => pointsMatch(node, point))
+);
+
+const pathsSharePrefixMatch = (leftPath, rightPath, compareLength) => {
+  for (let i = 0; i < compareLength; i += 1) {
+    if (!pointsMatch(leftPath[i], rightPath[i])) return false;
+  }
+  return true;
+};
+
 const resolveTipArrivalSyntheticPrevPathFromHint = (
   side,
   nextPath,
   tipArrivalHint = null,
 ) => {
-  if (side !== 'start' && side !== 'end') return null;
-  if (!Array.isArray(nextPath)) return null;
+  if (!isPathSide(side) || !Array.isArray(nextPath)) return null;
   if (!tipArrivalHint || tipArrivalHint.side !== side) return null;
 
   const from = tipArrivalHint.from;
   const to = tipArrivalHint.to;
-  if (
-    !Number.isInteger(from?.r)
-    || !Number.isInteger(from?.c)
-    || !Number.isInteger(to?.r)
-    || !Number.isInteger(to?.c)
-  ) {
-    return null;
-  }
+  if (!hasIntegerPointCoordinates(from) || !hasIntegerPointCoordinates(to)) return null;
+  if (nextPath.length <= 1) return null;
 
-  const nextLen = nextPath.length;
-  if (nextLen <= 1) return null;
-  const nextTip = side === 'start'
-    ? nextPath[0]
-    : nextPath[nextLen - 1];
-  if (!nextTip || nextTip.r !== to.r || nextTip.c !== to.c) return null;
+  const nextTip = getPathTipForSide(nextPath, side);
+  if (!pointsMatch(nextTip, to)) return null;
   if (cellDistance(from, to) > PATH_TIP_ARRIVAL_ADJACENT_MAX) return null;
 
-  if (side === 'end') {
-    const previousTip = nextPath[nextLen - 2];
-    if (previousTip && previousTip.r === from.r && previousTip.c === from.c) {
-      return nextPath.slice(0, nextLen - 1);
-    }
-    if (nextPath.some((node) => node?.r === from.r && node?.c === from.c)) return null;
-    return [...nextPath, { r: from.r, c: from.c }];
+  const nextNeighbor = getPathTipNeighborForSide(nextPath, side);
+  if (pointsMatch(nextNeighbor, from)) return trimPathTipForSide(nextPath, side);
+  if (pathContainsPoint(nextPath, from)) return null;
+  return insertPointAtPathTipForSide(nextPath, side, from);
+};
+
+const resolveEqualLengthTipArrivalSyntheticPrevPath = (side, prevPath, nextPath) => {
+  if (nextPath.length <= 1) return null;
+
+  const prevTip = getPathTipForSide(prevPath, side);
+  const nextTip = getPathTipForSide(nextPath, side);
+  if (!prevTip || !nextTip || pointsMatch(prevTip, nextTip)) return null;
+  return trimPathTipForSide(nextPath, side);
+};
+
+const resolveEndTipArrivalSyntheticPrevPath = (prevPath, nextPath) => {
+  const delta = nextPath.length - prevPath.length;
+  const sharedLen = Math.min(prevPath.length, nextPath.length);
+  if (!pathsSharePrefixMatch(prevPath, nextPath, sharedLen)) return null;
+  if (delta > 1) return nextPath.length > 1 ? trimPathTipForSide(nextPath, 'end') : null;
+  if (delta >= -1) return null;
+
+  const restored = prevPath[nextPath.length];
+  return restored ? insertPointAtPathTipForSide(nextPath, 'end', restored) : null;
+};
+
+const resolveStartTipArrivalSyntheticPrevPath = (prevPath, nextPath) => {
+  if (nextPath.length > prevPath.length) {
+    const stepCount = nextPath.length - prevPath.length;
+    if (stepCount <= 1) return null;
+    if (!hasShiftedPathPrefixMatch(nextPath, prevPath, stepCount)) return null;
+    return nextPath.length > 1 ? trimPathTipForSide(nextPath, 'start') : null;
   }
 
-  const nextNeighbor = nextPath[1];
-  if (nextNeighbor && nextNeighbor.r === from.r && nextNeighbor.c === from.c) {
-    return nextPath.slice(1);
-  }
-  if (nextPath.some((node) => node?.r === from.r && node?.c === from.c)) return null;
-  return [{ r: from.r, c: from.c }, ...nextPath];
+  const stepCount = prevPath.length - nextPath.length;
+  if (stepCount <= 1) return null;
+  if (!hasShiftedPathPrefixMatch(prevPath, nextPath, stepCount)) return null;
+
+  const restored = prevPath[stepCount - 1];
+  return restored ? insertPointAtPathTipForSide(nextPath, 'start', restored) : null;
 };
 
 export const resolveTipArrivalSyntheticPrevPath = (
@@ -93,8 +144,7 @@ export const resolveTipArrivalSyntheticPrevPath = (
   nextPath,
   tipArrivalHint = null,
 ) => {
-  if (side !== 'start' && side !== 'end') return null;
-  if (!Array.isArray(prevPath) || !Array.isArray(nextPath)) return null;
+  if (!isPathSide(side) || !Array.isArray(prevPath) || !Array.isArray(nextPath)) return null;
 
   const fromHint = resolveTipArrivalSyntheticPrevPathFromHint(side, nextPath, tipArrivalHint);
   if (fromHint) return fromHint;
@@ -102,51 +152,98 @@ export const resolveTipArrivalSyntheticPrevPath = (
   const prevLen = prevPath.length;
   const nextLen = nextPath.length;
   if (prevLen <= 0 || nextLen <= 0) return null;
-
   if (prevLen === nextLen) {
-    if (nextLen <= 1) return null;
-    if (side === 'end') {
-      const prevTail = prevPath[nextLen - 1];
-      const nextTail = nextPath[nextLen - 1];
-      if (!prevTail || !nextTail || pointsMatch(prevTail, nextTail)) return null;
-      return nextPath.slice(0, nextLen - 1);
-    }
+    return resolveEqualLengthTipArrivalSyntheticPrevPath(side, prevPath, nextPath);
+  }
+  return side === 'end'
+    ? resolveEndTipArrivalSyntheticPrevPath(prevPath, nextPath)
+    : resolveStartTipArrivalSyntheticPrevPath(prevPath, nextPath);
+};
 
-    const prevHead = prevPath[0];
-    const nextHead = nextPath[0];
-    if (!prevHead || !nextHead || pointsMatch(prevHead, nextHead)) return null;
-    return nextPath.slice(1);
+const resolvePathOverlapLength = (nextPath, previousPath, nextStart, prevStart) => {
+  let overlap = 0;
+  const maxCompare = Math.min(previousPath.length - prevStart, nextPath.length - nextStart);
+  while (
+    overlap < maxCompare
+    && pointsMatch(nextPath[nextStart + overlap], previousPath[prevStart + overlap])
+  ) {
+    overlap += 1;
+  }
+  return overlap;
+};
+
+const isBetterShiftConstrainedOverlapCandidate = (
+  overlap,
+  headCost,
+  bestOverlap,
+  bestHeadCost,
+) => {
+  if (overlap > bestOverlap) return true;
+  if (overlap < bestOverlap) return false;
+  return headCost < bestHeadCost;
+};
+
+const isBetterRelaxedOverlapCandidate = (
+  overlap,
+  headShiftAbs,
+  headCost,
+  bestOverlap,
+  bestHeadShiftAbs,
+  bestHeadCost,
+) => {
+  if (overlap > bestOverlap) return true;
+  if (overlap < bestOverlap) return false;
+  if (headShiftAbs < bestHeadShiftAbs) return true;
+  if (headShiftAbs > bestHeadShiftAbs) return false;
+  return headCost < bestHeadCost;
+};
+
+const resolvePathOverlapCandidate = (
+  nextPath,
+  previousPath,
+  nextStart,
+  prevStart,
+  minOverlap,
+  shiftCount,
+) => {
+  if (Number.isInteger(shiftCount) && (nextStart - prevStart) !== shiftCount) return null;
+
+  const overlap = resolvePathOverlapLength(nextPath, previousPath, nextStart, prevStart);
+  if (overlap < minOverlap) return null;
+
+  return {
+    nextStart,
+    prevStart,
+    overlap,
+    headShiftAbs: Math.abs(nextStart - prevStart),
+    headCost: nextStart + prevStart,
+  };
+};
+
+const isBetterPathOverlapCandidate = (
+  candidate,
+  bestOverlap,
+  bestHeadShiftAbs,
+  bestHeadCost,
+  shiftCount,
+) => {
+  if (Number.isInteger(shiftCount)) {
+    return isBetterShiftConstrainedOverlapCandidate(
+      candidate.overlap,
+      candidate.headCost,
+      bestOverlap,
+      bestHeadCost,
+    );
   }
 
-  if (side === 'end') {
-    const sharedLen = Math.min(prevLen, nextLen);
-    for (let i = 0; i < sharedLen; i += 1) {
-      if (!pointsMatch(prevPath[i], nextPath[i])) return null;
-    }
-
-    const delta = nextLen - prevLen;
-    if (delta > 1) {
-      return nextLen > 1 ? nextPath.slice(0, nextLen - 1) : null;
-    }
-    if (delta < -1) {
-      const restored = prevPath[nextLen];
-      return restored ? [...nextPath, restored] : null;
-    }
-    return null;
-  }
-
-  if (nextLen > prevLen) {
-    const stepCount = nextLen - prevLen;
-    if (stepCount <= 1) return null;
-    if (!hasShiftedPathPrefixMatch(nextPath, prevPath, stepCount)) return null;
-    return nextLen > 1 ? nextPath.slice(1) : null;
-  }
-
-  const stepCount = prevLen - nextLen;
-  if (stepCount <= 1) return null;
-  if (!hasShiftedPathPrefixMatch(prevPath, nextPath, stepCount)) return null;
-  const restored = prevPath[stepCount - 1];
-  return restored ? [restored, ...nextPath] : null;
+  return isBetterRelaxedOverlapCandidate(
+    candidate.overlap,
+    candidate.headShiftAbs,
+    candidate.headCost,
+    bestOverlap,
+    bestHeadShiftAbs,
+    bestHeadCost,
+  );
 };
 
 const resolveBestPathOverlap = (
@@ -168,39 +265,29 @@ const resolveBestPathOverlap = (
 
   for (let prevStart = 0; prevStart < prevLen; prevStart += 1) {
     for (let nextStart = 0; nextStart < nextLen; nextStart += 1) {
-      if (Number.isInteger(shiftCount) && (nextStart - prevStart) !== shiftCount) continue;
+      const candidate = resolvePathOverlapCandidate(
+        nextPath,
+        previousPath,
+        nextStart,
+        prevStart,
+        minOverlap,
+        shiftCount,
+      );
+      if (!candidate) continue;
 
-      let overlap = 0;
-      const maxCompare = Math.min(prevLen - prevStart, nextLen - nextStart);
-      while (overlap < maxCompare && pointsMatch(nextPath[nextStart + overlap], previousPath[prevStart + overlap])) {
-        overlap += 1;
-      }
-      if (overlap < minOverlap) continue;
+      if (!isBetterPathOverlapCandidate(
+        candidate,
+        bestOverlap,
+        bestHeadShiftAbs,
+        bestHeadCost,
+        shiftCount,
+      )) continue;
 
-      const headShiftAbs = Math.abs(nextStart - prevStart);
-      const headCost = nextStart + prevStart;
-      const isBetter = Number.isInteger(shiftCount)
-        ? (
-          overlap > bestOverlap
-          || (overlap === bestOverlap && headCost < bestHeadCost)
-        )
-        : (
-          overlap > bestOverlap
-          || (
-            overlap === bestOverlap
-            && (
-              headShiftAbs < bestHeadShiftAbs
-              || (headShiftAbs === bestHeadShiftAbs && headCost < bestHeadCost)
-            )
-          )
-        );
-      if (!isBetter) continue;
-
-      bestOverlap = overlap;
-      bestNextStart = nextStart;
-      bestPrevStart = prevStart;
-      bestHeadShiftAbs = headShiftAbs;
-      bestHeadCost = headCost;
+      bestOverlap = candidate.overlap;
+      bestNextStart = candidate.nextStart;
+      bestPrevStart = candidate.prevStart;
+      bestHeadShiftAbs = candidate.headShiftAbs;
+      bestHeadCost = candidate.headCost;
     }
   }
 
@@ -363,7 +450,7 @@ const getPathSegmentCount = (path) => {
 
 const normalizeDirectionInto = (dx, dy, out) => {
   const len = Math.hypot(dx, dy);
-  if (!(len > 0)) return null;
+  if (len <= 0) return null;
   out.x = dx / len;
   out.y = dy / len;
   return out;
@@ -415,11 +502,11 @@ export function createPathAnimationEngine(options = {}) {
     scale: 1,
     active: false,
     mode: 'none',
-    anchorR: NaN,
-    anchorC: NaN,
+    anchorR: Number.NaN,
+    anchorC: Number.NaN,
   };
-  const endArrowDirectionScratch = { x: NaN, y: NaN, active: false };
-  const startFlowDirectionScratch = { x: NaN, y: NaN, active: false };
+  const endArrowDirectionScratch = { x: Number.NaN, y: Number.NaN, active: false };
+  const startFlowDirectionScratch = { x: Number.NaN, y: Number.NaN, active: false };
   const reverseTipScaleScratch = { inScale: 1, outScale: 0, active: false };
   const reverseGradientBlendScratch = {
     blend: 1,
@@ -545,7 +632,7 @@ export function createPathAnimationEngine(options = {}) {
 
     const retractedTip = prevPath[nextPath.length];
     const nextTip = getPathTipFromPath(nextPath, 'end');
-    const neighbor = Array.isArray(nextPath) ? nextPath[nextPath.length - 2] : null;
+    const neighbor = Array.isArray(nextPath) ? nextPath.at(-2) : null;
     if (!retractedTip || !nextTip || !neighbor) {
       clearPathEndArrowRotateState();
       return;
@@ -589,8 +676,8 @@ export function createPathAnimationEngine(options = {}) {
     nowMs = nowFn(),
     out = endArrowDirectionScratch,
   ) => {
-    out.x = NaN;
-    out.y = NaN;
+    out.x = Number.NaN;
+    out.y = Number.NaN;
     out.active = false;
 
     if (isReducedMotionPreferred()) {
@@ -705,8 +792,8 @@ export function createPathAnimationEngine(options = {}) {
     nowMs = nowFn(),
     out = startFlowDirectionScratch,
   ) => {
-    out.x = NaN;
-    out.y = NaN;
+    out.x = Number.NaN;
+    out.y = Number.NaN;
     out.active = false;
 
     if (isReducedMotionPreferred()) {
@@ -758,6 +845,54 @@ export function createPathAnimationEngine(options = {}) {
     nowMs = nowFn(),
   ) => resolvePathStartFlowDirection(path, nowMs, startFlowDirectionScratch).active;
 
+  const setSinglePathTipArrivalState = (side, state) => {
+    if (side === 'start') pathStartArrivalState = state;
+    else if (side === 'end') pathEndArrivalState = state;
+  };
+
+  const resolveAdjacentTipArrivalMove = (prevTip, nextTip) => {
+    const dr = prevTip.r - nextTip.r;
+    const dc = prevTip.c - nextTip.c;
+    const length = Math.hypot(dc, dr);
+    if (length <= 0 || length > PATH_TIP_ARRIVAL_ADJACENT_MAX) return null;
+    return { dr, dc, length };
+  };
+
+  const resolveSinglePathTipArrivalMode = (side, prevPath, nextPath) => {
+    if (side === 'start') {
+      if (isStartRetractTransition(prevPath, nextPath)) return 'retract';
+      return isStartAdvanceTransition(prevPath, nextPath) ? 'arrive' : null;
+    }
+    if (isEndRetractTransition(prevPath, nextPath)) return 'retract';
+    return isEndAdvanceTransition(prevPath, nextPath) ? 'arrive' : null;
+  };
+
+  const buildPathTipArrivalState = (mode, nextTip, move, cellSize, cellStep, nowMs) => {
+    if (mode === 'retract') {
+      const step = Number.isFinite(cellStep) && cellStep > 0 ? cellStep : Number(cellSize) || 0;
+      return {
+        mode,
+        startTimeMs: nowMs,
+        offsetX: move.dc * step,
+        offsetY: move.dr * step,
+        targetR: nextTip.r,
+        targetC: nextTip.c,
+        cutoffMs: PATH_TIP_ARRIVAL_DURATION_MS,
+      };
+    }
+
+    const distancePx = Math.max(0, (Number(cellSize) || 0) * PATH_TIP_ARRIVAL_DISTANCE_CELL_FACTOR);
+    return {
+      mode,
+      startTimeMs: nowMs,
+      offsetX: (move.dc / move.length) * distancePx,
+      offsetY: (move.dr / move.length) * distancePx,
+      targetR: nextTip.r,
+      targetC: nextTip.c,
+      cutoffMs: PATH_TIP_ARRIVAL_DURATION_MS,
+    };
+  };
+
   const updateSinglePathTipArrivalState = (
     side,
     prevPath,
@@ -765,73 +900,33 @@ export function createPathAnimationEngine(options = {}) {
     cellSize,
     cellStep,
     nowMs,
-    pathChanged = true,
   ) => {
-    if (side !== 'start' && side !== 'end') return;
+    if (!isPathSide(side)) return;
     const clearState = () => clearSinglePathTipArrivalState(side);
     const prevTip = getPathTipFromPath(prevPath, side);
     const nextTip = getPathTipFromPath(nextPath, side);
 
-    if (!nextTip) {
-      clearState();
-      return;
-    }
-    if (!prevTip) {
-      if (pathChanged) clearState();
-      return;
-    }
-    if (prevTip.r === nextTip.r && prevTip.c === nextTip.c) {
-      if (pathChanged) clearState();
-      return;
-    }
-
-    const moveDr = prevTip.r - nextTip.r;
-    const moveDc = prevTip.c - nextTip.c;
-    const moveLength = Math.hypot(moveDc, moveDr);
-    if (!(moveLength > 0) || moveLength > PATH_TIP_ARRIVAL_ADJACENT_MAX) {
+    if (!nextTip || !prevTip || pointsMatch(prevTip, nextTip)) {
       clearState();
       return;
     }
 
-    const isRetract = side === 'start'
-      ? isStartRetractTransition(prevPath, nextPath)
-      : isEndRetractTransition(prevPath, nextPath);
-    if (isRetract) {
-      const step = Number.isFinite(cellStep) && cellStep > 0 ? cellStep : Number(cellSize) || 0;
-      const state = {
-        mode: 'retract',
-        startTimeMs: nowMs,
-        offsetX: moveDc * step,
-        offsetY: moveDr * step,
-        targetR: nextTip.r,
-        targetC: nextTip.c,
-        cutoffMs: PATH_TIP_ARRIVAL_DURATION_MS,
-      };
-      if (side === 'start') pathStartArrivalState = state;
-      else pathEndArrivalState = state;
-      return;
-    }
-
-    const isAdvance = side === 'start'
-      ? isStartAdvanceTransition(prevPath, nextPath)
-      : isEndAdvanceTransition(prevPath, nextPath);
-    if (!isAdvance) {
+    const move = resolveAdjacentTipArrivalMove(prevTip, nextTip);
+    if (!move) {
       clearState();
       return;
     }
 
-    const distancePx = Math.max(0, (Number(cellSize) || 0) * PATH_TIP_ARRIVAL_DISTANCE_CELL_FACTOR);
-    const state = {
-      mode: 'arrive',
-      startTimeMs: nowMs,
-      offsetX: (moveDc / moveLength) * distancePx,
-      offsetY: (moveDr / moveLength) * distancePx,
-      targetR: nextTip.r,
-      targetC: nextTip.c,
-      cutoffMs: PATH_TIP_ARRIVAL_DURATION_MS,
-    };
-    if (side === 'start') pathStartArrivalState = state;
-    else pathEndArrivalState = state;
+    const mode = resolveSinglePathTipArrivalMode(side, prevPath, nextPath);
+    if (!mode) {
+      clearState();
+      return;
+    }
+
+    setSinglePathTipArrivalState(
+      side,
+      buildPathTipArrivalState(mode, nextTip, move, cellSize, cellStep, nowMs),
+    );
   };
 
   const updatePathTipArrivalStates = (
@@ -882,7 +977,6 @@ export function createPathAnimationEngine(options = {}) {
       cellSize,
       cellStep,
       nowMs,
-      pathChanged,
     );
     updateSinglePathTipArrivalState(
       'end',
@@ -891,7 +985,6 @@ export function createPathAnimationEngine(options = {}) {
       cellSize,
       cellStep,
       nowMs,
-      pathChanged,
     );
   };
 
@@ -1046,8 +1139,8 @@ export function createPathAnimationEngine(options = {}) {
     return out;
   };
 
-  const hasActivePathFlowVisibility = (path, nowMs = nowFn(), out) => (
-    resolvePathFlowVisibilityMix(path, nowMs, out).active
+  const hasActivePathFlowVisibility = (path, nowMs, out = flowVisibilityMixScratch) => (
+    resolvePathFlowVisibilityMix(path, nowMs ?? nowFn(), out).active
   );
 
   const updatePathStartPinPresenceState = (
@@ -1106,8 +1199,8 @@ export function createPathAnimationEngine(options = {}) {
     out.scale = 1;
     out.active = false;
     out.mode = 'none';
-    out.anchorR = NaN;
-    out.anchorC = NaN;
+    out.anchorR = Number.NaN;
+    out.anchorC = Number.NaN;
 
     if (isReducedMotionPreferred()) {
       clearPathStartPinPresenceState();
@@ -1149,8 +1242,8 @@ export function createPathAnimationEngine(options = {}) {
     return out;
   };
 
-  const hasActivePathStartPinPresence = (path, nowMs = nowFn(), out) => (
-    resolvePathStartPinPresenceScale(path, nowMs, out).active
+  const hasActivePathStartPinPresence = (path, nowMs, out = startPinPresenceScaleScratch) => (
+    resolvePathStartPinPresenceScale(path, nowMs ?? nowFn(), out).active
   );
 
   const beginPathReverseGradientBlend = (
@@ -1251,7 +1344,7 @@ export function createPathAnimationEngine(options = {}) {
     if (!isPathReversed(nextPath, prevPath)) return;
     if (!Array.isArray(nextPath) || nextPath.length < 2) return;
     const head = nextPath[0];
-    const tail = nextPath[nextPath.length - 1];
+    const tail = nextPath.at(-1);
     if (!head || !tail) return;
     pathReverseTipSwapState = {
       startTimeMs: nowMs,
@@ -1280,7 +1373,7 @@ export function createPathAnimationEngine(options = {}) {
     }
 
     const head = path[0];
-    const tail = path[path.length - 1];
+    const tail = path.at(-1);
     if (
       !head
       || !tail

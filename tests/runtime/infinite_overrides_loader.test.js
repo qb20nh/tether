@@ -1,5 +1,5 @@
-import test from 'node:test';
 import assert from 'node:assert/strict';
+import test from 'node:test';
 import { gzipSync } from 'node:zlib';
 import { __TEST__ } from '../../src/infinite_overrides.js';
 

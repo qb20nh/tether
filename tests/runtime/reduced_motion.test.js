@@ -1,11 +1,11 @@
-import test from 'node:test';
 import assert from 'node:assert/strict';
-import { isReducedMotionPreferred } from '../../src/reduced_motion.js';
+import test from 'node:test';
 import {
   DEBUG_REDUCED_MOTION_CLASS,
   readDebugReducedMotionSimulation,
   setDebugReducedMotionSimulation,
 } from '../../src/debug/reduced_motion_debug.js';
+import { isReducedMotionPreferred } from '../../src/reduced_motion.js';
 
 const createClassList = () => {
   const tokens = new Set();

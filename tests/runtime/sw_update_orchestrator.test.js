@@ -1,5 +1,5 @@
-import test from 'node:test';
 import assert from 'node:assert/strict';
+import test from 'node:test';
 import { createSwUpdateOrchestrator } from '../../src/app/sw_update_orchestrator.js';
 
 const SW_MESSAGE_TYPES = Object.freeze({
@@ -230,6 +230,58 @@ test('checkForNewBuild performs APPLY path when auto-update is enabled', async (
   assert.equal(waitingWorkerMessages[0].type, 'SW_SKIP_WAITING');
 });
 
+test('applyUpdateForBuild waits for a worker discovered through updatefound', async () => {
+  const waitingWorkerMessages = [];
+  let updateFoundListener = null;
+  let stateChangeListener = null;
+  const waitingWorker = {
+    state: 'installing',
+    addEventListener(type, listener) {
+      if (type === 'statechange') stateChangeListener = listener;
+    },
+    removeEventListener(type, listener) {
+      if (type === 'statechange' && stateChangeListener === listener) {
+        stateChangeListener = null;
+      }
+    },
+    postMessage(message) {
+      waitingWorkerMessages.push(message);
+    },
+  };
+  const registration = {
+    waiting: null,
+    installing: null,
+    active: null,
+    async update() {
+      this.installing = waitingWorker;
+      updateFoundListener?.();
+      this.waiting = waitingWorker;
+      waitingWorker.state = 'installed';
+      stateChangeListener?.();
+    },
+    addEventListener(type, listener) {
+      if (type === 'updatefound') updateFoundListener = listener;
+    },
+    removeEventListener(type, listener) {
+      if (type === 'updatefound' && updateFoundListener === listener) {
+        updateFoundListener = null;
+      }
+    },
+  };
+  const messengerHarness = createMessengerStub({ registration });
+  const orchestrator = createOrchestrator({
+    messenger: messengerHarness.messenger,
+    readAutoUpdateEnabledPreference: () => true,
+  });
+
+  const result = await orchestrator.applyUpdateForBuild(101, { force: true });
+
+  assert.equal(result.applied, true);
+  assert.equal(result.status, UPDATE_APPLY_STATUS.APPLIED);
+  assert.equal(waitingWorkerMessages.length, 1);
+  assert.equal(waitingWorkerMessages[0].type, 'SW_SKIP_WAITING');
+});
+
 test('ensureServiceWorkerUpdatePolicyConsistency resyncs only when policy drift is detected', async () => {
   const target = { postMessage() { } };
   const messengerHarness = createMessengerStub({
@@ -320,11 +372,11 @@ test('registerServiceWorker runs sync flow and requests history', async () => {
   assert.equal(out, registration);
   assert.equal(messengerHarness.flushCalls.length, 1);
 
-  const types = messengerHarness.postedMessages.map(({ message }) => message.type);
-  assert.equal(types.includes(SW_MESSAGE_TYPES.SYNC_DAILY_STATE), true);
-  assert.equal(types.includes(SW_MESSAGE_TYPES.SYNC_UPDATE_POLICY), true);
-  assert.equal(types.includes(SW_MESSAGE_TYPES.RUN_DAILY_CHECK), true);
-  assert.equal(types.includes(SW_MESSAGE_TYPES.GET_HISTORY), true);
+  const types = new Set(messengerHarness.postedMessages.map(({ message }) => message.type));
+  assert.equal(types.has(SW_MESSAGE_TYPES.SYNC_DAILY_STATE), true);
+  assert.equal(types.has(SW_MESSAGE_TYPES.SYNC_UPDATE_POLICY), true);
+  assert.equal(types.has(SW_MESSAGE_TYPES.RUN_DAILY_CHECK), true);
+  assert.equal(types.has(SW_MESSAGE_TYPES.GET_HISTORY), true);
 });
 
 test('applyUpdateForBuild returns UNAVAILABLE when build is not applicable', async () => {

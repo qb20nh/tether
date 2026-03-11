@@ -11,6 +11,7 @@ const MIDDLE_DOUBLE_CLICK_WINDOW_MS = 360;
 const TOGGLE_BIND_ATTR = 'data-debug-toggle-bound';
 const DEBUG_TAB_NOTIFICATION = 'notification';
 const DEBUG_TAB_DAILY = 'daily';
+const DEBUG_TAB_ANIMATION = 'animation';
 
 const ensurePanelStyles = () => {
   if (document.getElementById(STYLE_ID)) return;
@@ -205,101 +206,91 @@ const bindLogoToggle = (panelEl, onToggle = () => {}) => {
   });
 };
 
-export const mountLocalDebugPanel = (callbacks = {}) => {
-  ensurePanelStyles();
-  const existingRoot = document.getElementById(PANEL_ID);
-  if (existingRoot) {
-    setPanelVisible(existingRoot, false);
-    bindLogoToggle(existingRoot);
-    return;
-  }
+const resolveFunction = (value, fallback) => (
+  typeof value === 'function' ? value : fallback
+);
 
-  const requestPermission = typeof callbacks.requestNotificationPermission === 'function'
-    ? callbacks.requestNotificationPermission
-    : async () => 'unsupported';
-  const showToast = typeof callbacks.showToast === 'function'
-    ? callbacks.showToast
-    : () => { };
-  const triggerSystemNotification = typeof callbacks.triggerSystemNotification === 'function'
-    ? callbacks.triggerSystemNotification
-    : async () => false;
-  const clearNotifications = typeof callbacks.clearNotifications === 'function'
-    ? callbacks.clearNotifications
-    : async () => false;
-  const fetchDailyPayload = typeof callbacks.fetchDailyPayload === 'function'
-    ? callbacks.fetchDailyPayload
-    : async () => null;
-  const runDailyCheck = typeof callbacks.runDailyCheck === 'function'
-    ? callbacks.runDailyCheck
-    : async () => false;
-  const readDailyDebugSnapshot = typeof callbacks.readDailyDebugSnapshot === 'function'
-    ? callbacks.readDailyDebugSnapshot
-    : () => null;
-  const toggleForceDailyFrozenState = typeof callbacks.toggleForceDailyFrozenState === 'function'
-    ? callbacks.toggleForceDailyFrozenState
-    : () => null;
-  const reloadApp = typeof callbacks.reloadApp === 'function'
-    ? callbacks.reloadApp
-    : () => window.location.reload();
+const resolvePanelCallbacks = (callbacks = {}) => ({
+  requestPermission: resolveFunction(callbacks.requestNotificationPermission, async () => 'unsupported'),
+  showToast: resolveFunction(callbacks.showToast, () => { }),
+  triggerSystemNotification: resolveFunction(callbacks.triggerSystemNotification, async () => false),
+  clearNotifications: resolveFunction(callbacks.clearNotifications, async () => false),
+  fetchDailyPayload: resolveFunction(callbacks.fetchDailyPayload, async () => null),
+  runDailyCheck: resolveFunction(callbacks.runDailyCheck, async () => false),
+  readDailyDebugSnapshot: resolveFunction(callbacks.readDailyDebugSnapshot, () => null),
+  toggleForceDailyFrozenState: resolveFunction(callbacks.toggleForceDailyFrozenState, () => null),
+  reloadApp: resolveFunction(callbacks.reloadApp, () => window.location.reload()),
+});
 
-  const root = document.createElement('section');
-  root.id = PANEL_ID;
-  setPanelVisible(root, false);
+const createDebugButton = (label, onClick) => {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.textContent = label;
+  button.addEventListener('click', onClick);
+  return button;
+};
 
-  const title = document.createElement('div');
-  title.className = 'debugTitle';
-  title.textContent = 'Local Debug';
+const appendDebugButtons = (container, buttons) => {
+  buttons.forEach(({ label, onClick }) => {
+    container.appendChild(createDebugButton(label, onClick));
+  });
+};
 
+const createTabEntry = ({ key, label, suffix }) => {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'debugTabBtn';
+  button.textContent = label;
+  button.id = `${PANEL_ID}Tab${suffix}`;
+  button.setAttribute('role', 'tab');
+  button.setAttribute('aria-controls', `${PANEL_ID}Panel${suffix}`);
+
+  const panel = document.createElement('div');
+  panel.className = 'debugTabPanel';
+  panel.dataset.tab = key;
+  panel.id = `${PANEL_ID}Panel${suffix}`;
+  panel.setAttribute('role', 'tabpanel');
+  panel.setAttribute('aria-labelledby', button.id);
+
+  return { key, button, panel };
+};
+
+const createTabLayout = () => {
   const tabs = document.createElement('div');
   tabs.className = 'debugTabs';
   tabs.setAttribute('role', 'tablist');
-  const notificationTabBtn = document.createElement('button');
-  notificationTabBtn.type = 'button';
-  notificationTabBtn.className = 'debugTabBtn';
-  notificationTabBtn.textContent = 'Notifications';
-  notificationTabBtn.id = `${PANEL_ID}TabNotification`;
-  notificationTabBtn.setAttribute('role', 'tab');
-  notificationTabBtn.setAttribute('aria-controls', `${PANEL_ID}PanelNotification`);
-  const dailyTabBtn = document.createElement('button');
-  dailyTabBtn.type = 'button';
-  dailyTabBtn.className = 'debugTabBtn';
-  dailyTabBtn.textContent = 'Daily';
-  dailyTabBtn.id = `${PANEL_ID}TabDaily`;
-  dailyTabBtn.setAttribute('role', 'tab');
-  dailyTabBtn.setAttribute('aria-controls', `${PANEL_ID}PanelDaily`);
-  tabs.appendChild(notificationTabBtn);
-  tabs.appendChild(dailyTabBtn);
 
-  const notificationTab = document.createElement('div');
-  notificationTab.className = 'debugTabPanel';
-  notificationTab.dataset.tab = DEBUG_TAB_NOTIFICATION;
-  notificationTab.id = `${PANEL_ID}PanelNotification`;
-  notificationTab.setAttribute('role', 'tabpanel');
-  notificationTab.setAttribute('aria-labelledby', notificationTabBtn.id);
+  const notificationEntry = createTabEntry({
+    key: DEBUG_TAB_NOTIFICATION,
+    label: 'Notifications',
+    suffix: 'Notification',
+  });
+  const dailyEntry = createTabEntry({
+    key: DEBUG_TAB_DAILY,
+    label: 'Daily',
+    suffix: 'Daily',
+  });
+  const animationEntry = createTabEntry({
+    key: DEBUG_TAB_ANIMATION,
+    label: 'Animations',
+    suffix: 'Animation',
+  });
+  const tabEntries = [notificationEntry, dailyEntry, animationEntry];
 
-  const dailyTab = document.createElement('div');
-  dailyTab.className = 'debugTabPanel';
-  dailyTab.dataset.tab = DEBUG_TAB_DAILY;
-  dailyTab.id = `${PANEL_ID}PanelDaily`;
-  dailyTab.setAttribute('role', 'tabpanel');
-  dailyTab.setAttribute('aria-labelledby', dailyTabBtn.id);
+  tabEntries.forEach(({ button }) => {
+    tabs.appendChild(button);
+  });
 
-  const animationTabBtn = document.createElement('button');
-  animationTabBtn.type = 'button';
-  animationTabBtn.className = 'debugTabBtn';
-  animationTabBtn.textContent = 'Animations';
-  animationTabBtn.id = `${PANEL_ID}TabAnimation`;
-  animationTabBtn.setAttribute('role', 'tab');
-  animationTabBtn.setAttribute('aria-controls', `${PANEL_ID}PanelAnimation`);
-  tabs.appendChild(animationTabBtn);
+  return {
+    tabs,
+    tabEntries,
+    notificationEntry,
+    dailyEntry,
+    animationEntry,
+  };
+};
 
-  const animationTab = document.createElement('div');
-  animationTab.className = 'debugTabPanel';
-  animationTab.dataset.tab = 'animation';
-  animationTab.id = `${PANEL_ID}PanelAnimation`;
-  animationTab.setAttribute('role', 'tabpanel');
-  animationTab.setAttribute('aria-labelledby', animationTabBtn.id);
-
+const createNotificationTabContent = (panel, callbacks) => {
   const titleRow = document.createElement('div');
   titleRow.className = 'debugRow';
   const titleInput = document.createElement('input');
@@ -315,103 +306,139 @@ export const mountLocalDebugPanel = (callbacks = {}) => {
 
   const buttonGrid = document.createElement('div');
   buttonGrid.className = 'debugGrid';
+  appendDebugButtons(buttonGrid, [
+    {
+      label: 'Permission',
+      onClick: async () => {
+        await callbacks.requestPermission();
+      },
+    },
+    {
+      label: 'Toast',
+      onClick: () => {
+        const titleText = buildValue(titleInput.value, 'Debug toast');
+        const bodyText = buildValue(bodyInput.value, '');
+        const text = bodyText ? `${titleText}\n${bodyText}` : titleText;
+        callbacks.showToast(text, { recordInHistory: true });
+      },
+    },
+    {
+      label: 'System: Warning',
+      onClick: async () => {
+        await callbacks.triggerSystemNotification({
+          kind: 'unsolved-warning',
+        });
+      },
+    },
+    {
+      label: 'System: New',
+      onClick: async () => {
+        await callbacks.triggerSystemNotification({
+          kind: 'new-level',
+        });
+      },
+    },
+    {
+      label: 'Clear Notifications',
+      onClick: async () => {
+        await callbacks.clearNotifications();
+      },
+    },
+  ]);
 
-  const mkButton = (label, onClick) => {
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.textContent = label;
-    button.addEventListener('click', onClick);
-    return button;
-  };
+  panel.appendChild(titleRow);
+  panel.appendChild(bodyRow);
+  panel.appendChild(buttonGrid);
+};
 
-  buttonGrid.appendChild(mkButton('Permission', async () => {
-    await requestPermission();
-  }));
-
-  buttonGrid.appendChild(mkButton('Toast', () => {
-    const titleText = buildValue(titleInput.value, 'Debug toast');
-    const bodyText = buildValue(bodyInput.value, '');
-    const text = bodyText ? `${titleText}\n${bodyText}` : titleText;
-    showToast(text, { recordInHistory: true });
-  }));
-
-  buttonGrid.appendChild(mkButton('System: Warning', async () => {
-    await triggerSystemNotification({
-      kind: 'unsolved-warning',
-    });
-  }));
-
-  buttonGrid.appendChild(mkButton('System: New', async () => {
-    await triggerSystemNotification({
-      kind: 'new-level',
-    });
-  }));
-
-  buttonGrid.appendChild(mkButton('Clear Notifications', async () => {
-    await clearNotifications();
-  }));
-
-  notificationTab.appendChild(titleRow);
-  notificationTab.appendChild(bodyRow);
-  notificationTab.appendChild(buttonGrid);
-
+const createDailyTabContent = (panel, callbacks) => {
   const dailyOutput = document.createElement('pre');
   dailyOutput.className = 'debugOutput';
   setDebugOutput(dailyOutput, 'Daily debug output');
 
   const dailyButtons = document.createElement('div');
   dailyButtons.className = 'debugGrid';
-  dailyButtons.appendChild(mkButton('Snapshot', () => {
-    setDebugOutput(dailyOutput, {
-      nowIsoUtc: new Date().toISOString(),
-      snapshot: readDailyDebugSnapshot(),
-    });
-  }));
-  dailyButtons.appendChild(mkButton('Run Daily Check', async () => {
-    const ok = await runDailyCheck();
-    setDebugOutput(dailyOutput, {
-      nowIsoUtc: new Date().toISOString(),
-      action: 'runDailyCheck',
-      ok,
-    });
-  }));
-  dailyButtons.appendChild(mkButton('Toggle Force Frozen', () => {
-    const nextState = toggleForceDailyFrozenState();
-    setDebugOutput(dailyOutput, {
-      nowIsoUtc: new Date().toISOString(),
-      action: 'toggleForceFrozen',
-      state: nextState,
-    });
-  }));
-  dailyButtons.appendChild(mkButton('Fetch Daily', async () => {
-    const payload = await fetchDailyPayload({ bypassCache: false });
-    setDebugOutput(dailyOutput, {
-      nowIsoUtc: new Date().toISOString(),
-      bypassCache: false,
-      payload: summarizeDailyPayload(payload),
-    });
-  }));
-  dailyButtons.appendChild(mkButton('Fetch Daily (Bypass)', async () => {
-    const payload = await fetchDailyPayload({ bypassCache: true });
-    setDebugOutput(dailyOutput, {
-      nowIsoUtc: new Date().toISOString(),
-      bypassCache: true,
-      payload: summarizeDailyPayload(payload),
-    });
-  }));
-  dailyButtons.appendChild(mkButton('Reload App', () => {
-    reloadApp();
-  }));
+  appendDebugButtons(dailyButtons, [
+    {
+      label: 'Snapshot',
+      onClick: () => {
+        setDebugOutput(dailyOutput, {
+          nowIsoUtc: new Date().toISOString(),
+          snapshot: callbacks.readDailyDebugSnapshot(),
+        });
+      },
+    },
+    {
+      label: 'Run Daily Check',
+      onClick: async () => {
+        const ok = await callbacks.runDailyCheck();
+        setDebugOutput(dailyOutput, {
+          nowIsoUtc: new Date().toISOString(),
+          action: 'runDailyCheck',
+          ok,
+        });
+      },
+    },
+    {
+      label: 'Toggle Force Frozen',
+      onClick: () => {
+        const nextState = callbacks.toggleForceDailyFrozenState();
+        setDebugOutput(dailyOutput, {
+          nowIsoUtc: new Date().toISOString(),
+          action: 'toggleForceFrozen',
+          state: nextState,
+        });
+      },
+    },
+    {
+      label: 'Fetch Daily',
+      onClick: async () => {
+        const payload = await callbacks.fetchDailyPayload({ bypassCache: false });
+        setDebugOutput(dailyOutput, {
+          nowIsoUtc: new Date().toISOString(),
+          bypassCache: false,
+          payload: summarizeDailyPayload(payload),
+        });
+      },
+    },
+    {
+      label: 'Fetch Daily (Bypass)',
+      onClick: async () => {
+        const payload = await callbacks.fetchDailyPayload({ bypassCache: true });
+        setDebugOutput(dailyOutput, {
+          nowIsoUtc: new Date().toISOString(),
+          bypassCache: true,
+          payload: summarizeDailyPayload(payload),
+        });
+      },
+    },
+    {
+      label: 'Reload App',
+      onClick: () => {
+        callbacks.reloadApp();
+      },
+    },
+  ]);
 
-  dailyTab.appendChild(dailyButtons);
-  dailyTab.appendChild(dailyOutput);
+  panel.appendChild(dailyButtons);
+  panel.appendChild(dailyOutput);
+};
 
+const ensureAnimationDebugSpeed = () => {
   if (typeof window.TETHER_DEBUG_ANIM_SPEED !== 'number') {
     window.TETHER_DEBUG_ANIM_SPEED = 1;
   }
+};
+
+const resolveAnimationSpeed = () => (
+  typeof window.TETHER_DEBUG_ANIM_SPEED === 'number' ? window.TETHER_DEBUG_ANIM_SPEED : 1
+);
+
+const createAnimationTabController = (root, panel) => {
+  ensureAnimationDebugSpeed();
+
   const animationButtons = document.createElement('div');
   animationButtons.className = 'debugGrid';
-  let activeTabKey = DEBUG_TAB_NOTIFICATION;
   const reducedMotionToggleLabel = document.createElement('label');
   reducedMotionToggleLabel.className = 'debugCheckbox';
   const reducedMotionToggle = document.createElement('input');
@@ -421,46 +448,29 @@ export const mountLocalDebugPanel = (callbacks = {}) => {
   reducedMotionToggleText.textContent = 'Simulate prefers-reduced-motion';
   reducedMotionToggleLabel.appendChild(reducedMotionToggle);
   reducedMotionToggleLabel.appendChild(reducedMotionToggleText);
-  reducedMotionToggle.addEventListener('change', () => {
-    reducedMotionToggle.checked = setDebugReducedMotionSimulation(reducedMotionToggle.checked);
-    refreshAnimationSync();
-  });
-  animationButtons.appendChild(mkButton('Speed: 1x', () => {
-    window.TETHER_DEBUG_ANIM_SPEED = 1;
-    refreshAnimationSync();
-  }));
-  animationButtons.appendChild(mkButton('Speed: 0.25x (4x slower)', () => {
-    window.TETHER_DEBUG_ANIM_SPEED = 4;
-    refreshAnimationSync();
-  }));
-  animationButtons.appendChild(mkButton('Speed: 0.1x (10x slower)', () => {
-    window.TETHER_DEBUG_ANIM_SPEED = 10;
-    refreshAnimationSync();
-  }));
-  animationTab.appendChild(reducedMotionToggleLabel);
-  animationTab.appendChild(animationButtons);
 
   let animationRafId = 0;
-  const resolveAnimationSpeed = () => (
-    typeof window.TETHER_DEBUG_ANIM_SPEED === 'number' ? window.TETHER_DEBUG_ANIM_SPEED : 1
-  );
-  const shouldSyncAnimations = () => (
-    resolveAnimationSpeed() !== 1 || (activeTabKey === 'animation' && !root.hidden)
-  );
+  let animationTabActive = false;
+
   const stopAnimationSync = () => {
     if (!animationRafId) return;
     cancelAnimationFrame(animationRafId);
     animationRafId = 0;
   };
+
   const applyAnimationsSpeed = () => {
-    const currentSpeed = resolveAnimationSpeed();
-    const targetPlaybackRate = 1 / Math.max(0.1, currentSpeed);
+    const targetPlaybackRate = 1 / Math.max(0.1, resolveAnimationSpeed());
     document.getAnimations().forEach((anim) => {
       if (anim.playbackRate !== targetPlaybackRate) {
         anim.playbackRate = targetPlaybackRate;
       }
     });
   };
+
+  const shouldSyncAnimations = () => (
+    resolveAnimationSpeed() !== 1 || (animationTabActive && !root.hidden)
+  );
+
   const syncAnimationsSpeed = () => {
     applyAnimationsSpeed();
     if (!shouldSyncAnimations()) {
@@ -469,6 +479,7 @@ export const mountLocalDebugPanel = (callbacks = {}) => {
     }
     animationRafId = requestAnimationFrame(syncAnimationsSpeed);
   };
+
   const refreshAnimationSync = () => {
     applyAnimationsSpeed();
     if (shouldSyncAnimations()) {
@@ -480,48 +491,118 @@ export const mountLocalDebugPanel = (callbacks = {}) => {
     stopAnimationSync();
   };
 
-  const setActiveTab = (tabKey) => {
-    activeTabKey = tabKey;
-    const useNotification = tabKey === DEBUG_TAB_NOTIFICATION;
-    const useDaily = tabKey === DEBUG_TAB_DAILY;
-    const useAnimation = tabKey === 'animation';
-    notificationTab.hidden = !useNotification;
-    dailyTab.hidden = !useDaily;
-    animationTab.hidden = !useAnimation;
-    notificationTabBtn.classList.toggle('isActive', useNotification);
-    dailyTabBtn.classList.toggle('isActive', useDaily);
-    animationTabBtn.classList.toggle('isActive', useAnimation);
-    notificationTabBtn.setAttribute('aria-selected', useNotification ? 'true' : 'false');
-    dailyTabBtn.setAttribute('aria-selected', useDaily ? 'true' : 'false');
-    animationTabBtn.setAttribute('aria-selected', useAnimation ? 'true' : 'false');
-    notificationTabBtn.tabIndex = useNotification ? 0 : -1;
-    dailyTabBtn.tabIndex = useDaily ? 0 : -1;
-    animationTabBtn.tabIndex = useAnimation ? 0 : -1;
+  reducedMotionToggle.addEventListener('change', () => {
+    reducedMotionToggle.checked = setDebugReducedMotionSimulation(reducedMotionToggle.checked);
     refreshAnimationSync();
+  });
+
+  appendDebugButtons(animationButtons, [
+    {
+      label: 'Speed: 1x',
+      onClick: () => {
+        window.TETHER_DEBUG_ANIM_SPEED = 1;
+        refreshAnimationSync();
+      },
+    },
+    {
+      label: 'Speed: 0.25x (4x slower)',
+      onClick: () => {
+        window.TETHER_DEBUG_ANIM_SPEED = 4;
+        refreshAnimationSync();
+      },
+    },
+    {
+      label: 'Speed: 0.1x (10x slower)',
+      onClick: () => {
+        window.TETHER_DEBUG_ANIM_SPEED = 10;
+        refreshAnimationSync();
+      },
+    },
+  ]);
+
+  panel.appendChild(reducedMotionToggleLabel);
+  panel.appendChild(animationButtons);
+
+  return {
+    refreshAnimationSync,
+    setAnimationTabActive(isActive) {
+      animationTabActive = isActive;
+      refreshAnimationSync();
+    },
   };
-  const tabButtons = [notificationTabBtn, dailyTabBtn, animationTabBtn];
-  tabButtons.forEach((button, index) => {
+};
+
+const applyActiveTab = (tabEntries, activeTabKey) => {
+  tabEntries.forEach(({ key, button, panel }) => {
+    const isActive = key === activeTabKey;
+    panel.hidden = !isActive;
+    button.classList.toggle('isActive', isActive);
+    button.setAttribute('aria-selected', isActive ? 'true' : 'false');
+    button.tabIndex = isActive ? 0 : -1;
+  });
+};
+
+const bindTabInteractions = (tabEntries, onTabChange) => {
+  tabEntries.forEach(({ key, button }, index) => {
+    button.addEventListener('click', () => onTabChange(key));
     button.addEventListener('keydown', (event) => {
       if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') return;
       event.preventDefault();
+
       const dir = event.key === 'ArrowRight' ? 1 : -1;
-      const nextIndex = (index + dir + tabButtons.length) % tabButtons.length;
-      tabButtons[nextIndex].focus();
-      setActiveTab(nextIndex === 0 ? DEBUG_TAB_NOTIFICATION : (nextIndex === 1 ? DEBUG_TAB_DAILY : 'animation'));
+      const nextIndex = (index + dir + tabEntries.length) % tabEntries.length;
+      const nextEntry = tabEntries[nextIndex];
+      nextEntry.button.focus();
+      onTabChange(nextEntry.key);
     });
   });
-  notificationTabBtn.addEventListener('click', () => setActiveTab(DEBUG_TAB_NOTIFICATION));
-  dailyTabBtn.addEventListener('click', () => setActiveTab(DEBUG_TAB_DAILY));
-  animationTabBtn.addEventListener('click', () => setActiveTab('animation'));
+};
+
+export const mountLocalDebugPanel = (callbacks = {}) => {
+  ensurePanelStyles();
+  const existingRoot = document.getElementById(PANEL_ID);
+  if (existingRoot) {
+    setPanelVisible(existingRoot, false);
+    bindLogoToggle(existingRoot);
+    return;
+  }
+
+  const panelCallbacks = resolvePanelCallbacks(callbacks);
+
+  const root = document.createElement('section');
+  root.id = PANEL_ID;
+  setPanelVisible(root, false);
+
+  const title = document.createElement('div');
+  title.className = 'debugTitle';
+  title.textContent = 'Local Debug';
+
+  const {
+    tabs,
+    tabEntries,
+    notificationEntry,
+    dailyEntry,
+    animationEntry,
+  } = createTabLayout();
+  createNotificationTabContent(notificationEntry.panel, panelCallbacks);
+  createDailyTabContent(dailyEntry.panel, panelCallbacks);
+  const animationController = createAnimationTabController(root, animationEntry.panel);
+
+  const setActiveTab = (tabKey) => {
+    applyActiveTab(tabEntries, tabKey);
+    animationController.setAnimationTabActive(tabKey === DEBUG_TAB_ANIMATION);
+  };
+
+  bindTabInteractions(tabEntries, setActiveTab);
   setActiveTab(DEBUG_TAB_NOTIFICATION);
 
   root.appendChild(title);
   root.appendChild(tabs);
-  root.appendChild(notificationTab);
-  root.appendChild(dailyTab);
-  root.appendChild(animationTab);
+  tabEntries.forEach(({ panel }) => {
+    root.appendChild(panel);
+  });
   document.body.appendChild(root);
   bindLogoToggle(root, () => {
-    refreshAnimationSync();
+    animationController.refreshAnimationSync();
   });
 };

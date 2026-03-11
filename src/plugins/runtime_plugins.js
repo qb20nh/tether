@@ -18,7 +18,7 @@ export const resolveServiceWorkerRegistrationUrl = (isLocalhostHostname) => {
 };
 
 const mountDevRuntimePlugins = async (host = {}) => {
-  if (typeof import.meta === 'undefined' || !import.meta.env || !import.meta.env.DEV) return;
+  if (!import.meta?.env?.DEV) return;
   if (!hasWindow()) return;
   if (typeof host.isLocalhostHostname !== 'function') return;
   if (!host.isLocalhostHostname(window.location.hostname)) return;
@@ -32,6 +32,6 @@ const mountDevRuntimePlugins = async (host = {}) => {
   }
 };
 
-export const mountRuntimePlugins = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.DEV)
+export const mountRuntimePlugins = (import.meta?.env?.DEV)
   ? mountDevRuntimePlugins
   : async () => { };

@@ -1,10 +1,10 @@
-import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createLevelProvider } from '../../src/core/level_provider.js';
+import test from 'node:test';
 import { createDefaultCore } from '../../src/core/default_core.js';
-import { createGameStateStore } from '../../src/state/game_state_store.js';
+import { createLevelProvider } from '../../src/core/level_provider.js';
 import { createMemoryPersistence } from '../../src/persistence/memory_persistence.js';
 import { createHeadlessRuntime } from '../../src/runtime/create_runtime.js';
+import { createGameStateStore } from '../../src/state/game_state_store.js';
 
 const LEVEL = {
   name: 'Headless',
@@ -28,8 +28,8 @@ const INFINITE_SCORE_LEVEL = {
 };
 
 const playPath = (runtime, cells) => {
-  for (let i = 0; i < cells.length; i += 1) {
-    const [r, c] = cells[i];
+  for (const element of cells) {
+    const [r, c] = element;
     runtime.dispatch('path/start-or-step', { r, c });
   }
   return runtime.dispatch('path/finalize-after-pointer', {});

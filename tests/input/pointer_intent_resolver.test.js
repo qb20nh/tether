@@ -1,5 +1,5 @@
-import test from 'node:test';
 import assert from 'node:assert/strict';
+import test from 'node:test';
 import {
   buildPathDragCandidates,
   choosePathDragCell,
@@ -27,7 +27,7 @@ test('buildPathDragCandidates filters visited non-backtrack candidates', () => {
   });
 
   assert.ok(out.find((p) => p.r === 0 && p.c === 1 && p.isBacktrack));
-  assert.ok(!out.find((p) => p.r === 0 && p.c === 1 && !p.isBacktrack));
+  assert.ok(!out.some((p) => p.r === 0 && p.c === 1 && !p.isBacktrack));
 });
 
 test('choosePathDragCell applies nearest + hysteresis selection', () => {

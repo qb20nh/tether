@@ -2,11 +2,41 @@ const TAU = Math.PI * 2;
 const FLOW_STOP_EPSILON = 1e-4;
 const COMPLETE_PATH_THRESHOLD = 0.999;
 const DEFAULT_MAX_PATH_POINTS = 64;
-const BRACKET_PULSE_CYCLES = 3.0;
+const BRACKET_PULSE_CYCLES = 3;
 const FLOAT_BYTES = Float32Array.BYTES_PER_ELEMENT;
 const UINT16_BYTES = Uint16Array.BYTES_PER_ELEMENT;
 
 const clampUnit = (value) => Math.max(0, Math.min(1, value));
+const EMPTY_CORNER_VERTEX_META = Object.freeze({
+  flag: 0,
+  cx: 0,
+  cy: 0,
+  angleIn: 0,
+  sweep: 0,
+  travelStart: 0,
+  travelSpan: 0,
+});
+
+const createMeshStorage = () => ({
+  positions: new Float32Array(0),
+  travels: new Float32Array(0),
+  cornerFlags: new Float32Array(0),
+  cornerCenters: new Float32Array(0),
+  cornerAngles: new Float32Array(0),
+  cornerTravels: new Float32Array(0),
+  indices: new Uint16Array(0),
+  vertexCount: 0,
+  indexCount: 0,
+  mainTravel: 0,
+});
+
+const createBracketStorage = () => ({
+  centers: new Float32Array(0),
+  corners: new Float32Array(0),
+  indices: new Uint16Array(0),
+  vertexCount: 0,
+  indexCount: 0,
+});
 
 const normalizeAngle = (angle) => {
   const normalized = angle % TAU;
@@ -25,26 +55,88 @@ const toFinitePoint = (point) => {
   return { x, y };
 };
 
-const createEmptyMesh = () => ({
-  positions: new Float32Array(0),
-  travels: new Float32Array(0),
-  cornerFlags: new Float32Array(0),
-  cornerCenters: new Float32Array(0),
-  cornerAngles: new Float32Array(0),
-  cornerTravels: new Float32Array(0),
-  indices: new Uint16Array(0),
-  vertexCount: 0,
-  indexCount: 0,
-  mainTravel: 0,
-});
+const createEmptyMesh = createMeshStorage;
+const createEmptyBracketMesh = createBracketStorage;
 
-const createEmptyBracketMesh = () => ({
-  centers: new Float32Array(0),
-  corners: new Float32Array(0),
-  indices: new Uint16Array(0),
-  vertexCount: 0,
-  indexCount: 0,
-});
+const createCornerVertexMeta = (cornerMeta) => {
+  if (!cornerMeta) return EMPTY_CORNER_VERTEX_META;
+  return {
+    flag: 1,
+    cx: cornerMeta.cx || 0,
+    cy: cornerMeta.cy || 0,
+    angleIn: cornerMeta.angleIn || 0,
+    sweep: cornerMeta.sweep || 0,
+    travelStart: cornerMeta.travelStart || 0,
+    travelSpan: cornerMeta.travelSpan || 0,
+  };
+};
+
+const buildCornerTurn = (
+  points,
+  segmentLengths,
+  segmentUx,
+  segmentUy,
+  cornerRadius,
+  cornerIndex,
+) => {
+  const angleTolerance = 1e-4;
+  const corner = points[cornerIndex];
+  const inLen = segmentLengths[cornerIndex - 1];
+  const outLen = segmentLengths[cornerIndex];
+  if (inLen <= 0 || outLen <= 0) return null;
+
+  const inUx = segmentUx[cornerIndex - 1];
+  const inUy = segmentUy[cornerIndex - 1];
+  const outUx = segmentUx[cornerIndex];
+  const outUy = segmentUy[cornerIndex];
+  const inAngle = Math.atan2(inUy, inUx);
+  const outAngle = Math.atan2(outUy, outUx);
+  const headingTurn = angleDeltaSigned(inAngle, outAngle);
+  const absTurn = Math.abs(headingTurn);
+  if (absTurn <= angleTolerance || absTurn >= Math.PI - angleTolerance) return null;
+
+  const tangentScale = Math.tan(absTurn * 0.5);
+  if (tangentScale <= 0 || !Number.isFinite(tangentScale)) return null;
+  const tangentOffset = cornerRadius * tangentScale;
+  const maxTangentOffset = Math.max(0, Math.min(inLen, outLen));
+  const effectiveTangentOffset = Math.min(tangentOffset, maxTangentOffset);
+  if (effectiveTangentOffset <= 0 || !Number.isFinite(effectiveTangentOffset)) return null;
+  const effectiveRadius = effectiveTangentOffset / tangentScale;
+  if (effectiveRadius <= 0 || !Number.isFinite(effectiveRadius)) return null;
+
+  const tangentInX = corner.x - inUx * effectiveTangentOffset;
+  const tangentInY = corner.y - inUy * effectiveTangentOffset;
+  const tangentOutX = corner.x + outUx * effectiveTangentOffset;
+  const tangentOutY = corner.y + outUy * effectiveTangentOffset;
+  const inNormalX = headingTurn > 0 ? -inUy : inUy;
+  const inNormalY = headingTurn > 0 ? inUx : -inUx;
+  const cx = tangentInX + inNormalX * effectiveRadius;
+  const cy = tangentInY + inNormalY * effectiveRadius;
+  const centerAngleIn = normalizeAngle(Math.atan2(tangentInY - cy, tangentInX - cx));
+  const centerAngleOut = normalizeAngle(Math.atan2(tangentOutY - cy, tangentOutX - cx));
+  const centerSweep = angleDeltaSigned(centerAngleIn, centerAngleOut);
+  const centerSweepAbs = Math.abs(centerSweep);
+  if (centerSweepAbs <= angleTolerance) return null;
+
+  return {
+    tangentOffset: effectiveTangentOffset,
+    arcLength: Math.max(0, effectiveRadius * centerSweepAbs),
+    tangentInX,
+    tangentInY,
+    tangentOutX,
+    tangentOutY,
+    inUx,
+    inUy,
+    outUx,
+    outUy,
+    turnSigned: centerSweep < 0 ? -1 : 1,
+    cx,
+    cy,
+    centerAngleIn,
+    centerSweep,
+    absTurn: centerSweepAbs,
+  };
+};
 
 const buildCornerTurns = (
   points,
@@ -54,66 +146,16 @@ const buildCornerTurns = (
   cornerRadius,
 ) => {
   const cornerTurns = new Array(points.length).fill(null);
-  const angleTolerance = 1e-4;
 
   for (let i = 1; i < points.length - 1; i++) {
-    const corner = points[i];
-    const inLen = segmentLengths[i - 1];
-    const outLen = segmentLengths[i];
-    if (inLen <= 0 || outLen <= 0) continue;
-
-    const inUx = segmentUx[i - 1];
-    const inUy = segmentUy[i - 1];
-    const outUx = segmentUx[i];
-    const outUy = segmentUy[i];
-
-    const inAngle = Math.atan2(inUy, inUx);
-    const outAngle = Math.atan2(outUy, outUx);
-    const headingTurn = angleDeltaSigned(inAngle, outAngle);
-    const absTurn = Math.abs(headingTurn);
-    if (absTurn <= angleTolerance || absTurn >= Math.PI - angleTolerance) continue;
-
-    const tangentScale = Math.tan(absTurn * 0.5);
-    if (!(tangentScale > 0) || !Number.isFinite(tangentScale)) continue;
-    const tangentOffset = cornerRadius * tangentScale;
-    const maxTangentOffset = Math.max(0, Math.min(inLen, outLen));
-    const effectiveTangentOffset = Math.min(tangentOffset, maxTangentOffset);
-    if (!(effectiveTangentOffset > 0) || !Number.isFinite(effectiveTangentOffset)) continue;
-    const effectiveRadius = effectiveTangentOffset / tangentScale;
-    if (!(effectiveRadius > 0) || !Number.isFinite(effectiveRadius)) continue;
-
-    const tangentInX = corner.x - inUx * effectiveTangentOffset;
-    const tangentInY = corner.y - inUy * effectiveTangentOffset;
-    const tangentOutX = corner.x + outUx * effectiveTangentOffset;
-    const tangentOutY = corner.y + outUy * effectiveTangentOffset;
-    const inNormalX = headingTurn > 0 ? -inUy : inUy;
-    const inNormalY = headingTurn > 0 ? inUx : -inUx;
-    const cx = tangentInX + inNormalX * effectiveRadius;
-    const cy = tangentInY + inNormalY * effectiveRadius;
-    const centerAngleIn = normalizeAngle(Math.atan2(tangentInY - cy, tangentInX - cx));
-    const centerAngleOut = normalizeAngle(Math.atan2(tangentOutY - cy, tangentOutX - cx));
-    const centerSweep = angleDeltaSigned(centerAngleIn, centerAngleOut);
-    const centerSweepAbs = Math.abs(centerSweep);
-    if (centerSweepAbs <= angleTolerance) continue;
-
-    cornerTurns[i] = {
-      tangentOffset: effectiveTangentOffset,
-      arcLength: Math.max(0, effectiveRadius * centerSweepAbs),
-      tangentInX,
-      tangentInY,
-      tangentOutX,
-      tangentOutY,
-      inUx,
-      inUy,
-      outUx,
-      outUy,
-      turnSigned: centerSweep < 0 ? -1 : 1,
-      cx,
-      cy,
-      centerAngleIn,
-      centerSweep,
-      absTurn: centerSweepAbs,
-    };
+    cornerTurns[i] = buildCornerTurn(
+      points,
+      segmentLengths,
+      segmentUx,
+      segmentUy,
+      cornerRadius,
+      i,
+    );
   }
 
   return cornerTurns;
@@ -126,7 +168,7 @@ const buildFlowPrimitives = (points, segmentLengths, cornerTurns) => {
 
   for (let i = 0; i < segmentLengths.length; i++) {
     const len = segmentLengths[i];
-    if (!(len > 0)) continue;
+    if (len <= 0) continue;
 
     const startCorner = cornerTurns[i];
     const endCorner = cornerTurns[i + 1];
@@ -253,6 +295,153 @@ const createUnifiedPathMeshBuildState = (points, options = {}) => {
   };
 };
 
+const appendQuad = (writer, startPoint, endPoint, radius, travelRange, cornerMeta = null) => {
+  const { addVertex, addTriangle } = writer;
+  const dx = endPoint.x - startPoint.x;
+  const dy = endPoint.y - startPoint.y;
+  const len = Math.hypot(dx, dy);
+  if (len <= FLOW_STOP_EPSILON) return;
+
+  const ux = dx / len;
+  const uy = dy / len;
+  const px = -uy * radius;
+  const py = ux * radius;
+  const vertexCornerMeta = createCornerVertexMeta(cornerMeta);
+  const v0 = addVertex(startPoint.x + px, startPoint.y + py, travelRange.start, vertexCornerMeta);
+  const v1 = addVertex(startPoint.x - px, startPoint.y - py, travelRange.start, vertexCornerMeta);
+  const v2 = addVertex(endPoint.x + px, endPoint.y + py, travelRange.end, vertexCornerMeta);
+  const v3 = addVertex(endPoint.x - px, endPoint.y - py, travelRange.end, vertexCornerMeta);
+  addTriangle(v0, v1, v2);
+  addTriangle(v2, v1, v3);
+};
+
+const appendCircle = (writer, center, radius, segments, travelValueOrFn) => {
+  const { addVertex, addTriangle } = writer;
+  if (radius <= 0) return;
+
+  const stepCount = Math.max(8, Math.trunc(Number(segments)));
+  const resolveTravel = typeof travelValueOrFn === 'function'
+    ? travelValueOrFn
+    : (() => Number(travelValueOrFn) || 0);
+  const centerIndex = addVertex(center.x, center.y, resolveTravel(center.x, center.y));
+  let previousRimIndex = -1;
+
+  for (let i = 0; i <= stepCount; i++) {
+    const unit = i / stepCount;
+    const angle = unit * TAU;
+    const x = center.x + Math.cos(angle) * radius;
+    const y = center.y + Math.sin(angle) * radius;
+    const rimIndex = addVertex(x, y, resolveTravel(x, y));
+    if (i > 0) addTriangle(centerIndex, previousRimIndex, rimIndex);
+    previousRimIndex = rimIndex;
+  }
+};
+
+const appendArrowHead = (writer, anchorPoint, direction, length, halfWidth, travelRange) => {
+  const { addVertex, addTriangle } = writer;
+  const perpX = -direction.uy;
+  const perpY = direction.ux;
+  const baseCenterShift = length / 3;
+  const baseCenterX = anchorPoint.x - (direction.ux * baseCenterShift);
+  const baseCenterY = anchorPoint.y - (direction.uy * baseCenterShift);
+  const left = addVertex(
+    baseCenterX - perpX * halfWidth,
+    baseCenterY - perpY * halfWidth,
+    travelRange.start,
+  );
+  const right = addVertex(
+    baseCenterX + perpX * halfWidth,
+    baseCenterY + perpY * halfWidth,
+    travelRange.start,
+  );
+  const apex = addVertex(
+    baseCenterX + direction.ux * length,
+    baseCenterY + direction.uy * length,
+    travelRange.end,
+  );
+  addTriangle(apex, left, right);
+};
+
+const appendCornerPrimitiveGeometry = (
+  writer,
+  safePoints,
+  cornerTurns,
+  halfWidth,
+  cornerIndex,
+  cornerPrimitive,
+) => {
+  const { addVertex, addTriangle } = writer;
+  const corner = cornerTurns[cornerIndex];
+  const base = safePoints[cornerIndex];
+  if (!corner || !cornerPrimitive || !base) return;
+
+  const travelStart = cornerPrimitive.travelStart;
+  const travelEnd = cornerPrimitive.travelEnd;
+  const travelSpan = Math.max(0, travelEnd - travelStart);
+  const cornerMeta = createCornerVertexMeta({
+    cx: corner.cx,
+    cy: corner.cy,
+    angleIn: corner.centerAngleIn,
+    sweep: corner.centerSweep,
+    travelStart,
+    travelSpan,
+  });
+
+  appendQuad(
+    writer,
+    { x: corner.tangentInX, y: corner.tangentInY },
+    base,
+    halfWidth,
+    { start: travelStart, end: travelStart },
+    cornerMeta,
+  );
+  appendQuad(
+    writer,
+    base,
+    { x: corner.tangentOutX, y: corner.tangentOutY },
+    halfWidth,
+    { start: travelStart, end: travelStart },
+    cornerMeta,
+  );
+
+  const inOuterNx = corner.turnSigned > 0 ? corner.inUy : -corner.inUy;
+  const inOuterNy = corner.turnSigned > 0 ? -corner.inUx : corner.inUx;
+  const outOuterNx = corner.turnSigned > 0 ? corner.outUy : -corner.outUy;
+  const outOuterNy = corner.turnSigned > 0 ? -corner.outUx : corner.outUx;
+  const joinAngleIn = Math.atan2(inOuterNy, inOuterNx);
+  const joinAngleOut = Math.atan2(outOuterNy, outOuterNx);
+  let joinSweep = angleDeltaSigned(joinAngleIn, joinAngleOut);
+  if (corner.turnSigned > 0 && joinSweep < 0) joinSweep += TAU;
+  if (corner.turnSigned < 0 && joinSweep > 0) joinSweep -= TAU;
+  if (Math.abs(joinSweep) <= FLOW_STOP_EPSILON) return;
+
+  const joinSteps = Math.max(2, Math.ceil((Math.abs(joinSweep) / Math.PI) * 18));
+  const centerIndex = addVertex(base.x, base.y, travelStart, cornerMeta);
+  let previousRimIndex = -1;
+
+  for (let step = 0; step <= joinSteps; step++) {
+    const t = step / joinSteps;
+    const angle = joinAngleIn + (joinSweep * t);
+    const rimX = base.x + Math.cos(angle) * halfWidth;
+    const rimY = base.y + Math.sin(angle) * halfWidth;
+    const rimIndex = addVertex(rimX, rimY, travelStart, cornerMeta);
+    if (step > 0) addTriangle(centerIndex, previousRimIndex, rimIndex);
+    previousRimIndex = rimIndex;
+  }
+};
+
+const resolveDirection = (fallbackUx, fallbackUy, hasOverride, overrideX, overrideY) => {
+  if (!hasOverride) return { ux: fallbackUx, uy: fallbackUy };
+  const norm = Math.hypot(overrideX, overrideY);
+  return { ux: overrideX / norm, uy: overrideY / norm };
+};
+
+const createTravelProjector = (origin, direction, baseTravel = 0) => (x, y) => (
+  baseTravel
+  + ((x - origin.x) * direction.ux)
+  + ((y - origin.y) * direction.uy)
+);
+
 const buildUnifiedPathMeshGeometry = (build, writer) => {
   const {
     safePoints,
@@ -278,313 +467,97 @@ const buildUnifiedPathMeshGeometry = (build, writer) => {
     cornerTurns,
     flow,
   } = build;
-  const { addVertex, addTriangle } = writer;
-
-  const addQuad = (
-    x1,
-    y1,
-    x2,
-    y2,
-    radius,
-    tStart,
-    tEnd,
-    cornerMeta = null,
-  ) => {
-    const dx = x2 - x1;
-    const dy = y2 - y1;
-    const len = Math.hypot(dx, dy);
-    if (!(len > FLOW_STOP_EPSILON)) return;
-
-    const ux = dx / len;
-    const uy = dy / len;
-    const px = -uy * radius;
-    const py = ux * radius;
-
-    const cornerFlag = cornerMeta ? 1 : 0;
-    const cornerCx = cornerMeta?.cx || 0;
-    const cornerCy = cornerMeta?.cy || 0;
-    const cornerAngleIn = cornerMeta?.angleIn || 0;
-    const cornerSweep = cornerMeta?.sweep || 0;
-    const cornerTravelStart = cornerMeta?.travelStart || 0;
-    const cornerTravelSpan = cornerMeta?.travelSpan || 0;
-    const v0 = addVertex(
-      x1 + px,
-      y1 + py,
-      tStart,
-      cornerFlag,
-      cornerCx,
-      cornerCy,
-      cornerAngleIn,
-      cornerSweep,
-      cornerTravelStart,
-      cornerTravelSpan,
-    );
-    const v1 = addVertex(
-      x1 - px,
-      y1 - py,
-      tStart,
-      cornerFlag,
-      cornerCx,
-      cornerCy,
-      cornerAngleIn,
-      cornerSweep,
-      cornerTravelStart,
-      cornerTravelSpan,
-    );
-    const v2 = addVertex(
-      x2 + px,
-      y2 + py,
-      tEnd,
-      cornerFlag,
-      cornerCx,
-      cornerCy,
-      cornerAngleIn,
-      cornerSweep,
-      cornerTravelStart,
-      cornerTravelSpan,
-    );
-    const v3 = addVertex(
-      x2 - px,
-      y2 - py,
-      tEnd,
-      cornerFlag,
-      cornerCx,
-      cornerCy,
-      cornerAngleIn,
-      cornerSweep,
-      cornerTravelStart,
-      cornerTravelSpan,
-    );
-    addTriangle(v0, v1, v2);
-    addTriangle(v2, v1, v3);
-  };
-
-  const addCircle = (cx, cy, radius, segments, travelValueOrFn) => {
-    if (!(radius > 0)) return;
-
-    const stepCount = Math.max(8, Number(segments) | 0);
-    const resolveTravel = typeof travelValueOrFn === 'function'
-      ? travelValueOrFn
-      : (() => Number(travelValueOrFn) || 0);
-    const centerIndex = addVertex(cx, cy, resolveTravel(cx, cy));
-    let previousRimIndex = -1;
-
-    for (let i = 0; i <= stepCount; i++) {
-      const unit = i / stepCount;
-      const angle = unit * TAU;
-      const x = cx + Math.cos(angle) * radius;
-      const y = cy + Math.sin(angle) * radius;
-      const rimIndex = addVertex(x, y, resolveTravel(x, y));
-      if (i > 0) addTriangle(centerIndex, previousRimIndex, rimIndex);
-      previousRimIndex = rimIndex;
-    }
-  };
-
   const head = safePoints[0];
-  const headTravelNorm = hasStartFlowOverride ? Math.hypot(startFlowDirX, startFlowDirY) : 0;
-  const headTravelUx = (() => {
-    if (hasStartFlowOverride) return startFlowDirX / headTravelNorm;
-    if (firstSegmentIndex >= 0) return segmentUx[firstSegmentIndex];
-    return 0;
-  })();
-  const headTravelUy = (() => {
-    if (hasStartFlowOverride) return startFlowDirY / headTravelNorm;
-    if (firstSegmentIndex >= 0) return segmentUy[firstSegmentIndex];
-    return 0;
-  })();
-  const headTravelAt = (x, y) => (
-    ((x - head.x) * headTravelUx)
-    + ((y - head.y) * headTravelUy)
+  const headDirection = resolveDirection(
+    firstSegmentIndex >= 0 ? segmentUx[firstSegmentIndex] : 0,
+    firstSegmentIndex >= 0 ? segmentUy[firstSegmentIndex] : 0,
+    hasStartFlowOverride,
+    startFlowDirX,
+    startFlowDirY,
   );
-
-  const addStartTipPrimitives = () => {
-    if (renderStartCap) addCircle(head.x, head.y, startRadius, 18, headTravelAt);
-    if (reverseHeadArrowLength > 0 && reverseHeadArrowHalfWidth > 0 && firstSegmentIndex >= 0) {
-      const ux = -segmentUx[firstSegmentIndex];
-      const uy = -segmentUy[firstSegmentIndex];
-      const perpX = -uy;
-      const perpY = ux;
-      const baseCenterShift = reverseHeadArrowLength / 3;
-      const baseCenterX = head.x - (ux * baseCenterShift);
-      const baseCenterY = head.y - (uy * baseCenterShift);
-      const baseTravel = -baseCenterShift;
-      const apexTravel = baseTravel + reverseHeadArrowLength;
-      const left = addVertex(
-        baseCenterX - perpX * reverseHeadArrowHalfWidth,
-        baseCenterY - perpY * reverseHeadArrowHalfWidth,
-        baseTravel,
-      );
-      const right = addVertex(
-        baseCenterX + perpX * reverseHeadArrowHalfWidth,
-        baseCenterY + perpY * reverseHeadArrowHalfWidth,
-        baseTravel,
-      );
-      const apex = addVertex(
-        baseCenterX + ux * reverseHeadArrowLength,
-        baseCenterY + uy * reverseHeadArrowLength,
-        apexTravel,
-      );
-      addTriangle(apex, left, right);
-    }
-  };
-
-  const addCornerPrimitive = (cornerIndex, cornerPrimitive) => {
-    const corner = cornerTurns[cornerIndex];
-    const base = safePoints[cornerIndex];
-    if (!corner || !cornerPrimitive || !base) return;
-
-    const travelStart = cornerPrimitive.travelStart;
-    const travelEnd = cornerPrimitive.travelEnd;
-    const travelSpan = Math.max(0, travelEnd - travelStart);
-    const cornerMeta = {
-      cx: corner.cx,
-      cy: corner.cy,
-      angleIn: corner.centerAngleIn,
-      sweep: corner.centerSweep,
-      travelStart,
-      travelSpan,
-    };
-
-    addQuad(
-      corner.tangentInX,
-      corner.tangentInY,
-      base.x,
-      base.y,
-      halfWidth,
-      travelStart,
-      travelStart,
-      cornerMeta,
-    );
-    addQuad(
-      base.x,
-      base.y,
-      corner.tangentOutX,
-      corner.tangentOutY,
-      halfWidth,
-      travelStart,
-      travelStart,
-      cornerMeta,
-    );
-
-    const inOuterNx = corner.turnSigned > 0 ? corner.inUy : -corner.inUy;
-    const inOuterNy = corner.turnSigned > 0 ? -corner.inUx : corner.inUx;
-    const outOuterNx = corner.turnSigned > 0 ? corner.outUy : -corner.outUy;
-    const outOuterNy = corner.turnSigned > 0 ? -corner.outUx : corner.outUx;
-    const joinAngleIn = Math.atan2(inOuterNy, inOuterNx);
-    const joinAngleOut = Math.atan2(outOuterNy, outOuterNx);
-    let joinSweep = angleDeltaSigned(joinAngleIn, joinAngleOut);
-    if (corner.turnSigned > 0 && joinSweep < 0) joinSweep += TAU;
-    if (corner.turnSigned < 0 && joinSweep > 0) joinSweep -= TAU;
-    const joinSteps = Math.max(2, Math.ceil((Math.abs(joinSweep) / Math.PI) * 18));
-    if (!(Math.abs(joinSweep) > FLOW_STOP_EPSILON)) return;
-
-    const joinTravel = travelStart;
-    const centerIndex = addVertex(
-      base.x,
-      base.y,
-      joinTravel,
-      1,
-      cornerMeta.cx,
-      cornerMeta.cy,
-      cornerMeta.angleIn,
-      cornerMeta.sweep,
-      cornerMeta.travelStart,
-      cornerMeta.travelSpan,
-    );
-    let previousRimIndex = -1;
-
-    for (let step = 0; step <= joinSteps; step++) {
-      const t = step / joinSteps;
-      const angle = joinAngleIn + (joinSweep * t);
-      const rimX = base.x + Math.cos(angle) * halfWidth;
-      const rimY = base.y + Math.sin(angle) * halfWidth;
-      const rimIndex = addVertex(
-        rimX,
-        rimY,
-        joinTravel,
-        1,
-        cornerMeta.cx,
-        cornerMeta.cy,
-        cornerMeta.angleIn,
-        cornerMeta.sweep,
-        cornerMeta.travelStart,
-        cornerMeta.travelSpan,
-      );
-      if (step > 0) addTriangle(centerIndex, previousRimIndex, rimIndex);
-      previousRimIndex = rimIndex;
-    }
-  };
+  const headTravelAt = createTravelProjector(head, headDirection);
 
   for (const primitive of flow.linearPrimitives) {
     const i = primitive.segmentIndex;
     const start = safePoints[i];
     const ux = segmentUx[i];
     const uy = segmentUy[i];
-    addQuad(
-      start.x + ux * primitive.localStart,
-      start.y + uy * primitive.localStart,
-      start.x + ux * primitive.localEnd,
-      start.y + uy * primitive.localEnd,
+    appendQuad(
+      writer,
+      {
+        x: start.x + ux * primitive.localStart,
+        y: start.y + uy * primitive.localStart,
+      },
+      {
+        x: start.x + ux * primitive.localEnd,
+        y: start.y + uy * primitive.localEnd,
+      },
       halfWidth,
-      primitive.travelStart,
-      primitive.travelEnd,
+      { start: primitive.travelStart, end: primitive.travelEnd },
     );
   }
   for (const cornerPrimitive of flow.cornerPrimitives) {
-    addCornerPrimitive(cornerPrimitive.cornerIndex, cornerPrimitive);
+    appendCornerPrimitiveGeometry(
+      writer,
+      safePoints,
+      cornerTurns,
+      halfWidth,
+      cornerPrimitive.cornerIndex,
+      cornerPrimitive,
+    );
   }
-  addStartTipPrimitives();
+  if (renderStartCap) appendCircle(writer, head, startRadius, 18, headTravelAt);
+  if (reverseHeadArrowLength > 0 && reverseHeadArrowHalfWidth > 0 && firstSegmentIndex >= 0) {
+    appendArrowHead(
+      writer,
+      head,
+      {
+        ux: -segmentUx[firstSegmentIndex],
+        uy: -segmentUy[firstSegmentIndex],
+      },
+      reverseHeadArrowLength,
+      reverseHeadArrowHalfWidth,
+      {
+        start: -(reverseHeadArrowLength / 3),
+        end: reverseHeadArrowLength - (reverseHeadArrowLength / 3),
+      },
+    );
+  }
 
   if (lastSegmentIndex >= 0) {
     const tail = safePoints[safePoints.length - 1];
-    const tailTravelNorm = hasEndArrowOverride ? Math.hypot(endArrowDirX, endArrowDirY) : 0;
-    const tailTravelUx = hasEndArrowOverride
-      ? (endArrowDirX / tailTravelNorm)
-      : segmentUx[lastSegmentIndex];
-    const tailTravelUy = hasEndArrowOverride
-      ? (endArrowDirY / tailTravelNorm)
-      : segmentUy[lastSegmentIndex];
-    const tailTravelAt = (x, y) => (
-      flow.mainTravel
-      + ((x - tail.x) * tailTravelUx)
-      + ((y - tail.y) * tailTravelUy)
+    const tailDirection = resolveDirection(
+      segmentUx[lastSegmentIndex],
+      segmentUy[lastSegmentIndex],
+      hasEndArrowOverride,
+      endArrowDirX,
+      endArrowDirY,
     );
-    if (renderEndCap) addCircle(tail.x, tail.y, halfWidth, 12, tailTravelAt);
-    addCircle(tail.x, tail.y, reverseTailCircleRadius, 18, tailTravelAt);
+    const tailTravelAt = createTravelProjector(tail, tailDirection, flow.mainTravel);
+    if (renderEndCap) appendCircle(writer, tail, halfWidth, 12, tailTravelAt);
+    appendCircle(writer, tail, reverseTailCircleRadius, 18, tailTravelAt);
   }
 
   if (arrowLength > 0 && endHalfWidth > 0 && lastSegmentIndex >= 0) {
     const tail = safePoints[safePoints.length - 1];
-    let ux = segmentUx[lastSegmentIndex];
-    let uy = segmentUy[lastSegmentIndex];
-    if (hasEndArrowOverride) {
-      const overrideLen = Math.hypot(endArrowDirX, endArrowDirY);
-      ux = endArrowDirX / overrideLen;
-      uy = endArrowDirY / overrideLen;
-    }
-    const perpX = -uy;
-    const perpY = ux;
-    const baseCenterShift = arrowLength / 3;
-    const baseCenterX = tail.x - (ux * baseCenterShift);
-    const baseCenterY = tail.y - (uy * baseCenterShift);
-    const baseTravel = flow.mainTravel - baseCenterShift;
-    const apexTravel = baseTravel + arrowLength;
-    const left = addVertex(
-      baseCenterX - perpX * endHalfWidth,
-      baseCenterY - perpY * endHalfWidth,
-      baseTravel,
+    const tailDirection = resolveDirection(
+      segmentUx[lastSegmentIndex],
+      segmentUy[lastSegmentIndex],
+      hasEndArrowOverride,
+      endArrowDirX,
+      endArrowDirY,
     );
-    const right = addVertex(
-      baseCenterX + perpX * endHalfWidth,
-      baseCenterY + perpY * endHalfWidth,
-      baseTravel,
+    appendArrowHead(
+      writer,
+      tail,
+      tailDirection,
+      arrowLength,
+      endHalfWidth,
+      {
+        start: flow.mainTravel - (arrowLength / 3),
+        end: flow.mainTravel + (arrowLength * (2 / 3)),
+      },
     );
-    const apex = addVertex(
-      baseCenterX + ux * arrowLength,
-      baseCenterY + uy * arrowLength,
-      apexTravel,
-    );
-    addTriangle(apex, left, right);
   }
 };
 
@@ -623,30 +596,19 @@ const createMeshFillWriter = (target) => {
   let vertexCount = 0;
   let indexCount = 0;
   return {
-    addVertex(
-      x,
-      y,
-      travel,
-      cornerFlag = 0,
-      cornerCx = 0,
-      cornerCy = 0,
-      cornerAngleIn = 0,
-      cornerSweep = 0,
-      cornerTravelStart = 0,
-      cornerTravelSpan = 0,
-    ) {
+    addVertex(x, y, travel, cornerMeta = EMPTY_CORNER_VERTEX_META) {
       const index = vertexCount;
       const vectorOffset = index * 2;
       target.positions[vectorOffset] = x;
       target.positions[vectorOffset + 1] = y;
       target.travels[index] = travel;
-      target.cornerFlags[index] = cornerFlag;
-      target.cornerCenters[vectorOffset] = cornerCx;
-      target.cornerCenters[vectorOffset + 1] = cornerCy;
-      target.cornerAngles[vectorOffset] = cornerAngleIn;
-      target.cornerAngles[vectorOffset + 1] = cornerSweep;
-      target.cornerTravels[vectorOffset] = cornerTravelStart;
-      target.cornerTravels[vectorOffset + 1] = cornerTravelSpan;
+      target.cornerFlags[index] = cornerMeta.flag;
+      target.cornerCenters[vectorOffset] = cornerMeta.cx;
+      target.cornerCenters[vectorOffset + 1] = cornerMeta.cy;
+      target.cornerAngles[vectorOffset] = cornerMeta.angleIn;
+      target.cornerAngles[vectorOffset + 1] = cornerMeta.sweep;
+      target.cornerTravels[vectorOffset] = cornerMeta.travelStart;
+      target.cornerTravels[vectorOffset + 1] = cornerMeta.travelSpan;
       vertexCount += 1;
       return index;
     },
@@ -689,7 +651,7 @@ export function buildUnifiedPathMesh(points, options = {}) {
 
 const nextPowerOfTwo = (value) => {
   let size = 1;
-  const target = Math.max(1, value | 0);
+  const target = Math.max(1, Math.trunc(value));
   while (size < target) size <<= 1;
   return size;
 };
@@ -704,18 +666,7 @@ const ensureIndexCapacity = (array, minLength) => {
   return new Uint16Array(nextPowerOfTwo(minLength));
 };
 
-const createMutableMeshStorage = () => ({
-  positions: new Float32Array(0),
-  travels: new Float32Array(0),
-  cornerFlags: new Float32Array(0),
-  cornerCenters: new Float32Array(0),
-  cornerAngles: new Float32Array(0),
-  cornerTravels: new Float32Array(0),
-  indices: new Uint16Array(0),
-  vertexCount: 0,
-  indexCount: 0,
-  mainTravel: 0,
-});
+const createMutableMeshStorage = createMeshStorage;
 
 const resetMutableMeshStorage = (out) => {
   const target = out || createMutableMeshStorage();
@@ -725,8 +676,8 @@ const resetMutableMeshStorage = (out) => {
   return target;
 };
 
-const buildUnifiedPathMeshInto = (points, options = {}, out) => {
-  const build = createUnifiedPathMeshBuildState(points, options);
+const buildUnifiedPathMeshInto = (points, options, out = null) => {
+  const build = createUnifiedPathMeshBuildState(points, options || {});
   if (!build) return resetMutableMeshStorage(out);
   const counts = countUnifiedPathMeshGeometry(build);
   const target = out || createMutableMeshStorage();
@@ -740,20 +691,8 @@ const buildUnifiedPathMeshInto = (points, options = {}, out) => {
   return fillUnifiedPathMeshStorage(build, target);
 };
 
-const toFiniteCenter = (point) => {
-  const x = Number(point?.x);
-  const y = Number(point?.y);
-  if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
-  return { x, y };
-};
-
-const createMutableBracketStorage = () => ({
-  centers: new Float32Array(0),
-  corners: new Float32Array(0),
-  indices: new Uint16Array(0),
-  vertexCount: 0,
-  indexCount: 0,
-});
+const toFiniteCenter = toFinitePoint;
+const createMutableBracketStorage = createBracketStorage;
 
 const resetMutableBracketStorage = (out) => {
   const target = out || createMutableBracketStorage();
@@ -1224,33 +1163,33 @@ export function createPathWebglRenderer(canvas, options = {}) {
   let cachedPointCount = 0;
   let cachedWidth = 0;
   let cachedStartRadius = 0;
-  let cachedStartFlowDirX = NaN;
-  let cachedStartFlowDirY = NaN;
+  let cachedStartFlowDirX = Number.NaN;
+  let cachedStartFlowDirY = Number.NaN;
   let cachedArrowLength = 0;
   let cachedEndHalfWidth = 0;
-  let cachedEndArrowDirX = NaN;
-  let cachedEndArrowDirY = NaN;
+  let cachedEndArrowDirX = Number.NaN;
+  let cachedEndArrowDirY = Number.NaN;
   let cachedReverseHeadArrowLength = 0;
   let cachedReverseHeadArrowHalfWidth = 0;
   let cachedReverseTailCircleRadius = 0;
   let cachedMaxPathPoints = DEFAULT_MAX_PATH_POINTS;
-  let cachedGeometryToken = NaN;
+  let cachedGeometryToken = Number.NaN;
   let cachedPoints = new Float32Array(0);
   const reusableRetainedStartArcMesh = createMutableMeshStorage();
   const reusableRetainedEndArcMesh = createMutableMeshStorage();
   let retainedStartArcGeometryCached = false;
   let retainedEndArcGeometryCached = false;
-  let cachedRetainedStartArcGeometryToken = NaN;
-  let cachedRetainedEndArcGeometryToken = NaN;
-  let cachedRetainedStartArcWidth = NaN;
-  let cachedRetainedEndArcWidth = NaN;
+  let cachedRetainedStartArcGeometryToken = Number.NaN;
+  let cachedRetainedEndArcGeometryToken = Number.NaN;
+  let cachedRetainedStartArcWidth = Number.NaN;
+  let cachedRetainedEndArcWidth = Number.NaN;
   let retainedStartArcUsedStartFlowOverride = false;
   let retainedEndArcUsedEndFlowOverride = false;
   let uploadedPathMeshTag = '';
   const reusableBracketMesh = createMutableBracketStorage();
   let bracketGeometryCached = false;
   let cachedBracketPointCount = 0;
-  let cachedBracketGeometryToken = NaN;
+  let cachedBracketGeometryToken = Number.NaN;
   let cachedBracketPoints = new Float32Array(0);
   const gpuCapacities = {
     position: 0,
@@ -1265,38 +1204,38 @@ export function createPathWebglRenderer(canvas, options = {}) {
     bracketIndex: 0,
   };
   const uniformCache = {
-    canvasWidth: NaN,
-    canvasHeight: NaN,
-    deviceScale: NaN,
-    mainR: NaN,
-    mainG: NaN,
-    mainB: NaN,
-    completeR: NaN,
-    completeG: NaN,
-    completeB: NaN,
-    completionEnabled: NaN,
-    completionBoundary: NaN,
-    completionFeather: NaN,
-    completionProgress: NaN,
-    completionThreshold: NaN,
-    flowEnabled: NaN,
-    flowMix: NaN,
-    flowOffset: NaN,
-    flowCycle: NaN,
-    flowPulse: NaN,
-    flowRise: NaN,
-    flowDrop: NaN,
-    reverseColorBlend: NaN,
-    reverseFromFlowOffset: NaN,
-    reverseTravelSpan: NaN,
-    bracketHalfSize: NaN,
-    bracketCornerAnchor: NaN,
-    bracketCornerRadius: NaN,
-    bracketCornerThickness: NaN,
-    bracketPulse: NaN,
-    bracketColorR: NaN,
-    bracketColorG: NaN,
-    bracketColorB: NaN,
+    canvasWidth: Number.NaN,
+    canvasHeight: Number.NaN,
+    deviceScale: Number.NaN,
+    mainR: Number.NaN,
+    mainG: Number.NaN,
+    mainB: Number.NaN,
+    completeR: Number.NaN,
+    completeG: Number.NaN,
+    completeB: Number.NaN,
+    completionEnabled: Number.NaN,
+    completionBoundary: Number.NaN,
+    completionFeather: Number.NaN,
+    completionProgress: Number.NaN,
+    completionThreshold: Number.NaN,
+    flowEnabled: Number.NaN,
+    flowMix: Number.NaN,
+    flowOffset: Number.NaN,
+    flowCycle: Number.NaN,
+    flowPulse: Number.NaN,
+    flowRise: Number.NaN,
+    flowDrop: Number.NaN,
+    reverseColorBlend: Number.NaN,
+    reverseFromFlowOffset: Number.NaN,
+    reverseTravelSpan: Number.NaN,
+    bracketHalfSize: Number.NaN,
+    bracketCornerAnchor: Number.NaN,
+    bracketCornerRadius: Number.NaN,
+    bracketCornerThickness: Number.NaN,
+    bracketPulse: Number.NaN,
+    bracketColorR: Number.NaN,
+    bracketColorG: Number.NaN,
+    bracketColorB: Number.NaN,
   };
   const mainColorScratch = { r: 1, g: 1, b: 1 };
   const completeColorScratch = { r: 1, g: 1, b: 1 };
@@ -1329,110 +1268,83 @@ export function createPathWebglRenderer(canvas, options = {}) {
     uniformCache[keyZ] = z;
   };
 
+  const scanFinitePoints = (points, maxPointCount, visitor = null) => {
+    const limit = Math.min(points.length, maxPointCount);
+    let safeIndex = 0;
+    for (let i = 0; i < limit; i++) {
+      const x = Number(points[i]?.x);
+      const y = Number(points[i]?.y);
+      if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+      if (visitor) visitor(x, y, safeIndex);
+      safeIndex += 1;
+    }
+    return safeIndex;
+  };
+
+  const copyPointSignature = (points, maxPointCount, target) => {
+    scanFinitePoints(points, maxPointCount, (x, y, safeIndex) => {
+      const base = safeIndex * 2;
+      target[base] = x;
+      target[base + 1] = y;
+    });
+  };
+
+  const pointSignatureChanged = (points, maxPointCount, signature) => {
+    let changed = false;
+    scanFinitePoints(points, maxPointCount, (x, y, safeIndex) => {
+      const base = safeIndex * 2;
+      if (signature[base] !== x || signature[base + 1] !== y) changed = true;
+    });
+    return changed;
+  };
+
   const ensurePointSignatureCapacity = (pointCount) => {
     const minLength = pointCount * 2;
     if (cachedPoints.length >= minLength) return;
     cachedPoints = new Float32Array(nextPowerOfTwo(minLength));
   };
 
-  const computeSafePointCount = (points, maxPathPoints) => {
-    const limit = Math.min(points.length, maxPathPoints);
-    let count = 0;
-    for (let i = 0; i < limit; i++) {
-      const x = Number(points[i]?.x);
-      const y = Number(points[i]?.y);
-      if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
-      count += 1;
-    }
-    return count;
+  const computeSafePointCount = (points, maxPathPoints) => scanFinitePoints(points, maxPathPoints);
+
+  const hasGeometryChange = (points, geometry) => {
+    const pointCount = computeSafePointCount(points, geometry.maxPathPoints);
+    const geometrySignatureChanged = (
+      !geometryCached
+      || cachedPointCount !== pointCount
+      || cachedWidth !== geometry.width
+      || cachedStartRadius !== geometry.startRadius
+      || !Object.is(cachedStartFlowDirX, geometry.startFlowDirX)
+      || !Object.is(cachedStartFlowDirY, geometry.startFlowDirY)
+      || cachedArrowLength !== geometry.arrowLength
+      || cachedEndHalfWidth !== geometry.endHalfWidth
+      || !Object.is(cachedEndArrowDirX, geometry.endArrowDirX)
+      || !Object.is(cachedEndArrowDirY, geometry.endArrowDirY)
+      || cachedReverseHeadArrowLength !== geometry.reverseHeadArrowLength
+      || cachedReverseHeadArrowHalfWidth !== geometry.reverseHeadArrowHalfWidth
+      || cachedReverseTailCircleRadius !== geometry.reverseTailCircleRadius
+      || cachedMaxPathPoints !== geometry.maxPathPoints
+    );
+    if (geometrySignatureChanged) return true;
+    return pointSignatureChanged(points, geometry.maxPathPoints, cachedPoints);
   };
 
-  const hasGeometryChange = (
-    points,
-    width,
-    startRadius,
-    startFlowDirX,
-    startFlowDirY,
-    arrowLength,
-    endHalfWidth,
-    endArrowDirX,
-    endArrowDirY,
-    reverseHeadArrowLength,
-    reverseHeadArrowHalfWidth,
-    reverseTailCircleRadius,
-    maxPathPoints,
-  ) => {
-    const pointCount = computeSafePointCount(points, maxPathPoints);
-    if (!geometryCached) return true;
-    if (cachedPointCount !== pointCount) return true;
-    if (cachedWidth !== width) return true;
-    if (cachedStartRadius !== startRadius) return true;
-    if (!Object.is(cachedStartFlowDirX, startFlowDirX)) return true;
-    if (!Object.is(cachedStartFlowDirY, startFlowDirY)) return true;
-    if (cachedArrowLength !== arrowLength) return true;
-    if (cachedEndHalfWidth !== endHalfWidth) return true;
-    if (!Object.is(cachedEndArrowDirX, endArrowDirX)) return true;
-    if (!Object.is(cachedEndArrowDirY, endArrowDirY)) return true;
-    if (cachedReverseHeadArrowLength !== reverseHeadArrowLength) return true;
-    if (cachedReverseHeadArrowHalfWidth !== reverseHeadArrowHalfWidth) return true;
-    if (cachedReverseTailCircleRadius !== reverseTailCircleRadius) return true;
-    if (cachedMaxPathPoints !== maxPathPoints) return true;
-
-    let safeIndex = 0;
-    const limit = Math.min(points.length, maxPathPoints);
-    for (let i = 0; i < limit; i++) {
-      const x = Number(points[i]?.x);
-      const y = Number(points[i]?.y);
-      if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
-      const base = safeIndex * 2;
-      if (cachedPoints[base] !== x || cachedPoints[base + 1] !== y) return true;
-      safeIndex += 1;
-    }
-    return false;
-  };
-
-  const updateGeometrySignature = (
-    points,
-    width,
-    startRadius,
-    startFlowDirX,
-    startFlowDirY,
-    arrowLength,
-    endHalfWidth,
-    endArrowDirX,
-    endArrowDirY,
-    reverseHeadArrowLength,
-    reverseHeadArrowHalfWidth,
-    reverseTailCircleRadius,
-    maxPathPoints,
-  ) => {
-    const pointCount = computeSafePointCount(points, maxPathPoints);
+  const updateGeometrySignature = (points, geometry) => {
+    const pointCount = computeSafePointCount(points, geometry.maxPathPoints);
     ensurePointSignatureCapacity(pointCount);
-    let safeIndex = 0;
-    const limit = Math.min(points.length, maxPathPoints);
-    for (let i = 0; i < limit; i++) {
-      const x = Number(points[i]?.x);
-      const y = Number(points[i]?.y);
-      if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
-      const base = safeIndex * 2;
-      cachedPoints[base] = x;
-      cachedPoints[base + 1] = y;
-      safeIndex += 1;
-    }
-
+    copyPointSignature(points, geometry.maxPathPoints, cachedPoints);
     cachedPointCount = pointCount;
-    cachedWidth = width;
-    cachedStartRadius = startRadius;
-    cachedStartFlowDirX = startFlowDirX;
-    cachedStartFlowDirY = startFlowDirY;
-    cachedArrowLength = arrowLength;
-    cachedEndHalfWidth = endHalfWidth;
-    cachedEndArrowDirX = endArrowDirX;
-    cachedEndArrowDirY = endArrowDirY;
-    cachedReverseHeadArrowLength = reverseHeadArrowLength;
-    cachedReverseHeadArrowHalfWidth = reverseHeadArrowHalfWidth;
-    cachedReverseTailCircleRadius = reverseTailCircleRadius;
-    cachedMaxPathPoints = maxPathPoints;
+    cachedWidth = geometry.width;
+    cachedStartRadius = geometry.startRadius;
+    cachedStartFlowDirX = geometry.startFlowDirX;
+    cachedStartFlowDirY = geometry.startFlowDirY;
+    cachedArrowLength = geometry.arrowLength;
+    cachedEndHalfWidth = geometry.endHalfWidth;
+    cachedEndArrowDirX = geometry.endArrowDirX;
+    cachedEndArrowDirY = geometry.endArrowDirY;
+    cachedReverseHeadArrowLength = geometry.reverseHeadArrowLength;
+    cachedReverseHeadArrowHalfWidth = geometry.reverseHeadArrowHalfWidth;
+    cachedReverseTailCircleRadius = geometry.reverseTailCircleRadius;
+    cachedMaxPathPoints = geometry.maxPathPoints;
     geometryCached = true;
   };
 
@@ -1442,54 +1354,279 @@ export function createPathWebglRenderer(canvas, options = {}) {
     cachedBracketPoints = new Float32Array(nextPowerOfTwo(minLength));
   };
 
-  const computeSafeBracketPointCount = (points) => {
-    const limit = points.length;
-    let count = 0;
-    for (let i = 0; i < limit; i++) {
-      const x = Number(points[i]?.x);
-      const y = Number(points[i]?.y);
-      if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
-      count += 1;
-    }
-    return count;
-  };
+  const computeSafeBracketPointCount = (points) => scanFinitePoints(points, points.length);
 
   const hasBracketGeometryChange = (points) => {
     const pointCount = computeSafeBracketPointCount(points);
     if (!bracketGeometryCached) return true;
     if (cachedBracketPointCount !== pointCount) return true;
-
-    let safeIndex = 0;
-    for (let i = 0; i < points.length; i++) {
-      const x = Number(points[i]?.x);
-      const y = Number(points[i]?.y);
-      if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
-      const base = safeIndex * 2;
-      if (cachedBracketPoints[base] !== x || cachedBracketPoints[base + 1] !== y) return true;
-      safeIndex += 1;
-    }
-    return false;
+    return pointSignatureChanged(points, points.length, cachedBracketPoints);
   };
 
   const updateBracketGeometrySignature = (points) => {
     const pointCount = computeSafeBracketPointCount(points);
     ensureBracketPointSignatureCapacity(pointCount);
-    let safeIndex = 0;
-    for (let i = 0; i < points.length; i++) {
-      const x = Number(points[i]?.x);
-      const y = Number(points[i]?.y);
-      if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
-      const base = safeIndex * 2;
-      cachedBracketPoints[base] = x;
-      cachedBracketPoints[base + 1] = y;
-      safeIndex += 1;
-    }
+    copyPointSignature(points, points.length, cachedBracketPoints);
     cachedBracketPointCount = pointCount;
     bracketGeometryCached = true;
   };
 
+  const resolveDirectionOverride = (xValue, yValue) => {
+    const x = Number(xValue);
+    const y = Number(yValue);
+    const hasOverride = Number.isFinite(x)
+      && Number.isFinite(y)
+      && Math.hypot(x, y) > FLOW_STOP_EPSILON;
+    return {
+      hasOverride,
+      x: hasOverride ? x : Number.NaN,
+      y: hasOverride ? y : Number.NaN,
+    };
+  };
+
+  const createPathGeometryOptions = (frame) => {
+    const width = Math.max(1, Number(frame.width) || 1);
+    const startFlowOverride = resolveDirectionOverride(frame.startFlowDirX, frame.startFlowDirY);
+    const endArrowOverride = resolveDirectionOverride(frame.endArrowDirX, frame.endArrowDirY);
+    return {
+      width,
+      startRadius: Math.max(0, Number(frame.startRadius) || 0),
+      startFlowDirX: startFlowOverride.x,
+      startFlowDirY: startFlowOverride.y,
+      hasStartFlowOverride: startFlowOverride.hasOverride,
+      arrowLength: Math.max(0, Number(frame.arrowLength) || 0),
+      endHalfWidth: Math.max(0, Number(frame.endHalfWidth) || 0),
+      endArrowDirX: endArrowOverride.x,
+      endArrowDirY: endArrowOverride.y,
+      hasEndArrowOverride: endArrowOverride.hasOverride,
+      reverseHeadArrowLength: Math.max(0, Number(frame.reverseHeadArrowLength) || 0),
+      reverseHeadArrowHalfWidth: Math.max(0, Number(frame.reverseHeadArrowHalfWidth) || 0),
+      reverseTailCircleRadius: Math.max(0, Number(frame.reverseTailCircleRadius) || 0),
+      maxPathPoints: Number.isInteger(frame.maxPathPoints) && frame.maxPathPoints > 0
+        ? frame.maxPathPoints
+        : DEFAULT_MAX_PATH_POINTS,
+    };
+  };
+
+  const createPathFrameState = (frame) => {
+    const points = Array.isArray(frame.points) ? frame.points : [];
+    const retainedStartArcPoints = Array.isArray(frame.retainedStartArcPoints)
+      ? frame.retainedStartArcPoints
+      : [];
+    const retainedEndArcPoints = Array.isArray(frame.retainedEndArcPoints)
+      ? frame.retainedEndArcPoints
+      : [];
+    const bracketCenters = Array.isArray(frame.tutorialBracketCenters)
+      ? frame.tutorialBracketCenters
+      : [];
+    const pathGeometry = createPathGeometryOptions(frame);
+    const bracketCellSize = Math.max(0, Number(frame.tutorialBracketCellSize) || 0);
+    const flowCycle = Math.max(1, Number(frame.flowCycle) || 1);
+    const flowPulse = Math.max(1, Math.min(Number(frame.flowPulse) || 1, flowCycle));
+    const flowMixRaw = Number(frame.flowMix);
+    const reverseColorBlendRaw = Number(frame.reverseColorBlend);
+    return {
+      frame,
+      points,
+      retainedStartArcPoints,
+      retainedEndArcPoints,
+      bracketCenters,
+      bracketCellSize,
+      hasPathPoints: points.length > 0,
+      hasRetainedStartArc: retainedStartArcPoints.length > 1,
+      hasRetainedEndArc: retainedEndArcPoints.length > 1,
+      hasTutorialBrackets: frame.drawTutorialBracketsInPathLayer === true
+        && bracketCellSize > 0
+        && bracketCenters.length > 0,
+      geometryToken: Number(frame.geometryToken),
+      retainedStartArcGeometryToken: Number(frame.retainedStartArcGeometryToken),
+      retainedEndArcGeometryToken: Number(frame.retainedEndArcGeometryToken),
+      tutorialBracketGeometryToken: Number(frame.tutorialBracketGeometryToken),
+      flowCycle,
+      flowPulse,
+      flowOffset: Number(frame.flowOffset) || 0,
+      flowEnabled: frame.flowEnabled ? 1 : 0,
+      flowMix: clampUnit(Number.isFinite(flowMixRaw) ? flowMixRaw : 1),
+      flowRise: Number.isFinite(frame.flowRise) ? frame.flowRise : 0.82,
+      flowDrop: Number.isFinite(frame.flowDrop) ? frame.flowDrop : 0.83,
+      reverseColorBlend: clampUnit(
+        Number.isFinite(reverseColorBlendRaw) ? reverseColorBlendRaw : 1,
+      ),
+      reverseFromFlowOffset: Number(frame.reverseFromFlowOffset) || 0,
+      reverseTravelSpanFromFrame: Math.max(0, Number(frame.reverseTravelSpan) || 0),
+      pathGeometry,
+      retainedStartArcWidth: Math.max(
+        0.5,
+        Number(frame.retainedStartArcWidth) || pathGeometry.width,
+      ),
+      retainedEndArcWidth: Math.max(
+        0.5,
+        Number(frame.retainedEndArcWidth) || pathGeometry.width,
+      ),
+    };
+  };
+
+  const clearPathMesh = (mesh) => {
+    mesh.vertexCount = 0;
+    mesh.indexCount = 0;
+    mesh.mainTravel = 0;
+  };
+
+  const clearBracketMesh = (mesh) => {
+    mesh.vertexCount = 0;
+    mesh.indexCount = 0;
+  };
+
+  const resetMainPathGeometryCache = () => {
+    clearPathMesh(reusableMesh);
+    geometryCached = false;
+    cachedGeometryToken = Number.NaN;
+  };
+
+  const resetRetainedStartArcGeometryCache = () => {
+    clearPathMesh(reusableRetainedStartArcMesh);
+    retainedStartArcGeometryCached = false;
+    cachedRetainedStartArcGeometryToken = Number.NaN;
+    cachedRetainedStartArcWidth = Number.NaN;
+    retainedStartArcUsedStartFlowOverride = false;
+  };
+
+  const resetRetainedEndArcGeometryCache = () => {
+    clearPathMesh(reusableRetainedEndArcMesh);
+    retainedEndArcGeometryCached = false;
+    cachedRetainedEndArcGeometryToken = Number.NaN;
+    cachedRetainedEndArcWidth = Number.NaN;
+    retainedEndArcUsedEndFlowOverride = false;
+  };
+
+  const resetBracketGeometryCache = () => {
+    clearBracketMesh(reusableBracketMesh);
+    bracketGeometryCached = false;
+    cachedBracketGeometryToken = Number.NaN;
+  };
+
+  const updateMainPathGeometry = (frameState) => {
+    if (!frameState.hasPathPoints) {
+      resetMainPathGeometryCache();
+      return false;
+    }
+
+    const hasGeometryToken = Number.isFinite(frameState.geometryToken);
+    const geometryChanged = hasGeometryToken
+      ? (!geometryCached || cachedGeometryToken !== frameState.geometryToken)
+      : hasGeometryChange(frameState.points, frameState.pathGeometry);
+    if (!geometryChanged) return false;
+
+    buildUnifiedPathMeshInto(frameState.points, frameState.pathGeometry, reusableMesh);
+    updateGeometrySignature(frameState.points, frameState.pathGeometry);
+    cachedGeometryToken = hasGeometryToken ? frameState.geometryToken : Number.NaN;
+    return true;
+  };
+
+  const updateRetainedStartArcGeometry = (frameState) => {
+    if (!frameState.hasRetainedStartArc) {
+      resetRetainedStartArcGeometryCache();
+      return false;
+    }
+
+    const hasGeometryToken = Number.isFinite(frameState.retainedStartArcGeometryToken);
+    const widthChanged = !Object.is(cachedRetainedStartArcWidth, frameState.retainedStartArcWidth);
+    const refreshByDirection = (
+      frameState.pathGeometry.hasStartFlowOverride
+      || retainedStartArcUsedStartFlowOverride
+    );
+    let geometryChanged = !hasGeometryToken
+      || !retainedStartArcGeometryCached
+      || cachedRetainedStartArcGeometryToken !== frameState.retainedStartArcGeometryToken;
+    if (refreshByDirection || widthChanged) geometryChanged = true;
+    if (!geometryChanged) return false;
+
+    buildUnifiedPathMeshInto(frameState.retainedStartArcPoints, {
+      width: frameState.retainedStartArcWidth,
+      startRadius: 0,
+      startFlowDirX: frameState.pathGeometry.startFlowDirX,
+      startFlowDirY: frameState.pathGeometry.startFlowDirY,
+      arrowLength: 0,
+      endHalfWidth: 0,
+      reverseHeadArrowLength: 0,
+      reverseHeadArrowHalfWidth: 0,
+      reverseTailCircleRadius: 0,
+      renderStartCap: false,
+      renderEndCap: false,
+      maxPathPoints: frameState.pathGeometry.maxPathPoints,
+    }, reusableRetainedStartArcMesh);
+    cachedRetainedStartArcGeometryToken = hasGeometryToken
+      ? frameState.retainedStartArcGeometryToken
+      : Number.NaN;
+    cachedRetainedStartArcWidth = frameState.retainedStartArcWidth;
+    retainedStartArcGeometryCached = true;
+    retainedStartArcUsedStartFlowOverride = frameState.pathGeometry.hasStartFlowOverride;
+    return true;
+  };
+
+  const updateRetainedEndArcGeometry = (frameState) => {
+    if (!frameState.hasRetainedEndArc) {
+      resetRetainedEndArcGeometryCache();
+      return false;
+    }
+
+    const hasGeometryToken = Number.isFinite(frameState.retainedEndArcGeometryToken);
+    const widthChanged = !Object.is(cachedRetainedEndArcWidth, frameState.retainedEndArcWidth);
+    const refreshByDirection = (
+      frameState.pathGeometry.hasEndArrowOverride
+      || retainedEndArcUsedEndFlowOverride
+    );
+    let geometryChanged = !hasGeometryToken
+      || !retainedEndArcGeometryCached
+      || cachedRetainedEndArcGeometryToken !== frameState.retainedEndArcGeometryToken;
+    if (refreshByDirection || widthChanged) geometryChanged = true;
+    if (!geometryChanged) return false;
+
+    buildUnifiedPathMeshInto(frameState.retainedEndArcPoints, {
+      width: frameState.retainedEndArcWidth,
+      startRadius: 0,
+      arrowLength: 0,
+      endHalfWidth: 0,
+      endArrowDirX: frameState.pathGeometry.endArrowDirX,
+      endArrowDirY: frameState.pathGeometry.endArrowDirY,
+      reverseHeadArrowLength: 0,
+      reverseHeadArrowHalfWidth: 0,
+      reverseTailCircleRadius: 0,
+      renderStartCap: false,
+      renderEndCap: false,
+      maxPathPoints: frameState.pathGeometry.maxPathPoints,
+    }, reusableRetainedEndArcMesh);
+    cachedRetainedEndArcGeometryToken = hasGeometryToken
+      ? frameState.retainedEndArcGeometryToken
+      : Number.NaN;
+    cachedRetainedEndArcWidth = frameState.retainedEndArcWidth;
+    retainedEndArcGeometryCached = true;
+    retainedEndArcUsedEndFlowOverride = frameState.pathGeometry.hasEndArrowOverride;
+    return true;
+  };
+
+  const updateTutorialBracketGeometry = (frameState) => {
+    if (!frameState.hasTutorialBrackets) {
+      resetBracketGeometryCache();
+      return false;
+    }
+
+    const hasBracketGeometryToken = Number.isFinite(frameState.tutorialBracketGeometryToken);
+    const geometryChanged = hasBracketGeometryToken
+      ? (!bracketGeometryCached || cachedBracketGeometryToken !== frameState.tutorialBracketGeometryToken)
+      : hasBracketGeometryChange(frameState.bracketCenters);
+    if (!geometryChanged) return false;
+
+    buildTutorialBracketMeshInto(frameState.bracketCenters, reusableBracketMesh);
+    updateBracketGeometrySignature(frameState.bracketCenters);
+    cachedBracketGeometryToken = hasBracketGeometryToken
+      ? frameState.tutorialBracketGeometryToken
+      : Number.NaN;
+    return true;
+  };
+
   const ensureGpuCapacity = (kind, target, requiredBytes) => {
-    const required = Math.max(0, requiredBytes | 0);
+    const required = Math.max(0, Math.trunc(requiredBytes));
     if (required <= gpuCapacities[kind]) return;
     const nextCapacity = nextPowerOfTwo(required);
     gl.bufferData(target, nextCapacity, gl.DYNAMIC_DRAW);
@@ -1598,419 +1735,219 @@ export function createPathWebglRenderer(canvas, options = {}) {
     clear();
   };
 
+  const createPathDrawState = (frameState) => ({
+    completionProgress: clampUnit(Number(frameState.frame.completionProgress) || 0),
+    completionEnabled: frameState.frame.isCompletionSolved ? 1 : 0,
+    completionFeather: Math.max(frameState.pathGeometry.width * 2.2, 14),
+    mainColor: toRgb01Into(
+      frameState.frame.mainColorRgb || { r: 255, g: 255, b: 255 },
+      mainColorScratch,
+    ),
+    completeColor: toRgb01Into(
+      frameState.frame.completeColorRgb || { r: 46, g: 204, b: 113 },
+      completeColorScratch,
+    ),
+  });
+
+  const drawPathMesh = ({
+    mesh,
+    shouldUpload,
+    meshTag,
+    frameState,
+    drawState,
+    tailExtension = 0,
+    useFrameReverseSpan = false,
+    options = null,
+  }) => {
+    if (mesh.indexCount <= 0 || mesh.vertexCount <= 0) return;
+
+    const flowEnabledForMesh = options?.disableFlow ? 0 : frameState.flowEnabled;
+    const flowMixForMesh = options?.disableFlow ? 0 : frameState.flowMix;
+    const flowOffsetForMesh = Number.isFinite(options?.flowOffsetOverride)
+      ? options.flowOffsetOverride
+      : frameState.flowOffset;
+    const reverseColorBlendForMesh = options?.disableReverse ? 1 : frameState.reverseColorBlend;
+    const reverseFromFlowOffsetForMesh = options?.disableReverse ? 0 : frameState.reverseFromFlowOffset;
+    const completionBoundary = drawState.completionProgress >= COMPLETE_PATH_THRESHOLD
+      ? (mesh.mainTravel + Math.max(0, tailExtension))
+      : (mesh.mainTravel * drawState.completionProgress);
+    const reverseTravelSpan = (
+      useFrameReverseSpan && frameState.reverseTravelSpanFromFrame > 0
+    ) ? frameState.reverseTravelSpanFromFrame : mesh.mainTravel;
+
+    gl.useProgram(program);
+    gl.bindVertexArray(vao);
+
+    if (shouldUpload || uploadedPathMeshTag !== meshTag) {
+      uploadMeshToGpu(mesh);
+      uploadedPathMeshTag = meshTag;
+    }
+
+    setUniform2fCached(uniforms.canvasSizePx, 'canvasWidth', 'canvasHeight', canvas.width, canvas.height);
+    setUniform1fCached(uniforms.deviceScale, 'deviceScale', deviceScale);
+    setUniform3fCached(
+      uniforms.mainColor,
+      'mainR',
+      'mainG',
+      'mainB',
+      drawState.mainColor.r,
+      drawState.mainColor.g,
+      drawState.mainColor.b,
+    );
+    setUniform3fCached(
+      uniforms.completeColor,
+      'completeR',
+      'completeG',
+      'completeB',
+      drawState.completeColor.r,
+      drawState.completeColor.g,
+      drawState.completeColor.b,
+    );
+    setUniform1fCached(uniforms.completionEnabled, 'completionEnabled', drawState.completionEnabled);
+    setUniform1fCached(uniforms.completionBoundary, 'completionBoundary', completionBoundary);
+    setUniform1fCached(uniforms.completionFeather, 'completionFeather', drawState.completionFeather);
+    setUniform1fCached(uniforms.completionProgress, 'completionProgress', drawState.completionProgress);
+    setUniform1fCached(uniforms.completionThreshold, 'completionThreshold', COMPLETE_PATH_THRESHOLD);
+    setUniform1fCached(uniforms.flowEnabled, 'flowEnabled', flowEnabledForMesh);
+    setUniform1fCached(uniforms.flowMix, 'flowMix', flowMixForMesh);
+    setUniform1fCached(uniforms.flowOffset, 'flowOffset', flowOffsetForMesh);
+    setUniform1fCached(uniforms.flowCycle, 'flowCycle', frameState.flowCycle);
+    setUniform1fCached(uniforms.flowPulse, 'flowPulse', frameState.flowPulse);
+    setUniform1fCached(uniforms.flowRise, 'flowRise', frameState.flowRise);
+    setUniform1fCached(uniforms.flowDrop, 'flowDrop', frameState.flowDrop);
+    setUniform1fCached(uniforms.reverseColorBlend, 'reverseColorBlend', reverseColorBlendForMesh);
+    setUniform1fCached(
+      uniforms.reverseFromFlowOffset,
+      'reverseFromFlowOffset',
+      reverseFromFlowOffsetForMesh,
+    );
+    setUniform1fCached(uniforms.reverseTravelSpan, 'reverseTravelSpan', reverseTravelSpan);
+
+    gl.drawElements(gl.TRIANGLES, mesh.indexCount, gl.UNSIGNED_SHORT, 0);
+    gl.bindVertexArray(null);
+  };
+
+  const drawPathMeshes = (frameState, drawState, geometryChanges) => {
+    if (frameState.hasRetainedStartArc) {
+      drawPathMesh({
+        mesh: reusableRetainedStartArcMesh,
+        shouldUpload: geometryChanges.retainedStartArc,
+        meshTag: 'retainedStart',
+        frameState,
+        drawState,
+        options: { disableReverse: true },
+      });
+    }
+    if (frameState.hasRetainedEndArc) {
+      drawPathMesh({
+        mesh: reusableRetainedEndArcMesh,
+        shouldUpload: geometryChanges.retainedEndArc,
+        meshTag: 'retainedEnd',
+        frameState,
+        drawState,
+        options: {
+          disableReverse: true,
+          flowOffsetOverride: frameState.flowOffset + (Number(reusableMesh.mainTravel) || 0),
+        },
+      });
+    }
+    if (frameState.hasPathPoints) {
+      drawPathMesh({
+        mesh: reusableMesh,
+        shouldUpload: geometryChanges.path,
+        meshTag: 'main',
+        frameState,
+        drawState,
+        tailExtension: frameState.pathGeometry.arrowLength,
+        useFrameReverseSpan: true,
+      });
+    }
+  };
+
+  const drawTutorialBrackets = (frameState, bracketGeometryChanged) => {
+    if (
+      !frameState.hasTutorialBrackets
+      || reusableBracketMesh.indexCount <= 0
+      || reusableBracketMesh.vertexCount <= 0
+    ) {
+      return;
+    }
+
+    const bracketColor = toRgb01Into(
+      frameState.frame.tutorialBracketColorRgb || { r: 120, g: 190, b: 255 },
+      bracketColorScratch,
+    );
+    const bracketPulseEnabled = frameState.frame.tutorialBracketPulseEnabled ? 1 : 0;
+    const flowPhase = frameState.flowOffset % frameState.flowCycle;
+    const phaseUnit = ((flowPhase >= 0 ? flowPhase : flowPhase + frameState.flowCycle) / frameState.flowCycle);
+    const pulse = bracketPulseEnabled > 0
+      ? (0.5 - (0.5 * Math.cos(phaseUnit * TAU * BRACKET_PULSE_CYCLES)))
+      : 1;
+    const halfSize = frameState.bracketCellSize * 0.5;
+    const inset = frameState.bracketCellSize * 0.05;
+    const cornerRadius = Math.max(1, (frameState.bracketCellSize * 0.2142857143) - inset);
+    const cornerThickness = Math.max(1.2, cornerRadius * 0.31);
+    const cornerAnchor = Math.max(0, halfSize - inset - cornerRadius);
+
+    gl.useProgram(bracketProgram);
+    gl.bindVertexArray(bracketVao);
+
+    if (bracketGeometryChanged) {
+      uploadTutorialBracketMeshToGpu(reusableBracketMesh);
+    }
+
+    setUniform2fCached(
+      bracketUniforms.canvasSizePx,
+      'bracketCanvasWidth',
+      'bracketCanvasHeight',
+      canvas.width,
+      canvas.height,
+    );
+    setUniform1fCached(bracketUniforms.deviceScale, 'bracketDeviceScale', deviceScale);
+    setUniform1fCached(bracketUniforms.halfSize, 'bracketHalfSize', halfSize);
+    setUniform1fCached(bracketUniforms.cornerAnchor, 'bracketCornerAnchor', cornerAnchor);
+    setUniform1fCached(bracketUniforms.cornerRadius, 'bracketCornerRadius', cornerRadius);
+    setUniform1fCached(bracketUniforms.cornerThickness, 'bracketCornerThickness', cornerThickness);
+    setUniform3fCached(
+      bracketUniforms.color,
+      'bracketColorR',
+      'bracketColorG',
+      'bracketColorB',
+      bracketColor.r,
+      bracketColor.g,
+      bracketColor.b,
+    );
+    setUniform1fCached(bracketUniforms.pulse, 'bracketPulse', pulse);
+
+    gl.drawElements(gl.TRIANGLES, reusableBracketMesh.indexCount, gl.UNSIGNED_SHORT, 0);
+    gl.bindVertexArray(null);
+  };
+
   const drawPathFrame = (frame = {}) => {
     if (isContextLost()) return 0;
-    const points = Array.isArray(frame.points) ? frame.points : [];
-    const retainedStartArcPoints = Array.isArray(frame.retainedStartArcPoints)
-      ? frame.retainedStartArcPoints
-      : [];
-    const retainedEndArcPoints = Array.isArray(frame.retainedEndArcPoints)
-      ? frame.retainedEndArcPoints
-      : [];
-    const bracketCenters = Array.isArray(frame.tutorialBracketCenters)
-      ? frame.tutorialBracketCenters
-      : [];
-    const bracketCellSize = Math.max(0, Number(frame.tutorialBracketCellSize) || 0);
-    const drawTutorialBracketsInPathLayer = frame.drawTutorialBracketsInPathLayer === true;
-    const hasPathPoints = points.length > 0;
-    const hasRetainedStartArc = retainedStartArcPoints.length > 1;
-    const hasRetainedEndArc = retainedEndArcPoints.length > 1;
-    const hasTutorialBrackets = drawTutorialBracketsInPathLayer && bracketCellSize > 0 && bracketCenters.length > 0;
 
-    const flowCycle = Math.max(1, Number(frame.flowCycle) || 1);
-    const flowPulse = Math.max(1, Math.min(Number(frame.flowPulse) || 1, flowCycle));
-    const flowOffset = Number(frame.flowOffset) || 0;
-    const flowEnabled = frame.flowEnabled ? 1 : 0;
-    const flowMixRaw = Number(frame.flowMix);
-    const flowMix = clampUnit(Number.isFinite(flowMixRaw) ? flowMixRaw : 1);
-    const flowRise = Number.isFinite(frame.flowRise) ? frame.flowRise : 0.82;
-    const flowDrop = Number.isFinite(frame.flowDrop) ? frame.flowDrop : 0.83;
-    const reverseColorBlendRaw = Number(frame.reverseColorBlend);
-    const reverseColorBlend = clampUnit(
-      Number.isFinite(reverseColorBlendRaw) ? reverseColorBlendRaw : 1,
-    );
-    const reverseFromFlowOffset = Number(frame.reverseFromFlowOffset) || 0;
-    const reverseTravelSpanFromFrame = Math.max(0, Number(frame.reverseTravelSpan) || 0);
+    const frameState = createPathFrameState(frame);
+    const geometryChanges = {
+      path: updateMainPathGeometry(frameState),
+      retainedStartArc: updateRetainedStartArcGeometry(frameState),
+      retainedEndArc: updateRetainedEndArcGeometry(frameState),
+      bracket: updateTutorialBracketGeometry(frameState),
+    };
 
-    if (!hasPathPoints) {
-      reusableMesh.vertexCount = 0;
-      reusableMesh.indexCount = 0;
-      reusableMesh.mainTravel = 0;
-      geometryCached = false;
-      cachedGeometryToken = NaN;
-    }
-
-    const width = Math.max(1, Number(frame.width) || 1);
-    const retainedStartArcWidth = Math.max(0.5, Number(frame.retainedStartArcWidth) || width);
-    const retainedEndArcWidth = Math.max(0.5, Number(frame.retainedEndArcWidth) || width);
-    const startRadius = Math.max(0, Number(frame.startRadius) || 0);
-    const startFlowDirXRaw = Number(frame.startFlowDirX);
-    const startFlowDirYRaw = Number(frame.startFlowDirY);
-    const hasStartFlowOverride = Number.isFinite(startFlowDirXRaw)
-      && Number.isFinite(startFlowDirYRaw)
-      && Math.hypot(startFlowDirXRaw, startFlowDirYRaw) > FLOW_STOP_EPSILON;
-    const startFlowDirX = hasStartFlowOverride ? startFlowDirXRaw : NaN;
-    const startFlowDirY = hasStartFlowOverride ? startFlowDirYRaw : NaN;
-    const arrowLength = Math.max(0, Number(frame.arrowLength) || 0);
-    const endHalfWidth = Math.max(0, Number(frame.endHalfWidth) || 0);
-    const endArrowDirXRaw = Number(frame.endArrowDirX);
-    const endArrowDirYRaw = Number(frame.endArrowDirY);
-    const hasEndArrowOverride = Number.isFinite(endArrowDirXRaw)
-      && Number.isFinite(endArrowDirYRaw)
-      && Math.hypot(endArrowDirXRaw, endArrowDirYRaw) > FLOW_STOP_EPSILON;
-    const endArrowDirX = hasEndArrowOverride ? endArrowDirXRaw : NaN;
-    const endArrowDirY = hasEndArrowOverride ? endArrowDirYRaw : NaN;
-    const reverseHeadArrowLength = Math.max(0, Number(frame.reverseHeadArrowLength) || 0);
-    const reverseHeadArrowHalfWidth = Math.max(0, Number(frame.reverseHeadArrowHalfWidth) || 0);
-    const reverseTailCircleRadius = Math.max(0, Number(frame.reverseTailCircleRadius) || 0);
-    const maxPathPoints = Number.isInteger(frame.maxPathPoints) && frame.maxPathPoints > 0
-      ? frame.maxPathPoints
-      : DEFAULT_MAX_PATH_POINTS;
-    let geometryChanged = false;
-    if (hasPathPoints) {
-      const nextGeometryToken = Number(frame.geometryToken);
-      const hasGeometryToken = Number.isFinite(nextGeometryToken);
-      geometryChanged = hasGeometryToken
-        ? (!geometryCached || cachedGeometryToken !== nextGeometryToken)
-        : hasGeometryChange(
-          points,
-          width,
-          startRadius,
-          startFlowDirX,
-          startFlowDirY,
-          arrowLength,
-          endHalfWidth,
-          endArrowDirX,
-          endArrowDirY,
-          reverseHeadArrowLength,
-          reverseHeadArrowHalfWidth,
-          reverseTailCircleRadius,
-          maxPathPoints,
-        );
-      if (geometryChanged) {
-        buildUnifiedPathMeshInto(points, {
-          width,
-          startRadius,
-          startFlowDirX,
-          startFlowDirY,
-          arrowLength,
-          endHalfWidth,
-          endArrowDirX,
-          endArrowDirY,
-          reverseHeadArrowLength,
-          reverseHeadArrowHalfWidth,
-          reverseTailCircleRadius,
-          maxPathPoints,
-        }, reusableMesh);
-        updateGeometrySignature(
-          points,
-          width,
-          startRadius,
-          startFlowDirX,
-          startFlowDirY,
-          arrowLength,
-          endHalfWidth,
-          endArrowDirX,
-          endArrowDirY,
-          reverseHeadArrowLength,
-          reverseHeadArrowHalfWidth,
-          reverseTailCircleRadius,
-          maxPathPoints,
-        );
-        if (hasGeometryToken) {
-          cachedGeometryToken = nextGeometryToken;
-        } else {
-          cachedGeometryToken = NaN;
-        }
-      }
-    }
-
-    let retainedStartArcGeometryChanged = false;
-    if (hasRetainedStartArc) {
-      const nextGeometryToken = Number(frame.retainedStartArcGeometryToken);
-      const hasGeometryToken = Number.isFinite(nextGeometryToken);
-      const widthChanged = !Object.is(cachedRetainedStartArcWidth, retainedStartArcWidth);
-      const refreshByDirection = (
-        hasStartFlowOverride
-        || retainedStartArcUsedStartFlowOverride
-      );
-      retainedStartArcGeometryChanged = !hasGeometryToken
-        || !retainedStartArcGeometryCached
-        || cachedRetainedStartArcGeometryToken !== nextGeometryToken;
-      if (refreshByDirection || widthChanged) retainedStartArcGeometryChanged = true;
-      if (retainedStartArcGeometryChanged) {
-        buildUnifiedPathMeshInto(retainedStartArcPoints, {
-          width: retainedStartArcWidth,
-          startRadius: 0,
-          startFlowDirX,
-          startFlowDirY,
-          arrowLength: 0,
-          endHalfWidth: 0,
-          reverseHeadArrowLength: 0,
-          reverseHeadArrowHalfWidth: 0,
-          reverseTailCircleRadius: 0,
-          renderStartCap: false,
-          renderEndCap: false,
-          maxPathPoints,
-        }, reusableRetainedStartArcMesh);
-        if (hasGeometryToken) {
-          cachedRetainedStartArcGeometryToken = nextGeometryToken;
-        } else {
-          cachedRetainedStartArcGeometryToken = NaN;
-        }
-        cachedRetainedStartArcWidth = retainedStartArcWidth;
-        retainedStartArcGeometryCached = true;
-        retainedStartArcUsedStartFlowOverride = hasStartFlowOverride;
-      }
-    } else {
-      reusableRetainedStartArcMesh.vertexCount = 0;
-      reusableRetainedStartArcMesh.indexCount = 0;
-      reusableRetainedStartArcMesh.mainTravel = 0;
-      retainedStartArcGeometryCached = false;
-      cachedRetainedStartArcGeometryToken = NaN;
-      cachedRetainedStartArcWidth = NaN;
-      retainedStartArcUsedStartFlowOverride = false;
-    }
-
-    let retainedEndArcGeometryChanged = false;
-    if (hasRetainedEndArc) {
-      const nextGeometryToken = Number(frame.retainedEndArcGeometryToken);
-      const hasGeometryToken = Number.isFinite(nextGeometryToken);
-      const widthChanged = !Object.is(cachedRetainedEndArcWidth, retainedEndArcWidth);
-      const refreshByDirection = (
-        hasEndArrowOverride
-        || retainedEndArcUsedEndFlowOverride
-      );
-      retainedEndArcGeometryChanged = !hasGeometryToken
-        || !retainedEndArcGeometryCached
-        || cachedRetainedEndArcGeometryToken !== nextGeometryToken;
-      if (refreshByDirection || widthChanged) retainedEndArcGeometryChanged = true;
-      if (retainedEndArcGeometryChanged) {
-        buildUnifiedPathMeshInto(retainedEndArcPoints, {
-          width: retainedEndArcWidth,
-          startRadius: 0,
-          arrowLength: 0,
-          endHalfWidth: 0,
-          endArrowDirX,
-          endArrowDirY,
-          reverseHeadArrowLength: 0,
-          reverseHeadArrowHalfWidth: 0,
-          reverseTailCircleRadius: 0,
-          renderStartCap: false,
-          renderEndCap: false,
-          maxPathPoints,
-        }, reusableRetainedEndArcMesh);
-        if (hasGeometryToken) {
-          cachedRetainedEndArcGeometryToken = nextGeometryToken;
-        } else {
-          cachedRetainedEndArcGeometryToken = NaN;
-        }
-        cachedRetainedEndArcWidth = retainedEndArcWidth;
-        retainedEndArcGeometryCached = true;
-        retainedEndArcUsedEndFlowOverride = hasEndArrowOverride;
-      }
-    } else {
-      reusableRetainedEndArcMesh.vertexCount = 0;
-      reusableRetainedEndArcMesh.indexCount = 0;
-      reusableRetainedEndArcMesh.mainTravel = 0;
-      retainedEndArcGeometryCached = false;
-      cachedRetainedEndArcGeometryToken = NaN;
-      cachedRetainedEndArcWidth = NaN;
-      retainedEndArcUsedEndFlowOverride = false;
-    }
-
-    let bracketGeometryChanged = false;
-    if (hasTutorialBrackets) {
-      const nextBracketGeometryToken = Number(frame.tutorialBracketGeometryToken);
-      const hasBracketGeometryToken = Number.isFinite(nextBracketGeometryToken);
-      bracketGeometryChanged = hasBracketGeometryToken
-        ? (!bracketGeometryCached || cachedBracketGeometryToken !== nextBracketGeometryToken)
-        : hasBracketGeometryChange(bracketCenters);
-      if (bracketGeometryChanged) {
-        buildTutorialBracketMeshInto(bracketCenters, reusableBracketMesh);
-        updateBracketGeometrySignature(bracketCenters);
-        if (hasBracketGeometryToken) {
-          cachedBracketGeometryToken = nextBracketGeometryToken;
-        } else {
-          cachedBracketGeometryToken = NaN;
-        }
-      }
-    } else {
-      reusableBracketMesh.vertexCount = 0;
-      reusableBracketMesh.indexCount = 0;
-      bracketGeometryCached = false;
-      cachedBracketGeometryToken = NaN;
-    }
-
-    if (!hasPathPoints && !hasRetainedStartArc && !hasRetainedEndArc && !hasTutorialBrackets) {
+    if (
+      !frameState.hasPathPoints
+      && !frameState.hasRetainedStartArc
+      && !frameState.hasRetainedEndArc
+      && !frameState.hasTutorialBrackets
+    ) {
       clear();
       return 0;
     }
 
     clear();
-    const completionProgress = clampUnit(Number(frame.completionProgress) || 0);
-    const completionEnabled = frame.isCompletionSolved ? 1 : 0;
-    const completionFeather = Math.max(width * 2.2, 14);
-    const mainColor = toRgb01Into(frame.mainColorRgb || { r: 255, g: 255, b: 255 }, mainColorScratch);
-    const completeColor = toRgb01Into(
-      frame.completeColorRgb || { r: 46, g: 204, b: 113 },
-      completeColorScratch,
-    );
-
-    const drawPathMesh = (
-      mesh,
-      shouldUpload,
-      meshTag,
-      tailExtension = 0,
-      useFrameReverseSpan = false,
-      options = null,
-    ) => {
-      if (mesh.indexCount <= 0 || mesh.vertexCount <= 0) return;
-      const flowEnabledForMesh = options?.disableFlow ? 0 : flowEnabled;
-      const flowMixForMesh = options?.disableFlow ? 0 : flowMix;
-      const flowOffsetForMesh = Number.isFinite(options?.flowOffsetOverride)
-        ? options.flowOffsetOverride
-        : flowOffset;
-      const reverseColorBlendForMesh = options?.disableReverse ? 1 : reverseColorBlend;
-      const reverseFromFlowOffsetForMesh = options?.disableReverse ? 0 : reverseFromFlowOffset;
-      const completionBoundary = completionProgress >= COMPLETE_PATH_THRESHOLD
-        ? (mesh.mainTravel + Math.max(0, tailExtension))
-        : (mesh.mainTravel * completionProgress);
-      const reverseTravelSpan = (
-        useFrameReverseSpan && reverseTravelSpanFromFrame > 0
-      ) ? reverseTravelSpanFromFrame : mesh.mainTravel;
-
-      gl.useProgram(program);
-      gl.bindVertexArray(vao);
-
-      if (shouldUpload || uploadedPathMeshTag !== meshTag) {
-        uploadMeshToGpu(mesh);
-        uploadedPathMeshTag = meshTag;
-      }
-
-      setUniform2fCached(uniforms.canvasSizePx, 'canvasWidth', 'canvasHeight', canvas.width, canvas.height);
-      setUniform1fCached(uniforms.deviceScale, 'deviceScale', deviceScale);
-      setUniform3fCached(
-        uniforms.mainColor,
-        'mainR',
-        'mainG',
-        'mainB',
-        mainColor.r,
-        mainColor.g,
-        mainColor.b,
-      );
-      setUniform3fCached(
-        uniforms.completeColor,
-        'completeR',
-        'completeG',
-        'completeB',
-        completeColor.r,
-        completeColor.g,
-        completeColor.b,
-      );
-      setUniform1fCached(uniforms.completionEnabled, 'completionEnabled', completionEnabled);
-      setUniform1fCached(uniforms.completionBoundary, 'completionBoundary', completionBoundary);
-      setUniform1fCached(uniforms.completionFeather, 'completionFeather', completionFeather);
-      setUniform1fCached(uniforms.completionProgress, 'completionProgress', completionProgress);
-      setUniform1fCached(uniforms.completionThreshold, 'completionThreshold', COMPLETE_PATH_THRESHOLD);
-      setUniform1fCached(uniforms.flowEnabled, 'flowEnabled', flowEnabledForMesh);
-      setUniform1fCached(uniforms.flowMix, 'flowMix', flowMixForMesh);
-      setUniform1fCached(uniforms.flowOffset, 'flowOffset', flowOffsetForMesh);
-      setUniform1fCached(uniforms.flowCycle, 'flowCycle', flowCycle);
-      setUniform1fCached(uniforms.flowPulse, 'flowPulse', flowPulse);
-      setUniform1fCached(uniforms.flowRise, 'flowRise', flowRise);
-      setUniform1fCached(uniforms.flowDrop, 'flowDrop', flowDrop);
-      setUniform1fCached(uniforms.reverseColorBlend, 'reverseColorBlend', reverseColorBlendForMesh);
-      setUniform1fCached(
-        uniforms.reverseFromFlowOffset,
-        'reverseFromFlowOffset',
-        reverseFromFlowOffsetForMesh,
-      );
-      setUniform1fCached(uniforms.reverseTravelSpan, 'reverseTravelSpan', reverseTravelSpan);
-
-      gl.drawElements(gl.TRIANGLES, mesh.indexCount, gl.UNSIGNED_SHORT, 0);
-      gl.bindVertexArray(null);
-    };
-
-    if (hasRetainedStartArc) {
-      drawPathMesh(
-        reusableRetainedStartArcMesh,
-        retainedStartArcGeometryChanged,
-        'retainedStart',
-        0,
-        false,
-        { disableReverse: true },
-      );
-    }
-    if (hasRetainedEndArc) {
-      const endFlowOffsetOverride = flowOffset + (Number(reusableMesh.mainTravel) || 0);
-      drawPathMesh(
-        reusableRetainedEndArcMesh,
-        retainedEndArcGeometryChanged,
-        'retainedEnd',
-        0,
-        false,
-        { disableReverse: true, flowOffsetOverride: endFlowOffsetOverride },
-      );
-    }
-    if (hasPathPoints) {
-      drawPathMesh(reusableMesh, geometryChanged, 'main', arrowLength, true);
-    }
-
-    if (hasTutorialBrackets && reusableBracketMesh.indexCount > 0 && reusableBracketMesh.vertexCount > 0) {
-      const bracketColor = toRgb01Into(
-        frame.tutorialBracketColorRgb || { r: 120, g: 190, b: 255 },
-        bracketColorScratch,
-      );
-      const bracketPulseEnabled = frame.tutorialBracketPulseEnabled ? 1 : 0;
-      const phaseUnit = (() => {
-        const mod = flowOffset % flowCycle;
-        const normalized = mod >= 0 ? mod : mod + flowCycle;
-        return normalized / flowCycle;
-      })();
-      const pulse = bracketPulseEnabled > 0
-        ? (0.5 - (0.5 * Math.cos(phaseUnit * TAU * BRACKET_PULSE_CYCLES)))
-        : 1;
-      const halfSize = bracketCellSize * 0.5;
-      const inset = bracketCellSize * 0.05;
-      const cornerRadius = Math.max(1, (bracketCellSize * 0.2142857143) - inset);
-      const cornerThickness = Math.max(1.2, cornerRadius * 0.31);
-      const cornerAnchor = Math.max(0, halfSize - inset - cornerRadius);
-
-      gl.useProgram(bracketProgram);
-      gl.bindVertexArray(bracketVao);
-
-      if (bracketGeometryChanged) {
-        uploadTutorialBracketMeshToGpu(reusableBracketMesh);
-      }
-
-      setUniform2fCached(
-        bracketUniforms.canvasSizePx,
-        'bracketCanvasWidth',
-        'bracketCanvasHeight',
-        canvas.width,
-        canvas.height,
-      );
-      setUniform1fCached(bracketUniforms.deviceScale, 'bracketDeviceScale', deviceScale);
-      setUniform1fCached(bracketUniforms.halfSize, 'bracketHalfSize', halfSize);
-      setUniform1fCached(bracketUniforms.cornerAnchor, 'bracketCornerAnchor', cornerAnchor);
-      setUniform1fCached(bracketUniforms.cornerRadius, 'bracketCornerRadius', cornerRadius);
-      setUniform1fCached(bracketUniforms.cornerThickness, 'bracketCornerThickness', cornerThickness);
-      setUniform3fCached(
-        bracketUniforms.color,
-        'bracketColorR',
-        'bracketColorG',
-        'bracketColorB',
-        bracketColor.r,
-        bracketColor.g,
-        bracketColor.b,
-      );
-      setUniform1fCached(bracketUniforms.pulse, 'bracketPulse', pulse);
-
-      gl.drawElements(gl.TRIANGLES, reusableBracketMesh.indexCount, gl.UNSIGNED_SHORT, 0);
-      gl.bindVertexArray(null);
-    }
-
+    const drawState = createPathDrawState(frameState);
+    drawPathMeshes(frameState, drawState, geometryChanges);
+    drawTutorialBrackets(frameState, geometryChanges.bracket);
     return reusableMesh.mainTravel;
   };
 

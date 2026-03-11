@@ -45,7 +45,7 @@ export function createPathTransitionCompensationBuffer({ resolveShift }) {
     },
 
     consume(path, currentOffset = 0, flowCycle = 128) {
-      if (!(pendingPathFlowTransitionCount > 0)) {
+      if (pendingPathFlowTransitionCount <= 0) {
         return {
           consumed: false,
           stale: false,
@@ -71,9 +71,9 @@ export function createPathTransitionCompensationBuffer({ resolveShift }) {
       const appliedShift = Number.isFinite(pendingPathFlowOffsetShift)
         ? pendingPathFlowOffsetShift
         : 0;
-      const nextOffset = appliedShift !== 0
-        ? normalizeFlowOffset(currentOffset + appliedShift, flowCycle)
-        : normalizeFlowOffset(currentOffset, flowCycle);
+      const nextOffset = appliedShift === 0
+        ? normalizeFlowOffset(currentOffset, flowCycle)
+        : normalizeFlowOffset(currentOffset + appliedShift, flowCycle);
       this.clear();
       return {
         consumed: true,

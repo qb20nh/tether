@@ -11,6 +11,32 @@ const HISTORY_RELATIVE_TIME_REFRESH_MS = 60 * 1000;
 const HISTORY_MAX_ENTRIES = 10;
 const HISTORY_DYING_START_INDEX = 5;
 const HISTORY_EMPTY_PLACEHOLDER_TEXT = 'No notifications yet.';
+const HISTORY_ENTRY_TRANSLATION_KEYS = Object.freeze({
+  'unsolved-warning': Object.freeze({
+    title: 'ui.notificationUnsolvedTitle',
+    body: 'ui.notificationUnsolvedBody',
+  }),
+  'new-level': Object.freeze({
+    title: 'ui.notificationNewLevelTitle',
+    body: 'ui.notificationNewLevelBody',
+  }),
+  'new-version-available': Object.freeze({
+    title: 'ui.newVersionAvailableTitle',
+    body: 'ui.newVersionAvailableBody',
+  }),
+  'new-version-toast': Object.freeze({
+    title: 'ui.newVersionAvailableToast',
+  }),
+  'update-apply-failed': Object.freeze({
+    title: 'ui.updateApplyFailedToast',
+  }),
+  'update-applied': Object.freeze({
+    title: 'ui.updateAppliedToast',
+  }),
+  'low-power-hint': Object.freeze({
+    title: 'ui.lowPowerModeHintToast',
+  }),
+});
 const isHistoryActionActivationKey = (key) => key === 'Enter' || key === ' ' || key === 'Spacebar';
 
 export function createNotificationHistoryController(options = {}) {
@@ -26,8 +52,8 @@ export function createNotificationHistoryController(options = {}) {
     requestUpdateApplyConfirmation = async () => false,
     requestMoveDailyConfirmation = async () => false,
     containsOpenDialogTarget = () => false,
-    windowObj = typeof window !== 'undefined' ? window : undefined,
-    documentObj = typeof document !== 'undefined' ? document : undefined,
+    windowObj = typeof window === 'undefined' ? undefined : window,
+    documentObj = typeof document === 'undefined' ? undefined : document,
   } = options;
 
   if (!elementIds || typeof elementIds !== 'object') {
@@ -53,63 +79,30 @@ export function createNotificationHistoryController(options = {}) {
     entries: [],
   };
 
+  const resolveHistoryEntryLocalizedText = (translationKey, fallback) => {
+    const localized = translateNow(translationKey);
+    return localized === translationKey ? fallback : localized;
+  };
+
   const resolveNotificationHistoryEntryText = (entry) => {
-    let title = entry?.title || '-';
-    let body = entry?.body || '';
+    const title = entry?.title || '-';
+    const body = entry?.body || '';
 
     if (!entry) {
       return { title, body };
     }
 
-    if (entry.kind === 'unsolved-warning') {
-      const localizedTitle = translateNow('ui.notificationUnsolvedTitle');
-      const localizedBody = translateNow('ui.notificationUnsolvedBody');
-      if (localizedTitle !== 'ui.notificationUnsolvedTitle') title = localizedTitle;
-      if (localizedBody !== 'ui.notificationUnsolvedBody') body = localizedBody;
-      return { title, body };
-    }
+    const translationKeys = HISTORY_ENTRY_TRANSLATION_KEYS[entry.kind];
+    if (!translationKeys) return { title, body };
 
-    if (entry.kind === 'new-level') {
-      const localizedTitle = translateNow('ui.notificationNewLevelTitle');
-      const localizedBody = translateNow('ui.notificationNewLevelBody');
-      if (localizedTitle !== 'ui.notificationNewLevelTitle') title = localizedTitle;
-      if (localizedBody !== 'ui.notificationNewLevelBody') body = localizedBody;
-      return { title, body };
-    }
-
-    if (entry.kind === 'new-version-available') {
-      const localizedTitle = translateNow('ui.newVersionAvailableTitle');
-      const localizedBody = translateNow('ui.newVersionAvailableBody');
-      if (localizedTitle !== 'ui.newVersionAvailableTitle') title = localizedTitle;
-      if (localizedBody !== 'ui.newVersionAvailableBody') body = localizedBody;
-      return { title, body };
-    }
-
-    if (entry.kind === 'new-version-toast') {
-      const localizedTitle = translateNow('ui.newVersionAvailableToast');
-      if (localizedTitle !== 'ui.newVersionAvailableToast') title = localizedTitle;
-      return { title, body };
-    }
-
-    if (entry.kind === 'update-apply-failed') {
-      const localizedTitle = translateNow('ui.updateApplyFailedToast');
-      if (localizedTitle !== 'ui.updateApplyFailedToast') title = localizedTitle;
-      return { title, body };
-    }
-
-    if (entry.kind === 'update-applied') {
-      const localizedTitle = translateNow('ui.updateAppliedToast');
-      if (localizedTitle !== 'ui.updateAppliedToast') title = localizedTitle;
-      return { title, body };
-    }
-
-    if (entry.kind === 'low-power-hint') {
-      const localizedTitle = translateNow('ui.lowPowerModeHintToast');
-      if (localizedTitle !== 'ui.lowPowerModeHintToast') title = localizedTitle;
-      return { title, body };
-    }
-
-    return { title, body };
+    return {
+      title: translationKeys.title
+        ? resolveHistoryEntryLocalizedText(translationKeys.title, title)
+        : title,
+      body: translationKeys.body
+        ? resolveHistoryEntryLocalizedText(translationKeys.body, body)
+        : body,
+    };
   };
 
   const normalizeHistoryEntry = (entry) => {
@@ -117,7 +110,8 @@ export function createNotificationHistoryController(options = {}) {
     const id = typeof entry.id === 'string' ? entry.id.trim() : '';
     if (!id) return null;
     const source = entry.source === 'system' ? 'system' : 'toast';
-    const kind = typeof entry.kind === 'string' ? entry.kind.trim() : (source === 'system' ? 'unsolved-warning' : 'toast');
+    const defaultKind = source === 'system' ? 'unsolved-warning' : 'toast';
+    const kind = typeof entry.kind === 'string' ? entry.kind.trim() : defaultKind;
     const title = typeof entry.title === 'string' ? entry.title.trim() : '';
     const body = typeof entry.body === 'string' ? entry.body.trim() : '';
     const createdAtUtcMs = Number.parseInt(entry.createdAtUtcMs, 10);
@@ -163,7 +157,7 @@ export function createNotificationHistoryController(options = {}) {
     const locale = getLocale();
     const rows = notificationHistoryListEl.querySelectorAll('.notificationHistoryItem');
     for (const row of rows) {
-      const tsRaw = row.getAttribute('data-created-at');
+      const tsRaw = row.dataset.createdAt;
       const createdAtUtcMs = Number.parseInt(tsRaw || '', 10);
       const timeEl = row.querySelector('.notificationHistoryItem__time');
       if (!timeEl || !Number.isInteger(createdAtUtcMs)) continue;
@@ -172,100 +166,116 @@ export function createNotificationHistoryController(options = {}) {
     }
   };
 
+  const renderEmptyNotificationHistoryList = () => {
+    const placeholder = documentObj.createElement('div');
+    placeholder.className = 'notificationHistoryEmpty';
+    const localized = translateNow('ui.notificationHistoryEmpty');
+    placeholder.textContent = localized === 'ui.notificationHistoryEmpty'
+      ? HISTORY_EMPTY_PLACEHOLDER_TEXT
+      : localized;
+    notificationHistoryListEl.appendChild(placeholder);
+  };
+
+  const resolveActionableNotificationHistoryEntry = (entry) => {
+    if (entry.action?.type !== 'open-daily') return entry.action;
+    return isOpenDailyHistoryActionable(entry) ? entry.action : null;
+  };
+
+  const applyNotificationHistoryRowAction = (row, entry) => {
+    const actionableEntry = resolveActionableNotificationHistoryEntry(entry);
+    if (!actionableEntry) return;
+
+    row.classList.add('isActionable');
+    row.setAttribute('role', 'button');
+    row.setAttribute('tabindex', '0');
+    row.dataset.actionType = actionableEntry.type;
+
+    if (actionableEntry.type === 'apply-update') {
+      row.dataset.actionBuildNumber = String(actionableEntry.buildNumber);
+      return;
+    }
+
+    if (actionableEntry.type === 'open-daily') {
+      row.dataset.actionDailyId = actionableEntry.dailyId;
+    }
+  };
+
+  const applyNotificationHistoryRowDeathRank = (row, entryIndex, entryCount) => {
+    if (entryCount <= HISTORY_DYING_START_INDEX || entryIndex < HISTORY_DYING_START_INDEX) return;
+    row.classList.add('isDying');
+    row.style.setProperty('--death-rank', String(entryIndex - HISTORY_DYING_START_INDEX));
+  };
+
+  const createNotificationHistoryDot = (entry) => {
+    const dot = documentObj.createElement('span');
+    dot.className = 'notificationHistoryItem__dot';
+
+    const dotColor = historyEntryDotColor(entry);
+    if (dotColor === HISTORY_DOT_COLORS.RED) {
+      dot.classList.add('isRed');
+    } else if (dotColor === HISTORY_DOT_COLORS.BLUE) {
+      dot.classList.add('isBlue');
+    }
+
+    if (entry.marker === 'older') {
+      dot.classList.add('isOlder');
+    }
+
+    return dot;
+  };
+
+  const createNotificationHistoryContent = (entry, locale) => {
+    const content = documentObj.createElement('div');
+    content.className = 'notificationHistoryItem__content';
+
+    const localizedEntry = resolveNotificationHistoryEntryText(entry);
+
+    const title = documentObj.createElement('div');
+    title.className = 'notificationHistoryItem__title';
+    title.textContent = localizedEntry.title;
+
+    const body = documentObj.createElement('div');
+    body.className = 'notificationHistoryItem__body';
+    body.textContent = localizedEntry.body;
+
+    const time = documentObj.createElement('div');
+    time.className = 'notificationHistoryItem__time';
+    time.textContent = formatHistoryRelativeTime(entry.createdAtUtcMs, locale);
+    time.setAttribute('title', formatHistoryAbsoluteTime(entry.createdAtUtcMs, locale));
+
+    content.appendChild(title);
+    content.appendChild(body);
+    content.appendChild(time);
+    return content;
+  };
+
+  const createNotificationHistoryRow = (entry, entryIndex, entryCount, locale) => {
+    const row = documentObj.createElement('div');
+    row.className = 'notificationHistoryItem';
+    row.dataset.entryId = entry.id;
+    row.dataset.entryKind = entry.kind;
+    row.dataset.createdAt = String(entry.createdAtUtcMs);
+
+    applyNotificationHistoryRowAction(row, entry);
+    applyNotificationHistoryRowDeathRank(row, entryIndex, entryCount);
+    row.appendChild(createNotificationHistoryDot(entry));
+    row.appendChild(createNotificationHistoryContent(entry, locale));
+    return row;
+  };
+
   const renderNotificationHistoryList = () => {
     if (!notificationHistoryListEl || !documentObj) return;
     const entries = notificationHistoryState.entries;
     notificationHistoryListEl.textContent = '';
 
     if (entries.length === 0) {
-      const placeholder = documentObj.createElement('div');
-      placeholder.className = 'notificationHistoryEmpty';
-      const localized = translateNow('ui.notificationHistoryEmpty');
-      placeholder.textContent = localized === 'ui.notificationHistoryEmpty'
-        ? HISTORY_EMPTY_PLACEHOLDER_TEXT
-        : localized;
-      notificationHistoryListEl.appendChild(placeholder);
+      renderEmptyNotificationHistoryList();
       return;
     }
 
+    const locale = getLocale();
     for (let i = 0; i < entries.length; i += 1) {
-      const entry = entries[i];
-      const row = documentObj.createElement('div');
-      row.className = 'notificationHistoryItem';
-      row.setAttribute('data-entry-id', entry.id);
-      row.setAttribute('data-entry-kind', entry.kind);
-      row.setAttribute('data-created-at', String(entry.createdAtUtcMs));
-      row.removeAttribute('data-action-type');
-      row.removeAttribute('data-action-build-number');
-      row.removeAttribute('data-action-daily-id');
-
-      const actionableEntry = (
-        entry.action?.type === 'open-daily'
-          ? (isOpenDailyHistoryActionable(entry) ? entry.action : null)
-          : entry.action
-      );
-
-      if (actionableEntry) {
-        row.classList.add('isActionable');
-        row.setAttribute('role', 'button');
-        row.setAttribute('tabindex', '0');
-        row.setAttribute('data-action-type', actionableEntry.type);
-        if (actionableEntry.type === 'apply-update') {
-          row.setAttribute('data-action-build-number', String(actionableEntry.buildNumber));
-        } else if (actionableEntry.type === 'open-daily') {
-          row.setAttribute('data-action-daily-id', actionableEntry.dailyId);
-        }
-      } else {
-        row.removeAttribute('role');
-        row.removeAttribute('tabindex');
-      }
-
-      const deathRank = (
-        entries.length > HISTORY_DYING_START_INDEX && i >= HISTORY_DYING_START_INDEX
-          ? (i - HISTORY_DYING_START_INDEX)
-          : -1
-      );
-      if (deathRank >= 0) {
-        row.classList.add('isDying');
-        row.style.setProperty('--death-rank', String(deathRank));
-      }
-
-      const dot = documentObj.createElement('span');
-      dot.className = 'notificationHistoryItem__dot';
-      const dotColor = historyEntryDotColor(entry);
-      if (dotColor === HISTORY_DOT_COLORS.RED) {
-        dot.classList.add('isRed');
-      } else if (dotColor === HISTORY_DOT_COLORS.BLUE) {
-        dot.classList.add('isBlue');
-      }
-      if (entry.marker === 'older') {
-        dot.classList.add('isOlder');
-      }
-
-      const content = documentObj.createElement('div');
-      content.className = 'notificationHistoryItem__content';
-
-      const localizedEntry = resolveNotificationHistoryEntryText(entry);
-
-      const title = documentObj.createElement('div');
-      title.className = 'notificationHistoryItem__title';
-      title.textContent = localizedEntry.title;
-
-      const body = documentObj.createElement('div');
-      body.className = 'notificationHistoryItem__body';
-      body.textContent = localizedEntry.body;
-
-      const time = documentObj.createElement('div');
-      time.className = 'notificationHistoryItem__time';
-      time.textContent = formatHistoryRelativeTime(entry.createdAtUtcMs, getLocale());
-      time.setAttribute('title', formatHistoryAbsoluteTime(entry.createdAtUtcMs, getLocale()));
-
-      content.appendChild(title);
-      content.appendChild(body);
-      content.appendChild(time);
-      row.appendChild(dot);
-      row.appendChild(content);
-      notificationHistoryListEl.appendChild(row);
+      notificationHistoryListEl.appendChild(createNotificationHistoryRow(entries[i], i, entries.length, locale));
     }
   };
 
@@ -273,6 +283,45 @@ export function createNotificationHistoryController(options = {}) {
     if (!notificationHistoryRefreshTimer || !windowObj) return;
     windowObj.clearInterval(notificationHistoryRefreshTimer);
     notificationHistoryRefreshTimer = 0;
+  };
+
+  const createNotificationHistoryRowIndex = () => {
+    const rows = notificationHistoryListEl.querySelectorAll('.notificationHistoryItem');
+    return new Map(Array.from(rows, (row) => [row.dataset.entryId, row]));
+  };
+
+  const isNotificationHistoryRowVisible = (row) => {
+    const style = windowObj.getComputedStyle(row);
+    return style.display !== 'none'
+      && style.visibility !== 'hidden'
+      && Number.parseFloat(style.opacity || '1') !== 0;
+  };
+
+  const isNotificationHistoryRowReadyForReadAck = (row, entry) => {
+    if (!row?.isConnected) return false;
+
+    const titleEl = row.querySelector('.notificationHistoryItem__title');
+    const bodyEl = row.querySelector('.notificationHistoryItem__body');
+    const timeEl = row.querySelector('.notificationHistoryItem__time');
+    if (!titleEl || !bodyEl || !timeEl) return false;
+
+    const localizedEntry = resolveNotificationHistoryEntryText(entry);
+    if (titleEl.textContent !== localizedEntry.title) return false;
+    if (bodyEl.textContent !== localizedEntry.body) return false;
+    if (!timeEl.textContent?.trim()) return false;
+
+    return isNotificationHistoryRowVisible(row);
+  };
+
+  const collectNotificationHistoryReadAckEntryIds = (entries) => {
+    const rowsByEntryId = createNotificationHistoryRowIndex();
+    const entryIds = [];
+    for (const entry of entries) {
+      const row = rowsByEntryId.get(entry.id);
+      if (!isNotificationHistoryRowReadyForReadAck(row, entry)) return null;
+      entryIds.push(entry.id);
+    }
+    return entryIds;
   };
 
   const validateAndMarkNotificationHistoryRead = async () => {
@@ -283,28 +332,8 @@ export function createNotificationHistoryController(options = {}) {
     const unreadEntries = notificationHistoryState.entries.filter((entry) => entry.marker === 'unread');
     if (unreadEntries.length === 0) return;
 
-    const entryIds = [];
-    for (const entry of unreadEntries) {
-      const rows = Array.from(notificationHistoryListEl.querySelectorAll('.notificationHistoryItem'));
-      const row = rows.find((candidate) => candidate.getAttribute('data-entry-id') === entry.id);
-      if (!row || !row.isConnected) return;
-
-      const titleEl = row.querySelector('.notificationHistoryItem__title');
-      const bodyEl = row.querySelector('.notificationHistoryItem__body');
-      const timeEl = row.querySelector('.notificationHistoryItem__time');
-      if (!titleEl || !bodyEl || !timeEl) return;
-      const localizedEntry = resolveNotificationHistoryEntryText(entry);
-      if (titleEl.textContent !== localizedEntry.title) return;
-      if (bodyEl.textContent !== localizedEntry.body) return;
-      if (!timeEl.textContent || !timeEl.textContent.trim()) return;
-
-      const style = windowObj.getComputedStyle(row);
-      if (style.display === 'none' || style.visibility === 'hidden' || Number.parseFloat(style.opacity || '1') === 0) {
-        return;
-      }
-
-      entryIds.push(entry.id);
-    }
+    const entryIds = collectNotificationHistoryReadAckEntryIds(unreadEntries);
+    if (!entryIds) return;
 
     notificationHistoryReadAckInFlight = true;
     notificationHistoryReadAckVersion = notificationHistoryState.historyVersion;
@@ -391,9 +420,9 @@ export function createNotificationHistoryController(options = {}) {
     if (!target || typeof target.closest !== 'function') return;
     const row = target.closest('.notificationHistoryItem');
     if (!row || !notificationHistoryListEl?.contains(row)) return;
-    const actionType = row.getAttribute('data-action-type') || '';
+    const actionType = row.dataset.actionType || '';
     if (actionType === 'apply-update') {
-      const buildNumber = Number.parseInt(row.getAttribute('data-action-build-number') || '', 10);
+      const buildNumber = Number.parseInt(row.dataset.actionBuildNumber || '', 10);
       if (!Number.isInteger(buildNumber) || buildNumber <= 0) return;
       void onApplyUpdateRequested({
         buildNumber,
@@ -403,8 +432,8 @@ export function createNotificationHistoryController(options = {}) {
       return;
     }
     if (actionType === 'open-daily') {
-      const dailyId = row.getAttribute('data-action-daily-id') || '';
-      const kind = row.getAttribute('data-entry-kind') || '';
+      const dailyId = row.dataset.actionDailyId || '';
+      const kind = row.dataset.entryKind || '';
       if (!isOpenDailyHistoryActionable({
         kind,
         action: { type: 'open-daily', dailyId },
@@ -426,7 +455,7 @@ export function createNotificationHistoryController(options = {}) {
     if (!target || typeof target.closest !== 'function') return;
     const row = target.closest('.notificationHistoryItem');
     if (!row || !notificationHistoryListEl?.contains(row)) return;
-    if (!row.getAttribute('data-action-type')) return;
+    if (!row.dataset.actionType) return;
     event.preventDefault?.();
     handleNotificationHistoryItemAction(event);
   };

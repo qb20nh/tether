@@ -1,5 +1,5 @@
-import test from 'node:test';
 import assert from 'node:assert/strict';
+import test from 'node:test';
 import { resolveLatestUpdateBuildNumber } from '../../src/app/update_build_resolver.js';
 
 test('resolver keeps hint when stronger than other sources', async () => {

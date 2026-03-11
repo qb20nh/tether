@@ -1,7 +1,7 @@
-import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createLevelProvider } from '../../src/core/level_provider.js';
+import test from 'node:test';
 import { createDefaultCore } from '../../src/core/default_core.js';
+import { createLevelProvider } from '../../src/core/level_provider.js';
 import { createGameStateStore } from '../../src/state/game_state_store.js';
 
 const LEVEL = {

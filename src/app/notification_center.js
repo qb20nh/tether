@@ -1,6 +1,6 @@
 import { createNotificationDialogController } from './notification_dialog_controller.js';
-import { createNotificationToggleController } from './notification_toggle_controller.js';
 import { createNotificationHistoryController } from './notification_history_controller.js';
+import { createNotificationToggleController } from './notification_toggle_controller.js';
 
 export function createNotificationCenter(options = {}) {
   const {
@@ -33,8 +33,8 @@ export function createNotificationCenter(options = {}) {
     onApplyUpdateRequested = async () => { },
     onOpenDailyRequested = async () => { },
     isOpenDailyHistoryActionable = () => true,
-    windowObj = typeof window !== 'undefined' ? window : undefined,
-    documentObj = typeof document !== 'undefined' ? document : undefined,
+    windowObj = typeof window === 'undefined' ? undefined : window,
+    documentObj = typeof document === 'undefined' ? undefined : document,
   } = options;
 
   if (!elementIds || typeof elementIds !== 'object') {

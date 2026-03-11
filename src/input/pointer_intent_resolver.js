@@ -4,14 +4,182 @@ const STITCH_BRIDGE_MIN_RADIUS_PX = 1;
 const STITCH_BRIDGE_MIN_WIDTH_PX = 1;
 const STITCH_BRIDGE_WIDTH_CELL_RATIO = 0.06;
 const DEFAULT_CELL_SIZE_PX = 56;
+const EPSILON = 1e-6;
+const NEIGHBOR_OFFSETS = [
+  [-1, -1],
+  [-1, 0],
+  [-1, 1],
+  [0, -1],
+  [0, 1],
+  [1, -1],
+  [1, 0],
+  [1, 1],
+];
 
 const sameCell = (a, b) =>
   Boolean(a && b && a.r === b.r && a.c === b.c);
+
+const isInBounds = (snapshot, r, c) =>
+  r >= 0 && r < snapshot.rows && c >= 0 && c < snapshot.cols;
+
+const isBacktrackCell = (backtrackNode, r, c) =>
+  Boolean(backtrackNode) && r === backtrackNode.r && c === backtrackNode.c;
 
 const resolveCellSize = (cellSize) => {
   const value = Number(cellSize);
   if (Number.isFinite(value) && value > 0) return value;
   return DEFAULT_CELL_SIZE_PX;
+};
+
+const buildReachableCandidate = ({
+  snapshot,
+  headNode,
+  backtrackNode,
+  isUsableCell,
+  isAdjacentMove,
+  isVisitedCell,
+  r,
+  c,
+}) => {
+  const candidate = { r, c };
+  if (!isAdjacentMove(snapshot, headNode, candidate)) return null;
+  if (!isUsableCell(snapshot, r, c)) return null;
+
+  const isBacktrack = isBacktrackCell(backtrackNode, r, c);
+  if (!isBacktrack && isVisitedCell(r, c)) return null;
+  return { ...candidate, isBacktrack };
+};
+
+const buildSlipperyCandidate = ({
+  snapshot,
+  headNode,
+  backtrackNode,
+  pointer,
+  pointerCell,
+  isUsableCell,
+  isAdjacentMove,
+  isVisitedCell,
+  cellCenter,
+  r,
+  c,
+  dr,
+  dc,
+}) => {
+  const candidate = buildReachableCandidate({
+    snapshot,
+    headNode,
+    backtrackNode,
+    isUsableCell,
+    isAdjacentMove,
+    isVisitedCell,
+    r,
+    c,
+  });
+  if (!candidate) return null;
+
+  const center = cellCenter(r, c);
+  return {
+    ...candidate,
+    center,
+    distance: Math.hypot(pointer.x - center.x, pointer.y - center.y),
+    dr,
+    dc,
+    isDiagonal: Math.abs(dr) === 1 && Math.abs(dc) === 1,
+    isPointerCell: sameCell(pointerCell, candidate),
+  };
+};
+
+const resolveStitchBridgeMetrics = (cellSize) => {
+  const resolvedCellSize = resolveCellSize(cellSize);
+  const halfLen = Math.max(
+    STITCH_BRIDGE_MIN_HALF_LEN_PX,
+    resolvedCellSize * STITCH_BRIDGE_HALF_LEN_CELL_RATIO,
+  );
+  const symbolStrokeWidth = Math.max(
+    STITCH_BRIDGE_MIN_WIDTH_PX,
+    resolvedCellSize * STITCH_BRIDGE_WIDTH_CELL_RATIO,
+  );
+  return {
+    halfLen,
+    symbolRadius: Math.max(
+      STITCH_BRIDGE_MIN_RADIUS_PX,
+      (halfLen * Math.SQRT2) + (symbolStrokeWidth * 0.5),
+    ),
+  };
+};
+
+const resolveBridgePointer = (rawPointer, pointer) => (
+  Number.isFinite(rawPointer?.x) && Number.isFinite(rawPointer?.y)
+    ? rawPointer
+    : pointer
+);
+
+const stitchKeyFor = (a, b) =>
+  `${Math.max(a.r, b.r)},${Math.max(a.c, b.c)}`;
+
+const hasStitchedDiagonal = (snapshot, headNode, candidate) =>
+  Boolean(
+    candidate.isDiagonal
+      && snapshot?.stitchSet?.size > 0
+      && snapshot.stitchSet.has(stitchKeyFor(headNode, candidate)),
+  );
+
+const buildBridgeSegment = (center, halfLen, usesDiagA) => ({
+  startX: usesDiagA ? (center.x + halfLen) : (center.x - halfLen),
+  startY: center.y - halfLen,
+  endX: usesDiagA ? (center.x - halfLen) : (center.x + halfLen),
+  endY: center.y + halfLen,
+});
+
+const pointSideOfBridge = (point, segment) => (
+  (point.x - segment.startX) * (segment.endY - segment.startY)
+  - (point.y - segment.startY) * (segment.endX - segment.startX)
+);
+
+const resolveStitchBridgeDecision = ({
+  snapshot,
+  headNode,
+  headCenter,
+  candidate,
+  bridgePointer,
+  halfLen,
+  symbolRadius,
+}) => {
+  if (!hasStitchedDiagonal(snapshot, headNode, candidate)) return null;
+
+  const bridgeCenter = {
+    x: (headCenter.x + candidate.center.x) * 0.5,
+    y: (headCenter.y + candidate.center.y) * 0.5,
+  };
+  if (Math.hypot(bridgePointer.x - bridgeCenter.x, bridgePointer.y - bridgeCenter.y) > symbolRadius) {
+    return null;
+  }
+
+  const segment = buildBridgeSegment(bridgeCenter, halfLen, candidate.dr === candidate.dc);
+  const headSide = pointSideOfBridge(headCenter, segment);
+  if (Math.abs(headSide) <= EPSILON) return { shouldHold: true, step: null };
+
+  const pointerSide = pointSideOfBridge(bridgePointer, segment);
+  if ((headSide * pointerSide) <= 0) {
+    return { shouldHold: true, step: { r: candidate.r, c: candidate.c } };
+  }
+  return { shouldHold: true, step: null };
+};
+
+const shouldPreferCandidate = (candidate, bestCandidate) => {
+  if (!bestCandidate) return true;
+  if (candidate.distance < bestCandidate.distance - EPSILON) return true;
+
+  const equalDistance = Math.abs(candidate.distance - bestCandidate.distance) <= EPSILON;
+  return equalDistance && candidate.isPointerCell && !bestCandidate.isPointerCell;
+};
+
+const shouldAdvanceFromHold = (bestCandidate, holdDistance, holdIsPointerCell) => {
+  if (!bestCandidate) return false;
+  if (bestCandidate.distance < holdDistance - EPSILON) return true;
+
+  const equalDistance = Math.abs(bestCandidate.distance - holdDistance) <= EPSILON;
+  return equalDistance && bestCandidate.isPointerCell && !holdIsPointerCell;
 };
 
 export function buildPathDragCandidates({
@@ -24,25 +192,22 @@ export function buildPathDragCandidates({
   if (!snapshot || !headNode) return [];
 
   const candidates = [];
-  for (let dr = -1; dr <= 1; dr++) {
-    for (let dc = -1; dc <= 1; dc++) {
-      if (dr === 0 && dc === 0) continue;
-      const nr = headNode.r + dr;
-      const nc = headNode.c + dc;
-      if (nr < 0 || nr >= snapshot.rows || nc < 0 || nc >= snapshot.cols) continue;
+  for (const [dr, dc] of NEIGHBOR_OFFSETS) {
+    const nr = headNode.r + dr;
+    const nc = headNode.c + dc;
+    if (!isInBounds(snapshot, nr, nc)) continue;
 
-      const cand = { r: nr, c: nc };
-      if (!isAdjacentMove(snapshot, headNode, cand)) continue;
-      if (!isUsableCell(snapshot, cand.r, cand.c)) continue;
-
-      const isBacktrack = Boolean(backtrackNode)
-        && cand.r === backtrackNode.r
-        && cand.c === backtrackNode.c;
-      const k = `${cand.r},${cand.c}`;
-      if (!isBacktrack && snapshot.visited.has(k)) continue;
-
-      candidates.push({ ...cand, isBacktrack });
-    }
+    const candidate = buildReachableCandidate({
+      snapshot,
+      headNode,
+      backtrackNode,
+      isUsableCell,
+      isAdjacentMove,
+      isVisitedCell: (r, c) => snapshot.visited.has(`${r},${c}`),
+      r: nr,
+      c: nc,
+    });
+    if (candidate) candidates.push(candidate);
   }
 
   return candidates;
@@ -104,99 +269,54 @@ export function chooseSlipperyPathDragStep({
   const headCenter = cellCenter(headNode.r, headNode.c);
   const holdDistance = Math.hypot(pointer.x - headCenter.x, pointer.y - headCenter.y);
   const holdIsPointerCell = sameCell(pointerCell, headNode);
-  const resolvedCellSize = resolveCellSize(cellSize);
-  const halfLen = Math.max(
-    STITCH_BRIDGE_MIN_HALF_LEN_PX,
-    resolvedCellSize * STITCH_BRIDGE_HALF_LEN_CELL_RATIO,
-  );
-  const symbolStrokeWidth = Math.max(
-    STITCH_BRIDGE_MIN_WIDTH_PX,
-    resolvedCellSize * STITCH_BRIDGE_WIDTH_CELL_RATIO,
-  );
-  const symbolRadius = Math.max(
-    STITCH_BRIDGE_MIN_RADIUS_PX,
-    (halfLen * Math.SQRT2) + (symbolStrokeWidth * 0.5),
-  );
-  const bridgePointer = (
-    Number.isFinite(rawPointer?.x) && Number.isFinite(rawPointer?.y)
-      ? rawPointer
-      : pointer
-  );
-  const candidate = { r: 0, c: 0 };
+  const { halfLen, symbolRadius } = resolveStitchBridgeMetrics(cellSize);
+  const bridgePointer = resolveBridgePointer(rawPointer, pointer);
   let shouldHold = false;
-  let bestR = NaN;
-  let bestC = NaN;
-  let bestDistance = Infinity;
-  let bestIsPointerCell = false;
+  let bestCandidate = null;
 
-  for (let dr = -1; dr <= 1; dr += 1) {
-    for (let dc = -1; dc <= 1; dc += 1) {
-      if (dr === 0 && dc === 0) continue;
-      const nr = headNode.r + dr;
-      const nc = headNode.c + dc;
-      if (nr < 0 || nr >= snapshot.rows || nc < 0 || nc >= snapshot.cols) continue;
+  for (const [dr, dc] of NEIGHBOR_OFFSETS) {
+    const nr = headNode.r + dr;
+    const nc = headNode.c + dc;
+    if (!isInBounds(snapshot, nr, nc)) continue;
 
-      candidate.r = nr;
-      candidate.c = nc;
-      if (!isAdjacentMove(snapshot, headNode, candidate)) continue;
-      if (!isUsableCell(snapshot, nr, nc)) continue;
+    const candidate = buildSlipperyCandidate({
+      snapshot,
+      headNode,
+      backtrackNode,
+      pointer,
+      pointerCell,
+      isUsableCell,
+      isAdjacentMove,
+      isVisitedCell: (r, c) => Boolean(snapshot.visited?.has?.(`${r},${c}`)),
+      cellCenter,
+      r: nr,
+      c: nc,
+      dr,
+      dc,
+    });
+    if (!candidate) continue;
 
-      const isBacktrack = Boolean(backtrackNode)
-        && nr === backtrackNode.r
-        && nc === backtrackNode.c;
-      if (!isBacktrack && snapshot.visited?.has?.(`${nr},${nc}`)) continue;
+    const bridgeDecision = resolveStitchBridgeDecision({
+      snapshot,
+      headNode,
+      headCenter,
+      candidate,
+      bridgePointer,
+      halfLen,
+      symbolRadius,
+    });
+    if (bridgeDecision) {
+      shouldHold = bridgeDecision.shouldHold;
+      if (bridgeDecision.step) return bridgeDecision.step;
+    }
 
-      const isDiagonal = Math.abs(dr) === 1 && Math.abs(dc) === 1;
-      const candidateCenter = cellCenter(nr, nc);
-      const candidateCenterX = candidateCenter.x;
-      const candidateCenterY = candidateCenter.y;
-
-      if (isDiagonal && snapshot?.stitchSet?.size > 0) {
-        const stitchKey = `${Math.max(headNode.r, nr)},${Math.max(headNode.c, nc)}`;
-        if (snapshot.stitchSet.has(stitchKey)) {
-          const centerX = (headCenter.x + candidateCenterX) * 0.5;
-          const centerY = (headCenter.y + candidateCenterY) * 0.5;
-          if (Math.hypot(bridgePointer.x - centerX, bridgePointer.y - centerY) <= symbolRadius) {
-            shouldHold = true;
-            const usesDiagA = dr === dc;
-            const bridgeStartX = usesDiagA ? (centerX + halfLen) : (centerX - halfLen);
-            const bridgeStartY = centerY - halfLen;
-            const bridgeEndX = usesDiagA ? (centerX - halfLen) : (centerX + halfLen);
-            const bridgeEndY = centerY + halfLen;
-            const headSide = (
-              (headCenter.x - bridgeStartX) * (bridgeEndY - bridgeStartY)
-              - (headCenter.y - bridgeStartY) * (bridgeEndX - bridgeStartX)
-            );
-            if (Math.abs(headSide) > 1e-6) {
-              const pointerSide = (
-                (bridgePointer.x - bridgeStartX) * (bridgeEndY - bridgeStartY)
-                - (bridgePointer.y - bridgeStartY) * (bridgeEndX - bridgeStartX)
-              );
-              if ((headSide * pointerSide) <= 0) {
-                return { r: nr, c: nc };
-              }
-            }
-          }
-        }
-      }
-
-      const distance = Math.hypot(pointer.x - candidateCenterX, pointer.y - candidateCenterY);
-      const isPointer = sameCell(pointerCell, candidate);
-      const betterDistance = distance < bestDistance - 1e-6;
-      const equalDistance = Math.abs(distance - bestDistance) <= 1e-6;
-      if (!betterDistance && !(equalDistance && isPointer && !bestIsPointerCell)) continue;
-
-      bestR = nr;
-      bestC = nc;
-      bestDistance = distance;
-      bestIsPointerCell = isPointer;
+    if (shouldPreferCandidate(candidate, bestCandidate)) {
+      bestCandidate = candidate;
     }
   }
 
-  if (shouldHold || !Number.isInteger(bestR) || !Number.isInteger(bestC)) return null;
-  const equalToHold = Math.abs(bestDistance - holdDistance) <= 1e-6;
-  const improves = bestDistance < holdDistance - 1e-6
-    || (equalToHold && bestIsPointerCell && !holdIsPointerCell);
-  if (!improves) return null;
-  return { r: bestR, c: bestC };
+  if (shouldHold || !shouldAdvanceFromHold(bestCandidate, holdDistance, holdIsPointerCell)) {
+    return null;
+  }
+  return { r: bestCandidate.r, c: bestCandidate.c };
 }

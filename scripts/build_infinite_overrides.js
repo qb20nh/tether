@@ -2,7 +2,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { gzipSync } from 'node:zlib';
-import { INFINITE_OVERRIDES_REPO_FILE } from '../src/shared/paths.js';
 import {
   INFINITE_CANDIDATE_VARIANTS,
   INFINITE_MAX_LEVELS,
@@ -10,6 +9,7 @@ import {
   selectDefaultInfiniteCandidate,
 } from '../src/infinite.js';
 import { canonicalConstraintSignature } from '../src/infinite_canonical.js';
+import { INFINITE_OVERRIDES_REPO_FILE } from '../src/shared/paths.js';
 
 const FORMAT_MAGIC = 0x49; // 'I'
 const FORMAT_VERSION = 1;

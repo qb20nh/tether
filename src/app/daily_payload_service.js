@@ -90,8 +90,8 @@ export function createDailyPayloadService(options = {}) {
     dailyHardInvalidateGraceMs = 60 * 1000,
     fetchImpl = typeof fetch === 'function' ? fetch : null,
     now = () => Date.now(),
-    windowObj = typeof window !== 'undefined' ? window : undefined,
-    documentObj = typeof document !== 'undefined' ? document : undefined,
+    windowObj = typeof window === 'undefined' ? undefined : window,
+    documentObj = typeof document === 'undefined' ? undefined : document,
     reloadApp = () => {
       if (windowObj?.location && typeof windowObj.location.reload === 'function') {
         windowObj.location.reload();
@@ -189,7 +189,7 @@ export function createDailyPayloadService(options = {}) {
       const nowMs = now();
       const todayId = utcDateIdFromMs(nowMs);
       const bypassPayload = await fetchDailyPayload({ bypassCache: true });
-      if (!bypassPayload || bypassPayload.dailyId !== todayId) return;
+      if (bypassPayload?.dailyId !== todayId) return;
 
       if (bootDaily.dailyId !== bypassPayload.dailyId) {
         reloadApp();

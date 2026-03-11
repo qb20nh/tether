@@ -1,5 +1,5 @@
-import test from 'node:test';
 import assert from 'node:assert/strict';
+import test from 'node:test';
 
 const BASE_URL = process.env.E2E_BASE_URL || 'http://127.0.0.1:5174/';
 const DAILY_LOCK_SETTLE_MS = 1200;
@@ -66,7 +66,7 @@ test('e2e: daily locked board keeps walls and path tips visually distinct', asyn
 
     const dailyValue = await page.$eval('#levelSel', (select) => {
       const options = Array.from(select.options);
-      const dailyOption = options[options.length - 1] || null;
+      const dailyOption = options.at(-1) || null;
       return dailyOption?.value || null;
     });
     assert.equal(typeof dailyValue, 'string');

@@ -16,9 +16,9 @@ export async function resolveLatestUpdateBuildNumber(options = {}) {
   }
 
   for (const entry of notificationHistoryEntries) {
-    if (!entry || entry.kind !== 'new-version-available') continue;
+    if (entry?.kind !== 'new-version-available') continue;
     const action = entry.action;
-    if (!action || action.type !== 'apply-update') continue;
+    if (action?.type !== 'apply-update') continue;
     if (Number.isInteger(action.buildNumber) && action.buildNumber > latest) {
       latest = action.buildNumber;
     }

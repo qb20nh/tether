@@ -1,8 +1,8 @@
-import test from 'node:test';
 import assert from 'node:assert/strict';
+import test from 'node:test';
 import {
-  buildUnifiedPathMesh,
   buildTutorialBracketMesh,
+  buildUnifiedPathMesh,
   createPathWebglRenderer,
 } from '../../src/renderer/path_webgl_renderer.js';
 
@@ -54,38 +54,38 @@ const createFakeWebgl2 = () => {
     UNSIGNED_SHORT: 0x1403,
     FLOAT: 0x1406,
     createShader() { return { id: nextId++ }; },
-    shaderSource() {},
-    compileShader() {},
-    getShaderParameter() { return true; },
+    shaderSource() { },
+    compileShader() { },
+    getShaderParameter(_shader, pname) { return pname === gl.COMPILE_STATUS; },
     getShaderInfoLog() { return ''; },
-    deleteShader() {},
+    deleteShader() { },
     createProgram() { return { id: nextId++ }; },
-    attachShader() {},
-    linkProgram() {},
-    getProgramParameter() { return true; },
+    attachShader() { },
+    linkProgram() { },
+    getProgramParameter(_program, pname) { return pname === gl.LINK_STATUS; },
     getProgramInfoLog() { return ''; },
-    deleteProgram() {},
+    deleteProgram() { },
     createVertexArray() { return { id: nextId++ }; },
     createBuffer() { return { id: nextId++ }; },
-    bindVertexArray() {},
-    bindBuffer() {},
-    enableVertexAttribArray() {},
-    vertexAttribPointer() {},
-    disable() {},
-    enable() {},
-    blendFunc() {},
-    clearColor() {},
-    clear() {},
-    viewport() {},
-    useProgram() {},
+    bindVertexArray() { },
+    bindBuffer() { },
+    enableVertexAttribArray() { },
+    vertexAttribPointer() { },
+    disable() { },
+    enable() { },
+    blendFunc() { },
+    clearColor() { },
+    clear() { },
+    viewport() { },
+    useProgram() { },
     bufferData() { counters.bufferData += 1; },
     bufferSubData() { counters.bufferSubData += 1; },
-    uniform2f() {},
-    uniform1f() {},
-    uniform3f() {},
+    uniform2f() { },
+    uniform1f() { },
+    uniform3f() { },
     drawElements() { counters.drawElements += 1; },
-    deleteBuffer() {},
-    deleteVertexArray() {},
+    deleteBuffer() { },
+    deleteVertexArray() { },
     getUniformLocation() { return { id: nextId++ }; },
     isContextLost() { return contextLost; },
     getExtension(name) {
@@ -316,7 +316,7 @@ test('buildUnifiedPathMesh honors end arrow direction override', () => {
         apexIndex = i;
       }
     }
-    const tail = points[points.length - 1];
+    const tail = points.at(-1);
     const x = mesh.positions[apexIndex * 2];
     const y = mesh.positions[(apexIndex * 2) + 1];
     const dx = x - tail.x;
@@ -442,7 +442,7 @@ test('buildTutorialBracketMesh caps geometry to the uint16 vertex budget', () =>
 test('createPathWebglRenderer throws when WebGL2 is unavailable', () => {
   const fakeCanvas = {
     getContext(kind) {
-      if (kind === 'webgl2') return null;
+      if (kind === '2d') return {};
       return null;
     },
   };

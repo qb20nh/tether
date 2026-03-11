@@ -56,7 +56,7 @@ const normalizeTheme = (theme) => (theme === 'light' || theme === 'dark' ? theme
 const hashString32 = (input) => {
   let h = 0x811c9dc5;
   for (let i = 0; i < input.length; i++) {
-    h ^= input.charCodeAt(i);
+    h ^= input.codePointAt(i);
     h = Math.imul(h, 0x01000193);
   }
   return h >>> 0;
@@ -79,7 +79,7 @@ const secureEqual = (a, b) => {
   if (a.length !== b.length) return false;
   let diff = 0;
   for (let i = 0; i < a.length; i++) {
-    diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+    diff |= a.codePointAt(i) ^ b.codePointAt(i);
   }
   return diff === 0;
 };
@@ -142,8 +142,8 @@ const decodePathCompact = (value) => {
   let r = startR;
   let c = startC;
 
-  for (let i = 0; i < dirs.length; i++) {
-    const delta = PATH_DELTA_FROM_DIR[dirs[i]];
+  for (const element of dirs) {
+    const delta = PATH_DELTA_FROM_DIR[element];
     if (!delta) return null;
     r += delta[0];
     c += delta[1];
@@ -179,7 +179,7 @@ const randomHex = (windowObj, byteLength = 16) => {
 };
 
 export function createLocalStoragePersistence(options = {}) {
-  const windowObj = options.windowObj || (typeof window !== 'undefined' ? window : null);
+  const windowObj = options.windowObj || (typeof window === 'undefined' ? null : window);
   const storage = options.storage || windowObj?.localStorage || null;
   const campaignLevelCount = Number.isInteger(options.campaignLevelCount)
     ? options.campaignLevelCount
@@ -255,7 +255,7 @@ export function createLocalStoragePersistence(options = {}) {
       if (!raw) return 0;
       const parsed = JSON.parse(raw);
       if (!parsed || typeof parsed !== 'object') return 0;
-      if (Object.prototype.hasOwnProperty.call(parsed, 'version') && parsed.version !== version) {
+      if (Object.hasOwn(parsed, 'version') && parsed.version !== version) {
         return 0;
       }
       return clampValue(parsed.latestLevel);
@@ -404,14 +404,17 @@ export function createLocalStoragePersistence(options = {}) {
   const normalizeSavedMutableState = (value) => {
     if (!value || typeof value !== 'object') return null;
 
-    const rawPath = typeof value.path === 'string'
-      ? decodePathCompact(value.path)
-      : (Array.isArray(value.path) ? value.path : []);
+    let rawPath = [];
+    if (typeof value.path === 'string') {
+      rawPath = decodePathCompact(value.path);
+    } else if (Array.isArray(value.path)) {
+      rawPath = value.path;
+    }
     if (!Array.isArray(rawPath)) return null;
 
     const path = [];
-    for (let i = 0; i < rawPath.length; i++) {
-      const normalized = normalizeSavedPathEntry(rawPath[i]);
+    for (const element of rawPath) {
+      const normalized = normalizeSavedPathEntry(element);
       if (!normalized) return null;
       path.push(normalized);
     }
@@ -420,8 +423,8 @@ export function createLocalStoragePersistence(options = {}) {
     if (value.movableWalls !== undefined) {
       if (!Array.isArray(value.movableWalls)) return null;
       movableWalls = [];
-      for (let i = 0; i < value.movableWalls.length; i++) {
-        const normalized = normalizeSavedPathEntry(value.movableWalls[i]);
+      for (const element of value.movableWalls) {
+        const normalized = normalizeSavedPathEntry(element);
         if (!normalized) return null;
         movableWalls.push(normalized);
       }

@@ -1,7 +1,7 @@
-import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ELEMENT_IDS } from '../../src/config.js';
+import test from 'node:test';
 import { createNotificationDialogController } from '../../src/app/notification_dialog_controller.js';
+import { ELEMENT_IDS } from '../../src/config.js';
 import {
   FakeElement,
   createDocumentMock,

@@ -1,5 +1,5 @@
-import test from 'node:test';
 import assert from 'node:assert/strict';
+import test from 'node:test';
 import { createGameStateStore } from '../../src/state/game_state_store.js';
 
 const LEVEL = {
@@ -66,6 +66,40 @@ test('game state store caches snapshots and preserves prior path-derived data', 
   assert.equal(firstPathSnapshot.idxByKey.get('0,0'), 0);
   assert.equal(firstPathSnapshot.idxByKey.has('0,1'), false);
   assert.deepEqual(secondPathSnapshot.path, [{ r: 0, c: 0 }, { r: 0, c: 1 }]);
+});
+
+test('game state store restores saved movable wall positions and path', () => {
+  const store = createGameStateStore(() => LEVEL);
+  store.dispatch({ type: 'level/load', payload: { levelIndex: 0 } });
+
+  const restored = store.restoreMutableState({
+    movableWalls: [[0, 0]],
+    path: [[2, 0], [2, 1]],
+  });
+
+  assert.equal(restored, true);
+  assert.deepEqual(store.getSnapshot().path, [{ r: 2, c: 0 }, { r: 2, c: 1 }]);
+  assert.equal(store.getSnapshot().gridData[0][0], 'm');
+  assert.equal(store.getSnapshot().gridData[1][1], '.');
+});
+
+test('game state store restores legacy grid saves', () => {
+  const store = createGameStateStore(() => LEVEL);
+  store.dispatch({ type: 'level/load', payload: { levelIndex: 0 } });
+
+  const restored = store.restoreMutableState({
+    grid: [
+      'm..',
+      '...',
+      '...',
+    ],
+    path: [{ r: 2, c: 0 }, { r: 2, c: 1 }],
+  });
+
+  assert.equal(restored, true);
+  assert.deepEqual(store.getSnapshot().path, [{ r: 2, c: 0 }, { r: 2, c: 1 }]);
+  assert.equal(store.getSnapshot().gridData[0][0], 'm');
+  assert.equal(store.getSnapshot().gridData[1][1], '.');
 });
 
 test('game state store applies end drag batches in one state version', () => {

@@ -1,11 +1,11 @@
-import test from 'node:test';
 import assert from 'node:assert/strict';
+import test from 'node:test';
 import {
   UPDATE_APPLY_STATUS,
   UPDATE_CHECK_DECISION,
   resolveUpdateCheckDecision,
-  shouldResyncManualUpdatePolicy,
   shouldReloadAfterManualPinConfirm,
+  shouldResyncManualUpdatePolicy,
 } from '../../src/runtime/update_flow_policy.js';
 
 test('resolveUpdateCheckDecision returns NOOP when build is not newer', () => {

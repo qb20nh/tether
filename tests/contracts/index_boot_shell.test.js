@@ -1,7 +1,7 @@
-import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import test from 'node:test';
 import { APP_BOOT_SHELL_PLACEHOLDER, injectBootShellIntoIndexHtml } from '../../src/index_boot_shell.js';
 
 const indexFile = path.join(process.cwd(), 'index.html');

@@ -1,5 +1,5 @@
-import test from 'node:test';
 import assert from 'node:assert/strict';
+import test from 'node:test';
 import { createPathTransitionCompensationBuffer } from '../../src/renderer/path_transition_compensation_buffer.js';
 
 const createBuffer = () => createPathTransitionCompensationBuffer({

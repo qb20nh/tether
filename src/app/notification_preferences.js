@@ -11,9 +11,9 @@ export const NOTIFICATION_AUTO_PROMPT_DECISIONS = Object.freeze({
 
 export function createNotificationPreferences(options = {}) {
   const {
-    localStorageObj = typeof window !== 'undefined' ? window.localStorage : null,
+    localStorageObj = typeof window === 'undefined' ? null : window.localStorage,
     supportsNotifications = () => false,
-    notificationApi = typeof Notification !== 'undefined' ? Notification : null,
+    notificationApi = typeof Notification === 'undefined' ? null : Notification,
   } = options;
 
   const readAutoPromptDecision = () => {

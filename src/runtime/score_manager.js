@@ -30,6 +30,13 @@ const DIRECTION_TOKEN_BY_DELTA = Object.freeze({
   '1,1': 'DR',
 });
 
+const ORTHOGONAL_DELTAS = Object.freeze([
+  [-1, 0],
+  [1, 0],
+  [0, -1],
+  [0, 1],
+]);
+
 const toNonNegativeInt = (value) => {
   const parsed = Number.parseInt(value, 10);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : 0;
@@ -39,8 +46,8 @@ const normalizeSignatureArray = (value) => {
   if (!Array.isArray(value)) return [];
   const out = [];
   const seen = new Set();
-  for (let i = 0; i < value.length; i += 1) {
-    const signature = typeof value[i] === 'string' ? value[i].trim() : '';
+  for (const element of value) {
+    const signature = typeof element === 'string' ? element.trim() : '';
     if (!signature || seen.has(signature)) continue;
     seen.add(signature);
     out.push(signature);
@@ -52,8 +59,8 @@ const normalizeByLevelRecord = (value) => {
   if (!value || typeof value !== 'object') return {};
   const out = {};
   const entries = Object.entries(value);
-  for (let i = 0; i < entries.length; i += 1) {
-    const [rawKey, signatures] = entries[i];
+  for (const element of entries) {
+    const [rawKey, signatures] = element;
     const key = String(rawKey || '').trim();
     if (!key) continue;
     const normalized = normalizeSignatureArray(signatures);
@@ -66,6 +73,14 @@ const scoreAwardForDistinctCount = (distinctCount) => {
   if (!Number.isInteger(distinctCount) || distinctCount <= 0) return 0;
   return Math.max(0, Math.round(Math.sqrt(2 * distinctCount)));
 };
+
+const compareStringsAscending = (left, right) => {
+  if (left < right) return -1;
+  if (left > right) return 1;
+  return 0;
+};
+
+const toSortedSignatureList = (signatureSet) => [...signatureSet].sort(compareStringsAscending);
 
 export const normalizeScoreState = (value) => {
   const source = value && typeof value === 'object' ? value : EMPTY_SCORE_STATE;
@@ -87,12 +102,12 @@ const serializeScoreState = ({
   const outDailyByDate = {};
 
   for (const [levelKey, signatureSet] of infiniteByLevel.entries()) {
-    const signatures = [...signatureSet].sort();
+    const signatures = toSortedSignatureList(signatureSet);
     if (signatures.length > 0) outInfiniteByLevel[levelKey] = signatures;
   }
 
   for (const [dailyId, signatureSet] of dailyByDate.entries()) {
-    const signatures = [...signatureSet].sort();
+    const signatures = toSortedSignatureList(signatureSet);
     if (signatures.length > 0) outDailyByDate[dailyId] = signatures;
   }
 
@@ -154,11 +169,12 @@ const buildCornerTraversalToken = (cornerState) => (
     : '-'
 );
 
-const buildConstraintSignatureForPath = (snapshot, path) => {
-  const clueEvents = [];
-  const stitchEvents = [];
-  const cornerEvents = [];
+const joinEventPart = (events) => (events.length > 0 ? events.join('>') : '-');
 
+const cornerKeyOf = (vr, vc) => `${vr},${vc}`;
+
+const buildClueEventsForPath = (snapshot, path) => {
+  const clueEvents = [];
   const lastIndex = path.length - 1;
 
   for (let i = 0; i < path.length; i += 1) {
@@ -166,26 +182,32 @@ const buildConstraintSignatureForPath = (snapshot, path) => {
     const code = snapshot.gridData?.[point.r]?.[point.c] || '';
     if (!CONSTRAINT_CODES.has(code)) continue;
 
-    if (HINT_CODES.has(code)) {
-      if (i === 0 || i === lastIndex) {
-        clueEvents.push(`${code}@${point.r},${point.c}:END`);
-        continue;
-      }
-      const prev = path[i - 1];
-      const next = path[i + 1];
-      const vin = directionToken(prev, point);
-      const vout = directionToken(point, next);
-      clueEvents.push(`${code}@${point.r},${point.c}:${vin}>${vout}`);
+    if (!HINT_CODES.has(code)) {
+      clueEvents.push(`${code}@${point.r},${point.c}`);
       continue;
     }
 
-    clueEvents.push(`${code}@${point.r},${point.c}`);
+    if (i === 0 || i === lastIndex) {
+      clueEvents.push(`${code}@${point.r},${point.c}:END`);
+      continue;
+    }
+
+    const prev = path[i - 1];
+    const next = path[i + 1];
+    const vin = directionToken(prev, point);
+    const vout = directionToken(point, next);
+    clueEvents.push(`${code}@${point.r},${point.c}:${vin}>${vout}`);
   }
 
+  return clueEvents;
+};
+
+const buildStitchEventByEdge = (stitches) => {
   const stitchEventByEdge = new Map();
-  const stitches = Array.isArray(snapshot.stitches) ? snapshot.stitches : [];
-  for (let i = 0; i < stitches.length; i += 1) {
-    const [vr, vc] = stitches[i];
+  const entries = Array.isArray(stitches) ? stitches : [];
+
+  for (const element of entries) {
+    const [vr, vc] = element;
     const aEdge = edgeKey({ r: vr - 1, c: vc - 1 }, { r: vr, c: vc });
     const bEdge = edgeKey({ r: vr - 1, c: vc }, { r: vr, c: vc - 1 });
 
@@ -196,25 +218,23 @@ const buildConstraintSignatureForPath = (snapshot, path) => {
     stitchEventByEdge.get(bEdge).push(`${vr},${vc}:B`);
   }
 
-  const seenStitchEvents = new Set();
-  const orthEdgeSet = new Set();
+  return stitchEventByEdge;
+};
 
-  const corners = Array.isArray(snapshot.cornerCounts) ? snapshot.cornerCounts : [];
-  const seenCorners = new Set();
+const buildCornerTracking = (corners) => {
   const cornerStateByKey = new Map();
   const cornerRefsByEdgeKey = new Map();
 
-  for (let i = 0; i < corners.length; i += 1) {
-    const [vr, vc] = corners[i];
-    const cornerKey = `${vr},${vc}`;
+  for (const element of corners) {
+    const [vr, vc] = element;
+    const cornerKey = cornerKeyOf(vr, vc);
     cornerStateByKey.set(cornerKey, {
       edgeSeen: new Set(),
       edgeTrace: [],
     });
 
     const edgeRefs = collectCornerEdgeRefs(vr, vc);
-    for (let j = 0; j < edgeRefs.length; j += 1) {
-      const edgeRef = edgeRefs[j];
+    for (const edgeRef of edgeRefs) {
       if (!cornerRefsByEdgeKey.has(edgeRef.edgeKey)) cornerRefsByEdgeKey.set(edgeRef.edgeKey, []);
       cornerRefsByEdgeKey.get(edgeRef.edgeKey).push({
         cornerKey,
@@ -223,61 +243,167 @@ const buildConstraintSignatureForPath = (snapshot, path) => {
     }
   }
 
-  for (let i = 0; i < corners.length; i += 1) {
-    const [vr, vc, target] = corners[i];
+  return {
+    cornerRefsByEdgeKey,
+    cornerStateByKey,
+    seenCorners: new Set(),
+  };
+};
+
+const appendCornerEvent = (cornerEvents, cornerKey, vr, vc, orthEdgeSet, cornerStateByKey) => {
+  const mask = buildCornerEventMask(vr, vc, orthEdgeSet).toString(16);
+  cornerEvents.push(`${cornerKey}:${mask}:${buildCornerTraversalToken(cornerStateByKey.get(cornerKey))}`);
+};
+
+const appendZeroTargetCornerEvents = (
+  corners,
+  seenCorners,
+  orthEdgeSet,
+  cornerStateByKey,
+  cornerEvents,
+) => {
+  for (const element of corners) {
+    const [vr, vc, target] = element;
     if (target !== 0) continue;
-    const cornerKey = `${vr},${vc}`;
+    const cornerKey = cornerKeyOf(vr, vc);
     seenCorners.add(cornerKey);
-    const mask = buildCornerEventMask(vr, vc, orthEdgeSet).toString(16);
-    cornerEvents.push(`${cornerKey}:${mask}:${buildCornerTraversalToken(cornerStateByKey.get(cornerKey))}`);
+    appendCornerEvent(cornerEvents, cornerKey, vr, vc, orthEdgeSet, cornerStateByKey);
   }
+};
+
+const recordStitchEventsForEdge = (
+  currentEdgeKey,
+  stitchEventByEdge,
+  seenStitchEvents,
+  stitchEvents,
+) => {
+  const events = stitchEventByEdge.get(currentEdgeKey);
+  if (!events) return;
+
+  for (const eventKey of events) {
+    if (seenStitchEvents.has(eventKey)) continue;
+    seenStitchEvents.add(eventKey);
+    stitchEvents.push(eventKey);
+  }
+};
+
+const recordCornerTraversalForEdge = (
+  prev,
+  cur,
+  stepIndex,
+  currentEdgeKey,
+  orthEdgeSet,
+  cornerRefsByEdgeKey,
+  cornerStateByKey,
+) => {
+  if (!isOrthEdge(prev, cur)) return;
+
+  orthEdgeSet.add(currentEdgeKey);
+  const cornerRefs = cornerRefsByEdgeKey.get(currentEdgeKey);
+  if (!cornerRefs) return;
+
+  const moveDirection = directionToken(prev, cur);
+  for (const cornerRef of cornerRefs) {
+    const cornerState = cornerStateByKey.get(cornerRef.cornerKey);
+    if (!cornerState || cornerState.edgeSeen.has(cornerRef.edgeLabel)) continue;
+    cornerState.edgeSeen.add(cornerRef.edgeLabel);
+    cornerState.edgeTrace.push(`${cornerRef.edgeLabel}${moveDirection}${stepIndex.toString(36)}`);
+  }
+};
+
+const appendSatisfiedCornerEvents = (
+  corners,
+  seenCorners,
+  orthEdgeSet,
+  cornerStateByKey,
+  cornerEvents,
+) => {
+  for (const element of corners) {
+    const [vr, vc, target] = element;
+    const cornerKey = cornerKeyOf(vr, vc);
+    if (seenCorners.has(cornerKey)) continue;
+    if (countCornerOrthConnections(vr, vc, orthEdgeSet) !== target) continue;
+    seenCorners.add(cornerKey);
+    appendCornerEvent(cornerEvents, cornerKey, vr, vc, orthEdgeSet, cornerStateByKey);
+  }
+};
+
+const buildConstraintSignatureForPath = (snapshot, path) => {
+  const clueEvents = buildClueEventsForPath(snapshot, path);
+  const stitchEvents = [];
+  const cornerEvents = [];
+  const stitchEventByEdge = buildStitchEventByEdge(snapshot.stitches);
+  const seenStitchEvents = new Set();
+  const orthEdgeSet = new Set();
+
+  const corners = Array.isArray(snapshot.cornerCounts) ? snapshot.cornerCounts : [];
+  const { seenCorners, cornerStateByKey, cornerRefsByEdgeKey } = buildCornerTracking(corners);
+
+  appendZeroTargetCornerEvents(corners, seenCorners, orthEdgeSet, cornerStateByKey, cornerEvents);
 
   for (let i = 1; i < path.length; i += 1) {
     const prev = path[i - 1];
     const cur = path[i];
     const currentEdgeKey = edgeKey(prev, cur);
 
-    if (stitchEventByEdge.has(currentEdgeKey)) {
-      const events = stitchEventByEdge.get(currentEdgeKey);
-      for (let j = 0; j < events.length; j += 1) {
-        const eventKey = events[j];
-        if (seenStitchEvents.has(eventKey)) continue;
-        seenStitchEvents.add(eventKey);
-        stitchEvents.push(eventKey);
-      }
-    }
-
-    if (isOrthEdge(prev, cur)) {
-      orthEdgeSet.add(currentEdgeKey);
-      const cornerRefs = cornerRefsByEdgeKey.get(currentEdgeKey);
-      if (cornerRefs) {
-        const moveDirection = directionToken(prev, cur);
-        for (let j = 0; j < cornerRefs.length; j += 1) {
-          const cornerRef = cornerRefs[j];
-          const cornerState = cornerStateByKey.get(cornerRef.cornerKey);
-          if (!cornerState || cornerState.edgeSeen.has(cornerRef.edgeLabel)) continue;
-          cornerState.edgeSeen.add(cornerRef.edgeLabel);
-          cornerState.edgeTrace.push(`${cornerRef.edgeLabel}${moveDirection}${i.toString(36)}`);
-        }
-      }
-    }
-
-    for (let j = 0; j < corners.length; j += 1) {
-      const [vr, vc, target] = corners[j];
-      const cornerKey = `${vr},${vc}`;
-      if (seenCorners.has(cornerKey)) continue;
-      if (countCornerOrthConnections(vr, vc, orthEdgeSet) !== target) continue;
-      seenCorners.add(cornerKey);
-      const mask = buildCornerEventMask(vr, vc, orthEdgeSet).toString(16);
-      cornerEvents.push(`${cornerKey}:${mask}:${buildCornerTraversalToken(cornerStateByKey.get(cornerKey))}`);
-    }
+    recordStitchEventsForEdge(currentEdgeKey, stitchEventByEdge, seenStitchEvents, stitchEvents);
+    recordCornerTraversalForEdge(
+      prev,
+      cur,
+      i,
+      currentEdgeKey,
+      orthEdgeSet,
+      cornerRefsByEdgeKey,
+      cornerStateByKey,
+    );
+    appendSatisfiedCornerEvents(corners, seenCorners, orthEdgeSet, cornerStateByKey, cornerEvents);
   }
 
-  const cluePart = clueEvents.length > 0 ? clueEvents.join('>') : '-';
-  const stitchPart = stitchEvents.length > 0 ? stitchEvents.join('>') : '-';
-  const cornerPart = cornerEvents.length > 0 ? cornerEvents.join('>') : '-';
+  return `${joinEventPart(clueEvents)}|${joinEventPart(stitchEvents)}|${joinEventPart(cornerEvents)}`;
+};
 
-  return `${cluePart}|${stitchPart}|${cornerPart}`;
+const isBoundaryCell = (r, c, rows, cols) => (
+  r === 0 || r === rows - 1 || c === 0 || c === cols - 1
+);
+
+const enqueueAdjacentWallCells = (queue, rr, cc, rows, cols, gridData, visited) => {
+  for (const [dr, dc] of ORTHOGONAL_DELTAS) {
+    const nr = rr + dr;
+    const nc = cc + dc;
+    if (nr < 0 || nr >= rows || nc < 0 || nc >= cols) continue;
+    if (visited[nr][nc]) continue;
+    if (!WALL_CODES.has(gridData[nr][nc])) continue;
+    visited[nr][nc] = true;
+    queue.push({ r: nr, c: nc });
+  }
+};
+
+const collectWallIsland = (startR, startC, rows, cols, gridData, visited) => {
+  let touchesBoundary = false;
+  let sumX = 0;
+  let sumY = 0;
+  let count = 0;
+
+  const queue = [{ r: startR, c: startC }];
+  visited[startR][startC] = true;
+
+  for (const point of queue) {
+    const { r: rr, c: cc } = point;
+
+    if (isBoundaryCell(rr, cc, rows, cols)) touchesBoundary = true;
+
+    sumX += cc + 0.5;
+    sumY += rr + 0.5;
+    count += 1;
+
+    enqueueAdjacentWallCells(queue, rr, cc, rows, cols, gridData, visited);
+  }
+
+  if (touchesBoundary || count <= 0) return null;
+  return {
+    x: sumX / count,
+    y: sumY / count,
+  };
 };
 
 const collectInteriorWallIslands = (gridData) => {
@@ -286,56 +412,15 @@ const collectInteriorWallIslands = (gridData) => {
   const cols = Array.isArray(gridData[0]) ? gridData[0].length : 0;
   if (!rows || !cols) return [];
 
-  const visited = Array.from({ length: rows }, () => Array(cols).fill(false));
+  const visited = Array.from({ length: rows }, () => new Array(cols).fill(false));
   const islands = [];
-  const deltas = [
-    [-1, 0],
-    [1, 0],
-    [0, -1],
-    [0, 1],
-  ];
 
   for (let r = 0; r < rows; r += 1) {
     for (let c = 0; c < cols; c += 1) {
       if (visited[r][c]) continue;
       if (!WALL_CODES.has(gridData[r][c])) continue;
-
-      let touchesBoundary = false;
-      let sumX = 0;
-      let sumY = 0;
-      let count = 0;
-
-      const queue = [{ r, c }];
-      visited[r][c] = true;
-
-      for (let qi = 0; qi < queue.length; qi += 1) {
-        const point = queue[qi];
-        const { r: rr, c: cc } = point;
-
-        if (rr === 0 || rr === rows - 1 || cc === 0 || cc === cols - 1) {
-          touchesBoundary = true;
-        }
-
-        sumX += cc + 0.5;
-        sumY += rr + 0.5;
-        count += 1;
-
-        for (let di = 0; di < deltas.length; di += 1) {
-          const nr = rr + deltas[di][0];
-          const nc = cc + deltas[di][1];
-          if (nr < 0 || nr >= rows || nc < 0 || nc >= cols) continue;
-          if (visited[nr][nc]) continue;
-          if (!WALL_CODES.has(gridData[nr][nc])) continue;
-          visited[nr][nc] = true;
-          queue.push({ r: nr, c: nc });
-        }
-      }
-
-      if (touchesBoundary || count <= 0) continue;
-      islands.push({
-        x: sumX / count,
-        y: sumY / count,
-      });
+      const island = collectWallIsland(r, c, rows, cols, gridData, visited);
+      if (island) islands.push(island);
     }
   }
 
@@ -354,9 +439,9 @@ const inverseToken = (token) => {
 
 const reduceTopologyTokens = (tokens) => {
   const out = [];
-  for (let i = 0; i < tokens.length; i += 1) {
-    const token = tokens[i];
-    const last = out[out.length - 1];
+  for (const element of tokens) {
+    const token = element;
+    const last = out.at(-1);
     if (last && inverseToken(last) === token) {
       out.pop();
       continue;
@@ -381,68 +466,69 @@ const normalizeTokenLabelsByAppearance = (tokens) => {
   };
 
   const out = [];
-  for (let i = 0; i < tokens.length; i += 1) {
-    const token = tokens[i];
+  for (const element of tokens) {
+    const token = element;
     out.push(`${token[0]}${normalizeId(token.slice(1))}`);
   }
 
   return out.join(',');
 };
 
-const buildTopologySignatureForPath = (snapshot, path) => {
-  const islands = collectInteriorWallIslands(snapshot.gridData);
-  if (islands.length === 0) return '-';
+const buildTopologyRays = (gridData) => collectInteriorWallIslands(gridData).map((island, index) => ({
+  id: String(index + 1),
+  x: island.x,
+  y: island.y + ((index + 1) * 1e-5),
+}));
 
-  const rays = islands.map((island, index) => ({
-    id: String(index + 1),
-    x: island.x,
-    y: island.y + ((index + 1) * 1e-5),
-  }));
+const buildRayHit = (x1, y1, x2, y2, ray) => {
+  const crossing = (
+    (y1 <= ray.y && y2 > ray.y)
+    || (y2 <= ray.y && y1 > ray.y)
+  );
+  if (!crossing) return null;
+
+  const t = (ray.y - y1) / (y2 - y1);
+  const xAt = x1 + ((x2 - x1) * t);
+  if (xAt <= ray.x) return null;
+
+  return {
+    t,
+    token: `${y2 > y1 ? '+' : '-'}${ray.id}`,
+  };
+};
+
+const compareRayHits = (left, right) => {
+  if (left.t !== right.t) return left.t - right.t;
+  return compareStringsAscending(left.token, right.token);
+};
+
+const collectTopologyHitsForSegment = (a, b, rays) => {
+  const x1 = a.c + 0.5;
+  const y1 = a.r + 0.5;
+  const x2 = b.c + 0.5;
+  const y2 = b.r + 0.5;
+
+  if (y1 === y2) return [];
+
+  const hits = [];
+  for (const ray of rays) {
+    const hit = buildRayHit(x1, y1, x2, y2, ray);
+    if (hit) hits.push(hit);
+  }
+
+  hits.sort(compareRayHits);
+  return hits;
+};
+
+const buildTopologySignatureForPath = (snapshot, path) => {
+  const rays = buildTopologyRays(snapshot.gridData);
+  if (rays.length === 0) return '-';
 
   const rawTokens = [];
 
   for (let i = 1; i < path.length; i += 1) {
-    const a = path[i - 1];
-    const b = path[i];
-    const x1 = a.c + 0.5;
-    const y1 = a.r + 0.5;
-    const x2 = b.c + 0.5;
-    const y2 = b.r + 0.5;
-
-    if (y1 === y2) continue;
-
-    const hits = [];
-    for (let ri = 0; ri < rays.length; ri += 1) {
-      const ray = rays[ri];
-      const yr = ray.y;
-      const crossing = (
-        (y1 <= yr && y2 > yr)
-        || (y2 <= yr && y1 > yr)
-      );
-      if (!crossing) continue;
-
-      const t = (yr - y1) / (y2 - y1);
-      const xAt = x1 + ((x2 - x1) * t);
-      if (!(xAt > ray.x)) continue;
-
-      hits.push({
-        t,
-        token: `${y2 > y1 ? '+' : '-'}${ray.id}`,
-      });
-    }
-
-    if (hits.length === 0) continue;
-
-    hits.sort((left, right) => {
-      if (left.t !== right.t) return left.t - right.t;
-      if (left.token < right.token) return -1;
-      if (left.token > right.token) return 1;
-      return 0;
-    });
-
-    for (let hi = 0; hi < hits.length; hi += 1) {
-      rawTokens.push(hits[hi].token);
-    }
+    const hits = collectTopologyHitsForSegment(path[i - 1], path[i], rays);
+    for (const hit of hits) rawTokens.push(hit.token);
   }
 
   const reduced = reduceTopologyTokens(rawTokens);
@@ -462,7 +548,7 @@ const rotatePath = (path, offset) => {
 
 const isCycleCutPath = (path, stitchSet) => {
   if (!Array.isArray(path) || path.length < 3) return false;
-  return isAdjacentMove({ stitchSet }, path[0], path[path.length - 1]);
+  return isAdjacentMove({ stitchSet }, path[0], path.at(-1));
 };
 
 const enumerateCanonicalCandidates = (snapshot) => {
@@ -507,8 +593,8 @@ export const buildCanonicalSolutionSignature = (snapshot) => {
 
   let best = null;
 
-  for (let i = 0; i < candidates.length; i += 1) {
-    const path = candidates[i];
+  for (const element of candidates) {
+    const path = element;
     const constraint = buildConstraintSignatureForPath(snapshot, path);
     const topology = buildTopologySignatureForPath(snapshot, path);
     const combined = `${constraint}||${topology}`;

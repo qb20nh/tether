@@ -6,31 +6,32 @@ const DEBUG_SW_MESSAGE_TYPES = Object.freeze({
   RUN_DAILY_CHECK: 'SW_RUN_DAILY_CHECK',
 });
 
+const resolveFunction = (value, fallback) => (
+  typeof value === 'function' ? value : fallback
+);
+
+const resolveRuntimeDebugHost = (host = {}) => ({
+  canUseServiceWorker: resolveFunction(host.canUseServiceWorker, () => false),
+  postMessageToServiceWorker: resolveFunction(host.postMessageToServiceWorker, async () => false),
+  requestNotificationPermission: resolveFunction(host.requestNotificationPermission, async () => 'unsupported'),
+  showToast: resolveFunction(host.showToast, () => {}),
+  fetchDailyPayload: resolveFunction(host.fetchDailyPayload, async () => null),
+  readDailyDebugSnapshot: resolveFunction(host.readDailyDebugSnapshot, () => null),
+  toggleForceDailyFrozenState: resolveFunction(host.toggleForceDailyFrozenState, () => null),
+  reloadApp: resolveFunction(host.reloadApp, () => window.location.reload()),
+});
+
 export const mountDebugRuntimePlugin = (host = {}) => {
-  const canUseServiceWorker = typeof host.canUseServiceWorker === 'function'
-    ? host.canUseServiceWorker
-    : () => false;
-  const postMessageToServiceWorker = typeof host.postMessageToServiceWorker === 'function'
-    ? host.postMessageToServiceWorker
-    : async () => false;
-  const requestNotificationPermission = typeof host.requestNotificationPermission === 'function'
-    ? host.requestNotificationPermission
-    : async () => 'unsupported';
-  const showToast = typeof host.showToast === 'function'
-    ? host.showToast
-    : () => {};
-  const fetchDailyPayload = typeof host.fetchDailyPayload === 'function'
-    ? host.fetchDailyPayload
-    : async () => null;
-  const readDailyDebugSnapshot = typeof host.readDailyDebugSnapshot === 'function'
-    ? host.readDailyDebugSnapshot
-    : () => null;
-  const toggleForceDailyFrozenState = typeof host.toggleForceDailyFrozenState === 'function'
-    ? host.toggleForceDailyFrozenState
-    : () => null;
-  const reloadApp = typeof host.reloadApp === 'function'
-    ? host.reloadApp
-    : () => window.location.reload();
+  const {
+    canUseServiceWorker,
+    postMessageToServiceWorker,
+    requestNotificationPermission,
+    showToast,
+    fetchDailyPayload,
+    readDailyDebugSnapshot,
+    toggleForceDailyFrozenState,
+    reloadApp,
+  } = resolveRuntimeDebugHost(host);
 
   const triggerSystemNotification = async ({ kind = 'unsolved-warning' } = {}) => {
     if (!canUseServiceWorker()) return false;

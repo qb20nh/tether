@@ -1,4 +1,4 @@
-import { solveLevel, buildLevelContext, runRandomSolveBatch, DIFFICULTY_PROFILES } from './verify_level_properties.js';
+import { buildLevelContext, DIFFICULTY_PROFILES, runRandomSolveBatch, solveLevel } from './verify_level_properties.js';
 
 function getRandomInt(max) {
   return Math.floor(Math.random() * max);

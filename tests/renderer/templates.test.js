@@ -1,6 +1,6 @@
-import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import test from 'node:test';
 import { renderAppShellMarkup } from '../../src/app_shell_markup.js';
 
 test('templates source uses material icon ligatures for header and dialog icons', () => {

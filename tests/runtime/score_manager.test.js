@@ -1,12 +1,12 @@
-import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createGameStateStore } from '../../src/state/game_state_store.js';
+import test from 'node:test';
 import {
+  __TEST__,
   buildCanonicalSolutionSignature,
   createScoreManager,
   SCORE_MODES,
-  __TEST__,
 } from '../../src/runtime/score_manager.js';
+import { createGameStateStore } from '../../src/state/game_state_store.js';
 
 const LEVEL_STRAIGHT = {
   name: 'Straight',
@@ -43,8 +43,8 @@ const LEVEL_CORNER = {
 const buildSnapshotForPath = (level, path) => {
   const store = createGameStateStore(() => level);
   store.dispatch({ type: 'level/load', payload: { levelIndex: 0 } });
-  for (let i = 0; i < path.length; i += 1) {
-    const [r, c] = path[i];
+  for (const element of path) {
+    const [r, c] = element;
     store.dispatch({ type: 'path/start-or-step', payload: { r, c } });
   }
   return store.getSnapshot();
@@ -135,6 +135,53 @@ test('corner event direction differences produce distinct signatures', () => {
 test('topology word helpers reduce and normalize generator labels deterministically', () => {
   assert.deepEqual(__TEST__.reduceTopologyTokens(['+1', '-1', '+2', '+2', '-2']), ['+2']);
   assert.equal(__TEST__.normalizeTokenLabelsByAppearance(['+7', '-3', '+7']), '+1,-2,+1');
+});
+
+test('interior wall islands ignore boundary walls and stay sorted by position', () => {
+  const islands = __TEST__.collectInteriorWallIslands([
+    ['#', '.', '.', '.', '.'],
+    ['.', '.', '.', '#', '.'],
+    ['.', '.', '.', '.', '.'],
+    ['.', '#', '.', '.', '.'],
+    ['.', '.', '.', '.', '#'],
+  ]);
+
+  assert.deepEqual(islands, [
+    { x: 3.5, y: 1.5 },
+    { x: 1.5, y: 3.5 },
+  ]);
+});
+
+test('topology signature records winding around an interior wall island', () => {
+  const snapshot = {
+    gridData: [
+      ['.', '.', '.'],
+      ['.', '#', '.'],
+      ['.', '.', '.'],
+    ],
+  };
+
+  assert.equal(__TEST__.buildTopologySignatureForPath(snapshot, [
+    { r: 0, c: 0 },
+    { r: 0, c: 1 },
+    { r: 0, c: 2 },
+    { r: 1, c: 2 },
+    { r: 2, c: 2 },
+    { r: 2, c: 1 },
+    { r: 2, c: 0 },
+    { r: 1, c: 0 },
+  ]), '+1');
+
+  assert.equal(__TEST__.buildTopologySignatureForPath(snapshot, [
+    { r: 0, c: 0 },
+    { r: 1, c: 0 },
+    { r: 2, c: 0 },
+    { r: 2, c: 1 },
+    { r: 2, c: 2 },
+    { r: 1, c: 2 },
+    { r: 0, c: 2 },
+    { r: 0, c: 1 },
+  ]), '-1');
 });
 
 test('unique solution bonus follows rounded sqrt(2n) progression', () => {

@@ -1,5 +1,5 @@
-import test from 'node:test';
 import assert from 'node:assert/strict';
+import test from 'node:test';
 import { createDefaultAdapters } from '../../src/runtime/default_adapters.js';
 
 test('default adapters expose required contract methods', () => {

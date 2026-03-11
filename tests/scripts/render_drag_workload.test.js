@@ -1,8 +1,8 @@
-import test from 'node:test';
 import assert from 'node:assert/strict';
+import test from 'node:test';
 import { createRenderDragWorkload } from '../../scripts/lib/render_drag_workload.js';
-import { createLevelProvider } from '../../src/core/level_provider.js';
 import { createDefaultCore } from '../../src/core/default_core.js';
+import { createLevelProvider } from '../../src/core/level_provider.js';
 import { createGameStateStore } from '../../src/state/game_state_store.js';
 import { isUsableCell } from '../../src/state/snapshot_rules.js';
 
@@ -46,8 +46,8 @@ test('render drag workload paths stay usable orthogonal and non-revisiting', () 
     boards: 4,
   });
 
-  for (let i = 0; i < workload.cases.length; i += 1) {
-    const workloadCase = workload.cases[i];
+  for (const element of workload.cases) {
+    const workloadCase = element;
     const snapshot = buildBoardSnapshot(workloadCase.infiniteIndex);
     const visited = new Set();
 

@@ -1,5 +1,5 @@
-import test from 'node:test';
 import assert from 'node:assert/strict';
+import test from 'node:test';
 
 const BASE_URL = process.env.E2E_BASE_URL || 'http://127.0.0.1:5174/';
 const ITERATIONS = Number.parseInt(process.env.E2E_RESIZE_ITERATIONS || '360', 10);

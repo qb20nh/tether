@@ -14,10 +14,10 @@ import {
   DAILY_POOL_MAX_VARIANT_PROBE,
   DAILY_POOL_SCHEMA_VERSION,
   DAILY_POOL_VERSION,
+  buildInfiniteCanonicalKeySet,
   computePoolDigest,
   selectDailyCandidateForSlot,
   writeDailyOverridesGzipFile,
-  buildInfiniteCanonicalKeySet,
 } from './daily_pool_tools.js';
 
 const DEFAULTS = {

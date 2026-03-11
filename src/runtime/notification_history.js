@@ -44,7 +44,7 @@ export const normalizeHistoryAction = (action) => {
 
 export const hasUnreadSystemHistory = (entries = []) =>
   Array.isArray(entries)
-  && entries.some((entry) => entry && entry.source === 'system' && entry.marker === 'unread');
+  && entries.some((entry) => entry?.source === 'system' && entry.marker === 'unread');
 
 export const historyEntryDotColor = (entry) => {
   if (!entry) return HISTORY_DOT_COLORS.NONE;
@@ -78,7 +78,7 @@ export const formatHistoryRelativeTime = (createdAtUtcMs, locale, nowMs = Date.n
     }
   }
   const unitEntry = RELATIVE_TIME_UNITS.find((candidate) => absDelta >= candidate.ms)
-    || RELATIVE_TIME_UNITS[RELATIVE_TIME_UNITS.length - 1];
+    || RELATIVE_TIME_UNITS.at(-1);
   const value = Math.round(deltaMs / unitEntry.ms);
 
   try {

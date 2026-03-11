@@ -21,8 +21,8 @@ export function createNotificationToggleController(options = {}) {
     requestServiceWorkerDailyCheck = async () => { },
     translateNow = (key) => key,
     showInAppToast = () => { },
-    windowObj = typeof window !== 'undefined' ? window : undefined,
-    documentObj = typeof document !== 'undefined' ? document : undefined,
+    windowObj = typeof window === 'undefined' ? undefined : window,
+    documentObj = typeof document === 'undefined' ? undefined : document,
   } = options;
 
   if (!elementIds || typeof elementIds !== 'object') {

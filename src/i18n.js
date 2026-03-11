@@ -168,7 +168,7 @@ const resolvePath = (obj, keyPath) => keyPath.split('.').reduce((acc, part) => {
 
 const normalizeLocale = (value) => {
   if (!value || typeof value !== 'string') return null;
-  const candidate = value.trim().toLowerCase().replace(/_/g, '-');
+  const candidate = value.trim().toLowerCase().replaceAll('_', '-');
   const exact = SUPPORTED_LOCALES.find((locale) => locale.toLowerCase() === candidate);
   if (exact) return exact;
 
@@ -253,7 +253,7 @@ export const loadLocaleMessages = async (locale) => {
 
   const load = LOCALE_LOADERS[resolved];
   if (typeof load !== 'function') {
-    throw new Error(`Unsupported locale loader: ${resolved}`);
+    throw new TypeError(`Unsupported locale loader: ${resolved}`);
   }
 
   const promise = load()
@@ -312,8 +312,8 @@ export const setLocale = async (locale) => {
 
 const interpolate = (template, vars = {}) => {
   if (!vars || Object.keys(vars).length === 0) return String(template);
-  return String(template).replace(/\{\{(\w+)\}\}/g, (match, key) => {
-    if (Object.prototype.hasOwnProperty.call(vars, key)) {
+  return String(template).replaceAll(/\{\{(\w+)\}\}/g, (match, key) => {
+    if (Object.hasOwn(vars, key)) {
       return String(vars[key]);
     }
     return match;
@@ -326,8 +326,8 @@ export const t = (locale) => {
   const fallbackOrder = Array.from(fallback);
 
   return (key, vars = {}) => {
-    for (let i = 0; i < fallbackOrder.length; i += 1) {
-      const localeKey = fallbackOrder[i];
+    for (const element of fallbackOrder) {
+      const localeKey = element;
       const messages = loadedLocaleMessages.get(localeKey);
       if (!messages) continue;
       const message = resolvePath(messages, key);

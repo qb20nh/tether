@@ -1,5 +1,5 @@
-import test from 'node:test';
 import assert from 'node:assert/strict';
+import test from 'node:test';
 import { buildBoardCellViewModel } from '../../src/renderer/board_view_model.js';
 
 test('board view model maps path and statuses to classes', () => {

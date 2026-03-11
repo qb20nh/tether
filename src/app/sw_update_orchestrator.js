@@ -7,11 +7,64 @@ export const parseRemoteBuildNumber = (payload) => {
 export const parseServiceWorkerBuildNumber = (source, buildNumberRe) => {
   if (typeof source !== 'string' || source.length === 0) return null;
   if (!(buildNumberRe instanceof RegExp)) return null;
-  const match = source.match(buildNumberRe);
+  const match = new RegExp(buildNumberRe).exec(source);
   if (!match) return null;
   const parsed = Number.parseInt(match[1], 10);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
 };
+
+const waitForWaitingWorker = (registration, timeoutMs, windowObj) =>
+  new Promise((resolve) => {
+    if (registration.waiting) {
+      resolve(registration.waiting);
+      return;
+    }
+
+    let settled = false;
+    const cleanups = [];
+    const finish = (worker = null) => {
+      if (settled) return;
+      settled = true;
+      for (const fn of cleanups) fn();
+      resolve(worker || registration.waiting || null);
+    };
+
+    const bindInstallingWorker = (worker) => {
+      if (!worker) return;
+      if (worker.state === 'installed') {
+        finish(registration.waiting || worker);
+        return;
+      }
+
+      const onStateChange = () => {
+        if (worker.state === 'installed') {
+          finish(registration.waiting || worker);
+        }
+      };
+      const removeStateChangeListener = () => {
+        worker.removeEventListener('statechange', onStateChange);
+      };
+      worker.addEventListener('statechange', onStateChange);
+      cleanups.push(removeStateChangeListener);
+    };
+
+    const onUpdateFound = () => {
+      bindInstallingWorker(registration.installing);
+    };
+    const clearUpdateFoundListener = () => {
+      registration.removeEventListener('updatefound', onUpdateFound);
+    };
+    const timer = windowObj.setTimeout(() => {
+      finish(null);
+    }, timeoutMs);
+    const clearTimer = () => {
+      windowObj.clearTimeout(timer);
+    };
+
+    bindInstallingWorker(registration.installing);
+    registration.addEventListener('updatefound', onUpdateFound);
+    cleanups.push(clearUpdateFoundListener, clearTimer);
+  });
 
 export function createSwUpdateOrchestrator(options = {}) {
   const {
@@ -49,10 +102,10 @@ export function createSwUpdateOrchestrator(options = {}) {
     waitingWorkerTimeoutFirstMs = 8000,
     waitingWorkerTimeoutRetryMs = 4000,
     fetchImpl = typeof fetch === 'function' ? fetch : null,
-    windowObj = typeof window !== 'undefined' ? window : undefined,
-    documentObj = typeof document !== 'undefined' ? document : undefined,
-    navigatorObj = typeof navigator !== 'undefined' ? navigator : undefined,
-    notificationApi = typeof Notification !== 'undefined' ? Notification : undefined,
+    windowObj = typeof window === 'undefined' ? undefined : window,
+    documentObj = typeof document === 'undefined' ? undefined : document,
+    navigatorObj = typeof navigator === 'undefined' ? undefined : navigator,
+    notificationApi = typeof Notification === 'undefined' ? undefined : Notification,
     now = () => Date.now(),
     noWaitingReloadBuildStorageKey = 'tetherUpdateNoWaitingReloadBuild',
   } = options;
@@ -61,10 +114,10 @@ export function createSwUpdateOrchestrator(options = {}) {
     throw new Error('createSwUpdateOrchestrator requires swMessenger');
   }
   if (typeof resolveServiceWorkerRegistrationUrl !== 'function') {
-    throw new Error('createSwUpdateOrchestrator requires resolveServiceWorkerRegistrationUrl');
+    throw new TypeError('createSwUpdateOrchestrator requires resolveServiceWorkerRegistrationUrl');
   }
   if (typeof isLocalhostHostname !== 'function') {
-    throw new Error('createSwUpdateOrchestrator requires isLocalhostHostname');
+    throw new TypeError('createSwUpdateOrchestrator requires isLocalhostHostname');
   }
 
   let swReloadOnControllerChangeArmed = false;
@@ -80,7 +133,7 @@ export function createSwUpdateOrchestrator(options = {}) {
     const reply = await swMessenger.postMessageWithReply({
       type: swMessageTypes.GET_UPDATE_POLICY,
     }, { target, timeoutMs: 2000 });
-    if (!reply || reply.ok !== true) return null;
+    if (reply?.ok !== true) return null;
     return {
       autoUpdateEnabled: reply.autoUpdateEnabled === true,
       pinnedBuildNumber: Number.parseInt(reply.pinnedBuildNumber, 10),
@@ -332,51 +385,6 @@ export function createSwUpdateOrchestrator(options = {}) {
     });
   };
 
-  const waitForWaitingWorker = (registration, timeoutMs = waitingWorkerTimeoutFirstMs) =>
-    new Promise((resolve) => {
-      if (registration.waiting) {
-        resolve(registration.waiting);
-        return;
-      }
-
-      let settled = false;
-      const cleanups = [];
-      const finish = (worker = null) => {
-        if (settled) return;
-        settled = true;
-        for (const fn of cleanups) fn();
-        resolve(worker || registration.waiting || null);
-      };
-
-      const bindInstallingWorker = (worker) => {
-        if (!worker) return;
-        if (worker.state === 'installed') {
-          finish(registration.waiting || worker);
-          return;
-        }
-        const onStateChange = () => {
-          if (worker.state === 'installed') {
-            finish(registration.waiting || worker);
-          }
-        };
-        worker.addEventListener('statechange', onStateChange);
-        cleanups.push(() => worker.removeEventListener('statechange', onStateChange));
-      };
-
-      bindInstallingWorker(registration.installing);
-
-      const onUpdateFound = () => {
-        bindInstallingWorker(registration.installing);
-      };
-      registration.addEventListener('updatefound', onUpdateFound);
-      cleanups.push(() => registration.removeEventListener('updatefound', onUpdateFound));
-
-      const timer = windowObj.setTimeout(() => {
-        finish(null);
-      }, timeoutMs);
-      cleanups.push(() => windowObj.clearTimeout(timer));
-    });
-
   const hasNotifiedRemoteBuild = (remoteBuildNumber) => {
     if (!Number.isInteger(remoteBuildNumber) || remoteBuildNumber <= 0) return true;
     if (notifiedRemoteBuildNumbers.has(remoteBuildNumber)) return true;
@@ -430,6 +438,7 @@ export function createSwUpdateOrchestrator(options = {}) {
         const waitingWorkerPromise = waitForWaitingWorker(
           registration,
           attempt === 0 ? waitingWorkerTimeoutFirstMs : waitingWorkerTimeoutRetryMs,
+          windowObj,
         );
         try {
           await registration.update();

@@ -1,11 +1,11 @@
+import { execFileSync, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { spawn, execFileSync } from 'node:child_process';
 import { cp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
-import { createRenderDragWorkload } from './lib/render_drag_workload.js';
 import { runRenderDragBenchmarkSuite } from './lib/render_drag_browser_runner.js';
+import { createRenderDragWorkload } from './lib/render_drag_workload.js';
 
 const DEFAULT_NEXT_REV = 'HEAD';
 const DEFAULT_PREV_REV = 'HEAD~2';

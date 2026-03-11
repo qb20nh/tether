@@ -1,11 +1,11 @@
-import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createLevelProvider } from '../../src/core/level_provider.js';
+import test from 'node:test';
 import { createDefaultCore } from '../../src/core/default_core.js';
-import { createGameStateStore } from '../../src/state/game_state_store.js';
+import { createLevelProvider } from '../../src/core/level_provider.js';
 import { createMemoryPersistence } from '../../src/persistence/memory_persistence.js';
 import { createRuntime } from '../../src/runtime/create_runtime.js';
 import { GAME_COMMANDS, INTENT_TYPES, INTERACTION_UPDATES, UI_ACTIONS } from '../../src/runtime/intents.js';
+import { createGameStateStore } from '../../src/state/game_state_store.js';
 
 const LEVEL = {
   name: 'Runtime Lifecycle',
@@ -62,8 +62,8 @@ const createElement = () => ({
   dataset: {},
   style: {},
   classList: createClassList(),
-  setAttribute() {},
-  removeAttribute() {},
+  setAttribute() { },
+  removeAttribute() { },
   querySelector() {
     return createElement();
   },
@@ -121,6 +121,14 @@ const createRefs = () => {
   };
 };
 
+const flushQueuedRafs = (env, ts) => {
+  const callbacks = [...env.rafCallbacks.values()];
+  env.rafCallbacks.clear();
+  for (const element of callbacks) {
+    element?.(ts);
+  }
+};
+
 const installBrowserEnv = (t) => {
   const originalWindow = globalThis.window;
   const originalDocument = globalThis.document;
@@ -172,7 +180,7 @@ const installBrowserEnv = (t) => {
       lang: '',
       dataset: {},
       classList: createClassList(),
-      setAttribute() {},
+      setAttribute() { },
     },
     body: null,
   };
@@ -262,7 +270,7 @@ const createRuntimeHarness = ({
   if (!persistence.clearSessionBoard) persistence.clearSessionBoard = basePersistence.clearSessionBoard;
 
   const renderer = {
-    mount: () => {},
+    mount: () => { },
     getRefs: () => refs,
     rebuildGrid: (...args) => {
       rebuildGridCount += 1;
@@ -374,13 +382,13 @@ const flushCallbacks = (callbackMap, arg) => {
 };
 
 const emitSolvePath = (runtime, cells) => {
-  for (let i = 0; i < cells.length; i += 1) {
+  for (const element of cells) {
     runtime.emitIntent({
       type: INTENT_TYPES.GAME_COMMAND,
       payload: {
         commandType: GAME_COMMANDS.START_OR_STEP,
-        r: cells[i][0],
-        c: cells[i][1],
+        r: element[0],
+        c: element[1],
       },
     });
   }
@@ -430,7 +438,7 @@ test('createRuntime destroy removes listeners, disconnects observers, and cancel
 });
 
 test('createRuntime destroy forwards renderer teardown options', (t) => {
-  const env = installBrowserEnv(t);
+  installBrowserEnv(t);
   const unmountOptions = [];
   const harness = createRuntimeHarness({
     rendererOverrides: {
@@ -849,7 +857,7 @@ test('createRuntime refreshLocalizationUi updates disabled locale options', (t) 
   offlineUnavailable = true;
   harness.runtime.refreshLocalizationUi();
 
-  assert.equal(harness.refs.langSel.innerHTML.includes('value=\"fr-FR\" disabled'), true);
+  assert.equal(harness.refs.langSel.innerHTML.includes('value="fr-FR" disabled'), true);
 
   harness.runtime.destroy();
 });
@@ -972,7 +980,7 @@ test('createRuntime applies persisted low power mode before first level render',
 });
 
 test('createRuntime applies persisted low power mode before mounting the renderer', (t) => {
-  const env = installBrowserEnv(t);
+  installBrowserEnv(t);
   const callOrder = [];
   const harness = createRuntimeHarness({
     persistenceInitialState: {
@@ -1115,13 +1123,7 @@ test('createRuntime suggests low power mode for ordinary single-step drag stutte
     },
   });
 
-  const flushAllRafs = (ts) => {
-    const callbacks = [...env.rafCallbacks.values()];
-    env.rafCallbacks.clear();
-    for (let i = 0; i < callbacks.length; i += 1) {
-      callbacks[i]?.(ts);
-    }
-  };
+  const flushAllRafs = (ts) => flushQueuedRafs(env, ts);
 
   harness.runtime.start();
   flushAllRafs(16);
@@ -1183,13 +1185,7 @@ test('createRuntime low power suggestion compares idle and drag fps before showi
     },
   });
 
-  const flushAllRafs = (ts) => {
-    const callbacks = [...env.rafCallbacks.values()];
-    env.rafCallbacks.clear();
-    for (let i = 0; i < callbacks.length; i += 1) {
-      callbacks[i]?.(ts);
-    }
-  };
+  const flushAllRafs = (ts) => flushQueuedRafs(env, ts);
 
   harness.runtime.start();
   flushAllRafs(16);

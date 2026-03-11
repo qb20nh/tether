@@ -1,7 +1,7 @@
+import { isReducedMotionPreferred as readReducedMotionPreference } from '../reduced_motion.js';
 import {
   createBoardRendererCore,
 } from './board_renderer_core.js';
-import { isReducedMotionPreferred as readReducedMotionPreference } from '../reduced_motion.js';
 
 export function createDomRenderer(options = {}) {
   const icons = options.icons || {};
@@ -85,7 +85,7 @@ export function createDomRenderer(options = {}) {
     }
     const styles = getComputedStyle(refs.boardWrap);
 
-    const speedMultiplier = typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.DEV && typeof window.TETHER_DEBUG_ANIM_SPEED === 'number'
+    const speedMultiplier = import.meta?.env?.DEV && typeof window.TETHER_DEBUG_ANIM_SPEED === 'number'
       ? Math.max(0.1, window.TETHER_DEBUG_ANIM_SPEED)
       : 1;
 
@@ -131,7 +131,7 @@ export function createDomRenderer(options = {}) {
 
   const triggerCompletePulse = (pulseTotalMs) => {
     clearCompletePulse();
-    if (!refs?.boardWrap || !(pulseTotalMs > 0)) return;
+    if (!refs?.boardWrap || pulseTotalMs <= 0) return;
     pendingCompletePulseClassClear = false;
     completePulseFrame = requestAnimationFrame(() => {
       completePulseFrame = 0;
@@ -146,7 +146,7 @@ export function createDomRenderer(options = {}) {
 
   const scheduleCompleteFinish = (durationMs, pulseTotalMs) => {
     clearCompleteFinishTimer();
-    if (!(durationMs > 0)) return;
+    if (durationMs <= 0) return;
     completeFinishTimer = setTimeout(() => {
       completeFinishTimer = 0;
       completionCascadeState.isCompleting = false;
@@ -203,6 +203,190 @@ export function createDomRenderer(options = {}) {
     )
   );
 
+  const isSolvedRenderFrame = ({
+    snapshot,
+    evaluation,
+    completion,
+    interactionModel,
+  }) => {
+    if (completion?.kind === 'good') return true;
+    if (!isSolvedSnapshot(snapshot, evaluation)) return false;
+    return Boolean(
+      completionCascadeState.isSolved
+      || !hasPendingPathFinalizeInteraction(interactionModel),
+    );
+  };
+
+  const getConfiguredCompleteTotalMs = ({
+    reducedMotion,
+    timing,
+    fallbackTotalMs,
+  }) => {
+    if (reducedMotion) return 0;
+    if (timing.totalMs > 0) return timing.totalMs;
+    return fallbackTotalMs;
+  };
+
+  const getCompletionTiming = (snapshot) => {
+    const timing = getCompleteTimingMs();
+    const pathLength = Math.max(1, snapshot.path.length);
+    const reducedMotion = prefersReducedMotion();
+    let stepMs = 0;
+    let cellMs = 0;
+    let pulseMs = 0;
+    let pulseStepMs = 0;
+
+    if (!reducedMotion) {
+      stepMs = timing.stepMs;
+      cellMs = timing.cellMs;
+      pulseMs = timing.pulseMs;
+      pulseStepMs = timing.pulseStepMs;
+    }
+
+    const fallbackTotalMs = (Math.max(0, pathLength - 1) * stepMs) + cellMs;
+    const configuredTotalMs = getConfiguredCompleteTotalMs({
+      reducedMotion,
+      timing,
+      fallbackTotalMs,
+    });
+    let totalMs = configuredTotalMs;
+
+    if (!reducedMotion && configuredTotalMs > 0) {
+      if (pathLength <= 1) {
+        stepMs = 0;
+        cellMs = configuredTotalMs;
+      } else {
+        const clampedCellMs = Math.min(Math.max(0, cellMs), configuredTotalMs);
+        cellMs = clampedCellMs;
+        stepMs = Math.max(0, (configuredTotalMs - clampedCellMs) / (pathLength - 1));
+      }
+      totalMs = configuredTotalMs;
+    }
+
+    const maxDiagOrder = Math.max(0, (snapshot.rows - 1) + (snapshot.cols - 1));
+    return {
+      stepMs,
+      cellMs,
+      totalMs,
+      pulseTotalMs: pulseMs + (maxDiagOrder * pulseStepMs),
+    };
+  };
+
+  const syncCompletionTimingStyles = ({ stepMs, cellMs }) => {
+    if (!refs?.boardWrap) return;
+    refs.boardWrap.style.setProperty(COMPLETE_STEP_VAR, `${stepMs}ms`);
+    refs.boardWrap.style.setProperty(COMPLETE_CELL_VAR, `${cellMs}ms`);
+  };
+
+  const startCompletionCascade = ({
+    timeNow,
+    shouldAnimateSolve,
+    totalMs,
+    pulseTotalMs,
+  }) => {
+    clearCompletePulse();
+    completionCascadeState = {
+      isSolved: true,
+      isCompleting: shouldAnimateSolve,
+      startTimeMs: timeNow,
+      durationMs: shouldAnimateSolve ? totalMs : 0,
+    };
+    lateSolveTriggerUntilMs = shouldAnimateSolve ? 0 : (timeNow + LATE_SOLVE_TRIGGER_GRACE_MS);
+    if (shouldAnimateSolve) scheduleCompleteFinish(totalMs, pulseTotalMs);
+    else clearCompleteFinishTimer();
+  };
+
+  const triggerDeferredCompletionCascade = ({ timeNow, totalMs, pulseTotalMs }) => {
+    clearCompletePulse();
+    completionCascadeState = {
+      isSolved: true,
+      isCompleting: true,
+      startTimeMs: timeNow,
+      durationMs: totalMs,
+    };
+    lateSolveTriggerUntilMs = 0;
+    scheduleCompleteFinish(totalMs, pulseTotalMs);
+  };
+
+  const resetCompletionCascade = () => {
+    completionCascadeState = {
+      isSolved: false,
+      isCompleting: false,
+      startTimeMs: 0,
+      durationMs: 0,
+    };
+    lateSolveTriggerUntilMs = 0;
+    clearCompleteFinishTimer();
+    clearCompletePulse();
+  };
+
+  const finishCompletionCascadeIfElapsed = ({ timeNow, pulseTotalMs }) => {
+    const elapsedMs = timeNow - completionCascadeState.startTimeMs;
+    if (elapsedMs < completionCascadeState.durationMs) return;
+    clearCompleteFinishTimer();
+    completionCascadeState.isCompleting = false;
+    triggerCompletePulse(pulseTotalMs);
+  };
+
+  const updateCompletionCascade = ({
+    solved,
+    shouldAnimateSolve,
+    timeNow,
+    totalMs,
+    pulseTotalMs,
+  }) => {
+    if (lateSolveTriggerUntilMs > 0 && timeNow > lateSolveTriggerUntilMs) {
+      lateSolveTriggerUntilMs = 0;
+    }
+
+    if (solved && !completionCascadeState.isSolved) {
+      startCompletionCascade({
+        timeNow,
+        shouldAnimateSolve,
+        totalMs,
+        pulseTotalMs,
+      });
+      return;
+    }
+
+    if (
+      solved
+      && shouldAnimateSolve
+      && !completionCascadeState.isCompleting
+      && lateSolveTriggerUntilMs > 0
+      && timeNow <= lateSolveTriggerUntilMs
+    ) {
+      triggerDeferredCompletionCascade({
+        timeNow,
+        totalMs,
+        pulseTotalMs,
+      });
+      return;
+    }
+
+    if (!solved && completionCascadeState.isSolved) {
+      resetCompletionCascade();
+      return;
+    }
+
+    if (solved && completionCascadeState.isCompleting) {
+      finishCompletionCascadeIfElapsed({
+        timeNow,
+        pulseTotalMs,
+      });
+    }
+  };
+
+  const getCompletionModel = (solved) => {
+    if (!solved) return null;
+    return {
+      isSolved: true,
+      isCompleting: completionCascadeState.isCompleting,
+      startTimeMs: completionCascadeState.startTimeMs,
+      durationMs: completionCascadeState.durationMs,
+    };
+  };
+
   return {
     mount(shellRefs = null) {
       boardRendererCore.mount(shellRefs);
@@ -227,112 +411,32 @@ export function createDomRenderer(options = {}) {
     }) {
       if (!refs) return;
       const timeNow = nowMs();
-      const solvedByValidation = completion?.kind === 'good';
-      const solvedBySnapshot = isSolvedSnapshot(snapshot, evaluation);
-      const suppressSolvedBySnapshot = Boolean(
-        !completionCascadeState.isSolved
-        && hasPendingPathFinalizeInteraction(interactionModel),
-      );
-      const solvedBySnapshotAllowed = Boolean(
-        solvedBySnapshot
-        && !suppressSolvedBySnapshot,
-      );
-      const solved = Boolean(solvedByValidation || solvedBySnapshotAllowed);
-      if (lateSolveTriggerUntilMs > 0 && timeNow > lateSolveTriggerUntilMs) {
-        lateSolveTriggerUntilMs = 0;
-      }
-      const timing = getCompleteTimingMs();
-      const pathLength = Math.max(1, snapshot.path.length);
-      const reducedMotion = prefersReducedMotion();
-      let stepMs = reducedMotion ? 0 : timing.stepMs;
-      let cellMs = reducedMotion ? 0 : timing.cellMs;
-      const pulseMs = reducedMotion ? 0 : timing.pulseMs;
-      const pulseStepMs = reducedMotion ? 0 : timing.pulseStepMs;
-      const fallbackTotalMs = (Math.max(0, pathLength - 1) * stepMs) + cellMs;
-      const configuredTotalMs = reducedMotion
-        ? 0
-        : (timing.totalMs > 0 ? timing.totalMs : fallbackTotalMs);
-      let totalMs = configuredTotalMs;
-
-      if (!reducedMotion && configuredTotalMs > 0) {
-        if (pathLength <= 1) {
-          stepMs = 0;
-          cellMs = configuredTotalMs;
-        } else {
-          const clampedCellMs = Math.min(Math.max(0, cellMs), configuredTotalMs);
-          cellMs = clampedCellMs;
-          stepMs = Math.max(0, (configuredTotalMs - clampedCellMs) / (pathLength - 1));
-        }
-        totalMs = configuredTotalMs;
-      }
-
-      const maxDiagOrder = Math.max(0, (snapshot.rows - 1) + (snapshot.cols - 1));
-      const pulseTotalMs = pulseMs + (maxDiagOrder * pulseStepMs);
+      const solved = isSolvedRenderFrame({
+        snapshot,
+        evaluation,
+        completion,
+        interactionModel,
+      });
+      const {
+        stepMs,
+        cellMs,
+        totalMs,
+        pulseTotalMs,
+      } = getCompletionTiming(snapshot);
       const shouldAnimateSolve = Boolean(
         uiModel.completionAnimationTrigger
         && hasRenderedFrame
         && totalMs > 0,
       );
-
-      if (refs.boardWrap) {
-        refs.boardWrap.style.setProperty(COMPLETE_STEP_VAR, `${stepMs}ms`);
-        refs.boardWrap.style.setProperty(COMPLETE_CELL_VAR, `${cellMs}ms`);
-      }
-
-      if (solved && !completionCascadeState.isSolved) {
-        clearCompletePulse();
-        completionCascadeState = {
-          isSolved: true,
-          isCompleting: shouldAnimateSolve,
-          startTimeMs: timeNow,
-          durationMs: shouldAnimateSolve ? totalMs : 0,
-        };
-        lateSolveTriggerUntilMs = shouldAnimateSolve ? 0 : (timeNow + LATE_SOLVE_TRIGGER_GRACE_MS);
-        if (shouldAnimateSolve) scheduleCompleteFinish(totalMs, pulseTotalMs);
-        else clearCompleteFinishTimer();
-      } else if (
-        solved
-        && shouldAnimateSolve
-        && !completionCascadeState.isCompleting
-        && lateSolveTriggerUntilMs > 0
-        && timeNow <= lateSolveTriggerUntilMs
-      ) {
-        clearCompletePulse();
-        completionCascadeState = {
-          isSolved: true,
-          isCompleting: true,
-          startTimeMs: timeNow,
-          durationMs: totalMs,
-        };
-        lateSolveTriggerUntilMs = 0;
-        scheduleCompleteFinish(totalMs, pulseTotalMs);
-      } else if (!solved && completionCascadeState.isSolved) {
-        completionCascadeState = {
-          isSolved: false,
-          isCompleting: false,
-          startTimeMs: 0,
-          durationMs: 0,
-        };
-        lateSolveTriggerUntilMs = 0;
-        clearCompleteFinishTimer();
-        clearCompletePulse();
-      } else if (solved && completionCascadeState.isCompleting) {
-        const elapsedMs = timeNow - completionCascadeState.startTimeMs;
-        if (elapsedMs >= completionCascadeState.durationMs) {
-          clearCompleteFinishTimer();
-          completionCascadeState.isCompleting = false;
-          triggerCompletePulse(pulseTotalMs);
-        }
-      }
-
-      const completionModel = solved
-        ? {
-          isSolved: true,
-          isCompleting: completionCascadeState.isCompleting,
-          startTimeMs: completionCascadeState.startTimeMs,
-          durationMs: completionCascadeState.durationMs,
-        }
-        : null;
+      syncCompletionTimingStyles({ stepMs, cellMs });
+      updateCompletionCascade({
+        solved,
+        shouldAnimateSolve,
+        timeNow,
+        totalMs,
+        pulseTotalMs,
+      });
+      const completionModel = getCompletionModel(solved);
 
       boardRendererCore.renderFrame({
         snapshot,

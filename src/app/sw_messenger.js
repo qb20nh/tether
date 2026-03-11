@@ -1,7 +1,7 @@
 export function createSwMessenger(options = {}) {
   const {
-    windowObj = typeof window !== 'undefined' ? window : undefined,
-    navigatorObj = typeof navigator !== 'undefined' ? navigator : undefined,
+    windowObj = typeof window === 'undefined' ? undefined : window,
+    navigatorObj = typeof navigator === 'undefined' ? undefined : navigator,
     messageChannelFactory = () => (
       typeof MessageChannel === 'function'
         ? new MessageChannel()
@@ -14,13 +14,13 @@ export function createSwMessenger(options = {}) {
   let historyListenerBound = false;
 
   const canUseServiceWorker = () =>
-    typeof windowObj !== 'undefined'
+    windowObj !== undefined
     && windowObj?.isSecureContext
-    && typeof navigatorObj !== 'undefined'
+    && navigatorObj !== undefined
     && 'serviceWorker' in navigatorObj;
 
   const supportsNotifications = () =>
-    typeof windowObj !== 'undefined'
+    windowObj !== undefined
     && 'Notification' in windowObj;
 
   const getRegistration = () => registration;

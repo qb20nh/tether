@@ -1,6 +1,6 @@
-import { INTENT_TYPES, UI_ACTIONS, INTERACTION_UPDATES, GAME_COMMANDS } from './intents.js';
-import { applyTheme as applyThemeCore, refreshThemeButton as refreshThemeButtonCore, requestLightThemeConfirmation as requestLightThemeConfirmationCore, setThemeSwitchPrompt as setThemeSwitchPromptCore, refreshSettingsToggle as refreshSettingsToggleCore, normalizeTheme } from './theme_manager.js';
-import { formatDailyDateLabel, formatDailyMonthDayLabel, formatCountdownHms, utcStartMsFromDateId } from './daily_timer.js';
+import { pointsMatch } from '../math.js';
+import { formatCountdownHms, formatDailyDateLabel, formatDailyMonthDayLabel, utcStartMsFromDateId } from './daily_timer.js';
+import { GAME_COMMANDS, INTENT_TYPES, INTERACTION_UPDATES, UI_ACTIONS } from './intents.js';
 import { createProgressManager } from './progress_manager.js';
 import { SCORE_MODES, createScoreManager } from './score_manager.js';
 import {
@@ -8,7 +8,7 @@ import {
   markClearedLevel,
   registerSolvedSnapshot,
 } from './solve_progress_helpers.js';
-import { pointsMatch } from '../math.js';
+import { applyTheme as applyThemeCore, normalizeTheme, refreshSettingsToggle as refreshSettingsToggleCore, refreshThemeButton as refreshThemeButtonCore, requestLightThemeConfirmation as requestLightThemeConfirmationCore, setThemeSwitchPrompt as setThemeSwitchPromptCore } from './theme_manager.js';
 
 const PATH_BRACKET_TUTORIAL_LEVEL_INDEX = 0;
 const MOVABLE_BRACKET_TUTORIAL_LEVEL_INDEX = 7;
@@ -82,17 +82,17 @@ const applyDataAttributes = (appEl, translate) => {
   if (!appEl) return;
 
   appEl.querySelectorAll('[data-i18n]').forEach((el) => {
-    const key = el.getAttribute('data-i18n');
+    const key = el.dataset.i18n;
     if (key) el.textContent = translate(key);
   });
 
   appEl.querySelectorAll('[data-i18n-title]').forEach((el) => {
-    const key = el.getAttribute('data-i18n-title');
+    const key = el.dataset.i18nTitle;
     if (key) el.setAttribute('title', translate(key));
   });
 
   appEl.querySelectorAll('[data-i18n-aria-label]').forEach((el) => {
-    const key = el.getAttribute('data-i18n-aria-label');
+    const key = el.dataset.i18nAriaLabel;
     if (key) el.setAttribute('aria-label', translate(key));
   });
 };
@@ -105,6 +105,948 @@ const buildLocaleOptionList = (localeOptions, activeLocale) =>
       return `<option value="${item.value}" ${disabled} ${selected}>${item.label}</option>`;
     })
     .join('');
+
+const resolveDailyResetUtcMs = (dailyHardInvalidateAtUtcMs, activeDailyId) => {
+  if (Number.isInteger(dailyHardInvalidateAtUtcMs) && dailyHardInvalidateAtUtcMs > 0) {
+    return dailyHardInvalidateAtUtcMs;
+  }
+  if (!activeDailyId) return null;
+
+  const startMs = utcStartMsFromDateId(activeDailyId);
+  if (!Number.isInteger(startMs)) return null;
+  return startMs + DAY_MS;
+};
+
+const resolveDailyRuntimeConfig = (core, dailyHardInvalidateAtUtcMs, campaignCount, maxInfiniteIndex) => {
+  const dailyAbsIndex = typeof core.getDailyAbsIndex === 'function'
+    ? core.getDailyAbsIndex()
+    : (campaignCount + maxInfiniteIndex + 1);
+  const hasDailyLevel = typeof core.hasDailyLevel === 'function'
+    ? core.hasDailyLevel()
+    : false;
+  const activeDailyId = typeof core.getDailyId === 'function'
+    ? core.getDailyId()
+    : null;
+
+  return {
+    dailyAbsIndex,
+    hasDailyLevel,
+    activeDailyId,
+    dailyResetUtcMs: resolveDailyResetUtcMs(dailyHardInvalidateAtUtcMs, activeDailyId),
+  };
+};
+
+const stripTutorialPracticePrefix = (value, nameKey) => {
+  if (typeof nameKey !== 'string') return value;
+  if (!nameKey.startsWith('level.tutorial_') && !nameKey.startsWith('level.pilot_')) return value;
+  return value.replace(TUTORIAL_PRACTICE_NAME_PREFIX_RE, '').trim();
+};
+
+const resolveLevelNameCore = (level, translate) => {
+  let name = '';
+  if (level?.nameKey) {
+    const translated = translate(level.nameKey);
+    if (translated !== level.nameKey) {
+      name = translated;
+    }
+  }
+  if (!name) {
+    name = level?.name || '';
+  }
+
+  return stripTutorialPracticePrefix(
+    String(name || '').trim(),
+    level?.nameKey,
+  );
+};
+
+const isDevRuntimeEnabled = () => {
+  if (typeof __TETHER_DEV__ === 'boolean') return __TETHER_DEV__;
+  return true;
+};
+
+const buildSelectOption = (value, label, options = {}) => {
+  const selected = options.selected ? 'selected' : '';
+  const disabled = options.disabled ? 'disabled' : '';
+  return `<option value="${value}" ${disabled} ${selected}>${label}</option>`;
+};
+
+const buildSelectOptGroup = (label, options) => {
+  if (options.length === 0) return '';
+  return `<optgroup label="${label}">${options.join('')}</optgroup>`;
+};
+
+const readNullableGridPoint = (rawPoint) => {
+  if (!Number.isInteger(rawPoint?.r) || !Number.isInteger(rawPoint?.c)) return null;
+  return { r: rawPoint.r, c: rawPoint.c };
+};
+
+const readNullableBoardSelection = (rawSelection) => {
+  if (
+    !Number.isInteger(rawSelection?.r)
+    || !Number.isInteger(rawSelection?.c)
+    || typeof rawSelection?.kind !== 'string'
+  ) {
+    return null;
+  }
+  return { kind: rawSelection.kind, r: rawSelection.r, c: rawSelection.c };
+};
+
+const gridPointsMatch = (left, right) =>
+  (left?.r ?? null) === (right?.r ?? null)
+  && (left?.c ?? null) === (right?.c ?? null);
+
+const boardSelectionsMatch = (left, right) =>
+  (left?.kind ?? null) === (right?.kind ?? null)
+  && gridPointsMatch(left, right);
+
+const cloneBoardState = (stateValue) => {
+  if (!stateValue) return null;
+  return {
+    levelIndex: stateValue.levelIndex,
+    path: stateValue.path.map(([r, c]) => [r, c]),
+    movableWalls: Array.isArray(stateValue.movableWalls)
+      ? stateValue.movableWalls.map(([r, c]) => [r, c])
+      : null,
+    dailyId: typeof stateValue.dailyId === 'string' ? stateValue.dailyId : null,
+  };
+};
+
+const clonePathPoint = (point) => ({ r: point.r, c: point.c });
+
+const pathsMatchForHint = (leftPath, rightPath) => {
+  if (!Array.isArray(leftPath) || !Array.isArray(rightPath)) return false;
+  if (leftPath.length !== rightPath.length) return false;
+  for (let i = 0; i < leftPath.length; i += 1) {
+    if (!pointsMatch(leftPath[i], rightPath[i])) return false;
+  }
+  return true;
+};
+
+const resolvePathStepPayloadSide = (side) => {
+  if (side === 'start' || side === 'end') return side;
+  return null;
+};
+
+const resolvePathStepCommandSide = (commandType, payload = null) => {
+  if (commandType === GAME_COMMANDS.START_OR_STEP_FROM_START) return 'start';
+  if (commandType === GAME_COMMANDS.START_OR_STEP) return 'end';
+  if (commandType === GAME_COMMANDS.APPLY_PATH_DRAG_SEQUENCE) return resolvePathStepPayloadSide(payload?.side);
+  return null;
+};
+
+const readPathEndpointForSide = (path, side) => {
+  if (!Array.isArray(path) || path.length === 0) return null;
+  if (side === 'start') return path[0] || null;
+  if (side === 'end') return path.at(-1) || null;
+  return null;
+};
+
+const buildPathAdvanceHint = (side, currentTip, step) => {
+  if (!currentTip) return null;
+  return {
+    side,
+    from: clonePathPoint(currentTip),
+    to: { r: step.r, c: step.c },
+  };
+};
+
+const applyDragSequenceStepAtStart = (workingPath, step, side) => {
+  const currentTip = workingPath[0] || null;
+  const retractNeighbor = workingPath[1] || null;
+  if (retractNeighbor && pointsMatch(retractNeighbor, step)) {
+    workingPath.shift();
+    return null;
+  }
+
+  workingPath.unshift({ r: step.r, c: step.c });
+  return buildPathAdvanceHint(side, currentTip, step);
+};
+
+const applyDragSequenceStepAtEnd = (workingPath, step, side) => {
+  const currentTip = workingPath[workingPath.length - 1] || null;
+  const retractNeighbor = workingPath.length > 1
+    ? workingPath[workingPath.length - 2]
+    : null;
+  if (retractNeighbor && pointsMatch(retractNeighbor, step)) {
+    workingPath.pop();
+    return null;
+  }
+
+  workingPath.push({ r: step.r, c: step.c });
+  return buildPathAdvanceHint(side, currentTip, step);
+};
+
+const resolveDragSequenceTipArrivalHintCore = (side, prevSnapshot, nextSnapshot, payload) => {
+  if (side !== 'start' && side !== 'end') return null;
+  const steps = Array.isArray(payload?.steps) ? payload.steps : [];
+  if (steps.length === 0) return null;
+
+  const prevPath = Array.isArray(prevSnapshot?.path) ? prevSnapshot.path : [];
+  const nextPath = Array.isArray(nextSnapshot?.path) ? nextSnapshot.path : [];
+  const workingPath = prevPath.map(clonePathPoint);
+  const applyStep = side === 'start' ? applyDragSequenceStepAtStart : applyDragSequenceStepAtEnd;
+  let lastAdvanceHint = null;
+
+  for (const step of steps) {
+    if (!Number.isInteger(step?.r) || !Number.isInteger(step?.c)) return null;
+    lastAdvanceHint = applyStep(workingPath, step, side);
+  }
+
+  if (!pathsMatchForHint(workingPath, nextPath)) return null;
+  return lastAdvanceHint;
+};
+
+const setScoreMetaActiveState = (scoreMetaEl, active) => {
+  scoreMetaEl.hidden = false;
+  scoreMetaEl.classList.toggle('isInactive', !active);
+  scoreMetaEl.setAttribute('aria-hidden', active ? 'false' : 'true');
+};
+
+const renderDailyScoreMeta = ({
+  refs,
+  infiniteItem,
+  dailyItem,
+  separator,
+  translate,
+  scoreManager,
+  totals,
+  activeDailyId,
+}) => {
+  if (infiniteItem) infiniteItem.hidden = true;
+  if (dailyItem) dailyItem.hidden = false;
+  if (separator) separator.hidden = true;
+  if (refs.dailyScoreLabel) refs.dailyScoreLabel.textContent = translate('ui.scoreDailyLabel');
+  const distinctCount = scoreManager.readDistinctCount({
+    mode: SCORE_MODES.DAILY,
+    levelKey: activeDailyId,
+  });
+  refs.dailyScoreValue.textContent = `${totals.dailyTotal} (${distinctCount})`;
+};
+
+const renderInfiniteScoreMeta = ({
+  refs,
+  infiniteItem,
+  dailyItem,
+  separator,
+  translate,
+  scoreManager,
+  totals,
+  core,
+  levelIndex,
+}) => {
+  if (infiniteItem) infiniteItem.hidden = false;
+  if (dailyItem) dailyItem.hidden = true;
+  if (separator) separator.hidden = true;
+  if (refs.infiniteScoreLabel) refs.infiniteScoreLabel.textContent = translate('ui.scoreInfiniteLabel');
+  const infiniteLevelKey = String(core.clampInfiniteIndex(core.toInfiniteIndex(levelIndex)));
+  const distinctCount = scoreManager.readDistinctCount({
+    mode: SCORE_MODES.INFINITE,
+    levelKey: infiniteLevelKey,
+  });
+  refs.infiniteScoreValue.textContent = `${totals.infiniteTotal} (${distinctCount})`;
+};
+
+const renderScoreMetaCore = ({
+  refs,
+  snapshot,
+  isDailyLevelIndex,
+  core,
+  scoreManager,
+  activeDailyId,
+  translate,
+}) => {
+  if (!refs?.scoreMeta || !refs?.infiniteScoreValue || !refs?.dailyScoreValue) return;
+
+  const levelIndex = snapshot?.levelIndex;
+  const totals = scoreManager.readTotals();
+  const infiniteItem = refs.infiniteScoreLabel?.closest('.scoreMetaItem') || null;
+  const dailyItem = refs.dailyScoreLabel?.closest('.scoreMetaItem') || null;
+  const separator = refs.scoreMeta.querySelector('.scoreMetaSeparator');
+
+  if (isDailyLevelIndex(levelIndex)) {
+    setScoreMetaActiveState(refs.scoreMeta, true);
+    renderDailyScoreMeta({
+      refs,
+      infiniteItem,
+      dailyItem,
+      separator,
+      translate,
+      scoreManager,
+      totals,
+      activeDailyId,
+    });
+    return;
+  }
+
+  if (core.isInfiniteAbsIndex(levelIndex)) {
+    setScoreMetaActiveState(refs.scoreMeta, true);
+    renderInfiniteScoreMeta({
+      refs,
+      infiniteItem,
+      dailyItem,
+      separator,
+      translate,
+      scoreManager,
+      totals,
+      core,
+      levelIndex,
+    });
+    return;
+  }
+
+  setScoreMetaActiveState(refs.scoreMeta, false);
+};
+
+const syncPrevInfiniteButton = (buttonEl, hidden, disabled, setDisabledReasonTitle, reasonKey = null) => {
+  if (!buttonEl) return;
+  buttonEl.hidden = hidden;
+  buttonEl.disabled = disabled;
+  setDisabledReasonTitle(buttonEl, reasonKey);
+};
+
+const syncInfiniteNavigationCore = ({
+  refs,
+  levelIndex,
+  isCleared,
+  isDailyLevelIndex,
+  core,
+  maxInfiniteIndex,
+  setDisabledReasonTitle,
+  isNextLevelAvailable,
+  resolveNextButtonLabel,
+}) => {
+  if (isDailyLevelIndex(levelIndex) || !core.isInfiniteAbsIndex(levelIndex)) {
+    syncPrevInfiniteButton(refs?.prevInfiniteBtn, true, false, setDisabledReasonTitle);
+  } else {
+    const infiniteIndex = core.clampInfiniteIndex(core.toInfiniteIndex(levelIndex));
+    syncPrevInfiniteButton(
+      refs?.prevInfiniteBtn,
+      false,
+      infiniteIndex <= 0,
+      setDisabledReasonTitle,
+      infiniteIndex <= 0 ? 'ui.prevInfiniteDisabledFirst' : null,
+    );
+  }
+
+  if (!refs?.nextLevelBtn) return;
+  if (isDailyLevelIndex(levelIndex)) {
+    refs.nextLevelBtn.hidden = true;
+    refs.nextLevelBtn.disabled = true;
+    setDisabledReasonTitle(refs.nextLevelBtn, null);
+    return;
+  }
+
+  const nextAvailable = isNextLevelAvailable(levelIndex);
+  const atInfiniteEnd = core.isInfiniteAbsIndex(levelIndex)
+    && core.clampInfiniteIndex(core.toInfiniteIndex(levelIndex)) >= maxInfiniteIndex;
+  let nextDisabledReasonKey = null;
+  if (!isCleared) nextDisabledReasonKey = 'ui.nextDisabledUncleared';
+  else if (!nextAvailable && atInfiniteEnd) nextDisabledReasonKey = 'ui.nextDisabledInfiniteEnd';
+
+  refs.nextLevelBtn.hidden = false;
+  refs.nextLevelBtn.textContent = resolveNextButtonLabel(levelIndex);
+  refs.nextLevelBtn.disabled = !isCleared || !nextAvailable;
+  setDisabledReasonTitle(refs.nextLevelBtn, nextDisabledReasonKey);
+};
+
+const resolveSelectedPrimaryLevelValue = ({
+  currentIndex,
+  dailyActive,
+  dailyAbsIndex,
+  infiniteActive,
+  infiniteAbsIndex,
+  practiceSet,
+  practicePrimaryIndex,
+  tutorialSet,
+  tutorialPrimaryIndex,
+}) => {
+  if (dailyActive) return dailyAbsIndex;
+  if (infiniteActive) return infiniteAbsIndex;
+  if (practiceSet.has(currentIndex) && Number.isInteger(practicePrimaryIndex)) return practicePrimaryIndex;
+  if (tutorialSet.has(currentIndex) && Number.isInteger(tutorialPrimaryIndex)) return tutorialPrimaryIndex;
+  if (Number.isInteger(tutorialPrimaryIndex)) return tutorialPrimaryIndex;
+  if (Number.isInteger(practicePrimaryIndex)) return practicePrimaryIndex;
+  return 0;
+};
+
+const resolveDailyLevelOptionLabel = ({ hasDailyLevel, translate, activeDailyId, activeLocale }) => {
+  if (!hasDailyLevel) return translate('ui.dailyUnavailable');
+
+  const base = translate('ui.dailyLevelOption');
+  if (!activeDailyId) return base;
+
+  const date = formatDailyMonthDayLabel(activeDailyId, activeLocale);
+  const templated = translate('ui.dailyLevelOptionWithDate', { label: base, date });
+  if (templated !== 'ui.dailyLevelOptionWithDate') return templated;
+  return `${base}(${date})`;
+};
+
+const applyLevelSelectGroupState = (levelSelectGroup, campaignActive, infiniteActive, dailyActive) => {
+  levelSelectGroup.classList.toggle('isCampaignActive', campaignActive);
+  levelSelectGroup.classList.toggle('isInfiniteActive', infiniteActive);
+  levelSelectGroup.classList.toggle('isDailyActive', dailyActive);
+
+  if (!levelSelectGroup.parentElement) return;
+  levelSelectGroup.parentElement.classList.toggle('isCampaignActive', campaignActive);
+  levelSelectGroup.parentElement.classList.toggle('isInfiniteActive', infiniteActive);
+  levelSelectGroup.parentElement.classList.toggle('isDailyActive', dailyActive);
+};
+
+const resolveActiveCampaignIndices = ({
+  currentIndex,
+  practiceSet,
+  practiceIndices,
+  tutorialIndices,
+}) => {
+  if (practiceSet.has(currentIndex) && practiceIndices.length > 0) return practiceIndices;
+  if (tutorialIndices.length > 0) return tutorialIndices;
+  return practiceIndices;
+};
+
+const buildCampaignSecondaryOptionsHtml = ({
+  activeCampaignIndices,
+  currentIndex,
+  isCampaignLevelUnlocked,
+  resolveLevelName,
+  core,
+}) => {
+  const selectedValue = activeCampaignIndices.includes(currentIndex)
+    ? currentIndex
+    : activeCampaignIndices[0];
+  let html = '';
+
+  for (let i = 0; i < activeCampaignIndices.length; i += 1) {
+    const levelIndex = activeCampaignIndices[i];
+    const levelName = resolveLevelName(core.getLevel(levelIndex));
+    const levelLabel = levelName ? `${i + 1}) ${levelName}` : String(i + 1);
+    html += buildSelectOption(levelIndex, levelLabel, {
+      selected: levelIndex === selectedValue,
+      disabled: !isCampaignLevelUnlocked(levelIndex),
+    });
+  }
+
+  return {
+    html,
+    selectedValue,
+  };
+};
+
+const buildInfiniteSecondaryOptionsHtml = ({
+  currentIndex,
+  core,
+  maxInfiniteIndex,
+  readInfiniteProgress,
+}) => {
+  const currentInfiniteIndex = core.clampInfiniteIndex(core.toInfiniteIndex(currentIndex));
+  const latestUnlockedInfiniteIndex = Math.max(
+    core.clampInfiniteIndex(readInfiniteProgress()),
+    currentInfiniteIndex,
+  );
+  const pageStart = Math.floor(currentInfiniteIndex / INFINITE_PAGE_SIZE) * INFINITE_PAGE_SIZE;
+  const pageEnd = Math.min(maxInfiniteIndex, pageStart + INFINITE_PAGE_SIZE - 1);
+  const prevPageStart = Math.max(0, pageStart - INFINITE_PAGE_SIZE);
+  const prevPageEnd = pageStart - 1;
+  const nextPageStart = pageStart + INFINITE_PAGE_SIZE;
+  const nextPageEnd = Math.min(maxInfiniteIndex, nextPageStart + INFINITE_PAGE_SIZE - 1);
+  let html = '';
+
+  if (pageStart > 0) {
+    html += buildSelectOption(INFINITE_SELECTOR_ACTIONS.first, '&laquo; #1');
+    html += buildSelectOption(
+      INFINITE_SELECTOR_ACTIONS.prev,
+      `&lsaquo; #${prevPageStart + 1}-#${prevPageEnd + 1}`,
+    );
+  }
+
+  for (let i = pageStart; i <= pageEnd; i += 1) {
+    html += buildSelectOption(i, `${i + 1}`, {
+      selected: i === currentInfiniteIndex,
+      disabled: i > latestUnlockedInfiniteIndex,
+    });
+  }
+
+  if (pageEnd < maxInfiniteIndex) {
+    html += buildSelectOption(
+      INFINITE_SELECTOR_ACTIONS.next,
+      `#${nextPageStart + 1}-#${nextPageEnd + 1} &rsaquo;`,
+      { disabled: nextPageStart > latestUnlockedInfiniteIndex },
+    );
+    html += buildSelectOption(
+      INFINITE_SELECTOR_ACTIONS.last,
+      `#${latestUnlockedInfiniteIndex + 1} &raquo;`,
+      { disabled: latestUnlockedInfiniteIndex <= pageEnd },
+    );
+  }
+
+  return {
+    html,
+    selectedValue: currentInfiniteIndex,
+  };
+};
+
+const syncSecondaryLevelSelector = ({
+  refs,
+  currentIndex,
+  campaignActive,
+  infiniteActive,
+  dailyActive,
+  practiceSet,
+  practiceIndices,
+  tutorialIndices,
+  isCampaignLevelUnlocked,
+  resolveLevelName,
+  core,
+  maxInfiniteIndex,
+  readInfiniteProgress,
+}) => {
+  if (!refs.levelSelectGroup || !refs.infiniteSel) return;
+
+  const secondaryActive = campaignActive || infiniteActive;
+  applyLevelSelectGroupState(refs.levelSelectGroup, campaignActive, infiniteActive, dailyActive);
+  refs.infiniteSel.hidden = !secondaryActive;
+  refs.infiniteSel.disabled = !secondaryActive;
+
+  if (!secondaryActive) {
+    refs.infiniteSel.innerHTML = '';
+    return;
+  }
+
+  if (campaignActive) {
+    const activeCampaignIndices = resolveActiveCampaignIndices({
+      currentIndex,
+      practiceSet,
+      practiceIndices,
+      tutorialIndices,
+    });
+    if (activeCampaignIndices.length === 0) {
+      refs.infiniteSel.innerHTML = '';
+      refs.infiniteSel.hidden = true;
+      refs.infiniteSel.disabled = true;
+      return;
+    }
+
+    const campaignOptions = buildCampaignSecondaryOptionsHtml({
+      activeCampaignIndices,
+      currentIndex,
+      isCampaignLevelUnlocked,
+      resolveLevelName,
+      core,
+    });
+    refs.infiniteSel.innerHTML = campaignOptions.html;
+    refs.infiniteSel.value = String(campaignOptions.selectedValue);
+    return;
+  }
+
+  const infiniteOptions = buildInfiniteSecondaryOptionsHtml({
+    currentIndex,
+    core,
+    maxInfiniteIndex,
+    readInfiniteProgress,
+  });
+  refs.infiniteSel.innerHTML = infiniteOptions.html;
+  refs.infiniteSel.value = String(infiniteOptions.selectedValue);
+};
+
+const refreshLevelOptionsCore = ({
+  refs,
+  currentIndex,
+  dailyAbsIndex,
+  hasDailyLevel,
+  activeDailyId,
+  activeLocale,
+  translate,
+  core,
+  maxInfiniteIndex,
+  readInfiniteProgress,
+  isCampaignLevelUnlocked,
+  resolveCampaignBuckets,
+  resolveLatestUnlockedCampaignBucketIndex,
+  resolveInfiniteModeLabel,
+  resolveLevelName,
+  isDailyLevelIndex,
+}) => {
+  const campaignOptions = [];
+  const modeOptions = [];
+  const { tutorialIndices, practiceIndices } = resolveCampaignBuckets();
+  const tutorialSet = new Set(tutorialIndices);
+  const practiceSet = new Set(practiceIndices);
+  const infiniteActive = core.isInfiniteAbsIndex(currentIndex);
+  const dailyActive = isDailyLevelIndex(currentIndex);
+  const campaignActive = !infiniteActive && !dailyActive;
+  const tutorialPrimaryIndex = resolveLatestUnlockedCampaignBucketIndex(tutorialIndices);
+  const practicePrimaryIndex = resolveLatestUnlockedCampaignBucketIndex(practiceIndices);
+  const selectorInfiniteIndex = core.isInfiniteAbsIndex(currentIndex)
+    ? core.clampInfiniteIndex(core.toInfiniteIndex(currentIndex))
+    : core.clampInfiniteIndex(readInfiniteProgress());
+  const infiniteAbsIndex = core.ensureInfiniteAbsIndex(selectorInfiniteIndex);
+  const selectedPrimaryValue = resolveSelectedPrimaryLevelValue({
+    currentIndex,
+    dailyActive,
+    dailyAbsIndex,
+    infiniteActive,
+    infiniteAbsIndex,
+    practiceSet,
+    practicePrimaryIndex,
+    tutorialSet,
+    tutorialPrimaryIndex,
+  });
+
+  if (Number.isInteger(tutorialPrimaryIndex)) {
+    campaignOptions.push(buildSelectOption(tutorialPrimaryIndex, translate('ui.levelGroupTutorial'), {
+      disabled: !isCampaignLevelUnlocked(tutorialPrimaryIndex),
+      selected: selectedPrimaryValue === tutorialPrimaryIndex,
+    }));
+  }
+  if (Number.isInteger(practicePrimaryIndex)) {
+    campaignOptions.push(buildSelectOption(practicePrimaryIndex, translate('ui.levelGroupPractice'), {
+      disabled: !isCampaignLevelUnlocked(practicePrimaryIndex),
+      selected: selectedPrimaryValue === practicePrimaryIndex,
+    }));
+  }
+
+  const translatedInfiniteLabel = resolveInfiniteModeLabel();
+  const fallbackInfiniteLabel = resolveLevelName(core.getLevel(infiniteAbsIndex));
+  const infiniteLabel = translatedInfiniteLabel === 'ui.infiniteLevelOption'
+    ? fallbackInfiniteLabel
+    : translatedInfiniteLabel;
+  modeOptions.push(buildSelectOption(infiniteAbsIndex, infiniteLabel, {
+    selected: selectedPrimaryValue === infiniteAbsIndex,
+  }));
+
+  const dailyLabel = resolveDailyLevelOptionLabel({
+    hasDailyLevel,
+    translate,
+    activeDailyId,
+    activeLocale,
+  });
+  modeOptions.push(buildSelectOption(dailyAbsIndex, dailyLabel, {
+    disabled: !hasDailyLevel,
+    selected: selectedPrimaryValue === dailyAbsIndex,
+  }));
+
+  refs.levelSel.innerHTML = [
+    buildSelectOptGroup(translate('ui.levelGroupCampaign'), campaignOptions),
+    buildSelectOptGroup(translate('ui.levelGroupModes'), modeOptions),
+  ].join('');
+  refs.levelSel.value = String(selectedPrimaryValue);
+
+  syncSecondaryLevelSelector({
+    refs,
+    currentIndex,
+    campaignActive,
+    infiniteActive,
+    dailyActive,
+    practiceSet,
+    practiceIndices,
+    tutorialIndices,
+    isCampaignLevelUnlocked,
+    resolveLevelName,
+    core,
+    maxInfiniteIndex,
+    readInfiniteProgress,
+  });
+};
+
+const normalizeLoadLevelTargetIndex = (idx, {
+  isDailyLevelIndex,
+  hasDailyLevel,
+  dailyAbsIndex,
+  core,
+  campaignCount,
+}) => {
+  let targetIndex = Number.isInteger(idx) ? idx : 0;
+  if (targetIndex < 0) targetIndex = 0;
+
+  if (isDailyLevelIndex(targetIndex)) {
+    if (!hasDailyLevel) return null;
+    return dailyAbsIndex;
+  }
+  if (core.isInfiniteAbsIndex(targetIndex)) {
+    return core.ensureInfiniteAbsIndex(core.clampInfiniteIndex(core.toInfiniteIndex(targetIndex)));
+  }
+  return Math.min(targetIndex, campaignCount - 1);
+};
+
+const resolveCampaignSecondarySelection = ({
+  selectedValue,
+  snapshot,
+  campaignCount,
+  isCampaignLevelUnlocked,
+}) => {
+  const parsedCampaignIndex = Number.parseInt(selectedValue, 10);
+  if (
+    !Number.isInteger(parsedCampaignIndex)
+    || parsedCampaignIndex < 0
+    || parsedCampaignIndex >= campaignCount
+    || !isCampaignLevelUnlocked(parsedCampaignIndex)
+  ) {
+    return null;
+  }
+  if (parsedCampaignIndex === snapshot.levelIndex) return null;
+  return parsedCampaignIndex;
+};
+
+const resolveInfiniteSecondarySelection = ({
+  selectedValue,
+  currentInfiniteIndex,
+  currentPageStart,
+  latestUnlockedInfiniteIndex,
+  core,
+}) => {
+  if (selectedValue === INFINITE_SELECTOR_ACTIONS.first) return 0;
+  if (selectedValue === INFINITE_SELECTOR_ACTIONS.prev) {
+    return Math.max(0, currentPageStart - INFINITE_PAGE_SIZE);
+  }
+  if (selectedValue === INFINITE_SELECTOR_ACTIONS.next) {
+    return Math.min(latestUnlockedInfiniteIndex, currentPageStart + INFINITE_PAGE_SIZE);
+  }
+  if (selectedValue === INFINITE_SELECTOR_ACTIONS.last) return latestUnlockedInfiniteIndex;
+
+  const parsed = Number.parseInt(selectedValue, 10);
+  if (!Number.isInteger(parsed)) return null;
+  return core.clampInfiniteIndex(parsed);
+};
+
+const handleThemeToggleAction = ({
+  setSettingsMenuOpen,
+  readActiveTheme,
+  requestLightThemeConfirmation,
+  applyThemeState,
+}) => {
+  setSettingsMenuOpen(false);
+  const targetTheme = readActiveTheme() === 'dark' ? 'light' : 'dark';
+  if (targetTheme === 'light' && requestLightThemeConfirmation(targetTheme)) return;
+  applyThemeState(targetTheme);
+};
+
+const handleThemeDialogCloseAction = ({
+  refs,
+  pendingTheme,
+  returnValue,
+  applyThemeState,
+}) => {
+  if (pendingTheme === 'light' && returnValue === 'confirm') {
+    applyThemeState(pendingTheme);
+  }
+  if (!refs.themeSwitchDialog) return;
+  delete refs.themeSwitchDialog.dataset.pendingTheme;
+  refs.themeSwitchDialog.returnValue = '';
+};
+
+const handlePanelToggleAction = ({
+  refs,
+  panel,
+  applyPanelVisibility,
+  queueBoardLayout,
+}) => {
+  if (panel !== 'guide' && panel !== 'legend') return;
+  const isGuidePanel = panel === 'guide';
+  const panelEl = isGuidePanel ? refs.guidePanel : refs.legendPanel;
+  const buttonEl = isGuidePanel ? refs.guideToggleBtn : refs.legendToggleBtn;
+  const hidden = !panelEl.classList.contains('is-hidden');
+  applyPanelVisibility(panelEl, buttonEl, panel, hidden);
+  queueBoardLayout(false, { needsResize: true });
+};
+
+const handleNextLevelClickAction = ({
+  state,
+  isDailyLevelIndex,
+  core,
+  maxInfiniteIndex,
+  readInfiniteProgress,
+  campaignCount,
+  isCampaignCompleted,
+  loadLevel,
+}) => {
+  const snapshot = state.getSnapshot();
+  if (isDailyLevelIndex(snapshot.levelIndex)) return;
+
+  if (core.isInfiniteAbsIndex(snapshot.levelIndex)) {
+    const currentInfiniteIndex = core.clampInfiniteIndex(core.toInfiniteIndex(snapshot.levelIndex));
+    if (currentInfiniteIndex >= maxInfiniteIndex) return;
+    const latestUnlockedInfiniteIndex = core.clampInfiniteIndex(readInfiniteProgress());
+    const nextInfiniteIndex = Math.min(currentInfiniteIndex + 1, latestUnlockedInfiniteIndex, maxInfiniteIndex);
+    if (nextInfiniteIndex <= currentInfiniteIndex) return;
+    loadLevel(core.ensureInfiniteAbsIndex(nextInfiniteIndex));
+    return;
+  }
+
+  const nextCampaignIndex = snapshot.levelIndex + 1;
+  if (nextCampaignIndex < campaignCount) {
+    loadLevel(nextCampaignIndex);
+    return;
+  }
+
+  if (isCampaignCompleted()) {
+    loadLevel(core.ensureInfiniteAbsIndex(core.clampInfiniteIndex(readInfiniteProgress())));
+  }
+};
+
+const handlePrevInfiniteClickAction = ({
+  state,
+  core,
+  loadLevel,
+}) => {
+  const snapshot = state.getSnapshot();
+  if (!core.isInfiniteAbsIndex(snapshot.levelIndex)) return;
+
+  const currentInfiniteIndex = core.clampInfiniteIndex(core.toInfiniteIndex(snapshot.levelIndex));
+  if (currentInfiniteIndex <= 0) return;
+  loadLevel(core.ensureInfiniteAbsIndex(currentInfiniteIndex - 1));
+};
+
+const handlePathDragInteractionUpdate = ({
+  payload,
+  interactionState,
+  state,
+  renderer,
+  queueBoardLayout,
+  evaluateCache,
+  isPathDragCursorOnActiveEndpoint,
+  resetLowPowerHintDetectorWindow,
+  markLowPowerHintDragActivity,
+}) => {
+  const nextIsPathDragging = Boolean(payload.isPathDragging);
+  const nextPathDragSide = payload.pathDragSide ?? null;
+  const nextPathDragCursor = readNullableGridPoint(payload.pathDragCursor);
+  const cursorChanged = !gridPointsMatch(interactionState.pathDragCursor, nextPathDragCursor);
+  const stateChanged = (
+    interactionState.isPathDragging !== nextIsPathDragging
+    || interactionState.pathDragSide !== nextPathDragSide
+    || cursorChanged
+  );
+  if (!stateChanged) return;
+
+  const snapshot = state.getSnapshot();
+  const prevSuppressEndpoint = isPathDragCursorOnActiveEndpoint(
+    snapshot,
+    interactionState.isPathDragging,
+    interactionState.pathDragSide,
+    interactionState.pathDragCursor,
+  );
+  const nextSuppressEndpoint = isPathDragCursorOnActiveEndpoint(
+    snapshot,
+    nextIsPathDragging,
+    nextPathDragSide,
+    nextPathDragCursor,
+  );
+  const shouldQueueLayout = (
+    interactionState.isPathDragging !== nextIsPathDragging
+    || interactionState.pathDragSide !== nextPathDragSide
+    || prevSuppressEndpoint !== nextSuppressEndpoint
+  );
+  const endedPathDrag = interactionState.isPathDragging && !nextIsPathDragging;
+
+  interactionState.isPathDragging = nextIsPathDragging;
+  interactionState.pathDragSide = nextPathDragSide;
+  interactionState.pathDragCursor = nextPathDragCursor;
+  if (endedPathDrag) evaluateCache.clear();
+  if (!interactionState.isPathDragging) {
+    resetLowPowerHintDetectorWindow();
+  } else if (stateChanged) {
+    markLowPowerHintDragActivity();
+  }
+  renderer.updateInteraction?.(interactionState);
+  if (!shouldQueueLayout) return;
+
+  queueBoardLayout(false, {
+    isPathDragging: interactionState.isPathDragging,
+    pathDragSide: interactionState.pathDragSide,
+    pathDragCursor: interactionState.pathDragCursor,
+  });
+};
+
+const handleWallDragInteractionUpdate = ({
+  payload,
+  interactionState,
+  renderer,
+}) => {
+  const nextWallDragging = Boolean(payload.isWallDragging);
+  const nextVisible = Boolean(payload.visible);
+  const nextX = Number.isFinite(payload.x) ? payload.x : interactionState.wallGhost.x;
+  const nextY = Number.isFinite(payload.y) ? payload.y : interactionState.wallGhost.y;
+  const stateChanged = (
+    interactionState.isWallDragging !== nextWallDragging
+    || interactionState.wallGhost.visible !== nextVisible
+    || interactionState.wallGhost.x !== nextX
+    || interactionState.wallGhost.y !== nextY
+  );
+  if (!stateChanged) return;
+
+  interactionState.isWallDragging = nextWallDragging;
+  interactionState.wallGhost = {
+    visible: nextVisible,
+    x: nextX,
+    y: nextY,
+  };
+  renderer.updateInteraction?.(interactionState);
+};
+
+const handleWallDropTargetInteractionUpdate = ({
+  payload,
+  interactionState,
+  renderer,
+}) => {
+  const nextDropTarget = payload.dropTarget || null;
+  if (gridPointsMatch(interactionState.dropTarget, nextDropTarget)) return;
+
+  interactionState.dropTarget = nextDropTarget;
+  renderer.updateInteraction?.(interactionState);
+};
+
+const handleBoardNavInteractionUpdate = ({
+  payload,
+  interactionState,
+  renderer,
+}) => {
+  const nextBoardCursor = readNullableGridPoint(payload.boardCursor);
+  const nextBoardSelection = readNullableBoardSelection(payload.boardSelection);
+  const nextBoardSelectionInteractive = typeof payload.boardSelectionInteractive === 'boolean'
+    ? payload.boardSelectionInteractive
+    : null;
+  const nextBoardNavPreviewDelta = readNullableGridPoint(payload.boardNavPreviewDelta);
+  const nextIsBoardNavPressing = Boolean(payload.isBoardNavPressing);
+  const nextIsBoardNavActive = Boolean(payload.isBoardNavActive);
+  const stateChanged = (
+    interactionState.isBoardNavActive !== nextIsBoardNavActive
+    || interactionState.isBoardNavPressing !== nextIsBoardNavPressing
+    || !gridPointsMatch(interactionState.boardCursor, nextBoardCursor)
+    || !boardSelectionsMatch(interactionState.boardSelection, nextBoardSelection)
+    || (interactionState.boardSelectionInteractive ?? null) !== nextBoardSelectionInteractive
+    || !gridPointsMatch(interactionState.boardNavPreviewDelta, nextBoardNavPreviewDelta)
+  );
+  if (!stateChanged) return;
+
+  interactionState.isBoardNavActive = nextIsBoardNavActive;
+  interactionState.isBoardNavPressing = nextIsBoardNavPressing;
+  interactionState.boardCursor = nextBoardCursor;
+  interactionState.boardSelection = nextBoardSelection;
+  interactionState.boardSelectionInteractive = nextBoardSelectionInteractive;
+  interactionState.boardNavPreviewDelta = nextBoardNavPreviewDelta;
+  renderer.updateInteraction?.(interactionState);
+};
+
+const shouldClearResetUiStateAfterCommand = (commandType, transition, previousSnapshot) =>
+  commandType !== GAME_COMMANDS.RESET_PATH
+  && transition.snapshot.version !== previousSnapshot.version
+  && (
+    transition.rebuildGrid
+    || commandType === GAME_COMMANDS.WALL_MOVE_ATTEMPT
+    || transition.snapshot.path.length > 1
+  );
+
+const shouldClearPathTransitionCompensation = (commandType, isPathStepCommand, transition) =>
+  commandType === GAME_COMMANDS.RESET_PATH
+  || commandType === GAME_COMMANDS.LOAD_LEVEL
+  || (!isPathStepCommand && transition.rebuildGrid);
+
+const shouldQueueSessionSaveAfterCommand = (commandType, isPathStepCommand, transition, isPathDragging) => {
+  const shouldPersistPathStepState = isPathStepCommand && transition.changed && !isPathDragging;
+  const shouldPersistInputState = Boolean(transition.validate) && !isPathDragging;
+  const shouldPersistResetState = commandType === GAME_COMMANDS.RESET_PATH && transition.changed;
+  return shouldPersistPathStepState || shouldPersistInputState || shouldPersistResetState;
+};
 
 
 
@@ -126,25 +1068,12 @@ export function createRuntime(options) {
 
   const campaignCount = core.getCampaignLevelCount();
   const maxInfiniteIndex = core.getInfiniteMaxIndex();
-  const dailyAbsIndex = typeof core.getDailyAbsIndex === 'function'
-    ? core.getDailyAbsIndex()
-    : (campaignCount + maxInfiniteIndex + 1);
-  const hasDailyLevel = typeof core.hasDailyLevel === 'function'
-    ? core.hasDailyLevel()
-    : false;
-  const activeDailyId = typeof core.getDailyId === 'function'
-    ? core.getDailyId()
-    : null;
-  const dailyResetUtcMs = Number.isInteger(dailyHardInvalidateAtUtcMs) && dailyHardInvalidateAtUtcMs > 0
-    ? dailyHardInvalidateAtUtcMs
-    : (
-      activeDailyId
-        ? (() => {
-          const startMs = utcStartMsFromDateId(activeDailyId);
-          return Number.isInteger(startMs) ? (startMs + DAY_MS) : null;
-        })()
-        : null
-    );
+  const {
+    dailyAbsIndex,
+    hasDailyLevel,
+    activeDailyId,
+    dailyResetUtcMs,
+  } = resolveDailyRuntimeConfig(core, dailyHardInvalidateAtUtcMs, campaignCount, maxInfiniteIndex);
 
   const bootState = persistence.readBootState();
 
@@ -235,32 +1164,10 @@ export function createRuntime(options) {
   };
 
   const sessionSaveData = {
-    board: bootState.sessionBoard
-      ? {
-        levelIndex: bootState.sessionBoard.levelIndex,
-        path: bootState.sessionBoard.path.map(([r, c]) => [r, c]),
-        movableWalls: Array.isArray(bootState.sessionBoard.movableWalls)
-          ? bootState.sessionBoard.movableWalls.map(([r, c]) => [r, c])
-          : null,
-        dailyId: typeof bootState.sessionBoard.dailyId === 'string'
-          ? bootState.sessionBoard.dailyId
-          : null,
-      }
-      : null,
+    board: cloneBoardState(bootState.sessionBoard),
   };
 
-  let mutableBoardState = sessionSaveData.board
-    ? {
-      levelIndex: sessionSaveData.board.levelIndex,
-      path: sessionSaveData.board.path.map(([r, c]) => [r, c]),
-      movableWalls: Array.isArray(sessionSaveData.board.movableWalls)
-        ? sessionSaveData.board.movableWalls.map(([r, c]) => [r, c])
-        : null,
-      dailyId: typeof sessionSaveData.board.dailyId === 'string'
-        ? sessionSaveData.board.dailyId
-        : null,
-    }
-    : null;
+  let mutableBoardState = cloneBoardState(sessionSaveData.board);
 
   const applyTheme = (theme) => {
     activeTheme = applyThemeCore(theme, persistence);
@@ -296,18 +1203,18 @@ export function createRuntime(options) {
   const summarizeFpsWindow = (frameDurationsMs) => {
     if (!Array.isArray(frameDurationsMs) || frameDurationsMs.length <= 0) return null;
     let totalFrameTimeMs = 0;
-    for (let i = 0; i < frameDurationsMs.length; i += 1) {
-      totalFrameTimeMs += frameDurationsMs[i];
+    for (const element of frameDurationsMs) {
+      totalFrameTimeMs += element;
     }
     const avgFrameTimeMs = totalFrameTimeMs / frameDurationsMs.length;
-    if (!(avgFrameTimeMs > 0)) return null;
+    if (avgFrameTimeMs <= 0) return null;
     const sortedFrameDurations = [...frameDurationsMs].sort((a, b) => a - b);
     const p99Index = Math.min(
       sortedFrameDurations.length - 1,
       Math.max(0, Math.ceil(sortedFrameDurations.length * 0.99) - 1),
     );
     const p99FrameTimeMs = sortedFrameDurations[p99Index];
-    if (!(p99FrameTimeMs > 0)) return null;
+    if (p99FrameTimeMs <= 0) return null;
     return {
       avgFrameTimeMs,
       p99FrameTimeMs,
@@ -453,30 +1360,7 @@ export function createRuntime(options) {
     return uiStateChanged;
   };
 
-  const resolveLevelName = (level) => {
-    const stripTutorialPracticePrefix = (value, nameKey) => {
-      if (typeof nameKey !== 'string') return value;
-      if (!nameKey.startsWith('level.tutorial_') && !nameKey.startsWith('level.pilot_')) return value;
-      return value.replace(TUTORIAL_PRACTICE_NAME_PREFIX_RE, '').trim();
-    };
-
-    let name = '';
-    if (level?.nameKey) {
-      const translated = translate(level.nameKey);
-      if (translated !== level.nameKey) {
-        name = translated;
-      }
-    }
-    if (!name) {
-      name = level?.name || '';
-    }
-
-    const baseName = stripTutorialPracticePrefix(
-      String(name || '').trim(),
-      level?.nameKey,
-    );
-    return baseName;
-  };
+  const resolveLevelName = (level) => resolveLevelNameCore(level, translate);
 
   const applyPanelVisibility = (panelEl, buttonEl, panel, isHidden) => {
     if (!panelEl || !buttonEl) return;
@@ -541,7 +1425,8 @@ export function createRuntime(options) {
     }
   };
 
-  const debugDailyFreeze = (typeof __TETHER_DEV__ === 'boolean' ? __TETHER_DEV__ : true)
+  const debugDailyFreezeEnabled = isDevRuntimeEnabled();
+  const debugDailyFreeze = debugDailyFreezeEnabled
     ? createDebugDailyFreezeDev({
       getLocked: () => dailyBoardLocked,
       renderDailyMeta: () => renderDailyMeta(),
@@ -553,7 +1438,7 @@ export function createRuntime(options) {
     : null;
 
   const isDailyExpired = () =>
-    (debugDailyFreeze && debugDailyFreeze.isForced())
+    (debugDailyFreeze?.isForced())
     || (Number.isInteger(dailyResetUtcMs) && Date.now() >= dailyResetUtcMs);
 
   const applyDailyBoardLockState = (snapshot = null) => {
@@ -693,8 +1578,8 @@ export function createRuntime(options) {
     if (!Array.isArray(indices) || indices.length === 0) return null;
 
     let latestUnlockedIndex = indices[0];
-    for (let i = 0; i < indices.length; i += 1) {
-      const levelIndex = indices[i];
+    for (const element of indices) {
+      const levelIndex = element;
       if (!isCampaignLevelUnlocked(levelIndex)) break;
       latestUnlockedIndex = levelIndex;
     }
@@ -703,51 +1588,15 @@ export function createRuntime(options) {
   };
 
   const renderScoreMeta = () => {
-    const refs = renderer.getRefs();
-    if (!refs?.scoreMeta || !refs?.infiniteScoreValue || !refs?.dailyScoreValue) return;
-
-    const snapshot = state.getSnapshot();
-    const levelIndex = snapshot?.levelIndex;
-    const totals = scoreManager.readTotals();
-    const infiniteItem = refs.infiniteScoreLabel?.closest('.scoreMetaItem') || null;
-    const dailyItem = refs.dailyScoreLabel?.closest('.scoreMetaItem') || null;
-    const separator = refs.scoreMeta.querySelector('.scoreMetaSeparator');
-    const setScoreMetaActive = (active) => {
-      refs.scoreMeta.hidden = false;
-      refs.scoreMeta.classList.toggle('isInactive', !active);
-      refs.scoreMeta.setAttribute('aria-hidden', active ? 'false' : 'true');
-    };
-
-    if (isDailyLevelIndex(levelIndex)) {
-      setScoreMetaActive(true);
-      if (infiniteItem) infiniteItem.hidden = true;
-      if (dailyItem) dailyItem.hidden = false;
-      if (separator) separator.hidden = true;
-      if (refs.dailyScoreLabel) refs.dailyScoreLabel.textContent = translate('ui.scoreDailyLabel');
-      const distinctCount = scoreManager.readDistinctCount({
-        mode: SCORE_MODES.DAILY,
-        levelKey: activeDailyId,
-      });
-      refs.dailyScoreValue.textContent = `${totals.dailyTotal} (${distinctCount})`;
-      return;
-    }
-
-    if (core.isInfiniteAbsIndex(levelIndex)) {
-      setScoreMetaActive(true);
-      if (infiniteItem) infiniteItem.hidden = false;
-      if (dailyItem) dailyItem.hidden = true;
-      if (separator) separator.hidden = true;
-      if (refs.infiniteScoreLabel) refs.infiniteScoreLabel.textContent = translate('ui.scoreInfiniteLabel');
-      const infiniteLevelKey = String(core.clampInfiniteIndex(core.toInfiniteIndex(levelIndex)));
-      const distinctCount = scoreManager.readDistinctCount({
-        mode: SCORE_MODES.INFINITE,
-        levelKey: infiniteLevelKey,
-      });
-      refs.infiniteScoreValue.textContent = `${totals.infiniteTotal} (${distinctCount})`;
-      return;
-    }
-
-    setScoreMetaActive(false);
+    renderScoreMetaCore({
+      refs: renderer.getRefs(),
+      snapshot: state.getSnapshot(),
+      isDailyLevelIndex,
+      core,
+      scoreManager,
+      activeDailyId,
+      translate,
+    });
   };
 
   const registerSolvedScore = (snapshot) => {
@@ -803,15 +1652,6 @@ export function createRuntime(options) {
     }
     return levelIndex < readCampaignProgress();
   };
-
-  const cloneBoardState = (stateValue) => ({
-    levelIndex: stateValue.levelIndex,
-    path: stateValue.path.map(([r, c]) => [r, c]),
-    movableWalls: Array.isArray(stateValue.movableWalls)
-      ? stateValue.movableWalls.map(([r, c]) => [r, c])
-      : null,
-    dailyId: typeof stateValue.dailyId === 'string' ? stateValue.dailyId : null,
-  });
 
   const collectLevelMovableWalls = (grid) => {
     if (!Array.isArray(grid)) return [];
@@ -911,46 +1751,17 @@ export function createRuntime(options) {
   };
 
   const syncInfiniteNavigation = (levelIndex, isCleared = false) => {
-    const refs = renderer.getRefs();
-
-    if (isDailyLevelIndex(levelIndex) || !core.isInfiniteAbsIndex(levelIndex)) {
-      if (refs?.prevInfiniteBtn) {
-        refs.prevInfiniteBtn.hidden = true;
-        refs.prevInfiniteBtn.disabled = false;
-        setDisabledReasonTitle(refs.prevInfiniteBtn, null);
-      }
-    } else {
-      const infiniteIndex = core.clampInfiniteIndex(core.toInfiniteIndex(levelIndex));
-      if (refs?.prevInfiniteBtn) {
-        refs.prevInfiniteBtn.hidden = false;
-        refs.prevInfiniteBtn.disabled = infiniteIndex <= 0;
-        setDisabledReasonTitle(
-          refs.prevInfiniteBtn,
-          refs.prevInfiniteBtn.disabled ? 'ui.prevInfiniteDisabledFirst' : null,
-        );
-      }
-    }
-
-    if (refs?.nextLevelBtn) {
-      if (isDailyLevelIndex(levelIndex)) {
-        refs.nextLevelBtn.hidden = true;
-        refs.nextLevelBtn.disabled = true;
-        setDisabledReasonTitle(refs.nextLevelBtn, null);
-        return;
-      }
-
-      const nextAvailable = isNextLevelAvailable(levelIndex);
-      const atInfiniteEnd = core.isInfiniteAbsIndex(levelIndex)
-        && core.clampInfiniteIndex(core.toInfiniteIndex(levelIndex)) >= maxInfiniteIndex;
-      let nextDisabledReasonKey = null;
-      if (!isCleared) nextDisabledReasonKey = 'ui.nextDisabledUncleared';
-      else if (!nextAvailable && atInfiniteEnd) nextDisabledReasonKey = 'ui.nextDisabledInfiniteEnd';
-
-      refs.nextLevelBtn.hidden = false;
-      refs.nextLevelBtn.textContent = resolveNextButtonLabel(levelIndex);
-      refs.nextLevelBtn.disabled = !isCleared || !nextAvailable;
-      setDisabledReasonTitle(refs.nextLevelBtn, nextDisabledReasonKey);
-    }
+    syncInfiniteNavigationCore({
+      refs: renderer.getRefs(),
+      levelIndex,
+      isCleared,
+      isDailyLevelIndex,
+      core,
+      maxInfiniteIndex,
+      setDisabledReasonTitle,
+      isNextLevelAvailable,
+      resolveNextButtonLabel,
+    });
   };
 
   const onLevelCleared = (levelIndex) => {
@@ -979,162 +1790,24 @@ export function createRuntime(options) {
   };
 
   const refreshLevelOptions = () => {
-    const refs = renderer.getRefs();
-    const currentIndex = state.getSnapshot().levelIndex;
-
-    const campaignOptions = [];
-    const modeOptions = [];
-    const { tutorialIndices, practiceIndices } = resolveCampaignBuckets();
-    const tutorialSet = new Set(tutorialIndices);
-    const practiceSet = new Set(practiceIndices);
-    const infiniteActive = core.isInfiniteAbsIndex(currentIndex);
-    const dailyActive = isDailyLevelIndex(currentIndex);
-    const campaignActive = !infiniteActive && !dailyActive;
-    const tutorialPrimaryIndex = resolveLatestUnlockedCampaignBucketIndex(tutorialIndices);
-    const practicePrimaryIndex = resolveLatestUnlockedCampaignBucketIndex(practiceIndices);
-    const buildOption = (value, label, options = {}) => {
-      const selected = options.selected ? 'selected' : '';
-      const disabled = options.disabled ? 'disabled' : '';
-      return `<option value="${value}" ${disabled} ${selected}>${label}</option>`;
-    };
-    const appendGroup = (labelKey, options) => {
-      if (options.length === 0) return '';
-      return `<optgroup label="${translate(labelKey)}">${options.join('')}</optgroup>`;
-    };
-
-    const selectorInfiniteIndex = core.isInfiniteAbsIndex(currentIndex)
-      ? core.clampInfiniteIndex(core.toInfiniteIndex(currentIndex))
-      : core.clampInfiniteIndex(readInfiniteProgress());
-    const infiniteAbsIndex = core.ensureInfiniteAbsIndex(selectorInfiniteIndex);
-    const selectedPrimaryValue = (() => {
-      if (dailyActive) return dailyAbsIndex;
-      if (infiniteActive) return infiniteAbsIndex;
-      if (practiceSet.has(currentIndex) && Number.isInteger(practicePrimaryIndex)) return practicePrimaryIndex;
-      if (tutorialSet.has(currentIndex) && Number.isInteger(tutorialPrimaryIndex)) return tutorialPrimaryIndex;
-      if (Number.isInteger(tutorialPrimaryIndex)) return tutorialPrimaryIndex;
-      if (Number.isInteger(practicePrimaryIndex)) return practicePrimaryIndex;
-      return 0;
-    })();
-
-    if (Number.isInteger(tutorialPrimaryIndex)) {
-      campaignOptions.push(buildOption(tutorialPrimaryIndex, translate('ui.levelGroupTutorial'), {
-        disabled: !isCampaignLevelUnlocked(tutorialPrimaryIndex),
-        selected: selectedPrimaryValue === tutorialPrimaryIndex,
-      }));
-    }
-    if (Number.isInteger(practicePrimaryIndex)) {
-      campaignOptions.push(buildOption(practicePrimaryIndex, translate('ui.levelGroupPractice'), {
-        disabled: !isCampaignLevelUnlocked(practicePrimaryIndex),
-        selected: selectedPrimaryValue === practicePrimaryIndex,
-      }));
-    }
-
-    const translated = resolveInfiniteModeLabel();
-    const fallback = resolveLevelName(core.getLevel(infiniteAbsIndex));
-    const infiniteLabel = translated === 'ui.infiniteLevelOption' ? fallback : translated;
-    modeOptions.push(buildOption(infiniteAbsIndex, infiniteLabel, {
-      selected: selectedPrimaryValue === infiniteAbsIndex,
-    }));
-
-    const dailyLabel = (() => {
-      if (!hasDailyLevel) return translate('ui.dailyUnavailable');
-      const base = translate('ui.dailyLevelOption');
-      if (!activeDailyId) return base;
-      const date = formatDailyMonthDayLabel(activeDailyId, activeLocale);
-      const templated = translate('ui.dailyLevelOptionWithDate', { label: base, date });
-      if (templated !== 'ui.dailyLevelOptionWithDate') return templated;
-      return `${base}(${date})`;
-    })();
-    modeOptions.push(buildOption(dailyAbsIndex, dailyLabel, {
-      disabled: !hasDailyLevel,
-      selected: selectedPrimaryValue === dailyAbsIndex,
-    }));
-
-    const optionHtml = [
-      appendGroup('ui.levelGroupCampaign', campaignOptions),
-      appendGroup('ui.levelGroupModes', modeOptions),
-    ].join('');
-
-    refs.levelSel.innerHTML = optionHtml;
-    refs.levelSel.value = String(selectedPrimaryValue);
-
-    if (refs.levelSelectGroup && refs.infiniteSel) {
-      const secondaryActive = campaignActive || infiniteActive;
-
-      refs.levelSelectGroup.classList.toggle('isCampaignActive', campaignActive);
-      refs.levelSelectGroup.classList.toggle('isInfiniteActive', infiniteActive);
-      refs.levelSelectGroup.classList.toggle('isDailyActive', dailyActive);
-      if (refs.levelSelectGroup.parentElement) {
-        refs.levelSelectGroup.parentElement.classList.toggle('isCampaignActive', campaignActive);
-        refs.levelSelectGroup.parentElement.classList.toggle('isInfiniteActive', infiniteActive);
-        refs.levelSelectGroup.parentElement.classList.toggle('isDailyActive', dailyActive);
-      }
-
-      refs.infiniteSel.hidden = !secondaryActive;
-      refs.infiniteSel.disabled = !secondaryActive;
-
-      if (!secondaryActive) {
-        refs.infiniteSel.innerHTML = '';
-      } else if (campaignActive) {
-        const activeCampaignIndices = (
-          practiceSet.has(currentIndex) && practiceIndices.length > 0
-            ? practiceIndices
-            : (tutorialIndices.length > 0 ? tutorialIndices : practiceIndices)
-        );
-        if (activeCampaignIndices.length === 0) {
-          refs.infiniteSel.innerHTML = '';
-          refs.infiniteSel.hidden = true;
-          refs.infiniteSel.disabled = true;
-        } else {
-          const selectedCampaignIndex = activeCampaignIndices.includes(currentIndex)
-            ? currentIndex
-            : activeCampaignIndices[0];
-          let campaignOptionHtml = '';
-          for (let i = 0; i < activeCampaignIndices.length; i += 1) {
-            const levelIndex = activeCampaignIndices[i];
-            const disabled = !isCampaignLevelUnlocked(levelIndex) ? 'disabled' : '';
-            const levelName = resolveLevelName(core.getLevel(levelIndex));
-            const levelLabel = levelName ? `${i + 1}) ${levelName}` : String(i + 1);
-            campaignOptionHtml += `<option value="${levelIndex}" ${levelIndex === selectedCampaignIndex ? 'selected' : ''} ${disabled}>${levelLabel}</option>`;
-          }
-          refs.infiniteSel.innerHTML = campaignOptionHtml;
-          refs.infiniteSel.value = String(selectedCampaignIndex);
-        }
-      } else {
-        const currentInfiniteIndex = core.clampInfiniteIndex(core.toInfiniteIndex(currentIndex));
-        const latestUnlockedInfiniteIndex = Math.max(
-          core.clampInfiniteIndex(readInfiniteProgress()),
-          currentInfiniteIndex,
-        );
-        const pageStart = Math.floor(currentInfiniteIndex / INFINITE_PAGE_SIZE) * INFINITE_PAGE_SIZE;
-        const pageEnd = Math.min(maxInfiniteIndex, pageStart + INFINITE_PAGE_SIZE - 1);
-        const prevPageStart = Math.max(0, pageStart - INFINITE_PAGE_SIZE);
-        const prevPageEnd = pageStart - 1;
-        const nextPageStart = pageStart + INFINITE_PAGE_SIZE;
-        const nextPageEnd = Math.min(maxInfiniteIndex, nextPageStart + INFINITE_PAGE_SIZE - 1);
-
-        let infiniteOptionHtml = '';
-        if (pageStart > 0) {
-          infiniteOptionHtml += `<option value="${INFINITE_SELECTOR_ACTIONS.first}">&laquo; #1</option>`;
-          infiniteOptionHtml += `<option value="${INFINITE_SELECTOR_ACTIONS.prev}">&lsaquo; #${prevPageStart + 1}-#${prevPageEnd + 1}</option>`;
-        }
-
-        for (let i = pageStart; i <= pageEnd; i += 1) {
-          const disabled = i > latestUnlockedInfiniteIndex ? 'disabled' : '';
-          infiniteOptionHtml += `<option value="${i}" ${i === currentInfiniteIndex ? 'selected' : ''} ${disabled}>${i + 1}</option>`;
-        }
-
-        if (pageEnd < maxInfiniteIndex) {
-          const nextDisabled = nextPageStart > latestUnlockedInfiniteIndex ? 'disabled' : '';
-          const lastDisabled = latestUnlockedInfiniteIndex <= pageEnd ? 'disabled' : '';
-          infiniteOptionHtml += `<option value="${INFINITE_SELECTOR_ACTIONS.next}" ${nextDisabled}>#${nextPageStart + 1}-#${nextPageEnd + 1} &rsaquo;</option>`;
-          infiniteOptionHtml += `<option value="${INFINITE_SELECTOR_ACTIONS.last}" ${lastDisabled}>#${latestUnlockedInfiniteIndex + 1} &raquo;</option>`;
-        }
-
-        refs.infiniteSel.innerHTML = infiniteOptionHtml;
-        refs.infiniteSel.value = String(currentInfiniteIndex);
-      }
-    }
+    refreshLevelOptionsCore({
+      refs: renderer.getRefs(),
+      currentIndex: state.getSnapshot().levelIndex,
+      dailyAbsIndex,
+      hasDailyLevel,
+      activeDailyId,
+      activeLocale,
+      translate,
+      core,
+      maxInfiniteIndex,
+      readInfiniteProgress,
+      isCampaignLevelUnlocked,
+      resolveCampaignBuckets,
+      resolveLatestUnlockedCampaignBucketIndex,
+      resolveInfiniteModeLabel,
+      resolveLevelName,
+      isDailyLevelIndex,
+    });
   };
 
   const showLevelGoal = (levelIndex) => {
@@ -1192,86 +1865,8 @@ export function createRuntime(options) {
     return Boolean(endpoint);
   };
 
-  const resolvePathStepCommandSide = (commandType, payload = null) => {
-    if (commandType === GAME_COMMANDS.START_OR_STEP_FROM_START) return 'start';
-    if (commandType === GAME_COMMANDS.START_OR_STEP) return 'end';
-    if (commandType === GAME_COMMANDS.APPLY_PATH_DRAG_SEQUENCE) {
-      return payload?.side === 'start' ? 'start' : (payload?.side === 'end' ? 'end' : null);
-    }
-    return null;
-  };
-
-  const clonePathPoint = (point) => ({ r: point.r, c: point.c });
-
-  const pathsMatchForHint = (leftPath, rightPath) => {
-    if (!Array.isArray(leftPath) || !Array.isArray(rightPath)) return false;
-    if (leftPath.length !== rightPath.length) return false;
-    for (let i = 0; i < leftPath.length; i += 1) {
-      if (!pointsMatch(leftPath[i], rightPath[i])) return false;
-    }
-    return true;
-  };
-
   const resolveDragSequenceTipArrivalHint = (side, prevSnapshot, nextSnapshot, payload) => {
-    if (side !== 'start' && side !== 'end') return null;
-    const steps = Array.isArray(payload?.steps) ? payload.steps : [];
-    if (steps.length <= 0) return null;
-
-    const prevPath = Array.isArray(prevSnapshot?.path) ? prevSnapshot.path : [];
-    const nextPath = Array.isArray(nextSnapshot?.path) ? nextSnapshot.path : [];
-    const workingPath = prevPath.map(clonePathPoint);
-    let lastAdvanceHint = null;
-
-    for (let i = 0; i < steps.length; i += 1) {
-      const step = steps[i];
-      if (!Number.isInteger(step?.r) || !Number.isInteger(step?.c)) return null;
-
-      if (side === 'start') {
-        const currentTip = workingPath[0] || null;
-        const retractNeighbor = workingPath[1] || null;
-        const isRetract = Boolean(retractNeighbor && pointsMatch(retractNeighbor, step));
-        if (isRetract) {
-          workingPath.shift();
-          lastAdvanceHint = null;
-          continue;
-        }
-        if (currentTip) {
-          lastAdvanceHint = {
-            side,
-            from: clonePathPoint(currentTip),
-            to: { r: step.r, c: step.c },
-          };
-        } else {
-          lastAdvanceHint = null;
-        }
-        workingPath.unshift({ r: step.r, c: step.c });
-        continue;
-      }
-
-      const currentTip = workingPath[workingPath.length - 1] || null;
-      const retractNeighbor = workingPath.length > 1
-        ? workingPath[workingPath.length - 2]
-        : null;
-      const isRetract = Boolean(retractNeighbor && pointsMatch(retractNeighbor, step));
-      if (isRetract) {
-        workingPath.pop();
-        lastAdvanceHint = null;
-        continue;
-      }
-      if (currentTip) {
-        lastAdvanceHint = {
-          side,
-          from: clonePathPoint(currentTip),
-          to: { r: step.r, c: step.c },
-        };
-      } else {
-        lastAdvanceHint = null;
-      }
-      workingPath.push({ r: step.r, c: step.c });
-    }
-
-    if (!pathsMatchForHint(workingPath, nextPath)) return null;
-    return lastAdvanceHint;
+    return resolveDragSequenceTipArrivalHintCore(side, prevSnapshot, nextSnapshot, payload);
   };
 
   const buildPathTipArrivalHint = (commandType, payload, prevSnapshot, nextSnapshot) => {
@@ -1286,12 +1881,8 @@ export function createRuntime(options) {
     const nextPath = Array.isArray(nextSnapshot.path) ? nextSnapshot.path : [];
     if (prevPath.length <= 0 || nextPath.length <= 0) return null;
 
-    const prevTip = side === 'start'
-      ? prevPath[0]
-      : prevPath[prevPath.length - 1];
-    const nextTip = side === 'start'
-      ? nextPath[0]
-      : nextPath[nextPath.length - 1];
+    const prevTip = readPathEndpointForSide(prevPath, side);
+    const nextTip = readPathEndpointForSide(nextPath, side);
     if (!prevTip || !nextTip) return null;
     if (prevTip.r === nextTip.r && prevTip.c === nextTip.c) return null;
 
@@ -1423,17 +2014,17 @@ export function createRuntime(options) {
       ...optionsForInteraction,
     };
 
-    if (Object.prototype.hasOwnProperty.call(queuedLayoutOptions, 'isPathDragging')) {
+    if (Object.hasOwn(queuedLayoutOptions, 'isPathDragging')) {
       interactionState.isPathDragging = Boolean(queuedLayoutOptions.isPathDragging);
     }
-    if (Object.prototype.hasOwnProperty.call(queuedLayoutOptions, 'pathDragSide')) {
+    if (Object.hasOwn(queuedLayoutOptions, 'pathDragSide')) {
       interactionState.pathDragSide = queuedLayoutOptions.pathDragSide;
     }
-    if (Object.prototype.hasOwnProperty.call(queuedLayoutOptions, 'pathDragCursor')) {
+    if (Object.hasOwn(queuedLayoutOptions, 'pathDragCursor')) {
       interactionState.pathDragCursor = queuedLayoutOptions.pathDragCursor;
     }
 
-    if (Boolean(validate)) {
+    if (validate) {
       pendingValidateSource = optionsForInteraction.validationSource || null;
     }
     pendingValidate = pendingValidate || Boolean(validate);
@@ -1464,19 +2055,16 @@ export function createRuntime(options) {
 
   const loadLevel = (idx, options = {}) => {
     const suppressFrozenTransition = Boolean(options.suppressFrozenTransition);
-    let targetIndex = Number.isInteger(idx) ? idx : 0;
-    if (targetIndex < 0) targetIndex = 0;
-
-    if (isDailyLevelIndex(targetIndex)) {
-      if (!hasDailyLevel) {
-        refreshLevelOptions();
-        return;
-      }
-      targetIndex = dailyAbsIndex;
-    } else if (core.isInfiniteAbsIndex(targetIndex)) {
-      targetIndex = core.ensureInfiniteAbsIndex(core.clampInfiniteIndex(core.toInfiniteIndex(targetIndex)));
-    } else {
-      targetIndex = Math.min(targetIndex, campaignCount - 1);
+    const targetIndex = normalizeLoadLevelTargetIndex(idx, {
+      isDailyLevelIndex,
+      hasDailyLevel,
+      dailyAbsIndex,
+      core,
+      campaignCount,
+    });
+    if (!Number.isInteger(targetIndex)) {
+      refreshLevelOptions();
+      return;
     }
 
     if (hasLoadedLevel) {
@@ -1619,21 +2207,17 @@ export function createRuntime(options) {
         refreshLevelOptions();
         return;
       }
-      const parsedCampaignIndex = parseInt(selectedValue, 10);
-      if (
-        !Number.isInteger(parsedCampaignIndex)
-        || parsedCampaignIndex < 0
-        || parsedCampaignIndex >= campaignCount
-        || !isCampaignLevelUnlocked(parsedCampaignIndex)
-      ) {
+      const targetCampaignIndex = resolveCampaignSecondarySelection({
+        selectedValue,
+        snapshot,
+        campaignCount,
+        isCampaignLevelUnlocked,
+      });
+      if (!Number.isInteger(targetCampaignIndex)) {
         refreshLevelOptions();
         return;
       }
-      if (parsedCampaignIndex === snapshot.levelIndex) {
-        refreshLevelOptions();
-        return;
-      }
-      loadLevel(parsedCampaignIndex);
+      loadLevel(targetCampaignIndex);
       return;
     }
 
@@ -1644,20 +2228,13 @@ export function createRuntime(options) {
     );
     const currentPageStart = Math.floor(currentInfiniteIndex / INFINITE_PAGE_SIZE) * INFINITE_PAGE_SIZE;
 
-    let targetInfiniteIndex = null;
-    if (selectedValue === INFINITE_SELECTOR_ACTIONS.first) {
-      targetInfiniteIndex = 0;
-    } else if (selectedValue === INFINITE_SELECTOR_ACTIONS.prev) {
-      targetInfiniteIndex = Math.max(0, currentPageStart - INFINITE_PAGE_SIZE);
-    } else if (selectedValue === INFINITE_SELECTOR_ACTIONS.next) {
-      targetInfiniteIndex = Math.min(latestUnlockedInfiniteIndex, currentPageStart + INFINITE_PAGE_SIZE);
-    } else if (selectedValue === INFINITE_SELECTOR_ACTIONS.last) {
-      targetInfiniteIndex = latestUnlockedInfiniteIndex;
-    } else {
-      const parsed = parseInt(selectedValue, 10);
-      if (Number.isInteger(parsed)) targetInfiniteIndex = core.clampInfiniteIndex(parsed);
-    }
-
+    const targetInfiniteIndex = resolveInfiniteSecondarySelection({
+      selectedValue,
+      currentInfiniteIndex,
+      currentPageStart,
+      latestUnlockedInfiniteIndex,
+      core,
+    });
     if (!Number.isInteger(targetInfiniteIndex)) {
       refreshLevelOptions();
       return;
@@ -1672,329 +2249,164 @@ export function createRuntime(options) {
     loadLevel(core.ensureInfiniteAbsIndex(clampedTarget));
   };
 
-  const handleUiAction = (payload) => {
-    const refs = renderer.getRefs();
-    const actionType = payload?.actionType;
-
-    if (actionType === UI_ACTIONS.LEVEL_SELECT) {
+  const uiActionHandlers = {
+    [UI_ACTIONS.LEVEL_SELECT]: (payload) => {
       loadLevel(payload.value, {
         suppressFrozenTransition: Boolean(payload?.suppressFrozenTransition),
       });
-      return;
-    }
-
-    if (actionType === UI_ACTIONS.INFINITE_SELECT) {
+    },
+    [UI_ACTIONS.INFINITE_SELECT]: (payload) => {
       handleSecondaryLevelSelect(payload.value);
-      return;
-    }
-
-    if (actionType === UI_ACTIONS.LOCALE_CHANGE) {
+    },
+    [UI_ACTIONS.LOCALE_CHANGE]: (payload) => {
       setSettingsMenuOpen(false);
       void applyLocaleChange(payload.value);
-      return;
-    }
-
-    if (actionType === UI_ACTIONS.THEME_TOGGLE) {
-      setSettingsMenuOpen(false);
-      const targetTheme = activeTheme === 'dark' ? 'light' : 'dark';
-      if (targetTheme === 'light' && requestLightThemeConfirmation(targetTheme)) return;
-      applyThemeState(targetTheme);
-      return;
-    }
-
-    if (actionType === UI_ACTIONS.LOW_POWER_TOGGLE) {
+    },
+    [UI_ACTIONS.THEME_TOGGLE]: () => {
+      handleThemeToggleAction({
+        setSettingsMenuOpen,
+        readActiveTheme: () => activeTheme,
+        requestLightThemeConfirmation,
+        applyThemeState,
+      });
+    },
+    [UI_ACTIONS.LOW_POWER_TOGGLE]: (payload) => {
       applyLowPowerMode(payload.enabled);
-      return;
-    }
-
-    if (actionType === UI_ACTIONS.KEYBOARD_GAMEPAD_CONTROLS_TOGGLE) {
+    },
+    [UI_ACTIONS.KEYBOARD_GAMEPAD_CONTROLS_TOGGLE]: (payload) => {
       applyKeyboardGamepadControlsEnabled(payload.enabled);
-      return;
-    }
-
-    if (actionType === UI_ACTIONS.THEME_DIALOG_CLOSE) {
-      const targetTheme = payload.pendingTheme;
-      if (targetTheme === 'light' && payload.returnValue === 'confirm') {
-        applyThemeState(targetTheme);
-      }
-      if (refs.themeSwitchDialog) {
-        delete refs.themeSwitchDialog.dataset.pendingTheme;
-        refs.themeSwitchDialog.returnValue = '';
-      }
-      return;
-    }
-
-    if (actionType === UI_ACTIONS.SETTINGS_TOGGLE) {
+    },
+    [UI_ACTIONS.THEME_DIALOG_CLOSE]: (payload) => {
+      handleThemeDialogCloseAction({
+        refs: renderer.getRefs(),
+        pendingTheme: payload.pendingTheme,
+        returnValue: payload.returnValue,
+        applyThemeState,
+      });
+    },
+    [UI_ACTIONS.SETTINGS_TOGGLE]: () => {
       setSettingsMenuOpen(!settingsMenuOpen);
-      return;
-    }
-
-    if (actionType === UI_ACTIONS.SETTINGS_CLOSE || actionType === UI_ACTIONS.DOCUMENT_ESCAPE) {
+    },
+    [UI_ACTIONS.SETTINGS_CLOSE]: () => {
       setSettingsMenuOpen(false);
-      return;
-    }
-
-    if (actionType === UI_ACTIONS.PANEL_TOGGLE) {
-      if (payload.panel === 'guide') {
-        const hidden = !refs.guidePanel.classList.contains('is-hidden');
-        applyPanelVisibility(refs.guidePanel, refs.guideToggleBtn, 'guide', hidden);
-        queueBoardLayout(false, { needsResize: true });
-      } else if (payload.panel === 'legend') {
-        const hidden = !refs.legendPanel.classList.contains('is-hidden');
-        applyPanelVisibility(refs.legendPanel, refs.legendToggleBtn, 'legend', hidden);
-        queueBoardLayout(false, { needsResize: true });
-      }
-      return;
-    }
-
-    if (actionType === UI_ACTIONS.RESET_CLICK) {
-      if (dailyBoardLocked) return;
-      handleGameCommand({
-        commandType: GAME_COMMANDS.RESET_PATH,
+    },
+    [UI_ACTIONS.DOCUMENT_ESCAPE]: () => {
+      setSettingsMenuOpen(false);
+    },
+    [UI_ACTIONS.PANEL_TOGGLE]: (payload) => {
+      handlePanelToggleAction({
+        refs: renderer.getRefs(),
+        panel: payload.panel,
+        applyPanelVisibility,
+        queueBoardLayout,
       });
-      return;
-    }
-
-    if (actionType === UI_ACTIONS.REVERSE_CLICK) {
+    },
+    [UI_ACTIONS.RESET_CLICK]: () => {
       if (dailyBoardLocked) return;
-      handleGameCommand({
-        commandType: GAME_COMMANDS.REVERSE_PATH,
+      handleGameCommand({ commandType: GAME_COMMANDS.RESET_PATH });
+    },
+    [UI_ACTIONS.REVERSE_CLICK]: () => {
+      if (dailyBoardLocked) return;
+      handleGameCommand({ commandType: GAME_COMMANDS.REVERSE_PATH });
+    },
+    [UI_ACTIONS.NEXT_LEVEL_CLICK]: () => {
+      handleNextLevelClickAction({
+        state,
+        isDailyLevelIndex,
+        core,
+        maxInfiniteIndex,
+        readInfiniteProgress,
+        campaignCount,
+        isCampaignCompleted,
+        loadLevel,
       });
-      return;
-    }
+    },
+    [UI_ACTIONS.PREV_INFINITE_CLICK]: () => {
+      handlePrevInfiniteClickAction({
+        state,
+        core,
+        loadLevel,
+      });
+    },
+  };
 
-    if (actionType === UI_ACTIONS.NEXT_LEVEL_CLICK) {
-      const snapshot = state.getSnapshot();
-      if (isDailyLevelIndex(snapshot.levelIndex)) return;
+  const handleUiAction = (payload) => {
+    const actionHandler = uiActionHandlers[payload?.actionType] || null;
+    if (actionHandler) actionHandler(payload);
+  };
 
-      if (core.isInfiniteAbsIndex(snapshot.levelIndex)) {
-        const currentInfiniteIndex = core.clampInfiniteIndex(core.toInfiniteIndex(snapshot.levelIndex));
-        if (currentInfiniteIndex >= maxInfiniteIndex) return;
-        const latestUnlockedInfiniteIndex = core.clampInfiniteIndex(readInfiniteProgress());
-        const nextInfiniteIndex = Math.min(currentInfiniteIndex + 1, latestUnlockedInfiniteIndex, maxInfiniteIndex);
-        if (nextInfiniteIndex <= currentInfiniteIndex) return;
-        loadLevel(core.ensureInfiniteAbsIndex(nextInfiniteIndex));
-        return;
-      }
-
-      const nextCampaignIndex = snapshot.levelIndex + 1;
-      if (nextCampaignIndex < campaignCount) {
-        loadLevel(nextCampaignIndex);
-        return;
-      }
-
-      if (isCampaignCompleted()) {
-        loadLevel(core.ensureInfiniteAbsIndex(core.clampInfiniteIndex(readInfiniteProgress())));
-      }
-      return;
-    }
-
-    if (actionType === UI_ACTIONS.PREV_INFINITE_CLICK) {
-      const snapshot = state.getSnapshot();
-      if (!core.isInfiniteAbsIndex(snapshot.levelIndex)) return;
-
-      const currentInfiniteIndex = core.clampInfiniteIndex(core.toInfiniteIndex(snapshot.levelIndex));
-      if (currentInfiniteIndex <= 0) return;
-
-      loadLevel(core.ensureInfiniteAbsIndex(currentInfiniteIndex - 1));
-    }
+  const interactionUpdateHandlers = {
+    [INTERACTION_UPDATES.PATH_DRAG]: (payload) => {
+      handlePathDragInteractionUpdate({
+        payload,
+        interactionState,
+        state,
+        renderer,
+        queueBoardLayout,
+        evaluateCache,
+        isPathDragCursorOnActiveEndpoint,
+        resetLowPowerHintDetectorWindow,
+        markLowPowerHintDragActivity,
+      });
+    },
+    [INTERACTION_UPDATES.WALL_DRAG]: (payload) => {
+      handleWallDragInteractionUpdate({
+        payload,
+        interactionState,
+        renderer,
+      });
+    },
+    [INTERACTION_UPDATES.WALL_DROP_TARGET]: (payload) => {
+      handleWallDropTargetInteractionUpdate({
+        payload,
+        interactionState,
+        renderer,
+      });
+    },
+    [INTERACTION_UPDATES.BOARD_NAV]: (payload) => {
+      handleBoardNavInteractionUpdate({
+        payload,
+        interactionState,
+        renderer,
+      });
+    },
   };
 
   const handleInteractionUpdate = (payload) => {
     const updateType = payload?.updateType;
     if (dailyBoardLocked && updateType !== INTERACTION_UPDATES.BOARD_NAV) return;
 
-    if (updateType === INTERACTION_UPDATES.PATH_DRAG) {
-      const nextIsPathDragging = Boolean(payload.isPathDragging);
-      const nextPathDragSide = payload.pathDragSide ?? null;
-      const rawCursor = payload.pathDragCursor;
-      const nextPathDragCursor = (
-        Number.isInteger(rawCursor?.r) && Number.isInteger(rawCursor?.c)
-          ? { r: rawCursor.r, c: rawCursor.c }
-          : null
-      );
-      const prevCursor = interactionState.pathDragCursor;
-      const cursorChanged = (
-        (prevCursor?.r ?? null) !== (nextPathDragCursor?.r ?? null)
-        || (prevCursor?.c ?? null) !== (nextPathDragCursor?.c ?? null)
-      );
-      const stateChanged = (
-        interactionState.isPathDragging !== nextIsPathDragging
-        || interactionState.pathDragSide !== nextPathDragSide
-        || cursorChanged
-      );
-      if (!stateChanged) return;
-
-      const snapshot = state.getSnapshot();
-      const prevSuppressEndpoint = isPathDragCursorOnActiveEndpoint(
-        snapshot,
-        interactionState.isPathDragging,
-        interactionState.pathDragSide,
-        interactionState.pathDragCursor,
-      );
-      const nextSuppressEndpoint = isPathDragCursorOnActiveEndpoint(
-        snapshot,
-        nextIsPathDragging,
-        nextPathDragSide,
-        nextPathDragCursor,
-      );
-      const shouldQueueLayout = (
-        interactionState.isPathDragging !== nextIsPathDragging
-        || interactionState.pathDragSide !== nextPathDragSide
-        || prevSuppressEndpoint !== nextSuppressEndpoint
-      );
-      const endedPathDrag = interactionState.isPathDragging && !nextIsPathDragging;
-      const dragActivityChanged = nextIsPathDragging && (
-        interactionState.isPathDragging !== nextIsPathDragging
-        || interactionState.pathDragSide !== nextPathDragSide
-        || cursorChanged
-      );
-
-      interactionState.isPathDragging = nextIsPathDragging;
-      interactionState.pathDragSide = nextPathDragSide;
-      interactionState.pathDragCursor = nextPathDragCursor;
-      if (endedPathDrag) evaluateCache.clear();
-      if (!interactionState.isPathDragging) {
-        resetLowPowerHintDetectorWindow();
-      } else if (dragActivityChanged) {
-        markLowPowerHintDragActivity();
-      }
-      renderer.updateInteraction?.(interactionState);
-      if (shouldQueueLayout) {
-        queueBoardLayout(false, {
-          isPathDragging: interactionState.isPathDragging,
-          pathDragSide: interactionState.pathDragSide,
-          pathDragCursor: interactionState.pathDragCursor,
-        });
-      }
-      return;
-    }
-
-    if (updateType === INTERACTION_UPDATES.WALL_DRAG) {
-      const nextWallDragging = Boolean(payload.isWallDragging);
-      const nextVisible = Boolean(payload.visible);
-      const nextX = Number.isFinite(payload.x) ? payload.x : interactionState.wallGhost.x;
-      const nextY = Number.isFinite(payload.y) ? payload.y : interactionState.wallGhost.y;
-      const stateChanged = (
-        interactionState.isWallDragging !== nextWallDragging
-        || interactionState.wallGhost.visible !== nextVisible
-        || interactionState.wallGhost.x !== nextX
-        || interactionState.wallGhost.y !== nextY
-      );
-      if (!stateChanged) return;
-
-      interactionState.isWallDragging = nextWallDragging;
-      interactionState.wallGhost = {
-        visible: nextVisible,
-        x: nextX,
-        y: nextY,
-      };
-      renderer.updateInteraction?.(interactionState);
-      return;
-    }
-
-    if (updateType === INTERACTION_UPDATES.WALL_DROP_TARGET) {
-      const nextDropTarget = payload.dropTarget || null;
-      const prevDropTarget = interactionState.dropTarget;
-      const stateChanged = (
-        (prevDropTarget?.r ?? null) !== (nextDropTarget?.r ?? null)
-        || (prevDropTarget?.c ?? null) !== (nextDropTarget?.c ?? null)
-      );
-      if (!stateChanged) return;
-
-      interactionState.dropTarget = nextDropTarget;
-      renderer.updateInteraction?.(interactionState);
-      return;
-    }
-
-    if (updateType === INTERACTION_UPDATES.BOARD_NAV) {
-      const rawCursor = payload.boardCursor;
-      const nextBoardCursor = (
-        Number.isInteger(rawCursor?.r) && Number.isInteger(rawCursor?.c)
-          ? { r: rawCursor.r, c: rawCursor.c }
-          : null
-      );
-      const rawSelection = payload.boardSelection;
-      const nextBoardSelection = (
-        Number.isInteger(rawSelection?.r)
-        && Number.isInteger(rawSelection?.c)
-        && typeof rawSelection?.kind === 'string'
-          ? { kind: rawSelection.kind, r: rawSelection.r, c: rawSelection.c }
-          : null
-      );
-      const nextBoardSelectionInteractive = typeof payload.boardSelectionInteractive === 'boolean'
-        ? payload.boardSelectionInteractive
-        : null;
-      const nextIsBoardNavPressing = Boolean(payload.isBoardNavPressing);
-      const rawPreviewDelta = payload.boardNavPreviewDelta;
-      const nextBoardNavPreviewDelta = (
-        Number.isInteger(rawPreviewDelta?.r) && Number.isInteger(rawPreviewDelta?.c)
-          ? { r: rawPreviewDelta.r, c: rawPreviewDelta.c }
-          : null
-      );
-      const nextIsBoardNavActive = Boolean(payload.isBoardNavActive);
-      const stateChanged = (
-        interactionState.isBoardNavActive !== nextIsBoardNavActive
-        || interactionState.isBoardNavPressing !== nextIsBoardNavPressing
-        || (interactionState.boardCursor?.r ?? null) !== (nextBoardCursor?.r ?? null)
-        || (interactionState.boardCursor?.c ?? null) !== (nextBoardCursor?.c ?? null)
-        || (interactionState.boardSelection?.kind ?? null) !== (nextBoardSelection?.kind ?? null)
-        || (interactionState.boardSelection?.r ?? null) !== (nextBoardSelection?.r ?? null)
-        || (interactionState.boardSelection?.c ?? null) !== (nextBoardSelection?.c ?? null)
-        || (interactionState.boardSelectionInteractive ?? null) !== nextBoardSelectionInteractive
-        || (interactionState.boardNavPreviewDelta?.r ?? null) !== (nextBoardNavPreviewDelta?.r ?? null)
-        || (interactionState.boardNavPreviewDelta?.c ?? null) !== (nextBoardNavPreviewDelta?.c ?? null)
-      );
-      if (!stateChanged) return;
-
-      interactionState.isBoardNavActive = nextIsBoardNavActive;
-      interactionState.isBoardNavPressing = nextIsBoardNavPressing;
-      interactionState.boardCursor = nextBoardCursor;
-      interactionState.boardSelection = nextBoardSelection;
-      interactionState.boardSelectionInteractive = nextBoardSelectionInteractive;
-      interactionState.boardNavPreviewDelta = nextBoardNavPreviewDelta;
-      renderer.updateInteraction?.(interactionState);
-    }
+    const updateHandler = interactionUpdateHandlers[updateType] || null;
+    if (updateHandler) updateHandler(payload);
   };
 
-  const handleGameCommand = (payload) => {
-    if (dailyBoardLocked) return;
-    if (!payload?.commandType) return;
-    const commandType = payload.commandType;
-    const pathStepSide = resolvePathStepCommandSide(commandType, payload);
-    const isPathStepCommand = pathStepSide === 'start' || pathStepSide === 'end';
-    const previousSnapshot = state.getSnapshot();
+  const handleResetGameCommandUiState = (commandType, transition) => {
+    if (commandType !== GAME_COMMANDS.RESET_PATH) return false;
 
-    const transition = state.dispatch({
-      type: commandType,
-      payload,
-    });
-    const didStateSnapshotChange = transition.snapshot.version !== previousSnapshot.version;
-    const shouldClearResetUiState = (
-      transition.rebuildGrid
-      || commandType === GAME_COMMANDS.WALL_MOVE_ATTEMPT
-      || transition.snapshot.path.length > 1
-    );
-    if (commandType !== GAME_COMMANDS.RESET_PATH && didStateSnapshotChange && shouldClearResetUiState) {
-      clearResetUiState();
-    }
-
-    let didResetUiState = false;
-    if (commandType === GAME_COMMANDS.RESET_PATH) {
-      const resetMode = transition.meta?.resetMode || null;
-      if (resetMode === 'cleared') {
-        if (transition.meta?.storedResetCandidate) {
-          lastResetUiState = captureResetUiState();
-        }
-        didResetUiState = showLevelGoal(transition.snapshot.levelIndex);
-      } else if (resetMode === 'restored') {
-        didResetUiState = restoreResetUiState(lastResetUiState);
-        clearResetUiState();
-      } else {
-        clearResetUiState();
+    const resetMode = transition.meta?.resetMode || null;
+    if (resetMode === 'cleared') {
+      if (transition.meta?.storedResetCandidate) {
+        lastResetUiState = captureResetUiState();
       }
+      return showLevelGoal(transition.snapshot.levelIndex);
+    }
+    if (resetMode === 'restored') {
+      const didRestore = restoreResetUiState(lastResetUiState);
+      clearResetUiState();
+      return didRestore;
     }
 
+    clearResetUiState();
+    return false;
+  };
+
+  const syncGameCommandPathTransitionState = (
+    commandType,
+    payload,
+    transition,
+    previousSnapshot,
+    isPathStepCommand,
+  ) => {
     if (transition.changed && isPathStepCommand) {
       renderer.recordPathTransition?.(
         previousSnapshot,
@@ -2010,9 +2422,35 @@ export function createRuntime(options) {
         previousSnapshot,
         transition.snapshot,
       );
-    } else if (!isPathStepCommand) {
-      interactionState.pathTipArrivalHint = null;
+      return;
     }
+    if (!isPathStepCommand) interactionState.pathTipArrivalHint = null;
+  };
+
+  const handleGameCommand = (payload) => {
+    if (dailyBoardLocked || !payload?.commandType) return;
+
+    const commandType = payload.commandType;
+    const pathStepSide = resolvePathStepCommandSide(commandType, payload);
+    const isPathStepCommand = pathStepSide === 'start' || pathStepSide === 'end';
+    const previousSnapshot = state.getSnapshot();
+    const transition = state.dispatch({
+      type: commandType,
+      payload,
+    });
+
+    if (shouldClearResetUiStateAfterCommand(commandType, transition, previousSnapshot)) {
+      clearResetUiState();
+    }
+
+    const didResetUiState = handleResetGameCommandUiState(commandType, transition);
+    syncGameCommandPathTransitionState(
+      commandType,
+      payload,
+      transition,
+      previousSnapshot,
+      isPathStepCommand,
+    );
 
     if (transition.rebuildGrid) {
       invalidateEvaluateCache();
@@ -2024,16 +2462,11 @@ export function createRuntime(options) {
     if (transition.changed || transition.rebuildGrid) {
       syncInputSnapshot(transition.snapshot);
     }
-
     if (!transition.changed && !transition.validate && !transition.rebuildGrid && !didResetUiState) {
       return;
     }
 
-    if (
-      commandType === GAME_COMMANDS.RESET_PATH
-      || commandType === GAME_COMMANDS.LOAD_LEVEL
-      || (!isPathStepCommand && transition.rebuildGrid)
-    ) {
+    if (shouldClearPathTransitionCompensation(commandType, isPathStepCommand, transition)) {
       renderer.clearPathTransitionCompensation?.();
     }
 
@@ -2045,16 +2478,18 @@ export function createRuntime(options) {
       needsResize: transition.rebuildGrid,
     });
 
-    const shouldPersistPathStepState = isPathStepCommand && transition.changed && !interactionState.isPathDragging;
-    const shouldPersistInputState = Boolean(transition.validate) && !interactionState.isPathDragging;
-    const shouldPersistResetState = commandType === GAME_COMMANDS.RESET_PATH && transition.changed;
-    if (shouldPersistPathStepState || shouldPersistInputState || shouldPersistResetState) {
+    if (shouldQueueSessionSaveAfterCommand(
+      commandType,
+      isPathStepCommand,
+      transition,
+      interactionState.isPathDragging,
+    )) {
       queueSessionSave();
     }
   };
 
   const emitIntent = (intent) => {
-    if (!intent || !intent.type) return;
+    if (!intent?.type) return;
 
     if (intent.type === INTENT_TYPES.UI_ACTION) {
       handleUiAction(intent.payload);
@@ -2217,7 +2652,6 @@ export function createHeadlessRuntime(options) {
     core,
     state,
     persistence,
-    effects = {},
   } = options;
 
   if (!core || !state || !persistence) {
@@ -2229,7 +2663,6 @@ export function createHeadlessRuntime(options) {
   let infiniteProgress = Number.isInteger(bootState.infiniteProgress) ? bootState.infiniteProgress : 0;
   let dailySolvedDate = typeof bootState.dailySolvedDate === 'string' ? bootState.dailySolvedDate : null;
   const scoreManager = createScoreManager(bootState.scoreState, persistence);
-  void effects;
 
   const evaluate = (validate = false) => {
     const snapshot = state.getSnapshot();
@@ -2269,7 +2702,7 @@ export function createHeadlessRuntime(options) {
   return {
     start(initialLevelIndex = 0) {
       state.dispatch({ type: 'level/load', payload: { levelIndex: initialLevelIndex } });
-      if (bootState.sessionBoard && bootState.sessionBoard.levelIndex === initialLevelIndex) {
+      if (bootState.sessionBoard?.levelIndex === initialLevelIndex) {
         state.restoreMutableState(bootState.sessionBoard);
       }
       return evaluate(false);

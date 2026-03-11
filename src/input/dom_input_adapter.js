@@ -1,5 +1,4 @@
 import { CELL_TYPES } from '../config.js';
-import { isAdjacentMove } from '../utils.js';
 import {
   cellCenter,
   getCellSize,
@@ -7,18 +6,19 @@ import {
   getGridPadding,
 } from '../geometry.js';
 import {
-  chooseSlipperyPathDragStep,
-} from './pointer_intent_resolver.js';
+  GAME_COMMANDS,
+  INTENT_TYPES,
+  INTERACTION_UPDATES,
+  UI_ACTIONS,
+} from '../runtime/intents.js';
 import {
   canDropWall,
   isUsableCell,
 } from '../state/snapshot_rules.js';
+import { isAdjacentMove } from '../utils.js';
 import {
-  INTENT_TYPES,
-  GAME_COMMANDS,
-  UI_ACTIONS,
-  INTERACTION_UPDATES,
-} from '../runtime/intents.js';
+  chooseSlipperyPathDragStep,
+} from './pointer_intent_resolver.js';
 
 export function createDomInputAdapter() {
   let refs = null;
@@ -94,6 +94,32 @@ export function createDomInputAdapter() {
     down: { r: 1, c: 0 },
     left: { r: 0, c: -1 },
     right: { r: 0, c: 1 },
+  });
+  const KEYBOARD_DIRECTION_KEYS = Object.freeze({
+    ArrowUp: 'up',
+    ArrowDown: 'down',
+    ArrowLeft: 'left',
+    ArrowRight: 'right',
+  });
+  const GAMEPLAY_KEYBOARD_KEYS = new Set([
+    ...Object.keys(KEYBOARD_DIRECTION_KEYS),
+    'Enter',
+    ' ',
+    'Spacebar',
+    'Backspace',
+    'Delete',
+    'r',
+    'R',
+    'PageUp',
+    'PageDown',
+  ]);
+  const KEYBOARD_SHORTCUT_ACTIONS = Object.freeze({
+    Backspace: 'reset',
+    Delete: 'reset',
+    r: 'reverse',
+    R: 'reverse',
+    PageUp: 'prevLevel',
+    PageDown: 'nextLevel',
   });
   const GAMEPAD_BUTTON_INDEX = Object.freeze({
     confirm: 0,
@@ -211,7 +237,7 @@ export function createDomInputAdapter() {
     const gap = getGridGap(refs.gridEl);
     const pad = getGridPadding(refs.gridEl);
     const step = size + gap;
-    if (!(step > 0)) return null;
+    if (step <= 0) return null;
     const viewportScroll = getViewportScroll();
 
     return {
@@ -492,19 +518,22 @@ export function createDomInputAdapter() {
   };
 
   const commitBoardNavState = (nextState = {}) => {
-    const nextCursor = Object.prototype.hasOwnProperty.call(nextState, 'cursor')
+    const nextCursor = Object.hasOwn(nextState, 'cursor')
       ? cloneCursor(nextState.cursor)
       : cloneCursor(boardNav.cursor);
-    const nextSelectionKind = Object.prototype.hasOwnProperty.call(nextState, 'selectionKind')
-      ? (typeof nextState.selectionKind === 'string' ? nextState.selectionKind : null)
-      : boardNav.selectionKind;
-    const nextSelectionCursor = Object.prototype.hasOwnProperty.call(nextState, 'selectionCursor')
+    let nextSelectionKind = boardNav.selectionKind;
+    if (Object.hasOwn(nextState, 'selectionKind')) {
+      nextSelectionKind = typeof nextState.selectionKind === 'string'
+        ? nextState.selectionKind
+        : null;
+    }
+    const nextSelectionCursor = Object.hasOwn(nextState, 'selectionCursor')
       ? cloneCursor(nextState.selectionCursor)
       : cloneCursor(boardNav.selectionCursor);
     const normalizedSelectionCursor = nextSelectionKind
       ? (nextSelectionCursor || cloneCursor(nextCursor))
       : null;
-    const nextNavActive = Object.prototype.hasOwnProperty.call(nextState, 'navActive')
+    const nextNavActive = Object.hasOwn(nextState, 'navActive')
       ? Boolean(nextState.navActive)
       : boardNav.navActive;
     const changed = (
@@ -603,6 +632,15 @@ export function createDomInputAdapter() {
     && left.c === right.c
   );
 
+  const isPathEndpointSelectionKind = (selectionKind) => (
+    selectionKind === BOARD_SELECTION_KINDS.PATH_START
+    || selectionKind === BOARD_SELECTION_KINDS.PATH_END
+  );
+
+  const resolvePathSelectionSide = (selectionKind) => (
+    selectionKind === BOARD_SELECTION_KINDS.PATH_START ? 'start' : 'end'
+  );
+
   const isBoardCursorInteractive = (snapshot, cursor) => {
     if (!snapshot || !isPointInBounds(snapshot, cursor)) return false;
     if (snapshot.gridData?.[cursor.r]?.[cursor.c] === CELL_TYPES.MOVABLE_WALL) return true;
@@ -640,6 +678,47 @@ export function createDomInputAdapter() {
     return snapshot.path[snapshot.path.length - 1];
   };
 
+  const createBoardNavSyncState = (levelChanged) => ({
+    selectionKind: levelChanged ? null : boardNav.selectionKind,
+    selectionCursor: levelChanged ? null : cloneCursor(boardNav.selectionCursor),
+    cursor: levelChanged ? null : cloneCursor(boardNav.cursor),
+  });
+
+  const clearSyncedBoardNavSelection = (state) => {
+    state.selectionKind = null;
+    state.selectionCursor = null;
+    keyboardWallPreviewVisible = false;
+  };
+
+  const syncWallBoardNavSelection = (snapshot, state) => {
+    if (
+      !isPointInBounds(snapshot, state.selectionCursor)
+      || snapshot.gridData?.[state.selectionCursor.r]?.[state.selectionCursor.c] !== CELL_TYPES.MOVABLE_WALL
+    ) {
+      clearSyncedBoardNavSelection(state);
+      return;
+    }
+    if (!isPointInBounds(snapshot, state.cursor)) {
+      state.cursor = cloneCursor(state.selectionCursor);
+    }
+  };
+
+  const syncPathBoardNavSelection = (snapshot, state) => {
+    keyboardWallPreviewVisible = false;
+    if (!Array.isArray(snapshot.path) || snapshot.path.length === 0) {
+      state.selectionKind = null;
+      state.selectionCursor = null;
+      return;
+    }
+    if (snapshot.path.length <= 1) {
+      state.selectionKind = BOARD_SELECTION_KINDS.PATH_END;
+    }
+    const endpoint = resolveSelectedPathEndpoint(snapshot, state.selectionKind);
+    if (!endpoint) return;
+    state.cursor = { r: endpoint.r, c: endpoint.c };
+    state.selectionCursor = { r: endpoint.r, c: endpoint.c };
+  };
+
   const syncBoardNavSnapshot = (snapshot = readSnapshot()) => {
     if (!keyboardGamepadControlsEnabled) return;
     if (!snapshot || snapshot.rows <= 0 || snapshot.cols <= 0) {
@@ -649,52 +728,28 @@ export function createDomInputAdapter() {
 
     const levelIndex = Number.isInteger(snapshot.levelIndex) ? snapshot.levelIndex : null;
     const levelChanged = levelIndex !== lastBoardNavLevelIndex;
-    let nextSelectionKind = levelChanged ? null : boardNav.selectionKind;
-    let nextSelectionCursor = levelChanged ? null : cloneCursor(boardNav.selectionCursor);
-    let nextCursor = levelChanged ? null : cloneCursor(boardNav.cursor);
+    const nextState = createBoardNavSyncState(levelChanged);
     if (levelChanged) keyboardWallPreviewVisible = false;
 
-    if (nextSelectionKind === BOARD_SELECTION_KINDS.WALL) {
-      if (
-        !isPointInBounds(snapshot, nextSelectionCursor)
-        || snapshot.gridData?.[nextSelectionCursor.r]?.[nextSelectionCursor.c] !== CELL_TYPES.MOVABLE_WALL
-      ) {
-        nextSelectionKind = null;
-        nextSelectionCursor = null;
-        keyboardWallPreviewVisible = false;
-      } else if (!isPointInBounds(snapshot, nextCursor)) {
-        nextCursor = cloneCursor(nextSelectionCursor);
-      }
-    } else if (
-      nextSelectionKind === BOARD_SELECTION_KINDS.PATH_START
-      || nextSelectionKind === BOARD_SELECTION_KINDS.PATH_END
-    ) {
-      keyboardWallPreviewVisible = false;
-      if (!Array.isArray(snapshot.path) || snapshot.path.length === 0) {
-        nextSelectionKind = null;
-      } else if (snapshot.path.length <= 1) {
-        nextSelectionKind = BOARD_SELECTION_KINDS.PATH_END;
-      }
-      const endpoint = resolveSelectedPathEndpoint(snapshot, nextSelectionKind);
-      if (endpoint) {
-        nextCursor = { r: endpoint.r, c: endpoint.c };
-        nextSelectionCursor = { r: endpoint.r, c: endpoint.c };
-      }
+    if (nextState.selectionKind === BOARD_SELECTION_KINDS.WALL) {
+      syncWallBoardNavSelection(snapshot, nextState);
+    } else if (isPathEndpointSelectionKind(nextState.selectionKind)) {
+      syncPathBoardNavSelection(snapshot, nextState);
     } else {
-      nextSelectionCursor = null;
+      nextState.selectionCursor = null;
       keyboardWallPreviewVisible = false;
     }
 
-    if (!nextCursor || !isPointInBounds(snapshot, nextCursor)) {
-      nextCursor = resolveBoardOriginCursor(snapshot);
+    if (!nextState.cursor || !isPointInBounds(snapshot, nextState.cursor)) {
+      nextState.cursor = resolveBoardOriginCursor(snapshot);
     }
 
     lastBoardNavLevelIndex = levelIndex;
     commitBoardNavState({
-      cursor: nextCursor,
-      selectionCursor: nextSelectionCursor,
-      selectionKind: nextSelectionKind,
-      navActive: Boolean(nextCursor),
+      cursor: nextState.cursor,
+      selectionCursor: nextState.selectionCursor,
+      selectionKind: nextState.selectionKind,
+      navActive: Boolean(nextState.cursor),
     });
   };
 
@@ -745,8 +800,37 @@ export function createDomInputAdapter() {
     };
   };
 
+  const removeVisitedSimulationPoint = (visited, point) => {
+    if (!point) return;
+    visited.delete(`${point.r},${point.c}`);
+  };
+
+  const applyPathStepToSimulationStart = (path, visited, nextStep, nextKey) => {
+    const backtrackNode = path[1];
+    if (pointsMatch(backtrackNode, nextStep)) {
+      const removedHead = path[0];
+      path.shift();
+      removeVisitedSimulationPoint(visited, removedHead);
+      return;
+    }
+    path.unshift({ r: nextStep.r, c: nextStep.c });
+    visited.add(nextKey);
+  };
+
+  const applyPathStepToSimulationEnd = (path, visited, nextStep, nextKey) => {
+    const backtrackNode = path[path.length - 2];
+    if (pointsMatch(backtrackNode, nextStep)) {
+      const removedTail = path[path.length - 1];
+      path.pop();
+      removeVisitedSimulationPoint(visited, removedTail);
+      return;
+    }
+    path.push({ r: nextStep.r, c: nextStep.c });
+    visited.add(nextKey);
+  };
+
   const applyPathStepToSimulation = (snapshot, side, nextStep) => {
-    if (!snapshot || !nextStep) return snapshot;
+    if (!snapshot || !nextStep) return;
     const nextKey = `${nextStep.r},${nextStep.c}`;
     const nextVisited = snapshot.visited;
     const nextPath = snapshot.path;
@@ -754,29 +838,13 @@ export function createDomInputAdapter() {
     if (nextPath.length === 0) {
       nextPath.push({ r: nextStep.r, c: nextStep.c });
       nextVisited.add(nextKey);
-    } else if (side === 'start') {
-      const backtrackNode = nextPath[1];
-      if (backtrackNode && backtrackNode.r === nextStep.r && backtrackNode.c === nextStep.c) {
-        const removedHead = nextPath[0];
-        nextPath.shift();
-        if (removedHead) nextVisited.delete(`${removedHead.r},${removedHead.c}`);
-      } else {
-        nextPath.unshift({ r: nextStep.r, c: nextStep.c });
-        nextVisited.add(nextKey);
-      }
-    } else {
-      const backtrackNode = nextPath[nextPath.length - 2];
-      if (backtrackNode && backtrackNode.r === nextStep.r && backtrackNode.c === nextStep.c) {
-        const removedTail = nextPath[nextPath.length - 1];
-        nextPath.pop();
-        if (removedTail) nextVisited.delete(`${removedTail.r},${removedTail.c}`);
-      } else {
-        nextPath.push({ r: nextStep.r, c: nextStep.c });
-        nextVisited.add(nextKey);
-      }
+      return;
     }
-
-    return snapshot;
+    if (side === 'start') {
+      applyPathStepToSimulationStart(nextPath, nextVisited, nextStep, nextKey);
+      return;
+    }
+    applyPathStepToSimulationEnd(nextPath, nextVisited, nextStep, nextKey);
   };
 
   const snapCellFromMetrics = (x, y, resolved) => {
@@ -794,8 +862,8 @@ export function createDomInputAdapter() {
     const cell = el.closest('.cell');
     if (!cell) return null;
     return {
-      r: parseInt(cell.dataset.r, 10),
-      c: parseInt(cell.dataset.c, 10),
+      r: Number.parseInt(cell.dataset.r, 10),
+      c: Number.parseInt(cell.dataset.c, 10),
     };
   };
 
@@ -847,15 +915,6 @@ export function createDomInputAdapter() {
     return snapWallCellFromPoint(x, y, snapshot, metrics);
   };
 
-  const pointMatches = (left, right) => (
-    Number.isInteger(left?.r)
-    && Number.isInteger(left?.c)
-    && Number.isInteger(right?.r)
-    && Number.isInteger(right?.c)
-    && left.r === right.r
-    && left.c === right.c
-  );
-
   const boardCursorOrDefault = (snapshot = readSnapshot()) => {
     const cursor = currentBoardCursor(snapshot);
     if (!cursor || !snapshot) return null;
@@ -901,6 +960,84 @@ export function createDomInputAdapter() {
     });
   };
 
+  const isOrthogonalDelta = (delta) => (
+    Math.abs(delta?.r ?? 0) + Math.abs(delta?.c ?? 0) === 1
+  );
+
+  const commitBoardNavSelection = (cursor, selectionKind, selectionCursor = cursor) => commitBoardNavState({
+    cursor,
+    selectionCursor,
+    selectionKind,
+    navActive: true,
+  });
+
+  const clearBoardNavSelection = (cursor, snapshot = readSnapshot()) => {
+    clearKeyboardWallPreviewState(snapshot);
+    return commitBoardNavState({
+      cursor,
+      selectionKind: null,
+      navActive: true,
+    });
+  };
+
+  const finalizeBoardPathSelection = (cursor) => {
+    const { afterSnapshot } = runGameCommand(GAME_COMMANDS.FINALIZE_PATH);
+    clearBoardNavSelection(cursor, afterSnapshot);
+    syncBoardNavSnapshot(afterSnapshot);
+    return true;
+  };
+
+  const tryMoveKeyboardWallSelection = (snapshot, cursor) => {
+    const anchor = cloneCursor(boardNav.selectionCursor) || cursor;
+    if (!anchor || !canDropWall(snapshot, anchor, cursor)) return false;
+    const target = { r: cursor.r, c: cursor.c };
+    const { afterSnapshot, changed } = runGameCommand(GAME_COMMANDS.WALL_MOVE_ATTEMPT, {
+      from: anchor,
+      to: target,
+    });
+    if (!changed) return false;
+    clearKeyboardWallPreviewState(afterSnapshot);
+    commitBoardNavSelection(target, BOARD_SELECTION_KINDS.WALL, target);
+    syncBoardNavSnapshot(afterSnapshot);
+    return true;
+  };
+
+  const startBoardPathFromCursor = (snapshot, cursor) => {
+    if (!isUsableCell(snapshot, cursor.r, cursor.c)) return false;
+    const { afterSnapshot, changed } = runGameCommand(GAME_COMMANDS.START_OR_STEP, cursor);
+    if (!changed) {
+      syncBoardNavSnapshot(afterSnapshot);
+      return false;
+    }
+    const endpoint = afterSnapshot?.path?.[afterSnapshot.path.length - 1] || cursor;
+    commitBoardNavSelection(endpoint, BOARD_SELECTION_KINDS.PATH_END);
+    return true;
+  };
+
+  const selectBoardPathEndpointAtCursor = (snapshot, cursor) => {
+    const head = snapshot.path[0] || null;
+    const tail = snapshot.path[snapshot.path.length - 1] || null;
+    if (tail && pointsMatch(cursor, tail)) {
+      return commitBoardNavSelection(cursor, BOARD_SELECTION_KINDS.PATH_END);
+    }
+    if (snapshot.path.length > 1 && head && pointsMatch(cursor, head)) {
+      return commitBoardNavSelection(cursor, BOARD_SELECTION_KINDS.PATH_START);
+    }
+    return false;
+  };
+
+  const handleUnselectedBoardConfirm = (snapshot, cursor) => {
+    const cellType = snapshot.gridData?.[cursor.r]?.[cursor.c];
+    if (cellType === CELL_TYPES.MOVABLE_WALL) {
+      setKeyboardWallPreviewVisible(true, snapshot);
+      return commitBoardNavSelection(cursor, BOARD_SELECTION_KINDS.WALL);
+    }
+    if (!Array.isArray(snapshot.path) || snapshot.path.length === 0) {
+      return startBoardPathFromCursor(snapshot, cursor);
+    }
+    return selectBoardPathEndpointAtCursor(snapshot, cursor);
+  };
+
   const handleBoardConfirmAction = () => {
     if (!keyboardGamepadControlsEnabled) return false;
     pendingKeyboardDiagonalReplacement = null;
@@ -908,95 +1045,94 @@ export function createDomInputAdapter() {
     const cursor = boardCursorOrDefault(snapshot);
     if (!snapshot || !cursor) return false;
 
-    if (boardNav.selectionKind) {
-      if (
-        (boardNav.selectionKind === BOARD_SELECTION_KINDS.PATH_START
-          || boardNav.selectionKind === BOARD_SELECTION_KINDS.PATH_END)
-      ) {
-        const { afterSnapshot, changed } = runGameCommand(GAME_COMMANDS.FINALIZE_PATH);
-        clearKeyboardWallPreviewState(afterSnapshot);
-        commitBoardNavState({
-          cursor,
-          selectionKind: null,
-          navActive: true,
-        });
-        syncBoardNavSnapshot(afterSnapshot);
-        return changed || true;
-      }
-      if (boardNav.selectionKind === BOARD_SELECTION_KINDS.WALL) {
-        const anchor = cloneCursor(boardNav.selectionCursor) || cursor;
-        if (anchor && canDropWall(snapshot, anchor, cursor)) {
-          const target = { r: cursor.r, c: cursor.c };
-          const { afterSnapshot, changed } = runGameCommand(GAME_COMMANDS.WALL_MOVE_ATTEMPT, {
-            from: anchor,
-            to: target,
-          });
-          if (changed) {
-            clearKeyboardWallPreviewState(afterSnapshot);
-            commitBoardNavState({
-              cursor: target,
-              selectionCursor: target,
-              selectionKind: BOARD_SELECTION_KINDS.WALL,
-              navActive: true,
-            });
-            syncBoardNavSnapshot(afterSnapshot);
-            return true;
-          }
-        }
-      }
-      clearKeyboardWallPreviewState(snapshot);
-      return commitBoardNavState({
-        cursor,
-        selectionKind: null,
-        navActive: true,
-      });
+    const selectionKind = boardNav.selectionKind;
+    if (isPathEndpointSelectionKind(selectionKind)) {
+      return finalizeBoardPathSelection(cursor);
     }
-
-    const cellType = snapshot.gridData?.[cursor.r]?.[cursor.c];
-    if (cellType === CELL_TYPES.MOVABLE_WALL) {
-      setKeyboardWallPreviewVisible(true, snapshot);
-      return commitBoardNavState({
-        cursor,
-        selectionCursor: cursor,
-        selectionKind: BOARD_SELECTION_KINDS.WALL,
-        navActive: true,
-      });
+    if (selectionKind === BOARD_SELECTION_KINDS.WALL) {
+      if (tryMoveKeyboardWallSelection(snapshot, cursor)) return true;
+      return clearBoardNavSelection(cursor, snapshot);
     }
+    if (selectionKind) {
+      return clearBoardNavSelection(cursor, snapshot);
+    }
+    return handleUnselectedBoardConfirm(snapshot, cursor);
+  };
 
-    if (!Array.isArray(snapshot.path) || snapshot.path.length === 0) {
-      if (!isUsableCell(snapshot, cursor.r, cursor.c)) return false;
-      const { afterSnapshot, changed } = runGameCommand(GAME_COMMANDS.START_OR_STEP, cursor);
-      if (!changed) {
-        syncBoardNavSnapshot(afterSnapshot);
-        return false;
-      }
-      const endpoint = afterSnapshot?.path?.[afterSnapshot.path.length - 1] || cursor;
-      commitBoardNavState({
-        cursor: endpoint,
-        selectionKind: BOARD_SELECTION_KINDS.PATH_END,
-        navActive: true,
-      });
+  const moveKeyboardWallSelection = (snapshot, cursor, delta) => {
+    pendingKeyboardDiagonalReplacement = null;
+    if (!isOrthogonalDelta(delta)) return false;
+    const target = {
+      r: cursor.r + delta.r,
+      c: cursor.c + delta.c,
+    };
+    if (!isPointInBounds(snapshot, target)) return false;
+    keyboardWallPreviewVisible = true;
+    commitBoardNavState({
+      cursor: target,
+      selectionKind: BOARD_SELECTION_KINDS.WALL,
+      navActive: true,
+    });
+    return true;
+  };
+
+  const tryApplyPendingKeyboardPathReplacement = (snapshot, selectionKind, delta) => {
+    if (!canUsePendingKeyboardDiagonalReplacement(snapshot, selectionKind, delta)) return false;
+    const replaceSourceTip = pendingKeyboardDiagonalReplacement?.sourceTip;
+    const replacementTarget = {
+      r: replaceSourceTip.r + delta.r,
+      c: replaceSourceTip.c + delta.c,
+    };
+    pendingKeyboardDiagonalReplacement = null;
+    const { afterSnapshot, changed } = runGameCommand(GAME_COMMANDS.APPLY_PATH_DRAG_SEQUENCE, {
+      side: resolvePathSelectionSide(selectionKind),
+      steps: [
+        { r: replaceSourceTip.r, c: replaceSourceTip.c },
+        replacementTarget,
+      ],
+    });
+    if (!changed) return false;
+    syncBoardNavSnapshot(afterSnapshot);
+    return true;
+  };
+
+  const rememberPendingKeyboardPathReplacement = (selectionKind, delta, source, afterSnapshot) => {
+    if (!isOrthogonalDelta(delta)) {
+      pendingKeyboardDiagonalReplacement = null;
+      return;
+    }
+    pendingKeyboardDiagonalReplacement = {
+      side: resolvePathSelectionSide(selectionKind),
+      delta,
+      sourceTip: { r: source.r, c: source.c },
+      afterVersion: afterSnapshot?.version ?? null,
+    };
+  };
+
+  const handleSelectedPathDirectionalAction = (snapshot, delta) => {
+    const selectionKind = boardNav.selectionKind;
+    const source = resolveSelectedPathEndpoint(snapshot, selectionKind);
+    if (!source) {
+      pendingKeyboardDiagonalReplacement = null;
+      syncBoardNavSnapshot(snapshot);
+      return false;
+    }
+    if (tryApplyPendingKeyboardPathReplacement(snapshot, selectionKind, delta)) {
       return true;
     }
-
-    const head = snapshot.path[0] || null;
-    const tail = snapshot.path[snapshot.path.length - 1] || null;
-    if (tail && pointMatches(cursor, tail)) {
-      return commitBoardNavState({
-        cursor,
-        selectionKind: BOARD_SELECTION_KINDS.PATH_END,
-        navActive: true,
-      });
-    }
-    if (snapshot.path.length > 1 && head && pointMatches(cursor, head)) {
-      return commitBoardNavState({
-        cursor,
-        selectionKind: BOARD_SELECTION_KINDS.PATH_START,
-        navActive: true,
-      });
-    }
-
-    return false;
+    const target = {
+      r: source.r + delta.r,
+      c: source.c + delta.c,
+    };
+    if (!isPointInBounds(snapshot, target)) return false;
+    const commandType = selectionKind === BOARD_SELECTION_KINDS.PATH_START
+      ? GAME_COMMANDS.START_OR_STEP_FROM_START
+      : GAME_COMMANDS.START_OR_STEP;
+    const { afterSnapshot, changed } = runGameCommand(commandType, target);
+    if (!changed) return false;
+    rememberPendingKeyboardPathReplacement(selectionKind, delta, source, afterSnapshot);
+    syncBoardNavSnapshot(afterSnapshot);
+    return true;
   };
 
   const handleBoardDirectionalAction = (directionOrDelta) => {
@@ -1009,95 +1145,10 @@ export function createDomInputAdapter() {
     if (!boardNav.selectionKind) {
       return moveFreeBoardCursor(delta, snapshot);
     }
-
     if (boardNav.selectionKind === BOARD_SELECTION_KINDS.WALL) {
-      pendingKeyboardDiagonalReplacement = null;
-      if (Math.abs(delta.r) + Math.abs(delta.c) !== 1) return false;
-      const target = {
-        r: cursor.r + delta.r,
-        c: cursor.c + delta.c,
-      };
-      if (!isPointInBounds(snapshot, target)) return false;
-      keyboardWallPreviewVisible = true;
-      commitBoardNavState({
-        cursor: target,
-        selectionKind: BOARD_SELECTION_KINDS.WALL,
-        navActive: true,
-      });
-      return true;
+      return moveKeyboardWallSelection(snapshot, cursor, delta);
     }
-
-    const source = resolveSelectedPathEndpoint(snapshot, boardNav.selectionKind);
-    if (!source) {
-      pendingKeyboardDiagonalReplacement = null;
-      syncBoardNavSnapshot(snapshot);
-      return false;
-    }
-
-    if (Math.abs(delta.r) === 1 && Math.abs(delta.c) === 1) {
-      const replaceSide = boardNav.selectionKind === BOARD_SELECTION_KINDS.PATH_START ? 'start' : 'end';
-      const replaceDelta = pendingKeyboardDiagonalReplacement?.delta;
-      const replaceSourceTip = pendingKeyboardDiagonalReplacement?.sourceTip;
-      const canReplaceLastSingleAxisStep = Boolean(
-        pendingKeyboardDiagonalReplacement
-        && pendingKeyboardDiagonalReplacement.side === replaceSide
-        && pendingKeyboardDiagonalReplacement.afterVersion === snapshot.version
-        && Number.isInteger(replaceSourceTip?.r)
-        && Number.isInteger(replaceSourceTip?.c)
-        && (
-          (replaceDelta?.r === delta.r && replaceDelta?.c === 0)
-          || (replaceDelta?.r === 0 && replaceDelta?.c === delta.c)
-        )
-      );
-      if (canReplaceLastSingleAxisStep) {
-        const replacementTarget = {
-          r: replaceSourceTip.r + delta.r,
-          c: replaceSourceTip.c + delta.c,
-        };
-        pendingKeyboardDiagonalReplacement = null;
-        if (
-          isPointInBounds(snapshot, replacementTarget)
-          && isUsableCell(snapshot, replacementTarget.r, replacementTarget.c)
-          && isAdjacentMove(snapshot, replaceSourceTip, replacementTarget)
-        ) {
-          const { afterSnapshot, changed } = runGameCommand(GAME_COMMANDS.APPLY_PATH_DRAG_SEQUENCE, {
-            side: replaceSide,
-            steps: [
-              { r: replaceSourceTip.r, c: replaceSourceTip.c },
-              replacementTarget,
-            ],
-          });
-          if (changed) {
-            syncBoardNavSnapshot(afterSnapshot);
-            return true;
-          }
-        }
-      }
-    }
-
-    const target = {
-      r: source.r + delta.r,
-      c: source.c + delta.c,
-    };
-    if (!isPointInBounds(snapshot, target)) return false;
-
-    const commandType = boardNav.selectionKind === BOARD_SELECTION_KINDS.PATH_START
-      ? GAME_COMMANDS.START_OR_STEP_FROM_START
-      : GAME_COMMANDS.START_OR_STEP;
-    const { afterSnapshot, changed } = runGameCommand(commandType, target);
-    if (!changed) return false;
-    if (Math.abs(delta.r) + Math.abs(delta.c) === 1) {
-      pendingKeyboardDiagonalReplacement = {
-        side: boardNav.selectionKind === BOARD_SELECTION_KINDS.PATH_START ? 'start' : 'end',
-        delta,
-        sourceTip: { r: source.r, c: source.c },
-        afterVersion: afterSnapshot?.version ?? null,
-      };
-    } else {
-      pendingKeyboardDiagonalReplacement = null;
-    }
-    syncBoardNavSnapshot(afterSnapshot);
-    return true;
+    return handleSelectedPathDirectionalAction(snapshot, delta);
   };
 
   const handleBoardShortcutAction = (shortcut) => {
@@ -1161,12 +1212,14 @@ export function createDomInputAdapter() {
   };
 
   const resolvePressedKeyboardDirection = () => {
-    const vertical = keyboardDirectionsPressed.up === keyboardDirectionsPressed.down
-      ? 0
-      : (keyboardDirectionsPressed.up ? -1 : 1);
-    const horizontal = keyboardDirectionsPressed.left === keyboardDirectionsPressed.right
-      ? 0
-      : (keyboardDirectionsPressed.left ? -1 : 1);
+    let vertical = 0;
+    if (keyboardDirectionsPressed.up !== keyboardDirectionsPressed.down) {
+      vertical = keyboardDirectionsPressed.up ? -1 : 1;
+    }
+    let horizontal = 0;
+    if (keyboardDirectionsPressed.left !== keyboardDirectionsPressed.right) {
+      horizontal = keyboardDirectionsPressed.left ? -1 : 1;
+    }
     if (vertical === 0 && horizontal === 0) return null;
     return { r: vertical, c: horizontal };
   };
@@ -1208,8 +1261,7 @@ export function createDomInputAdapter() {
     const replaceDelta = pendingKeyboardDiagonalReplacement?.delta;
     const replaceSourceTip = pendingKeyboardDiagonalReplacement?.sourceTip;
     if (
-      !pendingKeyboardDiagonalReplacement
-      || pendingKeyboardDiagonalReplacement.side !== replaceSide
+      pendingKeyboardDiagonalReplacement?.side !== replaceSide
       || pendingKeyboardDiagonalReplacement.afterVersion !== snapshot?.version
       || !Number.isInteger(replaceSourceTip?.r)
       || !Number.isInteger(replaceSourceTip?.c)
@@ -1264,16 +1316,16 @@ export function createDomInputAdapter() {
 
   const handleBoardDirectionalChord = (components = [], consumedDelta = null) => {
     let changed = false;
-    for (let i = 0; i < components.length; i += 1) {
+    for (const element of components) {
       if (
         Number.isInteger(consumedDelta?.r)
         && Number.isInteger(consumedDelta?.c)
-        && components[i]?.delta?.r === consumedDelta.r
-        && components[i]?.delta?.c === consumedDelta.c
+        && element?.delta?.r === consumedDelta.r
+        && element?.delta?.c === consumedDelta.c
       ) {
         continue;
       }
-      const didChange = handleBoardDirectionalAction(components[i]?.delta);
+      const didChange = handleBoardDirectionalAction(element?.delta);
       changed = didChange || changed;
     }
     return changed;
@@ -1344,68 +1396,107 @@ export function createDomInputAdapter() {
     });
   };
 
+  const resetKeyboardDirectionFrameState = () => {
+    resetKeyboardDirectionState();
+    clearBoardNavInvalidMovePreview();
+    refreshBoardNavVisibility();
+  };
+
+  const syncHeldKeyboardDirectionState = (directionKey, previousDirectionKey, timestamp) => {
+    if (directionKey === previousDirectionKey) return;
+    const cameFromIdle = previousDirectionKey === null;
+    keyboardDirectionState.directionKey = directionKey;
+    keyboardDirectionState.hasDispatched = false;
+    keyboardDirectionState.nextActionAtMs = cameFromIdle
+      ? (timestamp + KEYBOARD_DIRECTION_CHORD_DELAY_MS)
+      : timestamp;
+  };
+
+  const resolveHeldKeyboardDirectionAction = (
+    snapshot,
+    direction,
+    directionComponents,
+    consumedSplitAxisDelta,
+  ) => {
+    const shouldHandleChord = (
+      shouldSplitSelectedPathDiagonalChord(snapshot, direction, directionComponents)
+      || (
+        !boardNav.selectionKind
+        && consumedSplitAxisDelta
+        && directionComponents.length === 2
+      )
+    );
+    if (shouldHandleChord) {
+      return handleBoardDirectionalChord(directionComponents, consumedSplitAxisDelta);
+    }
+    return handleBoardDirectionalAction(direction);
+  };
+
+  const resolveKeyboardDirectionRepeatDelay = (directionKey, previousDirectionKey) => (
+    previousDirectionKey !== null && directionKey === previousDirectionKey
+      ? KEYBOARD_DIRECTION_REPEAT_MS
+      : KEYBOARD_DIRECTION_INITIAL_DELAY_MS
+  );
+
+  const dispatchHeldKeyboardDirection = (
+    timestamp,
+    direction,
+    directionComponents,
+    directionKey,
+    previousDirectionKey,
+    previousDirectionHadDispatched,
+  ) => {
+    if (timestamp < keyboardDirectionState.nextActionAtMs) return;
+    const previouslyConsumedDelta = parseDirectionKeyDelta(previousDirectionKey);
+    const consumedSplitAxisDelta = (
+      directionKey !== previousDirectionKey
+      && previousDirectionHadDispatched === true
+      && isOrthogonalDelta(previouslyConsumedDelta)
+    )
+      ? previouslyConsumedDelta
+      : null;
+    const snapshot = readSnapshot();
+    const handled = resolveHeldKeyboardDirectionAction(
+      snapshot,
+      direction,
+      directionComponents,
+      consumedSplitAxisDelta,
+    );
+    if (handled) clearBoardNavInvalidMovePreview();
+    else setBoardNavInvalidMovePreview(direction);
+    keyboardDirectionState.hasDispatched = true;
+    keyboardDirectionState.nextActionAtMs = timestamp + resolveKeyboardDirectionRepeatDelay(
+      directionKey,
+      previousDirectionKey,
+    );
+  };
+
   const pollKeyboardDirectionFrame = (timestamp = nowMs()) => {
     keyboardDirectionFrame = 0;
     if (!isGridFocusedForKeyboardBoardInput()) {
-      resetKeyboardDirectionState();
-      clearBoardNavInvalidMovePreview();
-      refreshBoardNavVisibility();
+      resetKeyboardDirectionFrameState();
       return;
     }
 
     const direction = resolvePressedKeyboardDirection();
     const directionComponents = resolvePressedKeyboardDirectionComponents();
     if (!direction) {
-      resetKeyboardDirectionState();
-      clearBoardNavInvalidMovePreview();
-      refreshBoardNavVisibility();
+      resetKeyboardDirectionFrameState();
       return;
     }
 
     const directionKey = `${direction.r},${direction.c}`;
     const previousDirectionKey = keyboardDirectionState.directionKey;
     const previousDirectionHadDispatched = keyboardDirectionState.hasDispatched;
-    if (directionKey !== previousDirectionKey) {
-      const cameFromIdle = previousDirectionKey === null;
-      keyboardDirectionState.directionKey = directionKey;
-      keyboardDirectionState.hasDispatched = false;
-      keyboardDirectionState.nextActionAtMs = cameFromIdle
-        ? (timestamp + KEYBOARD_DIRECTION_CHORD_DELAY_MS)
-        : timestamp;
-    }
-
-    if (timestamp >= keyboardDirectionState.nextActionAtMs) {
-      const previouslyConsumedDelta = parseDirectionKeyDelta(previousDirectionKey);
-      const consumedSplitAxisDelta = (
-        directionKey !== previousDirectionKey
-        && previousDirectionHadDispatched === true
-        && Math.abs(previouslyConsumedDelta?.r ?? 0) + Math.abs(previouslyConsumedDelta?.c ?? 0) === 1
-      )
-        ? previouslyConsumedDelta
-        : null;
-      const snapshot = readSnapshot();
-      const handled = shouldSplitSelectedPathDiagonalChord(snapshot, direction, directionComponents)
-        ? handleBoardDirectionalChord(directionComponents, consumedSplitAxisDelta)
-        : (
-          !boardNav.selectionKind
-          && consumedSplitAxisDelta
-          && directionComponents.length === 2
-            ? handleBoardDirectionalChord(directionComponents, consumedSplitAxisDelta)
-            : handleBoardDirectionalAction(direction)
-        );
-      if (!handled) setBoardNavInvalidMovePreview(direction);
-      else clearBoardNavInvalidMovePreview();
-      keyboardDirectionState.hasDispatched = true;
-      keyboardDirectionState.nextActionAtMs = timestamp + (
-        previousDirectionKey === null
-          ? KEYBOARD_DIRECTION_INITIAL_DELAY_MS
-          : (
-            directionKey !== previousDirectionKey
-              ? KEYBOARD_DIRECTION_INITIAL_DELAY_MS
-              : KEYBOARD_DIRECTION_REPEAT_MS
-          )
-      );
-    }
+    syncHeldKeyboardDirectionState(directionKey, previousDirectionKey, timestamp);
+    dispatchHeldKeyboardDirection(
+      timestamp,
+      direction,
+      directionComponents,
+      directionKey,
+      previousDirectionKey,
+      previousDirectionHadDispatched,
+    );
 
     refreshBoardNavVisibility();
     scheduleKeyboardDirectionPolling();
@@ -1549,72 +1640,51 @@ export function createDomInputAdapter() {
     });
   };
 
+  const pressKeyboardDirectionKey = (directionKey) => {
+    if (!keyboardDirectionsPressed[directionKey]) {
+      keyboardDirectionPressOrder[directionKey] = nextKeyboardDirectionPressOrder++;
+    }
+    keyboardDirectionsPressed[directionKey] = true;
+    scheduleKeyboardDirectionPolling();
+    refreshBoardNavVisibility();
+  };
+
+  const handleGridConfirmKeyDown = (event, confirmKeyId) => {
+    keyboardConfirmKeysPressed[confirmKeyId] = true;
+    if (event.repeat) return;
+    const handled = handleBoardShortcutAction('confirm');
+    if (handled) return;
+    const snapshot = readSnapshot();
+    const cursor = boardCursorOrDefault(snapshot);
+    setTransientBoardSelectionVisible(Boolean(cursor) && !isBoardCursorInteractive(snapshot, cursor));
+  };
+
+  const handleGridShortcutKeyDown = (key, repeat) => {
+    if (repeat) return;
+    const shortcut = KEYBOARD_SHORTCUT_ACTIONS[key] || null;
+    if (!shortcut) return;
+    handleBoardShortcutAction(shortcut);
+  };
+
   const onGridKeyDown = (event) => {
     if (!keyboardGamepadControlsEnabled) return;
     if (!refs?.gridEl || event?.altKey || event?.ctrlKey || event?.metaKey) return;
     if (typeof document !== 'undefined' && document.activeElement !== refs.gridEl) return;
 
     const key = event.key;
-    const isGameplayKey = (
-      key === 'ArrowUp'
-      || key === 'ArrowDown'
-      || key === 'ArrowLeft'
-      || key === 'ArrowRight'
-      || key === 'Enter'
-      || key === ' '
-      || key === 'Spacebar'
-      || key === 'Backspace'
-      || key === 'Delete'
-      || key === 'r'
-      || key === 'R'
-      || key === 'PageUp'
-      || key === 'PageDown'
-    );
-    let handled = false;
-    const confirmKeyId = resolveConfirmKeyId(key);
-
-    if (key === 'ArrowUp') {
-      if (!keyboardDirectionsPressed.up) keyboardDirectionPressOrder.up = nextKeyboardDirectionPressOrder++;
-      keyboardDirectionsPressed.up = true;
-      scheduleKeyboardDirectionPolling();
-      refreshBoardNavVisibility();
-      handled = true;
-    } else if (key === 'ArrowDown') {
-      if (!keyboardDirectionsPressed.down) keyboardDirectionPressOrder.down = nextKeyboardDirectionPressOrder++;
-      keyboardDirectionsPressed.down = true;
-      scheduleKeyboardDirectionPolling();
-      refreshBoardNavVisibility();
-      handled = true;
-    } else if (key === 'ArrowLeft') {
-      if (!keyboardDirectionsPressed.left) keyboardDirectionPressOrder.left = nextKeyboardDirectionPressOrder++;
-      keyboardDirectionsPressed.left = true;
-      scheduleKeyboardDirectionPolling();
-      refreshBoardNavVisibility();
-      handled = true;
-    } else if (key === 'ArrowRight') {
-      if (!keyboardDirectionsPressed.right) keyboardDirectionPressOrder.right = nextKeyboardDirectionPressOrder++;
-      keyboardDirectionsPressed.right = true;
-      scheduleKeyboardDirectionPolling();
-      refreshBoardNavVisibility();
-      handled = true;
-    } else if (confirmKeyId) {
-      keyboardConfirmKeysPressed[confirmKeyId] = true;
-      if (!event.repeat) {
-        handled = handleBoardShortcutAction('confirm');
-        if (!handled) {
-          const snapshot = readSnapshot();
-          const cursor = boardCursorOrDefault(snapshot);
-          setTransientBoardSelectionVisible(Boolean(cursor) && !isBoardCursorInteractive(snapshot, cursor));
-        }
-      }
-    } else if ((key === 'Backspace' || key === 'Delete') && !event.repeat) handled = handleBoardShortcutAction('reset');
-    else if ((key === 'r' || key === 'R') && !event.repeat) handled = handleBoardShortcutAction('reverse');
-    else if (key === 'PageUp' && !event.repeat) handled = handleBoardShortcutAction('prevLevel');
-    else if (key === 'PageDown' && !event.repeat) handled = handleBoardShortcutAction('nextLevel');
-
-    if (!isGameplayKey) return;
+    if (!GAMEPLAY_KEYBOARD_KEYS.has(key)) return;
     event.preventDefault?.();
-    if (!handled) return;
+    const directionKey = KEYBOARD_DIRECTION_KEYS[key];
+    if (directionKey) {
+      pressKeyboardDirectionKey(directionKey);
+      return;
+    }
+    const confirmKeyId = resolveConfirmKeyId(key);
+    if (confirmKeyId) {
+      handleGridConfirmKeyDown(event, confirmKeyId);
+      return;
+    }
+    handleGridShortcutKeyDown(key, event.repeat);
   };
 
   const onGridKeyUp = (event) => {
@@ -1773,165 +1843,179 @@ export function createDomInputAdapter() {
     e.preventDefault();
   };
 
+  const updatePathDragHover = (snapshot, pointerClientX, pointerClientY) => {
+    if (!pathDrag) return;
+    const hoverMetrics = refreshDragGridMetrics(snapshot, true);
+    const hoverCell = snapPathCellFromPoint(pointerClientX, pointerClientY, snapshot, hoverMetrics);
+    const hoverKey = hoverCell ? `${hoverCell.r},${hoverCell.c}` : '';
+    if (pathDrag.lastHoverKey === hoverKey) return;
+    pathDrag.lastHoverKey = hoverKey;
+    sendInteractionUpdate(INTERACTION_UPDATES.PATH_DRAG, {
+      isPathDragging: true,
+      pathDragSide: pathDrag.side,
+      pathDragCursor: cloneCursor(hoverCell),
+    });
+  };
+
+  const readPathDragPointerContext = (snapshot, pointerClientX, pointerClientY) => {
+    const metrics = refreshDragGridMetrics(snapshot, true);
+    const rect = metrics
+      ? null
+      : refs.gridEl.getBoundingClientRect();
+    return {
+      px: metrics ? (pointerClientX - metrics.left) : (pointerClientX - rect.left),
+      py: metrics ? (pointerClientY - metrics.top) : (pointerClientY - rect.top),
+      pointerCell: snapPathCellFromPoint(pointerClientX, pointerClientY, snapshot, metrics),
+      cellSize: metrics?.size ?? getCellSize(refs.gridEl),
+      cellCenter: metrics
+        ? ((r, c) => ({
+          x: metrics.pad + (c * metrics.step) + (metrics.size * 0.5),
+          y: metrics.pad + (r * metrics.step) + (metrics.size * 0.5),
+        }))
+        : ((r, c) => cellCenter(r, c, refs.gridEl)),
+    };
+  };
+
+  const queuePathDragSteps = (snapshot, pointerContext) => {
+    const stepSnapshot = createPathDragSimulation(snapshot);
+    if (!stepSnapshot) return [];
+
+    let stepCount = 0;
+    const maxStepCount = Math.max(1, (stepSnapshot.rows * stepSnapshot.cols) + 1);
+    const queuedSteps = [];
+
+    while (stepCount < maxStepCount) {
+      const headNode = pathDrag.side === 'start'
+        ? stepSnapshot.path[0]
+        : stepSnapshot.path[stepSnapshot.path.length - 1];
+      const backtrackNode = pathDrag.side === 'start'
+        ? stepSnapshot.path[1]
+        : stepSnapshot.path[stepSnapshot.path.length - 2];
+      if (!headNode) break;
+
+      const nextStep = chooseSlipperyPathDragStep({
+        snapshot: stepSnapshot,
+        headNode,
+        backtrackNode,
+        pointer: { x: pointerContext.px, y: pointerContext.py },
+        pointerCell: pointerContext.pointerCell,
+        isUsableCell,
+        isAdjacentMove,
+        cellCenter: pointerContext.cellCenter,
+        cellSize: pointerContext.cellSize,
+      });
+      if (!nextStep) break;
+
+      pathDrag.moved = true;
+      pathDrag.lastCursorKey = `${nextStep.r},${nextStep.c}`;
+      queuedSteps.push({ r: nextStep.r, c: nextStep.c });
+      stepCount += 1;
+      applyPathStepToSimulation(stepSnapshot, pathDrag.side, nextStep);
+
+      const nextHeadNode = pathDrag.side === 'start'
+        ? stepSnapshot.path[0]
+        : stepSnapshot.path[stepSnapshot.path.length - 1];
+      if (
+        !nextHeadNode
+        || pointsMatch(nextHeadNode, headNode)
+        || pointsMatch(nextHeadNode, pointerContext.pointerCell)
+      ) {
+        break;
+      }
+    }
+
+    return queuedSteps;
+  };
+
+  const handleSlipperyPathPointerMove = (snapshot, pointerClientX, pointerClientY) => {
+    const queuedSteps = queuePathDragSteps(
+      snapshot,
+      readPathDragPointerContext(snapshot, pointerClientX, pointerClientY),
+    );
+    if (queuedSteps.length === 0) return;
+    sendGameCommand(GAME_COMMANDS.APPLY_PATH_DRAG_SEQUENCE, {
+      side: pathDrag.side === 'start' ? 'start' : 'end',
+      steps: queuedSteps,
+    });
+  };
+
+  const handleSimplePathPointerMove = (pointerClientX, pointerClientY) => {
+    const cell = cellFromPoint(pointerClientX, pointerClientY);
+    if (!cell) return;
+
+    if (pathDrag && !pathDrag.moved) {
+      if (pointsMatch(pathDrag.origin, cell)) return;
+      pathDrag.moved = true;
+    }
+
+    const cursorKey = `${cell.r},${cell.c}`;
+    const cursorChanged = pathDrag ? pathDrag.lastCursorKey !== cursorKey : true;
+    if (!cursorChanged) return;
+
+    if (pathDrag?.side === 'start') {
+      sendGameCommand(GAME_COMMANDS.START_OR_STEP_FROM_START, { r: cell.r, c: cell.c });
+    } else {
+      sendGameCommand(GAME_COMMANDS.START_OR_STEP, { r: cell.r, c: cell.c });
+    }
+
+    if (pathDrag) pathDrag.lastCursorKey = cursorKey;
+  };
+
+  const handlePathPointerMove = (e) => {
+    if (e.cancelable) e.preventDefault();
+    const pointerClientX = e.clientX;
+    const pointerClientY = e.clientY;
+    const snapshotForInput = pathDrag ? readSnapshot() : null;
+
+    updatePathDragHover(snapshotForInput, pointerClientX, pointerClientY);
+    if (pathDrag && !pathDrag.applyPathCommands) return;
+    if (pathDrag && snapshotForInput) {
+      handleSlipperyPathPointerMove(snapshotForInput, pointerClientX, pointerClientY);
+      return;
+    }
+    handleSimplePathPointerMove(pointerClientX, pointerClientY);
+  };
+
+  const updateWallDragHover = (snapshot, cell) => {
+    const previousHover = wallDrag.hover;
+    if (!cell) {
+      if (!previousHover) return;
+      wallDrag.hover = null;
+      sendInteractionUpdate(INTERACTION_UPDATES.WALL_DROP_TARGET, { dropTarget: null });
+      return;
+    }
+
+    if (canDropWall(snapshot, wallDrag.from, cell)) {
+      if (pointsMatch(previousHover, cell)) return;
+      wallDrag.hover = { r: cell.r, c: cell.c };
+      sendInteractionUpdate(INTERACTION_UPDATES.WALL_DROP_TARGET, { dropTarget: wallDrag.hover });
+      return;
+    }
+
+    if (!previousHover) return;
+    wallDrag.hover = null;
+    sendInteractionUpdate(INTERACTION_UPDATES.WALL_DROP_TARGET, { dropTarget: null });
+  };
+
+  const handleWallPointerMove = (e) => {
+    if (e.cancelable) e.preventDefault();
+    queueWallDragGhostUpdate(e.clientX, e.clientY);
+    const snapshot = readSnapshot();
+    const metrics = refreshDragGridMetrics(snapshot, true);
+    const cell = wallCellFromPoint(e.clientX, e.clientY, snapshot, metrics);
+    updateWallDragHover(snapshot, cell);
+  };
+
   const onPointerMove = (e) => {
     if (activePointerId === null || e.pointerId !== activePointerId) return;
 
     if (dragMode === 'path') {
-      if (e.cancelable) e.preventDefault();
-      const pointerClientX = e.clientX;
-      const pointerClientY = e.clientY;
-      const snapshotForInput = pathDrag ? readSnapshot() : null;
-
-      if (pathDrag) {
-        const hoverMetrics = refreshDragGridMetrics(snapshotForInput, true);
-        const hoverCell = snapPathCellFromPoint(e.clientX, e.clientY, snapshotForInput, hoverMetrics);
-        const hoverKey = hoverCell ? `${hoverCell.r},${hoverCell.c}` : '';
-        if (pathDrag.lastHoverKey !== hoverKey) {
-          pathDrag.lastHoverKey = hoverKey;
-          sendInteractionUpdate(INTERACTION_UPDATES.PATH_DRAG, {
-            isPathDragging: true,
-            pathDragSide: pathDrag.side,
-            pathDragCursor: hoverCell ? { r: hoverCell.r, c: hoverCell.c } : null,
-          });
-        }
-      }
-
-      if (pathDrag && !pathDrag.applyPathCommands) return;
-
-      if (pathDrag && snapshotForInput) {
-        const metrics = refreshDragGridMetrics(snapshotForInput, true);
-        const rect = metrics
-          ? null
-          : refs.gridEl.getBoundingClientRect();
-        const px = metrics ? (pointerClientX - metrics.left) : (pointerClientX - rect.left);
-        const py = metrics ? (pointerClientY - metrics.top) : (pointerClientY - rect.top);
-        const activeCellSize = metrics?.size ?? getCellSize(refs.gridEl);
-        const centerOfCell = metrics
-          ? ((r, c) => ({
-            x: metrics.pad + (c * metrics.step) + (metrics.size * 0.5),
-            y: metrics.pad + (r * metrics.step) + (metrics.size * 0.5),
-          }))
-          : ((r, c) => cellCenter(r, c, refs.gridEl));
-        const pointerCell = snapPathCellFromPoint(
-          pointerClientX,
-          pointerClientY,
-          snapshotForInput,
-          metrics,
-        );
-        const dragCommandSide = pathDrag.side === 'start' ? 'start' : 'end';
-
-        let stepSnapshot = createPathDragSimulation(snapshotForInput);
-        let stepCount = 0;
-        const maxStepCount = Math.max(1, (stepSnapshot.rows * stepSnapshot.cols) + 1);
-        const queuedSteps = [];
-
-        while (stepCount < maxStepCount) {
-          const headNode = pathDrag.side === 'start'
-            ? stepSnapshot.path[0]
-            : stepSnapshot.path[stepSnapshot.path.length - 1];
-          const backtrackNode = pathDrag.side === 'start'
-            ? stepSnapshot.path[1]
-            : stepSnapshot.path[stepSnapshot.path.length - 2];
-          if (!headNode) break;
-
-          const nextStep = chooseSlipperyPathDragStep({
-            snapshot: stepSnapshot,
-            headNode,
-            backtrackNode,
-            pointer: { x: px, y: py },
-            pointerCell,
-            isUsableCell,
-            isAdjacentMove,
-            cellCenter: centerOfCell,
-            cellSize: activeCellSize,
-          });
-          if (!nextStep) break;
-
-          pathDrag.moved = true;
-          pathDrag.lastCursorKey = `${nextStep.r},${nextStep.c}`;
-          queuedSteps.push({ r: nextStep.r, c: nextStep.c });
-          stepCount += 1;
-          const nextSnapshot = applyPathStepToSimulation(stepSnapshot, pathDrag.side, nextStep);
-          const nextHeadNode = pathDrag.side === 'start'
-            ? nextSnapshot?.path?.[0]
-            : nextSnapshot?.path?.[nextSnapshot?.path?.length - 1];
-          if (
-            !nextHeadNode
-            || (nextHeadNode.r === headNode.r && nextHeadNode.c === headNode.c)
-          ) {
-            break;
-          }
-
-          stepSnapshot = nextSnapshot;
-          if (
-            pointerCell
-            && nextHeadNode.r === pointerCell.r
-            && nextHeadNode.c === pointerCell.c
-          ) {
-            break;
-          }
-        }
-
-        if (queuedSteps.length > 0) {
-          sendGameCommand(GAME_COMMANDS.APPLY_PATH_DRAG_SEQUENCE, {
-            side: dragCommandSide,
-            steps: queuedSteps,
-          });
-        }
-
-        return;
-      }
-
-      const cell = cellFromPoint(pointerClientX, pointerClientY);
-      if (!cell) return;
-
-      if (pathDrag && !pathDrag.moved) {
-        if (pathDrag.origin.r === cell.r && pathDrag.origin.c === cell.c) return;
-        pathDrag.moved = true;
-      }
-
-      const cursorKey = `${cell.r},${cell.c}`;
-      const cursorChanged = pathDrag ? pathDrag.lastCursorKey !== cursorKey : true;
-      if (!cursorChanged) return;
-
-      if (pathDrag && pathDrag.side === 'start') {
-        sendGameCommand(GAME_COMMANDS.START_OR_STEP_FROM_START, { r: cell.r, c: cell.c });
-      } else {
-        sendGameCommand(GAME_COMMANDS.START_OR_STEP, { r: cell.r, c: cell.c });
-      }
-
-      if (pathDrag) pathDrag.lastCursorKey = cursorKey;
+      handlePathPointerMove(e);
       return;
     }
 
     if (dragMode === 'wall') {
-      if (e.cancelable) e.preventDefault();
-      queueWallDragGhostUpdate(e.clientX, e.clientY);
-
-      const snapshot = readSnapshot();
-      const metrics = refreshDragGridMetrics(snapshot, true);
-      const cell = wallCellFromPoint(e.clientX, e.clientY, snapshot, metrics);
-      const previousHover = wallDrag.hover;
-      if (!cell) {
-        if (previousHover) {
-          wallDrag.hover = null;
-          sendInteractionUpdate(INTERACTION_UPDATES.WALL_DROP_TARGET, { dropTarget: null });
-        }
-        return;
-      }
-
-      if (canDropWall(snapshot, wallDrag.from, cell)) {
-        const sameHover = previousHover && previousHover.r === cell.r && previousHover.c === cell.c;
-        if (!sameHover) {
-          wallDrag.hover = { r: cell.r, c: cell.c };
-          sendInteractionUpdate(INTERACTION_UPDATES.WALL_DROP_TARGET, { dropTarget: wallDrag.hover });
-        }
-      } else {
-        if (previousHover) {
-          wallDrag.hover = null;
-          sendInteractionUpdate(INTERACTION_UPDATES.WALL_DROP_TARGET, { dropTarget: null });
-        }
-      }
+      handleWallPointerMove(e);
     }
   };
 
@@ -2009,7 +2093,7 @@ export function createDomInputAdapter() {
       addListener(window?.visualViewport, 'resize', syncViewportScroll, { passive: true });
 
       addListener(refs.levelSel, 'change', (e) => {
-        const value = parseInt(e.target.value, 10);
+        const value = Number.parseInt(e.target.value, 10);
         if (!Number.isInteger(value)) return;
         sendUiAction(UI_ACTIONS.LEVEL_SELECT, { value });
       });

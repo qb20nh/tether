@@ -73,7 +73,7 @@ export const isAdjacentMove = (snapshot, a, b) => {
   if (dr === 1 && dc === 1) {
     const vr = Math.max(a.r, b.r);
     const vc = Math.max(a.c, b.c);
-    return snapshot.stitchSet && snapshot.stitchSet.has(keyV(vr, vc));
+    return snapshot.stitchSet?.has(keyV(vr, vc));
   }
   return false;
 };

@@ -36,6 +36,14 @@ const parseGridKey = (key, out = keyScratch) => {
   return out;
 };
 
+const applyClassToKeys = (keys, desired, className, shouldApply = null) => {
+  keys?.forEach((key) => {
+    const parsed = parseGridKey(key);
+    const cell = parsed ? desired[parsed.r]?.[parsed.c] : null;
+    if (cell && (!shouldApply || shouldApply(cell))) cell.classes.push(className);
+  });
+};
+
 /**
  * Build cell classes/index/mark HTML from state + evaluation.
  */
@@ -75,38 +83,16 @@ export function buildBoardCellViewModel(snapshot, results, resolveMarkHtml, out 
     }
   }
 
-  if (hintStatus) {
-    hintStatus.badKeys?.forEach((k) => {
-      const parsed = parseGridKey(k);
-      if (parsed && desired[parsed.r]?.[parsed.c]) desired[parsed.r][parsed.c].classes.push('badHint');
-    });
-
-    hintStatus.goodKeys?.forEach((k) => {
-      const parsed = parseGridKey(k);
-      if (parsed && desired[parsed.r]?.[parsed.c]) desired[parsed.r][parsed.c].classes.push('goodHint');
-    });
-  }
-
-  if (rpsStatus) {
-    rpsStatus.badKeys?.forEach((k) => {
-      const parsed = parseGridKey(k);
-      if (parsed && desired[parsed.r]?.[parsed.c]) desired[parsed.r][parsed.c].classes.push('badRps');
-    });
-
-    rpsStatus.goodKeys?.forEach((k) => {
-      const parsed = parseGridKey(k);
-      if (parsed && desired[parsed.r]?.[parsed.c] && !desired[parsed.r][parsed.c].classes.includes('badRps')) {
-        desired[parsed.r][parsed.c].classes.push('goodRps');
-      }
-    });
-  }
-
-  if (blockedStatus) {
-    blockedStatus.badKeys?.forEach((k) => {
-      const parsed = parseGridKey(k);
-      if (parsed && desired[parsed.r]?.[parsed.c]) desired[parsed.r][parsed.c].classes.push('badBlocked');
-    });
-  }
+  applyClassToKeys(hintStatus?.badKeys, desired, 'badHint');
+  applyClassToKeys(hintStatus?.goodKeys, desired, 'goodHint');
+  applyClassToKeys(rpsStatus?.badKeys, desired, 'badRps');
+  applyClassToKeys(
+    rpsStatus?.goodKeys,
+    desired,
+    'goodRps',
+    (cell) => !cell.classes.includes('badRps'),
+  );
+  applyClassToKeys(blockedStatus?.badKeys, desired, 'badBlocked');
 
   return desired;
 }
