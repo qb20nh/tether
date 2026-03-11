@@ -51,7 +51,7 @@ const isLocalhostHostname = (hostname = '') =>
 const CURRENT_BUILD_CACHES = Object.freeze([APP_CACHE, DAILY_CACHE]);
 
 const isCacheableResponse = (response) =>
-  Boolean(response && response.ok && response.type === 'basic');
+  Boolean(response?.ok && response.type === 'basic');
 
 const isNavigationRequest = (request) =>
   request.mode === 'navigate' || request.destination === 'document';
@@ -151,8 +151,8 @@ const fetchFresh = (request, options = {}) => {
 
 const readHtmlTagAttribute = (tagSource, attributeName) => {
   if (typeof tagSource !== 'string' || typeof attributeName !== 'string') return '';
-  const re = new RegExp(`${attributeName}\\s*=\\s*("[^"]*"|'[^']*'|[^\\s>]+)`, 'i');
-  const match = tagSource.match(re);
+  const re = new RegExp(String.raw`${attributeName}\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)`, 'i');
+  const match = new RegExp(re).exec(tagSource);
   if (!match) return '';
   const raw = match[1];
   if (
@@ -188,8 +188,7 @@ const collectCriticalShellAssetUrls = (shellHtml, shellUrl = resolveShellUrl()) 
   };
 
   const tagRe = /<(script|link)\b[^>]*>/gi;
-  let tagMatch = tagRe.exec(shellHtml);
-  while (tagMatch) {
+  for (const tagMatch of shellHtml.matchAll(tagRe)) {
     const tag = tagMatch[0];
     const tagName = String(tagMatch[1] || '').toLowerCase();
     if (tagName === 'script') {
@@ -200,17 +199,11 @@ const collectCriticalShellAssetUrls = (shellHtml, shellUrl = resolveShellUrl()) 
       }
     } else if (tagName === 'link') {
       const href = readHtmlTagAttribute(tag, 'href');
-      if (href) {
-        const relTokens = readHtmlTagAttribute(tag, 'rel')
-          .toLowerCase()
-          .split(/\s+/)
-          .filter((token) => token.length > 0);
-        if (relTokens.includes('stylesheet')) {
-          pushUnique(href);
-        }
+      const relTokens = readHtmlTagAttribute(tag, 'rel').toLowerCase().split(/\s+/);
+      if (href && relTokens.includes('stylesheet')) {
+        pushUnique(href);
       }
     }
-    tagMatch = tagRe.exec(shellHtml);
   }
 
   return urls;
@@ -506,7 +499,7 @@ let metaDbPromise = null;
 const openMetaDb = async () => {
   if (metaDbPromise) return metaDbPromise;
   if (typeof indexedDB === 'undefined') {
-    throw new Error('IndexedDB is unavailable in service worker context.');
+    throw new TypeError('IndexedDB is unavailable in service worker context.');
   }
 
   metaDbPromise = new Promise((resolve, reject) => {
@@ -766,7 +759,7 @@ const mergeUpdatePolicyPayload = (state, payload = {}) => {
     ...normalizeUpdatePolicyPayload(state),
   };
 
-  if (Object.prototype.hasOwnProperty.call(payload, 'autoUpdateEnabled')) {
+  if (Object.hasOwn(payload, 'autoUpdateEnabled')) {
     next.autoUpdateEnabled = normalizeBool(payload.autoUpdateEnabled, next.autoUpdateEnabled);
   }
 
@@ -861,41 +854,29 @@ const mergeDailyStatePayload = (state, payload) => {
     },
   };
 
-  if (Object.prototype.hasOwnProperty.call(payload, 'dailyId')) {
-    next.dailyId = payload.dailyId;
-  }
-  if (Object.prototype.hasOwnProperty.call(payload, 'hardInvalidateAtUtcMs')) {
-    next.hardInvalidateAtUtcMs = payload.hardInvalidateAtUtcMs;
-  }
-  if (Object.prototype.hasOwnProperty.call(payload, 'dailySolvedDate')) {
-    next.dailySolvedDate = payload.dailySolvedDate;
-  }
-  if (Object.prototype.hasOwnProperty.call(payload, 'notificationsEnabled')) {
-    next.notificationsEnabled = payload.notificationsEnabled;
-  }
-  if (Object.prototype.hasOwnProperty.call(payload, 'warningHours')) {
-    next.warningHours = payload.warningHours;
-  }
-  if (Object.prototype.hasOwnProperty.call(payload, 'warnedDailyId')) {
-    next.warnedDailyId = payload.warnedDailyId;
-  }
-  if (Object.prototype.hasOwnProperty.call(payload, 'newLevelDailyId')) {
-    next.newLevelDailyId = payload.newLevelDailyId;
+  const keys = [
+    'dailyId',
+    'hardInvalidateAtUtcMs',
+    'dailySolvedDate',
+    'notificationsEnabled',
+    'warningHours',
+    'warnedDailyId',
+    'newLevelDailyId',
+  ];
+
+  for (const key of keys) {
+    if (Object.hasOwn(payload, key)) {
+      next[key] = payload[key];
+    }
   }
 
   if (payload.notificationText && typeof payload.notificationText === 'object') {
     const texts = payload.notificationText;
-    if (Object.prototype.hasOwnProperty.call(texts, 'unsolvedTitle')) {
-      next.notificationText.unsolvedTitle = texts.unsolvedTitle;
-    }
-    if (Object.prototype.hasOwnProperty.call(texts, 'unsolvedBody')) {
-      next.notificationText.unsolvedBody = texts.unsolvedBody;
-    }
-    if (Object.prototype.hasOwnProperty.call(texts, 'newLevelTitle')) {
-      next.notificationText.newLevelTitle = texts.newLevelTitle;
-    }
-    if (Object.prototype.hasOwnProperty.call(texts, 'newLevelBody')) {
-      next.notificationText.newLevelBody = texts.newLevelBody;
+    const textKeys = ['unsolvedTitle', 'unsolvedBody', 'newLevelTitle', 'newLevelBody'];
+    for (const key of textKeys) {
+      if (Object.hasOwn(texts, key)) {
+        next.notificationText[key] = texts[key];
+      }
     }
   }
 
@@ -1193,8 +1174,8 @@ const clearUpdateHistoryActions = async ({ buildNumber }) => {
     const current = await readHistoryState();
     let changed = false;
     const nextEntries = current.entries.map((entry) => {
-      if (!entry || entry.kind !== 'new-version-available') return entry;
-      if (!entry.action || entry.action.type !== 'apply-update') return entry;
+      if (entry?.kind !== 'new-version-available') return entry;
+      if (entry.action?.type !== 'apply-update') return entry;
       if (!Number.isInteger(entry.action.buildNumber) || entry.action.buildNumber > targetBuildNumber) return entry;
       changed = true;
       return {
@@ -1229,7 +1210,7 @@ const hasFocusedWindowClient = async () => {
     type: 'window',
     includeUncontrolled: true,
   });
-  return clients.some((client) => client && client.focused === true);
+  return clients.some((client) => client?.focused === true);
 };
 
 const normalizeSystemNotificationKind = (kindRaw) =>
@@ -1298,7 +1279,11 @@ const runDailyCheck = async () => {
   const warningLeadMs = state.warningHours * 60 * 60 * 1000;
   const warningStartMs = state.hardInvalidateAtUtcMs - warningLeadMs;
   const unsolved = state.dailySolvedDate !== state.dailyId;
-  const hasFocusedClient = await hasFocusedWindowClient();
+
+  if (await hasFocusedWindowClient()) {
+    return state;
+  }
+
   let changed = false;
 
   if (
@@ -1307,22 +1292,18 @@ const runDailyCheck = async () => {
     && now < state.hardInvalidateAtUtcMs
     && state.warnedDailyId !== state.dailyId
   ) {
-    if (!hasFocusedClient) {
-      const notified = await emitSystemNotification(state, 'unsolved-warning');
-      if (notified) {
-        state.warnedDailyId = state.dailyId;
-        changed = true;
-      }
+    const notified = await emitSystemNotification(state, 'unsolved-warning');
+    if (notified) {
+      state.warnedDailyId = state.dailyId;
+      changed = true;
     }
   }
 
   if (now >= state.hardInvalidateAtUtcMs && state.newLevelDailyId !== state.dailyId) {
-    if (!hasFocusedClient) {
-      const notified = await emitSystemNotification(state, 'new-level');
-      if (notified) {
-        state.newLevelDailyId = state.dailyId;
-        changed = true;
-      }
+    const notified = await emitSystemNotification(state, 'new-level');
+    if (notified) {
+      state.newLevelDailyId = state.dailyId;
+      changed = true;
     }
   }
 
@@ -1418,14 +1399,8 @@ self.addEventListener('notificationclick', (event) => {
   })());
 });
 
-self.addEventListener('message', (event) => {
-  if (event.origin !== self.location.origin) return;
-
-  const data = event.data;
-  if (!data || typeof data !== 'object') return;
-
-  if (data.type === 'SW_SKIP_WAITING') {
-    const payload = data.payload && typeof data.payload === 'object' ? data.payload : {};
+const systemMessageHandlers = {
+  SW_SKIP_WAITING: (event, payload) => {
     const approvedBuildNumber = normalizeInt(payload.approvedBuildNumber, null);
     event.waitUntil((async () => {
       if (Number.isInteger(approvedBuildNumber) && approvedBuildNumber > 0) {
@@ -1433,16 +1408,11 @@ self.addEventListener('message', (event) => {
       }
       await self.skipWaiting();
     })());
-    return;
-  }
-
-  if (data.type === 'SW_SYNC_UPDATE_POLICY') {
-    const payload = data.payload && typeof data.payload === 'object' ? data.payload : {};
+  },
+  SW_SYNC_UPDATE_POLICY: (event, payload) => {
     event.waitUntil(syncUpdatePolicyFromApp(payload));
-    return;
-  }
-
-  if (data.type === 'SW_GET_UPDATE_POLICY') {
+  },
+  SW_GET_UPDATE_POLICY: (event) => {
     event.waitUntil((async () => {
       try {
         const payload = await readUpdatePolicyReplyPayload();
@@ -1458,11 +1428,8 @@ self.addEventListener('message', (event) => {
         });
       }
     })());
-    return;
-  }
-
-  if (data.type === 'SW_CONFIRM_BUILD_UPDATE') {
-    const payload = data.payload && typeof data.payload === 'object' ? data.payload : {};
+  },
+  SW_CONFIRM_BUILD_UPDATE: (event, payload) => {
     const buildNumber = normalizeInt(payload.buildNumber, null);
     event.waitUntil((async () => {
       try {
@@ -1480,48 +1447,35 @@ self.addEventListener('message', (event) => {
         });
       }
     })());
-    return;
-  }
-
-  if (data.type === 'SW_SYNC_DAILY_STATE') {
-    const payload = data.payload && typeof data.payload === 'object' ? data.payload : {};
+  },
+  SW_SYNC_DAILY_STATE: (event, payload) => {
     event.waitUntil(enqueueDailyTask(async () => {
       const current = await readDailyState();
       await writeDailyState(mergeDailyStatePayload(current, payload));
       await registerPendingDailySync();
       await runDailyCheck();
     }));
-    return;
-  }
-
-  if (data.type === 'SW_RUN_DAILY_CHECK') {
+  },
+  SW_RUN_DAILY_CHECK: (event) => {
     event.waitUntil(enqueueDailyTask(async () => {
       await registerPendingDailySync();
       await runDailyCheck();
     }));
-    return;
-  }
-
-  if (data.type === 'SW_GET_NOTIFICATION_HISTORY') {
+  },
+  SW_GET_NOTIFICATION_HISTORY: (event) => {
     const sourceClient = event.source && typeof event.source.postMessage === 'function'
       ? event.source
       : null;
     event.waitUntil(enqueueHistoryTask(() => sendHistoryToSourceOrBroadcast(sourceClient)));
-    return;
-  }
-
-  if (data.type === 'SW_APPEND_TOAST_HISTORY') {
-    const payload = data.payload && typeof data.payload === 'object' ? data.payload : {};
+  },
+  SW_APPEND_TOAST_HISTORY: (event, payload) => {
     const kind = normalizeString(payload.kind, 'toast');
     const title = normalizeString(payload.title);
     const body = normalizeString(payload.body);
     if (!title && !body) return;
     event.waitUntil(appendToastHistoryEntry(title, body, kind));
-    return;
-  }
-
-  if (data.type === 'SW_APPEND_SYSTEM_HISTORY') {
-    const payload = data.payload && typeof data.payload === 'object' ? data.payload : {};
+  },
+  SW_APPEND_SYSTEM_HISTORY: (event, payload) => {
     const kind = normalizeString(payload.kind, 'system');
     const title = normalizeString(payload.title);
     const body = normalizeString(payload.body);
@@ -1533,23 +1487,30 @@ self.addEventListener('message', (event) => {
       normalizeString(payload.dailyId),
       normalizeHistoryAction(payload.action),
     ));
-    return;
-  }
-
-  if (data.type === 'SW_CLEAR_UPDATE_HISTORY_ACTIONS') {
-    const payload = data.payload && typeof data.payload === 'object' ? data.payload : {};
+  },
+  SW_CLEAR_UPDATE_HISTORY_ACTIONS: (event, payload) => {
     event.waitUntil(clearUpdateHistoryActions({
       buildNumber: normalizeInt(payload.buildNumber, null),
     }));
-    return;
-  }
-
-  if (data.type === 'SW_MARK_NOTIFICATION_HISTORY_READ') {
-    const payload = data.payload && typeof data.payload === 'object' ? data.payload : {};
+  },
+  SW_MARK_NOTIFICATION_HISTORY_READ: (event, payload) => {
     event.waitUntil(markHistoryRead({
       historyVersion: normalizeInt(payload.historyVersion, null),
       entryIds: Array.isArray(payload.entryIds) ? payload.entryIds : [],
     }));
+  },
+};
+
+self.addEventListener('message', (event) => {
+  if (event.origin !== self.location.origin) return;
+
+  const data = event.data;
+  if (!data || typeof data !== 'object') return;
+
+  const handler = systemMessageHandlers[data.type];
+  if (handler) {
+    const payload = data.payload && typeof data.payload === 'object' ? data.payload : {};
+    handler(event, payload);
     return;
   }
 
