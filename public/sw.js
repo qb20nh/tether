@@ -1419,6 +1419,8 @@ self.addEventListener('notificationclick', (event) => {
 });
 
 self.addEventListener('message', (event) => {
+  if (event.origin !== self.location.origin) return;
+
   const data = event.data;
   if (!data || typeof data !== 'object') return;
 
