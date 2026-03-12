@@ -6,8 +6,9 @@ import path from 'node:path';
 import process from 'node:process';
 import { runCommand, waitForServer } from './lib/process_utils.js';
 import { runRenderDragBenchmarkSuite } from './lib/render_drag_browser_runner.js';
-import { buildMetricSummary, formatMetric, mean, median, percentile } from './lib/stats.js';
 import { createRenderDragWorkload } from './lib/render_drag_workload.js';
+import { buildMetricSummary, formatMetric, median } from './lib/stats.js';
+
 
 const DEFAULT_NEXT_REV = 'HEAD';
 const DEFAULT_PREV_REV = 'HEAD~2';

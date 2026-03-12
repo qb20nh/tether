@@ -1,7 +1,7 @@
 import { normalizeDailyPayload } from '../shared/daily_payload_schema.js';
 import { utcDateIdFromMs } from '../shared/utc_date.js';
 
-export { normalizeDailyPayload, utcDateIdFromMs };
+
 
 export function createDailyPayloadService(options = {}) {
   const {
@@ -136,3 +136,6 @@ export function createDailyPayloadService(options = {}) {
     setupDailyHardInvalidationWatcher,
   };
 }
+
+export { normalizeDailyPayload } from '../shared/daily_payload_schema.js';
+export { utcDateIdFromMs } from '../shared/utc_date.js';

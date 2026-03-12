@@ -163,5 +163,5 @@
  * }} InputPort
  */
 
-export { };
+export default {};
 

@@ -23,7 +23,7 @@ import { parseCoordinatePair } from '../src/shared/coordinate_pair.js';
 import { parseUtcDateIdStartMs, utcDateIdFromMs } from '../src/shared/utc_date.js';
 import { createGameStateStore } from '../src/state/game_state_store.js';
 
-export { utcDateIdFromMs };
+
 
 export const DAILY_POOL_SCHEMA_VERSION = 1;
 export const DAILY_POOL_VERSION = 'v1';
@@ -302,7 +302,7 @@ export const computePoolDigest = (records) => {
 export const utcStartMsFromDateId = (dateId) => {
   const startMs = parseUtcDateIdStartMs(dateId);
   if (!Number.isInteger(startMs)) {
-    throw new Error(`Invalid UTC date id: ${dateId}`);
+    throw new TypeError(`Invalid UTC date id: ${dateId}`);
   }
   return startMs;
 };
@@ -415,3 +415,5 @@ export const toDailyPayloadLevel = (level, dailyId) => ({
     ? level.cornerCounts.map((entry) => [entry[0], entry[1], entry[2]])
     : [],
 });
+
+export { utcDateIdFromMs } from '../src/shared/utc_date.js';

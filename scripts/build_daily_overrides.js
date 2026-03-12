@@ -40,11 +40,13 @@ const DEFAULTS = {
 const parseArgs = (argv) => {
   const opts = { ...DEFAULTS };
 
-  for (let i = 0; i < argv.length; i++) {
-    const arg = argv[i];
+  let index = 0;
+  while (index < argv.length) {
+    const arg = argv[index];
+    let nextArgIndex = index + 1;
     const nextValue = () => {
-      const result = readRequiredArgValue(argv, i, arg);
-      i = result.nextIndex;
+      const result = readRequiredArgValue(argv, index, arg);
+      nextArgIndex = result.nextIndex + 1;
       return result.value;
     };
 
@@ -101,6 +103,8 @@ const parseArgs = (argv) => {
       default:
         throw new Error(`Unknown option: ${arg}`);
     }
+
+    index = nextArgIndex;
   }
 
   if (opts.maxSlots > INFINITE_MAX_LEVELS) {

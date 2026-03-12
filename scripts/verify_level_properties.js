@@ -133,11 +133,13 @@ function parseArgs(argv) {
     json: false,
   };
 
-  for (let i = 0; i < argv.length; i++) {
-    const a = argv[i];
+  let index = 0;
+  while (index < argv.length) {
+    const a = argv[index];
+    let nextArgIndex = index + 1;
     const next = () => {
-      const result = readRequiredArgValue(argv, i, a);
-      i = result.nextIndex;
+      const result = readRequiredArgValue(argv, index, a);
+      nextArgIndex = result.nextIndex + 1;
       return result.value;
     };
 
@@ -192,6 +194,8 @@ function parseArgs(argv) {
       default:
         throw new Error(`Unknown option: ${a}`);
     }
+
+    index = nextArgIndex;
   }
 
   return opts;
@@ -323,6 +327,14 @@ const stddev = (values, avg) => {
     sumSq += d * d;
   }
   return Math.sqrt(sumSq / values.length);
+};
+
+const checkDeadline = (deadline, timeoutState) => {
+  if (Date.now() > deadline) {
+    timeoutState.timedOut = true;
+    return false;
+  }
+  return true;
 };
 
 const sampleWalls = (movableCandidates, count, rng) => {
@@ -570,7 +582,7 @@ export function solveLevel(level, opts) {
   const levelCtx = buildLevelContext(level);
 
   const deadline = Date.now() + opts.timeMs;
-  let timedOut = false;
+  const timeoutState = { timedOut: false };
 
   const rawSet = new Set();
   const canonicalSet = new Set();
@@ -586,14 +598,9 @@ export function solveLevel(level, opts) {
     hintOrderSet.size >= opts.minHintOrders &&
     cornerOrderSet.size >= opts.minCornerOrders;
 
-  const shouldStop = () => timedOut || rawSet.size >= opts.maxSolutions || earlySatisfied;
-  const beforeVisitNode = () => {
-    if (Date.now() > deadline) {
-      timedOut = true;
-      return false;
-    }
-    return true;
-  };
+  const shouldStop = () =>
+    timeoutState.timedOut || rawSet.size >= opts.maxSolutions || earlySatisfied;
+  const beforeVisitNode = checkDeadline.bind(null, deadline, timeoutState);
   const onCompletePath = (path, placement) => {
     rawSet.add(pathKey(path));
     const canonical = canonicalPathKey(path);
@@ -622,7 +629,7 @@ export function solveLevel(level, opts) {
     canonicalSolutions: canonicalSet.size,
     distinctHintOrders: hintOrderSet.size,
     distinctCornerOrders: cornerOrderSet.size,
-    timedOut,
+    timedOut: timeoutState.timedOut,
     hitMaxSolutions: rawSet.size >= opts.maxSolutions,
     earlySatisfied,
     movableWallsPresent: levelCtx.movableWallsCount > 0,
@@ -767,14 +774,11 @@ function proveSatisfiableOrUnsat(levelCtx, opts) {
 
   let nodesVisited = 0;
   let found = false;
-  let timedOut = false;
+  const timeoutState = { timedOut: false };
   let nodeCapHit = false;
 
   const consumeBudget = () => {
-    if (Date.now() > deadline) {
-      timedOut = true;
-      return false;
-    }
+    if (!checkDeadline(deadline, timeoutState)) return false;
     if (nodesVisited >= nodeCap) {
       nodeCapHit = true;
       return false;
@@ -782,14 +786,8 @@ function proveSatisfiableOrUnsat(levelCtx, opts) {
     nodesVisited += 1;
     return true;
   };
-  const shouldStop = () => found || timedOut || nodeCapHit;
-  const beforePlacementStep = () => {
-    if (Date.now() > deadline) {
-      timedOut = true;
-      return false;
-    }
-    return true;
-  };
+  const shouldStop = () => found || timeoutState.timedOut || nodeCapHit;
+  const beforePlacementStep = checkDeadline.bind(null, deadline, timeoutState);
 
   visitPlacementStates(levelCtx, {
     shouldStop,
@@ -807,12 +805,12 @@ function proveSatisfiableOrUnsat(levelCtx, opts) {
 
   let status = 'proven_unsat';
   if (found) status = 'satisfiable_found';
-  else if (timedOut || nodeCapHit) status = 'inconclusive';
+  else if (timeoutState.timedOut || nodeCapHit) status = 'inconclusive';
 
   return {
     status,
     nodesVisited,
-    timedOut,
+    timedOut: timeoutState.timedOut,
     nodeCapHit,
   };
 }

@@ -48,11 +48,13 @@ const DEFAULTS = {
 const parseArgs = (argv) => {
   const opts = { ...DEFAULTS };
 
-  for (let i = 0; i < argv.length; i++) {
-    const arg = argv[i];
+  let index = 0;
+  while (index < argv.length) {
+    const arg = argv[index];
+    let nextArgIndex = index + 1;
     const nextValue = () => {
-      const result = readRequiredArgValue(argv, i, arg);
-      i = result.nextIndex;
+      const result = readRequiredArgValue(argv, index, arg);
+      nextArgIndex = result.nextIndex + 1;
       return result.value;
     };
 
@@ -84,6 +86,8 @@ const parseArgs = (argv) => {
     } else {
       throw new Error(`Unknown option: ${arg}`);
     }
+
+    index = nextArgIndex;
   }
 
   return opts;
@@ -121,6 +125,52 @@ const pruneHistoryForAppend = (entries = [], {
   return out;
 };
 
+const readPreservedExistingDailySummary = ({
+  todayEntry,
+  todayFile,
+  dailyId,
+  historyLength,
+}) => {
+  if (!todayEntry) return null;
+
+  const existingTodayPayload = normalizeDailyPayloadHeader(readJsonFile(todayFile, null));
+  const payloadMatchesHistory = Boolean(
+    existingTodayPayload?.dailyId === dailyId
+    && existingTodayPayload.dailySlot === todayEntry.dailySlot
+    && existingTodayPayload.canonicalKey === todayEntry.canonicalKey
+  );
+  if (!payloadMatchesHistory) {
+    throw new Error(`History conflict for ${dailyId}: existing daily payload does not match history entry`);
+  }
+
+  return {
+    ok: true,
+    preservedExistingDaily: true,
+    dailyId,
+    dailySlot: todayEntry.dailySlot,
+    canonicalKey: todayEntry.canonicalKey,
+    ordinal: null,
+    wroteTodayFile: null,
+    wroteHistoryFile: null,
+    historyLength,
+  };
+};
+
+const resolveStableGeneratedAtUtcMs = ({
+  existingTodayPayload,
+  dailyId,
+  dailySlot,
+  canonicalKey,
+  nowMs,
+}) => (
+  existingTodayPayload?.dailyId === dailyId
+    && existingTodayPayload.dailySlot === dailySlot
+    && existingTodayPayload.canonicalKey === canonicalKey
+    && existingTodayPayload.generatedAtUtcMs > 0
+    ? existingTodayPayload.generatedAtUtcMs
+    : nowMs
+);
+
 export const publishDailyLevel = (rawOptions = {}) => {
   const opts = { ...DEFAULTS, ...rawOptions };
 
@@ -143,29 +193,13 @@ export const publishDailyLevel = (rawOptions = {}) => {
     maxSlots,
   );
   const todayEntry = history.entries.find((entry) => entry.dailyId === dailyId);
-
-  if (todayEntry) {
-    const existingTodayPayload = normalizeDailyPayloadHeader(readJsonFile(opts.todayFile, null));
-    const payloadMatchesHistory = Boolean(
-      existingTodayPayload?.dailyId === dailyId
-      && existingTodayPayload.dailySlot === todayEntry.dailySlot
-      && existingTodayPayload.canonicalKey === todayEntry.canonicalKey
-    );
-    if (!payloadMatchesHistory) {
-      throw new Error(`History conflict for ${dailyId}: existing daily payload does not match history entry`);
-    }
-    return {
-      ok: true,
-      preservedExistingDaily: true,
-      dailyId,
-      dailySlot: todayEntry.dailySlot,
-      canonicalKey: todayEntry.canonicalKey,
-      ordinal: null,
-      wroteTodayFile: null,
-      wroteHistoryFile: null,
-      historyLength: history.entries.length,
-    };
-  }
+  const preservedExistingDailySummary = readPreservedExistingDailySummary({
+    todayEntry,
+    todayFile: opts.todayFile,
+    dailyId,
+    historyLength: history.entries.length,
+  });
+  if (preservedExistingDailySummary) return preservedExistingDailySummary;
 
   const dailySecret = typeof opts.dailySecret === 'string' && opts.dailySecret.length > 0
     ? opts.dailySecret
@@ -203,14 +237,13 @@ export const publishDailyLevel = (rawOptions = {}) => {
   });
 
   const existingTodayPayload = normalizeDailyPayloadHeader(readJsonFile(opts.todayFile, null));
-  const stableGeneratedAtUtcMs = (
-    existingTodayPayload?.dailyId === dailyId
-      && existingTodayPayload.dailySlot === dailySlot
-      && existingTodayPayload.canonicalKey === materialized.canonicalKey
-      && existingTodayPayload.generatedAtUtcMs > 0
-      ? existingTodayPayload.generatedAtUtcMs
-      : nowMs
-  );
+  const stableGeneratedAtUtcMs = resolveStableGeneratedAtUtcMs({
+    existingTodayPayload,
+    dailyId,
+    dailySlot,
+    canonicalKey: materialized.canonicalKey,
+    nowMs,
+  });
 
   const tomorrowId = addUtcDaysToDateId(dailyId, 1);
   const payload = normalizeDailyPayload({

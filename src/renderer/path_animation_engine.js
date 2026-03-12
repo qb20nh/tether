@@ -664,9 +664,10 @@ export function createPathAnimationEngine(options = {}) {
       ? prevPath[prevPath.length - nextPath.length - 1]
       : prevPath[nextPath.length];
     const nextTip = getPathTipFromPath(nextPath, side);
-    const neighbor = Array.isArray(nextPath)
-      ? (isStartSide ? nextPath[1] : nextPath.at(-2))
-      : null;
+    let neighbor = null;
+    if (Array.isArray(nextPath)) {
+      neighbor = isStartSide ? nextPath[1] : nextPath.at(-2);
+    }
     if (!retractedTip || !nextTip || !neighbor) {
       clearPathRotateState(side);
       return;
