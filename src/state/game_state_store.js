@@ -356,15 +356,29 @@ export function createGameStateStore(levelSource) {
     return true;
   };
 
-  const undo = (deferInvalidate = false) => {
+  const removePathTip = (side, deferInvalidate) => {
     if (path.length === 0) return false;
-    const last = path.pop();
-    visited.delete(keyOf(last.r, last.c));
+    const removed = side === 'start' ? path.shift() : path.pop();
+    visited.delete(keyOf(removed.r, removed.c));
     if (!deferInvalidate) commitPathMutation();
     return true;
   };
 
-  const startOrTryStep = (r, c, options = {}) => {
+  const undo = (deferInvalidate = false) => removePathTip('end', deferInvalidate);
+
+  const pathPointsMatch = (left, right) => (
+    left?.r === right?.r && left?.c === right?.c
+  );
+
+  const getPathTipForSide = (side) => (
+    side === 'start' ? path[0] || null : path.at(-1) || null
+  );
+
+  const getPathRetractNeighborForSide = (side) => (
+    side === 'start' ? path[1] || null : path.at(-2) || null
+  );
+
+  const startOrTryStepAtSide = (r, c, side, options = {}) => {
     const deferInvalidate = Boolean(options.deferInvalidate);
     if (!isUsable(r, c)) return false;
 
@@ -375,46 +389,25 @@ export function createGameStateStore(levelSource) {
       return initializePath(next, nextKey, deferInvalidate);
     }
 
-    const last = path.at(-1);
     if (path.length >= 2) {
-      const prev = path.at(-2);
-      if (next.r === prev.r && next.c === prev.c) {
-        undo(deferInvalidate);
-        return true;
+      const retractNeighbor = getPathRetractNeighborForSide(side);
+      if (pathPointsMatch(next, retractNeighbor)) {
+        return removePathTip(side, deferInvalidate);
       }
     }
 
-    if (!isAdjacentMove({ stitchSet }, last, next)) return false;
+    const tip = getPathTipForSide(side);
+    const isAdjacent = side === 'start'
+      ? isAdjacentMove({ stitchSet }, next, tip)
+      : isAdjacentMove({ stitchSet }, tip, next);
+    if (!isAdjacent) return false;
     if (visited.has(nextKey)) return false;
-    return addPathTip(next, nextKey, 'end', deferInvalidate);
+    return addPathTip(next, nextKey, side, deferInvalidate);
   };
 
-  const startOrTryStepFromStart = (r, c, options = {}) => {
-    const deferInvalidate = Boolean(options.deferInvalidate);
-    if (!isUsable(r, c)) return false;
+  const startOrTryStep = (r, c, options = {}) => startOrTryStepAtSide(r, c, 'end', options);
 
-    const next = { r, c };
-    const nextKey = keyOf(r, c);
-
-    if (path.length === 0) {
-      return initializePath(next, nextKey, deferInvalidate);
-    }
-
-    const head = path[0];
-    if (path.length >= 2) {
-      const nextFromStart = path[1];
-      if (next.r === nextFromStart.r && next.c === nextFromStart.c) {
-        path.shift();
-        visited.delete(keyOf(head.r, head.c));
-        if (!deferInvalidate) commitPathMutation();
-        return true;
-      }
-    }
-
-    if (!isAdjacentMove({ stitchSet }, next, head)) return false;
-    if (visited.has(nextKey)) return false;
-    return addPathTip(next, nextKey, 'start', deferInvalidate);
-  };
+  const startOrTryStepFromStart = (r, c, options = {}) => startOrTryStepAtSide(r, c, 'start', options);
 
   const applyPathDragSequence = (side, steps = []) => {
     let applyStep = null;

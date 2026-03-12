@@ -4374,22 +4374,24 @@ export function createBoardRendererCore(options = {}) {
       ctx.stroke();
     };
 
+    const buildStitchLines = (centerX, centerY) => ({
+      diagALine: buildUnsnappedLine(
+        centerX - stitchLineHalf,
+        centerY - stitchLineHalf,
+        centerX + stitchLineHalf,
+        centerY + stitchLineHalf,
+      ),
+      diagBLine: buildUnsnappedLine(
+        centerX + stitchLineHalf,
+        centerY - stitchLineHalf,
+        centerX - stitchLineHalf,
+        centerY + stitchLineHalf,
+      ),
+    });
+
     for (const [vr, vc] of snapshot.stitches) {
       const point = getVertexPoint(vr, vc, refs, offset, headPointScratchA, canvasScale.x);
-      const centerX = point.x;
-      const centerY = point.y;
-      const diagALine = buildUnsnappedLine(
-        centerX - stitchLineHalf,
-        centerY - stitchLineHalf,
-        centerX + stitchLineHalf,
-        centerY + stitchLineHalf,
-      );
-      const diagBLine = buildUnsnappedLine(
-        centerX + stitchLineHalf,
-        centerY - stitchLineHalf,
-        centerX - stitchLineHalf,
-        centerY + stitchLineHalf,
-      );
+      const { diagALine, diagBLine } = buildStitchLines(point.x, point.y);
       drawLine(diagALine, shadowOpaque, stitchWidth * 2);
       drawLine(diagBLine, shadowOpaque, stitchWidth * 2);
     }
@@ -4401,20 +4403,7 @@ export function createBoardRendererCore(options = {}) {
         const diagAState = resolveDiagStatus(entry, 'diagA');
         const diagBState = resolveDiagStatus(entry, 'diagB');
         const point = getVertexPoint(vr, vc, refs, offset, headPointScratchB, canvasScale.x);
-        const centerX = point.x;
-        const centerY = point.y;
-        const diagALine = buildUnsnappedLine(
-          centerX - stitchLineHalf,
-          centerY - stitchLineHalf,
-          centerX + stitchLineHalf,
-          centerY + stitchLineHalf,
-        );
-        const diagBLine = buildUnsnappedLine(
-          centerX + stitchLineHalf,
-          centerY - stitchLineHalf,
-          centerX - stitchLineHalf,
-          centerY + stitchLineHalf,
-        );
+        const { diagALine, diagBLine } = buildStitchLines(point.x, point.y);
         if (diagAState === state) {
           drawLine(diagALine, color, stitchWidth);
         }

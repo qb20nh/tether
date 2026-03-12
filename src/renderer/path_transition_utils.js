@@ -49,37 +49,44 @@ const matchesPathWindow = (sourcePath, targetPath, sourceOffset = 0, targetOffse
   return true;
 };
 
-export const isEndRetractTransition = (prevPath, nextPath) => {
+const resolveRetractTransitionLengths = (prevPath, nextPath) => {
+  if (!Array.isArray(prevPath) || !Array.isArray(nextPath)) return null;
+  const nextLen = nextPath.length;
+  const diff = prevPath.length - nextLen;
+  if (diff < 1 || nextLen < 1) return null;
+  return { nextLen, diff };
+};
+
+const matchesRetractTransition = (prevPath, nextPath, prevOffset = 0) => {
+  const lengths = resolveRetractTransitionLengths(prevPath, nextPath);
+  if (!lengths) return false;
+  return matchesPathWindow(nextPath, prevPath, 0, prevOffset, lengths.nextLen);
+};
+
+const matchesAdvanceTransition = (prevPath, nextPath, nextOffset = 0) => {
   if (!Array.isArray(prevPath) || !Array.isArray(nextPath)) return false;
   const prevLen = prevPath.length;
   const nextLen = nextPath.length;
-  if (nextLen >= prevLen || nextLen < 1) return false;
-  return matchesPathWindow(nextPath, prevPath, 0, 0, nextLen);
+  if (nextLen !== prevLen + 1) return false;
+  return matchesPathWindow(nextPath, prevPath, nextOffset, 0, prevLen);
 };
+
+export const isEndRetractTransition = (prevPath, nextPath) => (
+  matchesRetractTransition(prevPath, nextPath)
+);
 
 export const isStartRetractTransition = (prevPath, nextPath) => {
-  if (!Array.isArray(prevPath) || !Array.isArray(nextPath)) return false;
-  const prevLen = prevPath.length;
-  const nextLen = nextPath.length;
-  if (nextLen >= prevLen || nextLen < 1) return false;
-  const diff = prevLen - nextLen;
-  return matchesPathWindow(nextPath, prevPath, 0, diff, nextLen);
+  const lengths = resolveRetractTransitionLengths(prevPath, nextPath);
+  if (!lengths) return false;
+  return matchesRetractTransition(prevPath, nextPath, lengths.diff);
 };
 
-export const isEndAdvanceTransition = (prevPath, nextPath) => {
-  if (!Array.isArray(prevPath) || !Array.isArray(nextPath)) return false;
-  const prevLen = prevPath.length;
-  const nextLen = nextPath.length;
-  if (nextLen !== prevLen + 1) return false;
-  return matchesPathWindow(nextPath, prevPath, 0, 0, prevLen);
-};
+export const isEndAdvanceTransition = (prevPath, nextPath) => (
+  matchesAdvanceTransition(prevPath, nextPath)
+);
 
 export const isStartAdvanceTransition = (prevPath, nextPath) => {
-  if (!Array.isArray(prevPath) || !Array.isArray(nextPath)) return false;
-  const prevLen = prevPath.length;
-  const nextLen = nextPath.length;
-  if (nextLen !== prevLen + 1) return false;
-  return matchesPathWindow(nextPath, prevPath, 1, 0, prevLen);
+  return matchesAdvanceTransition(prevPath, nextPath, 1);
 };
 
 export const isRetractUnturnTransition = (side, retractedTip, nextTip, nextPath) => {

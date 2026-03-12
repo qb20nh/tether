@@ -616,7 +616,13 @@ const createShellRefsWithWebglCanvas = () => {
   };
 };
 
-const createSnapshot = ({ gridData, path = [], levelIndex = 0 }) => {
+const createSnapshot = ({
+  gridData,
+  path = [],
+  levelIndex = 0,
+  stitches = [],
+  cornerCounts = [],
+}) => {
   const rows = gridData.length;
   const cols = gridData[0].length;
   const visited = new Set(path.map((point) => `${point.r},${point.c}`));
@@ -630,10 +636,44 @@ const createSnapshot = ({ gridData, path = [], levelIndex = 0 }) => {
     path,
     visited,
     idxByKey,
-    stitches: [],
-    cornerCounts: [],
+    stitches,
+    cornerCounts,
     totalUsable,
   };
+};
+
+const recordStrokeSegments = (ctx) => {
+  const segments = [];
+  let currentSegment = { from: null, to: null };
+  const originalBeginPath = ctx.beginPath.bind(ctx);
+  const originalMoveTo = ctx.moveTo.bind(ctx);
+  const originalLineTo = ctx.lineTo.bind(ctx);
+  const originalStroke = ctx.stroke.bind(ctx);
+
+  ctx.beginPath = () => {
+    currentSegment = { from: null, to: null };
+    return originalBeginPath();
+  };
+  ctx.moveTo = (x, y) => {
+    currentSegment.from = { x, y };
+    return originalMoveTo(x, y);
+  };
+  ctx.lineTo = (x, y) => {
+    currentSegment.to = { x, y };
+    return originalLineTo(x, y);
+  };
+  ctx.stroke = () => {
+    segments.push({
+      from: currentSegment.from ? { ...currentSegment.from } : null,
+      to: currentSegment.to ? { ...currentSegment.to } : null,
+      strokeStyle: ctx.strokeStyle,
+      lineWidth: ctx.lineWidth,
+      lineCap: ctx.lineCap,
+    });
+    return originalStroke();
+  };
+
+  return segments;
 };
 
 const getGridCell = (refs, r, c, cols) => refs.gridEl.children[(r * cols) + c] || null;
@@ -740,6 +780,68 @@ test('createBoardRendererCore positions wall ghosts from interaction coordinates
   assert.equal(ghost !== null, true);
   assert.equal(ghost?.style.left, '40px');
   assert.equal(ghost?.style.top, '60px');
+});
+
+test('createBoardRendererCore draws stitched diagonals with stable shadow and status passes', (t) => {
+  const env = installRendererEnv(t);
+  const core = createBoardRendererCore();
+  const refs = createShellRefs();
+  const strokeSegments = recordStrokeSegments(refs.symbolCtx);
+  const snapshot = createSnapshot({
+    gridData: [
+      ['.', '.'],
+      ['.', '.'],
+    ],
+    stitches: [[1, 1]],
+  });
+
+  core.mount(refs);
+  core.rebuildGrid(snapshot);
+  core.renderFrame({
+    snapshot,
+    evaluation: {
+      stitchStatus: {
+        vertexStatus: new Map([
+          ['1,1', { diagA: 'good', diagB: 'bad' }],
+        ]),
+      },
+    },
+    completion: null,
+    uiModel: {},
+    interactionModel: {},
+  });
+  flushNextRaf(env, 16);
+
+  assert.deepEqual(strokeSegments, [
+    {
+      from: { x: 151, y: 151 },
+      to: { x: 217, y: 217 },
+      strokeStyle: '#0a111b',
+      lineWidth: 22,
+      lineCap: 'round',
+    },
+    {
+      from: { x: 217, y: 151 },
+      to: { x: 151, y: 217 },
+      strokeStyle: '#0a111b',
+      lineWidth: 22,
+      lineCap: 'round',
+    },
+    {
+      from: { x: 151, y: 151 },
+      to: { x: 217, y: 217 },
+      strokeStyle: '#16a34a',
+      lineWidth: 11,
+      lineCap: 'round',
+    },
+    {
+      from: { x: 217, y: 151 },
+      to: { x: 151, y: 217 },
+      strokeStyle: '#e85c5c',
+      lineWidth: 11,
+      lineCap: 'round',
+    },
+  ]);
 });
 
 test('createBoardRendererCore moves the nav marker with wall preview cursor while keeping the wall selected', (t) => {

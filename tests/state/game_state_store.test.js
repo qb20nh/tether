@@ -13,6 +13,17 @@ const LEVEL = {
   cornerCounts: [],
 };
 
+const STITCHED_LEVEL = {
+  name: 'Stitched',
+  grid: [
+    '...',
+    '...',
+    '...',
+  ],
+  stitches: [[1, 1]],
+  cornerCounts: [],
+};
+
 test('game state store supports command dispatch semantics', () => {
   const store = createGameStateStore(() => LEVEL);
   store.dispatch({ type: 'level/load', payload: { levelIndex: 0 } });
@@ -167,6 +178,28 @@ test('game state store applies start drag batches with legacy parity', () => {
   assert.deepEqual(store.getSnapshot().path, legacyStore.getSnapshot().path);
   assert.equal(store.getSnapshot().pathKey, legacyStore.getSnapshot().pathKey);
   assert.equal(store.getSnapshot().version, previousSnapshot.version + 1);
+});
+
+test('game state store preserves start-side stitched diagonal advance and retract', () => {
+  const store = createGameStateStore(() => STITCHED_LEVEL);
+  store.dispatch({ type: 'level/load', payload: { levelIndex: 0 } });
+  store.dispatch({ type: 'path/start-or-step', payload: { r: 1, c: 1 } });
+  store.dispatch({ type: 'path/start-or-step', payload: { r: 1, c: 2 } });
+
+  let transition = store.dispatch({ type: 'path/start-or-step-from-start', payload: { r: 0, c: 0 } });
+  assert.equal(transition.changed, true);
+  assert.deepEqual(store.getSnapshot().path, [
+    { r: 0, c: 0 },
+    { r: 1, c: 1 },
+    { r: 1, c: 2 },
+  ]);
+
+  transition = store.dispatch({ type: 'path/start-or-step-from-start', payload: { r: 1, c: 1 } });
+  assert.equal(transition.changed, true);
+  assert.deepEqual(store.getSnapshot().path, [
+    { r: 1, c: 1 },
+    { r: 1, c: 2 },
+  ]);
 });
 
 test('game state store batched retract matches repeated single-step dispatch', () => {
