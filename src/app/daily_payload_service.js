@@ -1,10 +1,6 @@
-export const utcDateIdFromMs = (ms) => {
-  const date = new Date(ms);
-  const y = date.getUTCFullYear();
-  const m = String(date.getUTCMonth() + 1).padStart(2, '0');
-  const d = String(date.getUTCDate()).padStart(2, '0');
-  return `${y}-${m}-${d}`;
-};
+import { utcDateIdFromMs } from '../shared/utc_date.js';
+
+export { utcDateIdFromMs };
 
 const normalizeGrid = (grid) => {
   if (!Array.isArray(grid) || grid.length === 0) return null;

@@ -317,18 +317,20 @@ body.isPathDragging * {
   min-width: 0;
 }
 
-.bootShellSelect {
-  text-indent: -9999px;
+.bootShellSelect,
+select {
   background-image:
     linear-gradient(45deg, transparent 50%, currentColor 50%),
     linear-gradient(135deg, currentColor 50%, transparent 50%);
   background-position:
     calc(100% - 15px) 1.1em,
     calc(100% - 10px) 1.1em;
-  background-size:
-    6px 6px,
-    6px 6px;
+  background-size: 6px 6px, 6px 6px;
   background-repeat: no-repeat;
+}
+
+.bootShellSelect {
+  text-indent: -9999px;
 }
 
 .bootShellSelectText {
@@ -345,7 +347,8 @@ body.isPathDragging * {
   pointer-events: none;
 }
 
-[dir='rtl'] .bootShellSelect {
+[dir='rtl'] .bootShellSelect,
+[dir='rtl'] select {
   background-position:
     10px 1.1em,
     15px 1.1em;
@@ -1105,20 +1108,6 @@ button:not(.settingsToggle):not(.miniBtn) {
 
 select {
   padding-inline-end: 30px;
-  background-image:
-    linear-gradient(45deg, transparent 50%, currentColor 50%),
-    linear-gradient(135deg, currentColor 50%, transparent 50%);
-  background-position:
-    calc(100% - 15px) 1.1em,
-    calc(100% - 10px) 1.1em;
-  background-size: 6px 6px, 6px 6px;
-  background-repeat: no-repeat;
-}
-
-[dir='rtl'] select {
-  background-position:
-    10px 1.1em,
-    15px 1.1em;
 }
 
 select option,
@@ -1723,15 +1712,7 @@ body:not(.isPathDragging) .cell:active {
 }
 
 
-.cell.pathStart:hover {
-  z-index: 3;
-  border-color: rgba(120, 190, 255, 0.86);
-  box-shadow:
-    0 0 0 var(--cell-shadow-3) rgba(120, 190, 255, 0.30) inset,
-    0 0 0 var(--cell-shadow-2) rgba(120, 190, 255, 0.28);
-  --interactive-corner-color: rgba(120, 190, 255, 1);
-}
-
+.cell.pathStart:hover,
 .cell.pathEnd:hover {
   z-index: 3;
   border-color: rgba(120, 190, 255, 0.86);
@@ -2126,14 +2107,7 @@ body:not(.isPathDragging) .cell.pathEnd:active {
     0 0 0 var(--cell-shadow-1) rgba(255, 92, 92, 0.38) !important;
 }
 
-.cell.goodHint {
-  border-color: rgba(46, 204, 113, 0.95) !important;
-  background: linear-gradient(180deg, rgba(46, 204, 113, 0.16) 0%, rgba(22, 106, 65, 0.26) 100%) !important;
-  box-shadow:
-    0 0 0 var(--cell-shadow-3) rgba(46, 204, 113, 0.28) inset,
-    0 0 0 var(--cell-shadow-2) rgba(46, 204, 113, 0.16) !important;
-}
-
+.cell.goodHint,
 .cell.goodRps {
   border-color: rgba(46, 204, 113, 0.95) !important;
   background: linear-gradient(180deg, rgba(46, 204, 113, 0.16) 0%, rgba(22, 106, 65, 0.26) 100%) !important;

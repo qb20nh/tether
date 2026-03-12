@@ -1,3 +1,5 @@
+import { applyCanvasElementSize, resolveCanvasSize } from './canvas_size_utils.js';
+
 const TAU = Math.PI * 2;
 const FLOW_STOP_EPSILON = 1e-4;
 const COMPLETE_PATH_THRESHOLD = 0.999;
@@ -1716,20 +1718,16 @@ export function createPathWebglRenderer(canvas, options = {}) {
 
   const resize = (cssWidth, cssHeight, dpr = 1) => {
     if (isContextLost()) return;
-    const safeCssWidth = Math.max(1, Number(cssWidth) || 1);
-    const safeCssHeight = Math.max(1, Number(cssHeight) || 1);
-    const safeDpr = Math.max(1, Number(dpr) || 1);
+    const {
+      safeDpr,
+      safeCssWidth,
+      safeCssHeight,
+      pixelWidth,
+      pixelHeight,
+    } = resolveCanvasSize(cssWidth, cssHeight, dpr);
     deviceScale = safeDpr;
 
-    const pixelWidth = Math.max(1, Math.round(safeCssWidth * safeDpr));
-    const pixelHeight = Math.max(1, Math.round(safeCssHeight * safeDpr));
-    if (canvas.width !== pixelWidth) canvas.width = pixelWidth;
-    if (canvas.height !== pixelHeight) canvas.height = pixelHeight;
-
-    const cssWidthPx = `${safeCssWidth}px`;
-    const cssHeightPx = `${safeCssHeight}px`;
-    if (canvas.style.width !== cssWidthPx) canvas.style.width = cssWidthPx;
-    if (canvas.style.height !== cssHeightPx) canvas.style.height = cssHeightPx;
+    applyCanvasElementSize(canvas, safeCssWidth, safeCssHeight, pixelWidth, pixelHeight);
 
     gl.viewport(0, 0, pixelWidth, pixelHeight);
     clear();

@@ -9,6 +9,7 @@ import {
   selectDefaultInfiniteCandidate,
 } from '../src/infinite.js';
 import { canonicalConstraintSignature } from '../src/infinite_canonical.js';
+import { encodePackedOverridePayload } from '../src/shared/packed_override_codec.js';
 import { INFINITE_OVERRIDES_REPO_FILE } from '../src/shared/paths.js';
 
 const FORMAT_MAGIC = 0x49; // 'I'
@@ -73,49 +74,21 @@ const parseArgs = (argv) => {
   return opts;
 };
 
-const bitsRequired = (maxValueInclusive) => {
-  if (maxValueInclusive <= 0) return 1;
-  return Math.max(1, Math.ceil(Math.log2(maxValueInclusive + 1)));
-};
-
-const pushVarUint = (bytes, value) => {
-  let next = value >>> 0;
-  while (next >= 0x80) {
-    bytes.push((next & 0x7f) | 0x80);
-    next >>>= 7;
-  }
-  bytes.push(next & 0x7f);
-};
+const INFINITE_OVERRIDE_CODEC_MESSAGES = Object.freeze({
+  maxBitsExceeded: (variantBits) => `Variant id width ${variantBits} bits exceeds format limit (8 bits).`,
+  invalidIndex: (index) => `Invalid override index: ${index}`,
+  invalidValue: (variantId, variantBits) => `Variant ${variantId} cannot be encoded with ${variantBits} bits`,
+  nonIncreasing: (index) => `Non-increasing override index sequence near ${index}`,
+});
 
 const encodeOverridesPayload = (overrides, maxVariantUsed) => {
-  const variantBits = bitsRequired(maxVariantUsed);
-  if (variantBits > 8) {
-    throw new Error(`Variant id width ${variantBits} bits exceeds format limit (8 bits).`);
-  }
-  const variantMask = (1 << variantBits) - 1;
-
-  const entries = [...overrides.entries()].sort((a, b) => a[0] - b[0]);
-  const bytes = [FORMAT_MAGIC, FORMAT_VERSION, variantBits];
-  let prevIndex = -1;
-
-  for (const [index, variantId] of entries) {
-    if (variantId < 0 || variantId > variantMask) {
-      throw new Error(`Variant ${variantId} cannot be encoded with ${variantBits} bits`);
-    }
-    const delta = index - prevIndex;
-    if (delta <= 0) {
-      throw new Error(`Non-increasing override index sequence near ${index}`);
-    }
-    prevIndex = index;
-    const token = (delta << variantBits) | variantId;
-    pushVarUint(bytes, token);
-  }
-
-  return {
-    payload: Uint8Array.from(bytes),
-    variantBits,
-    entryCount: entries.length,
-  };
+  return encodePackedOverridePayload({
+    formatMagic: FORMAT_MAGIC,
+    formatVersion: FORMAT_VERSION,
+    overrides,
+    maxVariantUsed,
+    messages: INFINITE_OVERRIDE_CODEC_MESSAGES,
+  });
 };
 
 function resolveCollision(levelIndex, maxVariantProbe, acceptedBySignature) {

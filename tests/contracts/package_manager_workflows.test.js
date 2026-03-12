@@ -16,7 +16,7 @@ test('package metadata standardizes on pnpm and only-allow', () => {
   assert.equal(pkg.scripts.build, 'vite build');
   assert.equal(pkg.scripts['verify:duplication'], 'jscpd --config .jscpd.json src scripts src-tauri/src vite.config.js');
   assert.equal(pkg.scripts['verify:release-no-debug'], 'node scripts/verify_release_no_debug_artifacts.js');
-  assert.equal(jscpdConfig.threshold, 2);
+  assert.equal(jscpdConfig.threshold, 1);
   assert.equal(jscpdConfig.gitignore, true);
   assert.equal(jscpdConfig.maxLines, 10000);
   assert.equal(jscpdConfig.maxSize, '1mb');

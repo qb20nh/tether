@@ -42,15 +42,19 @@ export const resolvePathSignature = (path) => {
   return `${path.length}|${headSig}|${tailSig}`;
 };
 
+const matchesPathWindow = (sourcePath, targetPath, sourceOffset = 0, targetOffset = 0, length = 0) => {
+  for (let i = 0; i < length; i += 1) {
+    if (!pointsMatch(sourcePath[sourceOffset + i], targetPath[targetOffset + i])) return false;
+  }
+  return true;
+};
+
 export const isEndRetractTransition = (prevPath, nextPath) => {
   if (!Array.isArray(prevPath) || !Array.isArray(nextPath)) return false;
   const prevLen = prevPath.length;
   const nextLen = nextPath.length;
   if (nextLen >= prevLen || nextLen < 1) return false;
-  for (let i = 0; i < nextLen; i += 1) {
-    if (!pointsMatch(nextPath[i], prevPath[i])) return false;
-  }
-  return true;
+  return matchesPathWindow(nextPath, prevPath, 0, 0, nextLen);
 };
 
 export const isStartRetractTransition = (prevPath, nextPath) => {
@@ -59,10 +63,7 @@ export const isStartRetractTransition = (prevPath, nextPath) => {
   const nextLen = nextPath.length;
   if (nextLen >= prevLen || nextLen < 1) return false;
   const diff = prevLen - nextLen;
-  for (let i = 0; i < nextLen; i += 1) {
-    if (!pointsMatch(nextPath[i], prevPath[i + diff])) return false;
-  }
-  return true;
+  return matchesPathWindow(nextPath, prevPath, 0, diff, nextLen);
 };
 
 export const isEndAdvanceTransition = (prevPath, nextPath) => {
@@ -70,10 +71,7 @@ export const isEndAdvanceTransition = (prevPath, nextPath) => {
   const prevLen = prevPath.length;
   const nextLen = nextPath.length;
   if (nextLen !== prevLen + 1) return false;
-  for (let i = 0; i < prevLen; i += 1) {
-    if (!pointsMatch(nextPath[i], prevPath[i])) return false;
-  }
-  return true;
+  return matchesPathWindow(nextPath, prevPath, 0, 0, prevLen);
 };
 
 export const isStartAdvanceTransition = (prevPath, nextPath) => {
@@ -81,10 +79,7 @@ export const isStartAdvanceTransition = (prevPath, nextPath) => {
   const prevLen = prevPath.length;
   const nextLen = nextPath.length;
   if (nextLen !== prevLen + 1) return false;
-  for (let i = 0; i < prevLen; i += 1) {
-    if (!pointsMatch(nextPath[i + 1], prevPath[i])) return false;
-  }
-  return true;
+  return matchesPathWindow(nextPath, prevPath, 1, 0, prevLen);
 };
 
 export const isRetractUnturnTransition = (side, retractedTip, nextTip, nextPath) => {

@@ -1,3 +1,5 @@
+import { normalizeSwUpdateOptions } from './sw_update_options.js';
+
 export const parseRemoteBuildNumber = (payload) => {
   if (!payload || typeof payload !== 'object') return null;
   const parsed = Number.parseInt(payload.buildNumber, 10);
@@ -69,46 +71,44 @@ const waitForWaitingWorker = (registration, timeoutMs, windowObj) =>
 export function createSwUpdateOrchestrator(options = {}) {
   const {
     swMessenger,
+    noWaitingReloadBuildStorageKey = 'tetherUpdateNoWaitingReloadBuild',
+  } = options;
+  const {
     swMessageTypes,
     updateApplyStatus,
     updateCheckDecision,
-    localBuildNumber = 0,
-    versionUrl = '',
-    swBuildNumberRe = null,
+    localBuildNumber,
+    versionUrl,
+    swBuildNumberRe,
     resolveServiceWorkerRegistrationUrl,
     isLocalhostHostname,
-    readAutoUpdateEnabledPreference = () => false,
-    readNotificationEnabledPreference = () => false,
-    readLastNotifiedRemoteBuildNumber = () => null,
-    writeLastNotifiedRemoteBuildNumber = () => { },
-    buildNotificationTextPayload = () => ({}),
-    getLatestDailyState = () => ({
-      dailyId: null,
-      hardInvalidateAtUtcMs: null,
-      dailySolvedDate: null,
-    }),
-    resolveUpdateCheckDecision = () => null,
-    shouldResyncManualUpdatePolicy = () => false,
-    showInAppToast = () => { },
-    resolveNewVersionToastText = () => '',
-    resolveNewVersionTitleText = () => '',
-    resolveNewVersionBodyText = () => '',
-    resolveUpdateApplyFailureToastText = () => '',
-    setUpdateProgressOverlayActive = () => { },
-    updateCheckThrottleMs = 5 * 60 * 1000,
-    updateApplyReloadFallbackMs = 5 * 1000,
-    dailyCheckTag = 'tether-daily-check',
-    dailyNotificationWarningHours = 8,
-    waitingWorkerTimeoutFirstMs = 8000,
-    waitingWorkerTimeoutRetryMs = 4000,
-    fetchImpl = typeof fetch === 'function' ? fetch : null,
-    windowObj = typeof window === 'undefined' ? undefined : window,
-    documentObj = typeof document === 'undefined' ? undefined : document,
-    navigatorObj = typeof navigator === 'undefined' ? undefined : navigator,
-    notificationApi = typeof Notification === 'undefined' ? undefined : Notification,
-    now = () => Date.now(),
-    noWaitingReloadBuildStorageKey = 'tetherUpdateNoWaitingReloadBuild',
-  } = options;
+    readAutoUpdateEnabledPreference,
+    readNotificationEnabledPreference,
+    readLastNotifiedRemoteBuildNumber,
+    writeLastNotifiedRemoteBuildNumber,
+    buildNotificationTextPayload,
+    getLatestDailyState,
+    resolveUpdateCheckDecision,
+    shouldResyncManualUpdatePolicy,
+    showInAppToast,
+    resolveNewVersionToastText,
+    resolveNewVersionTitleText,
+    resolveNewVersionBodyText,
+    resolveUpdateApplyFailureToastText,
+    setUpdateProgressOverlayActive,
+    updateCheckThrottleMs,
+    updateApplyReloadFallbackMs,
+    dailyCheckTag,
+    dailyNotificationWarningHours,
+    waitingWorkerTimeoutFirstMs,
+    waitingWorkerTimeoutRetryMs,
+    fetchImpl,
+    windowObj,
+    documentObj,
+    navigatorObj,
+    notificationApi,
+    now,
+  } = normalizeSwUpdateOptions(options);
 
   if (!swMessenger || typeof swMessenger.postMessage !== 'function') {
     throw new Error('createSwUpdateOrchestrator requires swMessenger');

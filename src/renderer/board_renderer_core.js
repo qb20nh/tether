@@ -25,6 +25,7 @@ import {
   normalizeFlowOffset,
   pathsMatch
 } from './path_transition_utils.js';
+import { applyCanvasElementSize, resolveCanvasSize } from './canvas_size_utils.js';
 import { createPathWebglRenderer } from './path_webgl_renderer.js';
 
 const DEBUG_COUNTER_NOOP = () => { };
@@ -2077,21 +2078,16 @@ export function createBoardRendererCore(options = {}) {
 
 
   const configureHiDPICanvas = (canvas, ctx, cssWidth, cssHeight, dpr = getDevicePixelScale()) => {
-    const safeCssWidth = Math.max(1, cssWidth);
-    const safeCssHeight = Math.max(1, cssHeight);
-    const safeDpr = Number.isFinite(dpr) && dpr > 0 ? dpr : 1;
-    const pixelWidth = Math.max(1, Math.round(safeCssWidth * safeDpr));
-    const pixelHeight = Math.max(1, Math.round(safeCssHeight * safeDpr));
-    const scaleX = pixelWidth / safeCssWidth;
-    const scaleY = pixelHeight / safeCssHeight;
+    const {
+      safeCssWidth,
+      safeCssHeight,
+      pixelWidth,
+      pixelHeight,
+      scaleX,
+      scaleY,
+    } = resolveCanvasSize(cssWidth, cssHeight, dpr);
 
-    if (canvas.width !== pixelWidth) canvas.width = pixelWidth;
-    if (canvas.height !== pixelHeight) canvas.height = pixelHeight;
-
-    const cssWidthPx = `${safeCssWidth}px`;
-    const cssHeightPx = `${safeCssHeight}px`;
-    if (canvas.style.width !== cssWidthPx) canvas.style.width = cssWidthPx;
-    if (canvas.style.height !== cssHeightPx) canvas.style.height = cssHeightPx;
+    applyCanvasElementSize(canvas, safeCssWidth, safeCssHeight, pixelWidth, pixelHeight);
 
     ctx.setTransform(
       scaleX,
@@ -2667,25 +2663,21 @@ export function createBoardRendererCore(options = {}) {
   };
 
   const applyCanvasCssSize = (canvas, cssWidth, cssHeight) => {
-    if (!canvas) return;
-    const safeCssWidth = Math.max(1, Number(cssWidth) || 1);
-    const safeCssHeight = Math.max(1, Number(cssHeight) || 1);
-    const cssWidthPx = `${safeCssWidth}px`;
-    const cssHeightPx = `${safeCssHeight}px`;
-    if (canvas.style.width !== cssWidthPx) canvas.style.width = cssWidthPx;
-    if (canvas.style.height !== cssHeightPx) canvas.style.height = cssHeightPx;
+    applyCanvasElementSize(canvas, cssWidth, cssHeight);
   };
 
   const applyScaledSymbolCanvasTransform = (canvas, ctx, cssWidth, cssHeight) => {
     if (!canvas || !ctx) return;
-    const dpr = getDevicePixelScale();
-    const safeDpr = Number.isFinite(dpr) && dpr > 0 ? dpr : 1;
-    const safeCssWidth = Math.max(1, cssWidth);
-    const safeCssHeight = Math.max(1, cssHeight);
-    const pixelWidth = Math.max(1, Math.round(safeCssWidth * safeDpr));
-    const pixelHeight = Math.max(1, Math.round(safeCssHeight * safeDpr));
-    const scaleX = pixelWidth / safeCssWidth;
-    const scaleY = pixelHeight / safeCssHeight;
+    const {
+      safeCssWidth,
+      safeCssHeight,
+      pixelWidth,
+      pixelHeight,
+      scaleX,
+      scaleY,
+    } = resolveCanvasSize(cssWidth, cssHeight, getDevicePixelScale());
+
+    applyCanvasElementSize(canvas, safeCssWidth, safeCssHeight, pixelWidth, pixelHeight);
 
     ctx.setTransform(
       scaleX,

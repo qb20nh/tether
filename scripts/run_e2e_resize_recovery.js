@@ -1,42 +1,11 @@
 import { spawn } from 'node:child_process';
+import { runCommand, waitForServer } from './lib/process_utils.js';
 
 const HOST = process.env.E2E_HOST || '127.0.0.1';
 const PORT = Number.parseInt(process.env.E2E_PORT || '4173', 10);
 const BASE_URL = `http://${HOST}:${PORT}/`;
 const SERVER_READY_TIMEOUT_MS = 30_000;
 const SERVER_POLL_INTERVAL_MS = 250;
-
-const runCommand = (command, args, options = {}) =>
-  new Promise((resolve, reject) => {
-    const child = spawn(command, args, {
-      stdio: 'inherit',
-      ...options,
-    });
-    child.on('error', reject);
-    child.on('exit', (code) => {
-      if (code === 0) {
-        resolve();
-        return;
-      }
-      reject(new Error(`${command} ${args.join(' ')} exited with code ${code}`));
-    });
-  });
-
-const waitForServer = async (url, timeoutMs, intervalMs) => {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    try {
-      const response = await fetch(url, { cache: 'no-store' });
-      if (response.ok || response.status === 404) return;
-    } catch {
-      // Keep polling until timeout.
-    }
-    await new Promise((resolve) => {
-      setTimeout(resolve, intervalMs);
-    });
-  }
-  throw new Error(`Timed out waiting for preview server at ${url}`);
-};
 
 const runE2e = async () => {
   await runCommand('pnpm', ['run', 'build']);

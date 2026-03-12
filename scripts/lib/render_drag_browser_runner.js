@@ -1,3 +1,5 @@
+import { buildMetricSummary, mean, pathsEqual, percentile } from './stats.js';
+
 const STORAGE_KEYS = Object.freeze({
   levelProgress: 'tetherLevelProgress',
   infiniteProgress: 'tetherInfiniteProgress',
@@ -24,23 +26,6 @@ const MODE_TO_LOW_POWER = Object.freeze({
 
 const toFixedNumber = (value) => (Number.isFinite(value) ? Number(value) : 0);
 
-const mean = (values) => {
-  if (!Array.isArray(values) || values.length === 0) return 0;
-  let total = 0;
-  for (let i = 0; i < values.length; i += 1) {
-    total += values[i];
-  }
-  return total / values.length;
-};
-
-const percentile = (values, ratio) => {
-  if (!Array.isArray(values) || values.length === 0) return 0;
-  const sorted = values.slice().sort((a, b) => a - b);
-  const clamped = Math.max(0, Math.min(1, ratio));
-  const index = Math.min(sorted.length - 1, Math.max(0, Math.ceil(sorted.length * clamped) - 1));
-  return sorted[index];
-};
-
 const summarizeCases = (caseResults) => {
   const syncValues = [];
   const rafValues = [];
@@ -63,40 +48,11 @@ const summarizeCases = (caseResults) => {
     caseCount: caseResults.length,
     totalPointerMoves,
     totalPathSteps,
-    syncMsPerPointerMove: {
-      mean: mean(syncValues),
-      median: percentile(syncValues, 0.5),
-      p95: percentile(syncValues, 0.95),
-    },
-    rafMsPerPointerMove: {
-      mean: mean(rafValues),
-      median: percentile(rafValues, 0.5),
-      p95: percentile(rafValues, 0.95),
-    },
-    dragWallClockMs: {
-      mean: mean(dragValues),
-      median: percentile(dragValues, 0.5),
-      p95: percentile(dragValues, 0.95),
-    },
-    totalMsPerPathStep: {
-      mean: mean(stepValues),
-      median: percentile(stepValues, 0.5),
-      p95: percentile(stepValues, 0.95),
-    },
+    syncMsPerPointerMove: buildMetricSummary(syncValues, (values) => percentile(values, 0.5)),
+    rafMsPerPointerMove: buildMetricSummary(rafValues, (values) => percentile(values, 0.5)),
+    dragWallClockMs: buildMetricSummary(dragValues, (values) => percentile(values, 0.5)),
+    totalMsPerPathStep: buildMetricSummary(stepValues, (values) => percentile(values, 0.5)),
   };
-};
-
-const pathsEqual = (expected, actual) => {
-  if (!Array.isArray(expected) || !Array.isArray(actual)) return false;
-  if (expected.length !== actual.length) return false;
-  for (let i = 0; i < expected.length; i += 1) {
-    const expectedPoint = expected[i];
-    const actualPoint = actual[i];
-    if (expectedPoint?.[0] !== actualPoint?.[0] || expectedPoint?.[1] !== actualPoint?.[1]) {
-      return false;
-    }
-  }
-  return true;
 };
 
 const primeBootState = async (page, { infiniteIndex, lowPowerEnabled }) => {

@@ -22,27 +22,27 @@ const formatDateByLocale = (date, locale, options) => {
     }
 };
 
-export const formatDailyDateLabel = (dateId, locale) => {
+const formatDailyDatePartLabel = (dateId, locale, options) => {
     if (typeof dateId !== 'string' || dateId.length === 0) return '-';
     const date = parseUtcDateFromDateId(dateId);
     if (!date) return dateId;
-    const formatted = formatDateByLocale(date, locale, {
+    const formatted = formatDateByLocale(date, locale, options);
+    return formatted || dateId;
+};
+
+export const formatDailyDateLabel = (dateId, locale) => {
+    return formatDailyDatePartLabel(dateId, locale, {
         year: 'numeric',
         month: 'long',
         day: 'numeric',
     });
-    return formatted || dateId;
 };
 
 export const formatDailyMonthDayLabel = (dateId, locale) => {
-    if (typeof dateId !== 'string' || dateId.length === 0) return '-';
-    const date = parseUtcDateFromDateId(dateId);
-    if (!date) return dateId;
-    const formatted = formatDateByLocale(date, locale, {
+    return formatDailyDatePartLabel(dateId, locale, {
         month: 'long',
         day: 'numeric',
     });
-    return formatted || dateId;
 };
 
 export const formatCountdownHms = (remainingMs, locale) => {

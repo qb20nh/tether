@@ -1,4 +1,5 @@
 import { normalizeScoreState } from '../runtime/score_manager.js';
+import { hashString32, mix32 } from '../shared/hash32.js';
 
 const GUIDE_KEY = 'tetherGuideHidden';
 const LEGEND_KEY = 'tetherLegendHidden';
@@ -52,25 +53,6 @@ const PATH_DELTA_FROM_DIR = Object.freeze({
 });
 
 const normalizeTheme = (theme) => (theme === 'light' || theme === 'dark' ? theme : null);
-
-const hashString32 = (input) => {
-  let h = 0x811c9dc5;
-  for (let i = 0; i < input.length; i++) {
-    h ^= input.codePointAt(i);
-    h = Math.imul(h, 0x01000193);
-  }
-  return h >>> 0;
-};
-
-const mix32 = (input) => {
-  let x = input >>> 0;
-  x ^= x >>> 16;
-  x = Math.imul(x, 0x7feb352d) >>> 0;
-  x ^= x >>> 15;
-  x = Math.imul(x, 0x846ca68b) >>> 0;
-  x ^= x >>> 16;
-  return x >>> 0;
-};
 
 const toHex32 = (value) => (value >>> 0).toString(16).padStart(8, '0');
 

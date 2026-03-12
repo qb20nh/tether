@@ -4,7 +4,9 @@ import { cp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
+import { runCommand, waitForServer } from './lib/process_utils.js';
 import { runRenderDragBenchmarkSuite } from './lib/render_drag_browser_runner.js';
+import { buildMetricSummary, formatMetric, mean, median, percentile } from './lib/stats.js';
 import { createRenderDragWorkload } from './lib/render_drag_workload.js';
 
 const DEFAULT_NEXT_REV = 'HEAD';
@@ -37,31 +39,6 @@ const WORKTREE_EXCLUDED_NAMES = new Set([
 const repoRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const resolvedRepoRoot = path.resolve(repoRoot);
 const viteBinPath = path.resolve(resolvedRepoRoot, 'node_modules', 'vite', 'bin', 'vite.js');
-
-const median = (values) => {
-  if (!Array.isArray(values) || values.length === 0) return 0;
-  const sorted = values.slice().sort((a, b) => a - b);
-  const mid = Math.floor(sorted.length / 2);
-  if (sorted.length % 2 === 1) return sorted[mid];
-  return (sorted[mid - 1] + sorted[mid]) * 0.5;
-};
-
-const mean = (values) => {
-  if (!Array.isArray(values) || values.length === 0) return 0;
-  let total = 0;
-  for (const element of values) total += element;
-  return total / values.length;
-};
-
-const percentile = (values, ratio) => {
-  if (!Array.isArray(values) || values.length === 0) return 0;
-  const sorted = values.slice().sort((a, b) => a - b);
-  const clamped = Math.max(0, Math.min(1, ratio));
-  const index = Math.min(sorted.length - 1, Math.max(0, Math.ceil(sorted.length * clamped) - 1));
-  return sorted[index];
-};
-
-const formatMetric = (value) => Number.isFinite(value) ? value.toFixed(3) : 'n/a';
 
 const applyArg = (args, key, value, token) => {
   switch (key) {
@@ -277,21 +254,6 @@ const assertSharedWorkloadInputs = async (candidateRevision, baselineRevision) =
   }
 };
 
-const runCommand = (command, args, options = {}) => new Promise((resolve, reject) => {
-  const child = spawn(command, args, {
-    stdio: 'inherit',
-    ...options,
-  });
-  child.on('error', reject);
-  child.on('exit', (code) => {
-    if (code === 0) {
-      resolve();
-      return;
-    }
-    reject(new Error(`${command} ${args.join(' ')} exited with code ${code}`));
-  });
-});
-
 const pipeArchiveToDirectory = (revision, outputDir) => new Promise((resolve, reject) => {
   const archive = spawn('git', ['archive', '--format=tar', revision.full], {
     cwd: resolvedRepoRoot,
@@ -380,22 +342,6 @@ const buildSnapshot = async (snapshotDir, revision) => {
   });
 };
 
-const waitForServer = async (url, timeoutMs = 30000, intervalMs = 250) => {
-  const startMs = Date.now();
-  while ((Date.now() - startMs) < timeoutMs) {
-    try {
-      const response = await fetch(url, { cache: 'no-store' });
-      if (response.ok || response.status === 404) return;
-    } catch {
-      // Keep polling until timeout.
-    }
-    await new Promise((resolve) => {
-      setTimeout(resolve, intervalMs);
-    });
-  }
-  throw new Error(`Timed out waiting for preview server at ${url}`);
-};
-
 const startPreviewServer = async (snapshotDir, port) => {
   const child = spawn(process.execPath, [
     viteBinPath,
@@ -449,26 +395,10 @@ const aggregateModeRevisionResults = (suiteResults) => {
     caseCount: allCaseResults.length,
     pointerMoveCount: allCaseResults.reduce((sum, item) => sum + item.pointerMoveCount, 0),
     pathStepCount: allCaseResults.reduce((sum, item) => sum + item.pathStepCount, 0),
-    syncMsPerPointerMove: {
-      mean: mean(syncValues),
-      median: median(syncValues),
-      p95: percentile(syncValues, 0.95),
-    },
-    rafMsPerPointerMove: {
-      mean: mean(rafValues),
-      median: median(rafValues),
-      p95: percentile(rafValues, 0.95),
-    },
-    dragWallClockMs: {
-      mean: mean(dragValues),
-      median: median(dragValues),
-      p95: percentile(dragValues, 0.95),
-    },
-    totalMsPerPathStep: {
-      mean: mean(stepValues),
-      median: median(stepValues),
-      p95: percentile(stepValues, 0.95),
-    },
+    syncMsPerPointerMove: buildMetricSummary(syncValues, median),
+    rafMsPerPointerMove: buildMetricSummary(rafValues, median),
+    dragWallClockMs: buildMetricSummary(dragValues, median),
+    totalMsPerPathStep: buildMetricSummary(stepValues, median),
   };
 };
 

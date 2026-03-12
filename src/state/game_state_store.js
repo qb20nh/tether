@@ -350,6 +350,24 @@ export function createGameStateStore(levelSource) {
     invalidateSnapshotCache();
   };
 
+  const initializePath = (next, nextKey, deferInvalidate) => {
+    path = [next];
+    visited = new Set([nextKey]);
+    if (!deferInvalidate) commitPathMutation();
+    return true;
+  };
+
+  const addPathTip = (next, nextKey, side, deferInvalidate) => {
+    if (side === 'start') {
+      path.unshift(next);
+    } else {
+      path.push(next);
+    }
+    visited.add(nextKey);
+    if (!deferInvalidate) commitPathMutation();
+    return true;
+  };
+
   const undo = (deferInvalidate = false) => {
     if (path.length === 0) return false;
     const last = path.pop();
@@ -366,10 +384,7 @@ export function createGameStateStore(levelSource) {
     const nextKey = keyOf(r, c);
 
     if (path.length === 0) {
-      path = [next];
-      visited = new Set([nextKey]);
-      if (!deferInvalidate) commitPathMutation();
-      return true;
+      return initializePath(next, nextKey, deferInvalidate);
     }
 
     const last = path.at(-1);
@@ -383,11 +398,7 @@ export function createGameStateStore(levelSource) {
 
     if (!isAdjacentMove({ stitchSet }, last, next)) return false;
     if (visited.has(nextKey)) return false;
-
-    path.push(next);
-    visited.add(nextKey);
-    if (!deferInvalidate) commitPathMutation();
-    return true;
+    return addPathTip(next, nextKey, 'end', deferInvalidate);
   };
 
   const startOrTryStepFromStart = (r, c, options = {}) => {
@@ -398,10 +409,7 @@ export function createGameStateStore(levelSource) {
     const nextKey = keyOf(r, c);
 
     if (path.length === 0) {
-      path = [next];
-      visited = new Set([nextKey]);
-      if (!deferInvalidate) commitPathMutation();
-      return true;
+      return initializePath(next, nextKey, deferInvalidate);
     }
 
     const head = path[0];
@@ -417,11 +425,7 @@ export function createGameStateStore(levelSource) {
 
     if (!isAdjacentMove({ stitchSet }, next, head)) return false;
     if (visited.has(nextKey)) return false;
-
-    path.unshift(next);
-    visited.add(nextKey);
-    if (!deferInvalidate) commitPathMutation();
-    return true;
+    return addPathTip(next, nextKey, 'start', deferInvalidate);
   };
 
   const applyPathDragSequence = (side, steps = []) => {

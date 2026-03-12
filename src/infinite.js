@@ -1,5 +1,6 @@
 import { canonicalConstraintFingerprint } from './infinite_canonical.js';
 import { INFINITE_OVERRIDE_BY_INDEX } from './infinite_overrides.js';
+import { hashString32, makeMulberry32Rng, mix32 } from './shared/hash32.js';
 
 export const INFINITE_GLOBAL_SEED = 'TETHER_INFINITE_V2';
 export const INFINITE_FEATURE_CYCLE = Object.freeze([
@@ -18,45 +19,12 @@ export const MAX_WALL_DENSITY = 0.25;
 
 const HINT_CODES = new Set(['t', 'r', 'l', 's', 'h', 'v']);
 const RPS_CODES = ['g', 'b', 'p'];
-const UINT32 = 0x100000000;
 const ORTH_DIRS = Object.freeze([
   [-1, 0],
   [1, 0],
   [0, -1],
   [0, 1],
 ]);
-
-const hashString32 = (input) => {
-  let h = 0x811c9dc5;
-  for (const char of input) {
-    h ^= char.codePointAt(0) ?? 0;
-    h = Math.imul(h, 0x01000193);
-  }
-  return h >>> 0;
-};
-
-const mix32 = (input) => {
-  let x = input >>> 0;
-  x ^= x >>> 16;
-  x = Math.imul(x, 0x7feb352d) >>> 0;
-  x ^= x >>> 15;
-  x = Math.imul(x, 0x846ca68b) >>> 0;
-  x ^= x >>> 16;
-  return x >>> 0;
-};
-
-const makeRng = (seedInput) => {
-  let state = seedInput >>> 0;
-  if (state === 0) state = 0x6d2b79f5;
-
-  return () => {
-    state = (state + 0x6d2b79f5) >>> 0;
-    let t = state;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / UINT32;
-  };
-};
 
 const intFromRng = (rng, maxExclusive) => {
   if (maxExclusive <= 0) return 0;
@@ -1195,7 +1163,7 @@ const createCoreLevel = (infiniteIndex, variantId) => {
 
   const requiredFeature = INFINITE_FEATURE_CYCLE[infiniteIndex % INFINITE_FEATURE_CYCLE.length];
   const seed = mix32(hashString32(`${INFINITE_GLOBAL_SEED}:${infiniteIndex}:variant:${variantId}`));
-  const rng = makeRng(seed);
+  const rng = makeMulberry32Rng(seed);
   const variantContext = { infiniteIndex, variantId };
 
   const plan = buildFeaturePlan(requiredFeature, rng);

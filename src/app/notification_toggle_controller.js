@@ -1,29 +1,8 @@
+import { normalizeNotificationToggleOptions } from './notification_options.js';
+
 export function createNotificationToggleController(options = {}) {
-  const {
-    elementIds,
-    notificationEnabledKey,
-    autoUpdateEnabledKey,
-    notificationAutoPromptDecisions,
-    readAutoPromptDecision = () => notificationAutoPromptDecisions?.UNSET,
-    writeAutoPromptDecision = () => { },
-    readNotificationEnabledPreference = () => false,
-    writeNotificationEnabledPreference = () => { },
-    readAutoUpdateEnabledPreference = () => false,
-    writeAutoUpdateEnabledPreference = () => { },
-    hasStoredNotificationEnabledPreference = () => false,
-    notificationPermissionState = () => 'unsupported',
-    supportsNotifications = () => false,
-    canUseServiceWorker = () => false,
-    requestNotificationPermission = async () => 'unsupported',
-    syncDailyStateToServiceWorker = async () => { },
-    syncUpdatePolicyToServiceWorker = async () => { },
-    registerBackgroundDailyCheck = async () => { },
-    requestServiceWorkerDailyCheck = async () => { },
-    translateNow = (key) => key,
-    showInAppToast = () => { },
-    windowObj = typeof window === 'undefined' ? undefined : window,
-    documentObj = typeof document === 'undefined' ? undefined : document,
-  } = options;
+  const notificationOptions = normalizeNotificationToggleOptions(options);
+  const { elementIds } = notificationOptions;
 
   if (!elementIds || typeof elementIds !== 'object') {
     throw new Error('createNotificationToggleController requires elementIds');
@@ -36,67 +15,83 @@ export function createNotificationToggleController(options = {}) {
 
   const refreshNotificationsToggleUi = () => {
     if (!notificationsToggleEl) return;
-    const enabled = readNotificationEnabledPreference();
-    const permission = notificationPermissionState();
+    const enabled = notificationOptions.readNotificationEnabledPreference();
+    const permission = notificationOptions.notificationPermissionState();
     notificationsToggleEl.checked = enabled;
     notificationsToggleEl.disabled = permission === 'unsupported';
   };
 
   const refreshAutoUpdateToggleUi = () => {
     if (!autoUpdateToggleEl) return;
-    autoUpdateToggleEl.checked = readAutoUpdateEnabledPreference();
+    autoUpdateToggleEl.checked = notificationOptions.readAutoUpdateEnabledPreference();
   };
 
   const requestAndEnableNotifications = async () => {
-    writeNotificationEnabledPreference(true);
-    const permission = await requestNotificationPermission();
+    notificationOptions.writeNotificationEnabledPreference(true);
+    const permission = await notificationOptions.requestNotificationPermission();
     if (permission !== 'granted') {
-      writeNotificationEnabledPreference(false);
+      notificationOptions.writeNotificationEnabledPreference(false);
       if (permission === 'denied') {
-        const deniedText = translateNow('ui.notificationsBlockedToast');
+        const deniedText = notificationOptions.translateNow('ui.notificationsBlockedToast');
         if (deniedText !== 'ui.notificationsBlockedToast') {
-          showInAppToast(deniedText, { recordInHistory: false });
+          notificationOptions.showInAppToast(deniedText, { recordInHistory: false });
         }
       }
       refreshNotificationsToggleUi();
-      await syncDailyStateToServiceWorker();
+      await notificationOptions.syncDailyStateToServiceWorker();
       return false;
     }
 
     refreshNotificationsToggleUi();
-    await syncDailyStateToServiceWorker();
-    await registerBackgroundDailyCheck();
-    await requestServiceWorkerDailyCheck();
+    await notificationOptions.syncDailyStateToServiceWorker();
+    await notificationOptions.registerBackgroundDailyCheck();
+    await notificationOptions.requestServiceWorkerDailyCheck();
     return true;
   };
 
   const disableNotificationsNow = async () => {
-    writeNotificationEnabledPreference(false);
+    notificationOptions.writeNotificationEnabledPreference(false);
     refreshNotificationsToggleUi();
-    await syncDailyStateToServiceWorker();
+    await notificationOptions.syncDailyStateToServiceWorker();
   };
 
   const maybeAutoPromptForNotifications = async () => {
-    if (!supportsNotifications() || !canUseServiceWorker()) return;
-    if (hasStoredNotificationEnabledPreference() && !readNotificationEnabledPreference()) return;
-    if (notificationPermissionState() === 'granted') return;
-    if (readAutoPromptDecision() !== notificationAutoPromptDecisions.UNSET) return;
-
-    const confirmed = windowObj.confirm(translateNow('ui.notificationsAutoPromptConfirm'));
-    if (!confirmed) {
-      writeAutoPromptDecision(notificationAutoPromptDecisions.DECLINED);
-      writeNotificationEnabledPreference(false);
-      refreshNotificationsToggleUi();
-      await syncDailyStateToServiceWorker();
+    if (!notificationOptions.supportsNotifications() || !notificationOptions.canUseServiceWorker()) return;
+    if (
+      notificationOptions.hasStoredNotificationEnabledPreference()
+      && !notificationOptions.readNotificationEnabledPreference()
+    ) {
+      return;
+    }
+    if (notificationOptions.notificationPermissionState() === 'granted') return;
+    if (
+      notificationOptions.readAutoPromptDecision()
+      !== notificationOptions.notificationAutoPromptDecisions.UNSET
+    ) {
       return;
     }
 
-    writeAutoPromptDecision(notificationAutoPromptDecisions.ACCEPTED);
+    const confirmed = notificationOptions.windowObj.confirm(
+      notificationOptions.translateNow('ui.notificationsAutoPromptConfirm'),
+    );
+    if (!confirmed) {
+      notificationOptions.writeAutoPromptDecision(
+        notificationOptions.notificationAutoPromptDecisions.DECLINED,
+      );
+      notificationOptions.writeNotificationEnabledPreference(false);
+      refreshNotificationsToggleUi();
+      await notificationOptions.syncDailyStateToServiceWorker();
+      return;
+    }
+
+    notificationOptions.writeAutoPromptDecision(
+      notificationOptions.notificationAutoPromptDecisions.ACCEPTED,
+    );
     await requestAndEnableNotifications();
   };
 
   const bindNotificationsToggle = () => {
-    notificationsToggleEl = documentObj.getElementById(elementIds.NOTIFICATIONS_TOGGLE);
+    notificationsToggleEl = notificationOptions.documentObj.getElementById(elementIds.NOTIFICATIONS_TOGGLE);
 
     if (!notificationsToggleEl || notificationsToggleBound) {
       refreshNotificationsToggleUi();
@@ -115,7 +110,7 @@ export function createNotificationToggleController(options = {}) {
   };
 
   const bindAutoUpdateToggle = () => {
-    autoUpdateToggleEl = documentObj.getElementById(elementIds.AUTO_UPDATE_TOGGLE);
+    autoUpdateToggleEl = notificationOptions.documentObj.getElementById(elementIds.AUTO_UPDATE_TOGGLE);
 
     if (!autoUpdateToggleEl || autoUpdateToggleBound) {
       refreshAutoUpdateToggleUi();
@@ -123,9 +118,9 @@ export function createNotificationToggleController(options = {}) {
     }
 
     autoUpdateToggleEl.addEventListener('change', () => {
-      writeAutoUpdateEnabledPreference(autoUpdateToggleEl.checked);
+      notificationOptions.writeAutoUpdateEnabledPreference(autoUpdateToggleEl.checked);
       refreshAutoUpdateToggleUi();
-      void syncUpdatePolicyToServiceWorker();
+      void notificationOptions.syncUpdatePolicyToServiceWorker();
     });
 
     autoUpdateToggleBound = true;
@@ -133,17 +128,17 @@ export function createNotificationToggleController(options = {}) {
   };
 
   const handleStorageEvent = (storageKey) => {
-    if (storageKey === notificationEnabledKey) {
+    if (storageKey === notificationOptions.notificationEnabledKey) {
       refreshNotificationsToggleUi();
-      void syncDailyStateToServiceWorker();
-    } else if (storageKey === autoUpdateEnabledKey) {
+      void notificationOptions.syncDailyStateToServiceWorker();
+    } else if (storageKey === notificationOptions.autoUpdateEnabledKey) {
       refreshAutoUpdateToggleUi();
-      void syncUpdatePolicyToServiceWorker();
+      void notificationOptions.syncUpdatePolicyToServiceWorker();
     }
   };
 
   const bind = () => {
-    if (!documentObj || !windowObj) return;
+    if (!notificationOptions.documentObj || !notificationOptions.windowObj) return;
     bindNotificationsToggle();
     bindAutoUpdateToggle();
   };

@@ -19,7 +19,10 @@ import {
   evaluateRPS,
   evaluateStitches,
 } from '../src/rules.js';
+import { parseUtcDateIdStartMs, utcDateIdFromMs } from '../src/shared/utc_date.js';
 import { createGameStateStore } from '../src/state/game_state_store.js';
+
+export { utcDateIdFromMs };
 
 export const DAILY_POOL_SCHEMA_VERSION = 1;
 export const DAILY_POOL_VERSION = 'v1';
@@ -302,20 +305,12 @@ export const computePoolDigest = (records) => {
   return hash.digest('hex');
 };
 
-export const utcDateIdFromMs = (ms) => {
-  const date = new Date(ms);
-  const y = date.getUTCFullYear();
-  const m = String(date.getUTCMonth() + 1).padStart(2, '0');
-  const d = String(date.getUTCDate()).padStart(2, '0');
-  return `${y}-${m}-${d}`;
-};
-
 export const utcStartMsFromDateId = (dateId) => {
-  if (typeof dateId !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(dateId)) {
+  const startMs = parseUtcDateIdStartMs(dateId);
+  if (!Number.isInteger(startMs)) {
     throw new Error(`Invalid UTC date id: ${dateId}`);
   }
-  const [y, m, d] = dateId.split('-').map((part) => Number.parseInt(part, 10));
-  return Date.UTC(y, m - 1, d, 0, 0, 0, 0);
+  return startMs;
 };
 
 export const addUtcDaysToDateId = (dateId, deltaDays) => {

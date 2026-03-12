@@ -1738,6 +1738,32 @@ export function createDomInputAdapter() {
     scheduleGamepadPolling();
   };
 
+  const beginPathDrag = ({
+    side,
+    applyPathCommands,
+    metrics,
+    pointerId,
+    originCell,
+  }) => {
+    pathDrag = {
+      side,
+      applyPathCommands,
+      moved: false,
+      origin: { r: originCell.r, c: originCell.c },
+      lastCursorKey: `${originCell.r},${originCell.c}`,
+      lastHoverKey: `${originCell.r},${originCell.c}`,
+    };
+    dragGridMetrics = metrics;
+    dragMode = 'path';
+    activePointerId = pointerId;
+    refs.gridEl.setPointerCapture(pointerId);
+    sendInteractionUpdate(INTERACTION_UPDATES.PATH_DRAG, {
+      isPathDragging: true,
+      pathDragSide: side,
+      pathDragCursor: { r: originCell.r, c: originCell.c },
+    });
+  };
+
   const onPointerDown = (e) => {
     const snapshot = readSnapshot();
     const metrics = refreshDragGridMetrics(snapshot, true);
@@ -1775,22 +1801,12 @@ export function createDomInputAdapter() {
       const nextSnapshot = readSnapshot();
       if (nextSnapshot.path.length === 0) return;
 
-      dragMode = 'path';
-      pathDrag = {
+      beginPathDrag({
         side: 'end',
         applyPathCommands: true,
-        moved: false,
-        origin: { r: cell.r, c: cell.c },
-        lastCursorKey: `${cell.r},${cell.c}`,
-        lastHoverKey: `${cell.r},${cell.c}`,
-      };
-      dragGridMetrics = refreshDragGridMetrics(nextSnapshot, true);
-      activePointerId = e.pointerId;
-      refs.gridEl.setPointerCapture(e.pointerId);
-      sendInteractionUpdate(INTERACTION_UPDATES.PATH_DRAG, {
-        isPathDragging: true,
-        pathDragSide: pathDrag.side,
-        pathDragCursor: { r: cell.r, c: cell.c },
+        metrics: refreshDragGridMetrics(nextSnapshot, true),
+        pointerId: e.pointerId,
+        originCell: cell,
       });
       e.preventDefault();
       return;
@@ -1801,44 +1817,23 @@ export function createDomInputAdapter() {
     const isTail = tail.r === cell.r && tail.c === cell.c;
     const isHead = head.r === cell.r && head.c === cell.c;
     if (!isTail && !isHead) {
-      pathDrag = {
+      beginPathDrag({
         side: null,
         applyPathCommands: false,
-        moved: false,
-        origin: { r: cell.r, c: cell.c },
-        lastCursorKey: `${cell.r},${cell.c}`,
-        lastHoverKey: `${cell.r},${cell.c}`,
-      };
-      dragGridMetrics = metrics;
-      dragMode = 'path';
-      activePointerId = e.pointerId;
-      refs.gridEl.setPointerCapture(e.pointerId);
-      sendInteractionUpdate(INTERACTION_UPDATES.PATH_DRAG, {
-        isPathDragging: true,
-        pathDragSide: null,
-        pathDragCursor: { r: cell.r, c: cell.c },
+        metrics,
+        pointerId: e.pointerId,
+        originCell: cell,
       });
       e.preventDefault();
       return;
     }
 
-    pathDrag = {
+    beginPathDrag({
       side: isHead ? 'start' : 'end',
       applyPathCommands: true,
-      moved: false,
-      origin: { r: cell.r, c: cell.c },
-      lastCursorKey: `${cell.r},${cell.c}`,
-      lastHoverKey: `${cell.r},${cell.c}`,
-    };
-    dragGridMetrics = metrics;
-
-    dragMode = 'path';
-    activePointerId = e.pointerId;
-    refs.gridEl.setPointerCapture(e.pointerId);
-    sendInteractionUpdate(INTERACTION_UPDATES.PATH_DRAG, {
-      isPathDragging: true,
-      pathDragSide: pathDrag.side,
-      pathDragCursor: { r: cell.r, c: cell.c },
+      metrics,
+      pointerId: e.pointerId,
+      originCell: cell,
     });
     e.preventDefault();
   };

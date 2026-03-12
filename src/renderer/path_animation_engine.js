@@ -552,6 +552,32 @@ export function createPathAnimationEngine(options = {}) {
     pathStartFlowRotateState = null;
   };
 
+  const clearPathRotateState = (side) => {
+    if (side === 'start') {
+      clearPathStartFlowRotateState();
+      return;
+    }
+    if (side === 'end') {
+      clearPathEndArrowRotateState();
+    }
+  };
+
+  const setPathRotateState = (side, state) => {
+    if (side === 'start') {
+      pathStartFlowRotateState = state;
+      return;
+    }
+    if (side === 'end') {
+      pathEndArrowRotateState = state;
+    }
+  };
+
+  const getPathRotateState = (side) => (
+    side === 'start'
+      ? pathStartFlowRotateState
+      : pathEndArrowRotateState
+  );
+
   const resetTransitionState = ({ preserveFlowFreeze = false } = {}) => {
     clearPathTipArrivalStates();
     clearPathStartPinPresenceState();
@@ -613,53 +639,73 @@ export function createPathAnimationEngine(options = {}) {
     };
   };
 
-  const updatePathEndArrowRotateState = (
+  const updatePathRotateState = (
+    side,
     prevPath,
     nextPath,
     nowMs = nowFn(),
   ) => {
     if (isReducedMotionPreferred()) {
-      clearPathEndArrowRotateState();
+      clearPathRotateState(side);
       return;
     }
-    const pathChanged = !pathsMatch(prevPath, nextPath);
-    if (!pathChanged) return;
+    if (pathsMatch(prevPath, nextPath)) return;
 
-    if (!isEndRetractTransition(prevPath, nextPath)) {
-      clearPathEndArrowRotateState();
+    const isStartSide = side === 'start';
+    const isRetracting = isStartSide
+      ? isStartRetractTransition(prevPath, nextPath)
+      : isEndRetractTransition(prevPath, nextPath);
+    if (!isRetracting) {
+      clearPathRotateState(side);
       return;
     }
 
-    const retractedTip = prevPath[nextPath.length];
-    const nextTip = getPathTipFromPath(nextPath, 'end');
-    const neighbor = Array.isArray(nextPath) ? nextPath.at(-2) : null;
+    const retractedTip = isStartSide
+      ? prevPath[prevPath.length - nextPath.length - 1]
+      : prevPath[nextPath.length];
+    const nextTip = getPathTipFromPath(nextPath, side);
+    const neighbor = Array.isArray(nextPath)
+      ? (isStartSide ? nextPath[1] : nextPath.at(-2))
+      : null;
     if (!retractedTip || !nextTip || !neighbor) {
-      clearPathEndArrowRotateState();
+      clearPathRotateState(side);
       return;
     }
-    if (!isRetractUnturnTransition('end', retractedTip, nextTip, nextPath)) {
-      clearPathEndArrowRotateState();
+    if (!isRetractUnturnTransition(side, retractedTip, nextTip, nextPath)) {
+      clearPathRotateState(side);
       return;
     }
 
-    const fromDir = normalizeDirectionInto(
-      retractedTip.c - nextTip.c,
-      retractedTip.r - nextTip.r,
-      normalizeDirectionScratchA,
-    );
-    const toDir = normalizeDirectionInto(
-      nextTip.c - neighbor.c,
-      nextTip.r - neighbor.r,
-      normalizeDirectionScratchB,
-    );
+    const fromDir = isStartSide
+      ? normalizeDirectionInto(
+        nextTip.c - retractedTip.c,
+        nextTip.r - retractedTip.r,
+        normalizeDirectionScratchA,
+      )
+      : normalizeDirectionInto(
+        retractedTip.c - nextTip.c,
+        retractedTip.r - nextTip.r,
+        normalizeDirectionScratchA,
+      );
+    const toDir = isStartSide
+      ? normalizeDirectionInto(
+        neighbor.c - nextTip.c,
+        neighbor.r - nextTip.r,
+        normalizeDirectionScratchB,
+      )
+      : normalizeDirectionInto(
+        nextTip.c - neighbor.c,
+        nextTip.r - neighbor.r,
+        normalizeDirectionScratchB,
+      );
     if (!fromDir || !toDir) {
-      clearPathEndArrowRotateState();
+      clearPathRotateState(side);
       return;
     }
 
     const fromAngle = Math.atan2(fromDir.y, fromDir.x);
     const toAngle = Math.atan2(toDir.y, toDir.x);
-    pathEndArrowRotateState = {
+    setPathRotateState(side, {
       startTimeMs: nowMs,
       targetR: nextTip.r,
       targetC: nextTip.c,
@@ -668,42 +714,44 @@ export function createPathAnimationEngine(options = {}) {
       fromAngle,
       deltaAngle: angleDeltaSigned(fromAngle, toAngle),
       cutoffMs: PATH_TIP_ARRIVAL_DURATION_MS,
-    };
+    });
   };
 
-  const resolvePathEndArrowDirection = (
+  const resolvePathRotateDirection = (
+    side,
     path,
-    nowMs = nowFn(),
-    out = endArrowDirectionScratch,
+    nowMs,
+    out,
   ) => {
     out.x = Number.NaN;
     out.y = Number.NaN;
     out.active = false;
 
     if (isReducedMotionPreferred()) {
-      clearPathEndArrowRotateState();
+      clearPathRotateState(side);
       return out;
     }
 
-    const state = pathEndArrowRotateState;
+    const state = getPathRotateState(side);
     if (!state) return out;
     const pathLength = Array.isArray(path) ? path.length : 0;
     if (pathLength < 2) {
-      clearPathEndArrowRotateState();
+      clearPathRotateState(side);
       return out;
     }
 
-    const tail = path[pathLength - 1];
-    const neighbor = path[pathLength - 2];
+    const isStartSide = side === 'start';
+    const tip = isStartSide ? path[0] : path[pathLength - 1];
+    const neighbor = isStartSide ? path[1] : path[pathLength - 2];
     if (
-      !tail
+      !tip
       || !neighbor
-      || tail.r !== state.targetR
-      || tail.c !== state.targetC
+      || tip.r !== state.targetR
+      || tip.c !== state.targetC
       || neighbor.r !== state.neighborR
       || neighbor.c !== state.neighborC
     ) {
-      clearPathEndArrowRotateState();
+      clearPathRotateState(side);
       return out;
     }
 
@@ -712,7 +760,7 @@ export function createPathAnimationEngine(options = {}) {
       ? state.cutoffMs
       : PATH_TIP_ARRIVAL_DURATION_MS;
     if (elapsed >= visibleDuration) {
-      clearPathEndArrowRotateState();
+      clearPathRotateState(side);
       return out;
     }
     const linearProgress = clampUnit(elapsed / PATH_TIP_ARRIVAL_DURATION_MS);
@@ -723,6 +771,18 @@ export function createPathAnimationEngine(options = {}) {
     out.active = true;
     return out;
   };
+
+  const updatePathEndArrowRotateState = (
+    prevPath,
+    nextPath,
+    nowMs = nowFn(),
+  ) => updatePathRotateState('end', prevPath, nextPath, nowMs);
+
+  const resolvePathEndArrowDirection = (
+    path,
+    nowMs = nowFn(),
+    out = endArrowDirectionScratch,
+  ) => resolvePathRotateDirection('end', path, nowMs, out);
 
   const hasActivePathEndArrowRotate = (
     path,
@@ -733,112 +793,13 @@ export function createPathAnimationEngine(options = {}) {
     prevPath,
     nextPath,
     nowMs = nowFn(),
-  ) => {
-    if (isReducedMotionPreferred()) {
-      clearPathStartFlowRotateState();
-      return;
-    }
-    const pathChanged = !pathsMatch(prevPath, nextPath);
-    if (!pathChanged) return;
-
-    if (!isStartRetractTransition(prevPath, nextPath)) {
-      clearPathStartFlowRotateState();
-      return;
-    }
-
-    const retractedTip = prevPath[prevPath.length - nextPath.length - 1];
-    const nextTip = getPathTipFromPath(nextPath, 'start');
-    const neighbor = Array.isArray(nextPath) ? nextPath[1] : null;
-    if (!retractedTip || !nextTip || !neighbor) {
-      clearPathStartFlowRotateState();
-      return;
-    }
-    if (!isRetractUnturnTransition('start', retractedTip, nextTip, nextPath)) {
-      clearPathStartFlowRotateState();
-      return;
-    }
-
-    const fromDir = normalizeDirectionInto(
-      nextTip.c - retractedTip.c,
-      nextTip.r - retractedTip.r,
-      normalizeDirectionScratchA,
-    );
-    const toDir = normalizeDirectionInto(
-      neighbor.c - nextTip.c,
-      neighbor.r - nextTip.r,
-      normalizeDirectionScratchB,
-    );
-    if (!fromDir || !toDir) {
-      clearPathStartFlowRotateState();
-      return;
-    }
-
-    const fromAngle = Math.atan2(fromDir.y, fromDir.x);
-    const toAngle = Math.atan2(toDir.y, toDir.x);
-    pathStartFlowRotateState = {
-      startTimeMs: nowMs,
-      targetR: nextTip.r,
-      targetC: nextTip.c,
-      neighborR: neighbor.r,
-      neighborC: neighbor.c,
-      fromAngle,
-      deltaAngle: angleDeltaSigned(fromAngle, toAngle),
-      cutoffMs: PATH_TIP_ARRIVAL_DURATION_MS,
-    };
-  };
+  ) => updatePathRotateState('start', prevPath, nextPath, nowMs);
 
   const resolvePathStartFlowDirection = (
     path,
     nowMs = nowFn(),
     out = startFlowDirectionScratch,
-  ) => {
-    out.x = Number.NaN;
-    out.y = Number.NaN;
-    out.active = false;
-
-    if (isReducedMotionPreferred()) {
-      clearPathStartFlowRotateState();
-      return out;
-    }
-
-    const state = pathStartFlowRotateState;
-    if (!state) return out;
-    const pathLength = Array.isArray(path) ? path.length : 0;
-    if (pathLength < 2) {
-      clearPathStartFlowRotateState();
-      return out;
-    }
-
-    const head = path[0];
-    const neighbor = path[1];
-    if (
-      !head
-      || !neighbor
-      || head.r !== state.targetR
-      || head.c !== state.targetC
-      || neighbor.r !== state.neighborR
-      || neighbor.c !== state.neighborC
-    ) {
-      clearPathStartFlowRotateState();
-      return out;
-    }
-
-    const elapsed = nowMs - state.startTimeMs;
-    const visibleDuration = Number.isFinite(state.cutoffMs) && state.cutoffMs > 0
-      ? state.cutoffMs
-      : PATH_TIP_ARRIVAL_DURATION_MS;
-    if (elapsed >= visibleDuration) {
-      clearPathStartFlowRotateState();
-      return out;
-    }
-    const linearProgress = clampUnit(elapsed / PATH_TIP_ARRIVAL_DURATION_MS);
-    const eased = easeOutCubic(linearProgress);
-    const angle = state.fromAngle + (state.deltaAngle * eased);
-    out.x = Math.cos(angle);
-    out.y = Math.sin(angle);
-    out.active = true;
-    return out;
-  };
+  ) => resolvePathRotateDirection('start', path, nowMs, out);
 
   const hasActivePathStartFlowRotate = (
     path,

@@ -9,6 +9,7 @@ import {
   evaluateRPS,
   evaluateStitches,
 } from '../src/rules.js';
+import { hashString32, makeMulberry32Rng, mix32 } from '../src/shared/hash32.js';
 import { keyOf, keyV, parseLevel } from '../src/utils.js';
 
 const CONSTRAINT_CODES = new Set(['t', 'r', 'l', 's', 'h', 'v', 'g', 'b', 'p']);
@@ -26,7 +27,6 @@ const ALL_DIRS = [
   [1, 1],
 ];
 
-const UINT32 = 0x100000000;
 const GOLDEN_RATIO_32 = 0x9e3779b9;
 const DIFFICULTY_VERSION = 1;
 const LEVELS_FILE_PATH = fileURLToPath(new URL('../src/levels.js', import.meta.url));
@@ -313,38 +313,6 @@ const compareCell = (a, b) => {
 };
 
 const cloneGrid = (grid) => grid.map((row) => row.slice());
-
-const hashString32 = (input) => {
-  let h = 0x811c9dc5;
-  for (const char of input) {
-    h ^= char.codePointAt(0);
-    h = Math.imul(h, 0x01000193);
-  }
-  return h >>> 0;
-};
-
-const mix32 = (input) => {
-  let x = input >>> 0;
-  x ^= x >>> 16;
-  x = Math.imul(x, 0x7feb352d) >>> 0;
-  x ^= x >>> 15;
-  x = Math.imul(x, 0x846ca68b) >>> 0;
-  x ^= x >>> 16;
-  return x >>> 0;
-};
-
-const makeRng = (seed) => {
-  let state = seed >>> 0;
-  if (state === 0) state = 0x6d2b79f5;
-
-  return () => {
-    state = (state + 0x6d2b79f5) >>> 0;
-    let t = state;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / UINT32;
-  };
-};
 
 const shuffleInPlace = (arr, rng) => {
   for (let i = arr.length - 1; i > 0; i--) {
@@ -653,7 +621,7 @@ export function solveLevel(level, opts) {
 }
 
 function runRandomSolveTrial(levelCtx, trialSeed, trialNodeCap) {
-  const rng = makeRng(trialSeed);
+  const rng = makeMulberry32Rng(trialSeed);
   const sampledWalls = sampleWalls(levelCtx.movableCandidates, levelCtx.movableWallsCount, rng);
   const placement = buildPlacementState(levelCtx, sampledWalls);
 

@@ -1,5 +1,5 @@
 {
-  "threshold": 2,
+  "threshold": 1,
   "gitignore": true,
   "maxLines": 10000,
   "maxSize": "1mb",
