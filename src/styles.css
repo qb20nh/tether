@@ -1083,7 +1083,7 @@ select,
 button {
   appearance: none;
   border: 1px solid var(--control-border);
-  background: var(--control-bg);
+  background-color: var(--control-bg);
   color: var(--text);
   padding: 8px 11px;
   border-radius: 10px;

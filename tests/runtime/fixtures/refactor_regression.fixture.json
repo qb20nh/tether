@@ -1,0 +1,6707 @@
+{
+  "dailyOverrides": [
+    {
+      "decoded": {},
+      "encoded": {
+        "entryCount": 0,
+        "payload": [
+          68,
+          1,
+          3
+        ],
+        "variantBits": 3
+      },
+      "overrides": {}
+    },
+    {
+      "decoded": {
+        "0": 0
+      },
+      "encoded": {
+        "entryCount": 1,
+        "payload": [
+          68,
+          1,
+          3,
+          8
+        ],
+        "variantBits": 3
+      },
+      "overrides": {
+        "0": 0
+      }
+    },
+    {
+      "decoded": {
+        "1": 1,
+        "3": 2,
+        "8": 0
+      },
+      "encoded": {
+        "entryCount": 3,
+        "payload": [
+          68,
+          1,
+          3,
+          17,
+          18,
+          40
+        ],
+        "variantBits": 3
+      },
+      "overrides": {
+        "1": 1,
+        "3": 2,
+        "8": 0
+      }
+    },
+    {
+      "decoded": {
+        "2": 3,
+        "9": 1,
+        "15": 2,
+        "31": 3
+      },
+      "encoded": {
+        "entryCount": 4,
+        "payload": [
+          68,
+          1,
+          3,
+          27,
+          57,
+          50,
+          131,
+          1
+        ],
+        "variantBits": 3
+      },
+      "overrides": {
+        "2": 3,
+        "9": 1,
+        "15": 2,
+        "31": 3
+      }
+    },
+    {
+      "decoded": {
+        "5": 7,
+        "18": 6,
+        "33": 5,
+        "65": 4
+      },
+      "encoded": {
+        "entryCount": 4,
+        "payload": [
+          68,
+          1,
+          3,
+          55,
+          110,
+          125,
+          132,
+          2
+        ],
+        "variantBits": 3
+      },
+      "overrides": {
+        "5": 7,
+        "18": 6,
+        "33": 5,
+        "65": 4
+      }
+    }
+  ],
+  "dailyPayloads": [
+    {
+      "input": null,
+      "output": null
+    },
+    {
+      "input": {},
+      "output": null
+    },
+    {
+      "input": {
+        "dailyId": "bad"
+      },
+      "output": null
+    },
+    {
+      "input": {
+        "canonicalKey": "abc",
+        "dailyId": "2026-03-12",
+        "dailySlot": "12",
+        "generatedAtUtcMs": "1741734000000",
+        "hardInvalidateAtUtcMs": "1741737600000",
+        "level": {
+          "cornerCounts": [
+            [
+              1,
+              1,
+              2
+            ]
+          ],
+          "grid": [
+            "...",
+            ".#.",
+            "..."
+          ],
+          "name": "Daily",
+          "stitches": [
+            [
+              1,
+              1
+            ]
+          ]
+        },
+        "poolVersion": "p1",
+        "schemaVersion": 1
+      },
+      "output": {
+        "canonicalKey": "abc",
+        "dailyId": "2026-03-12",
+        "dailySlot": 12,
+        "generatedAtUtcMs": 1741734000000,
+        "hardInvalidateAtUtcMs": 1741737600000,
+        "level": {
+          "cornerCounts": [
+            [
+              1,
+              1,
+              2
+            ]
+          ],
+          "grid": [
+            "...",
+            ".#.",
+            "..."
+          ],
+          "name": "Daily",
+          "stitches": [
+            [
+              1,
+              1
+            ]
+          ]
+        },
+        "poolVersion": "p1",
+        "schemaVersion": 1
+      }
+    },
+    {
+      "input": {
+        "canonicalKey": "abc",
+        "dailyId": "2026-03-12",
+        "dailySlot": 12,
+        "generatedAtUtcMs": 1741734000000,
+        "hardInvalidateAtUtcMs": 1741737600000,
+        "level": {
+          "cornerCounts": [],
+          "grid": [
+            "..",
+            ".."
+          ],
+          "stitches": []
+        },
+        "poolVersion": "p1",
+        "schemaVersion": 1
+      },
+      "output": {
+        "canonicalKey": "abc",
+        "dailyId": "2026-03-12",
+        "dailySlot": 12,
+        "generatedAtUtcMs": 1741734000000,
+        "hardInvalidateAtUtcMs": 1741737600000,
+        "level": {
+          "cornerCounts": [],
+          "grid": [
+            "..",
+            ".."
+          ],
+          "name": "Daily 2026-03-12",
+          "stitches": []
+        },
+        "poolVersion": "p1",
+        "schemaVersion": 1
+      }
+    }
+  ],
+  "infiniteLevels": [
+    {
+      "defaultVariant": 2,
+      "digest": "4311e57841503584e9b5d08f1ed15a1f97319f6cbff32955543ed99d32fb3360",
+      "infiniteIndex": 0,
+      "summary": {
+        "cols": 6,
+        "cornerCount": 2,
+        "name": "Infinite 1",
+        "requiredFeature": "stitch",
+        "rows": 6,
+        "stitchCount": 1,
+        "witnessMovableWallCount": 0,
+        "witnessPathLength": 30
+      }
+    },
+    {
+      "defaultVariant": 2,
+      "digest": "2c81a154ce2f2e71665946aec3d9b6187e889ac376dc5eac04e413719f63dd90",
+      "infiniteIndex": 1,
+      "summary": {
+        "cols": 6,
+        "cornerCount": 2,
+        "name": "Infinite 2",
+        "requiredFeature": "movable",
+        "rows": 5,
+        "stitchCount": 0,
+        "witnessMovableWallCount": 2,
+        "witnessPathLength": 25
+      }
+    },
+    {
+      "defaultVariant": 2,
+      "digest": "eb7b797869a8b629a3f33b23692623b5eeafbe85cac81b5ea8ceef44ad4306ee",
+      "infiniteIndex": 2,
+      "summary": {
+        "cols": 5,
+        "cornerCount": 3,
+        "name": "Infinite 3",
+        "requiredFeature": "corner",
+        "rows": 5,
+        "stitchCount": 0,
+        "witnessMovableWallCount": 0,
+        "witnessPathLength": 23
+      }
+    },
+    {
+      "defaultVariant": 2,
+      "digest": "14ea08def912ee29f9f5ff030f9bc7e8f504884e41b48fb9da056be5ea3e7d21",
+      "infiniteIndex": 3,
+      "summary": {
+        "cols": 6,
+        "cornerCount": 2,
+        "name": "Infinite 4",
+        "requiredFeature": "rps",
+        "rows": 5,
+        "stitchCount": 0,
+        "witnessMovableWallCount": 1,
+        "witnessPathLength": 24
+      }
+    },
+    {
+      "defaultVariant": 3,
+      "digest": "3ab2f999f300adfbd44324b854fa68d9bd2383a4890c9f06895e1028f208c5d2",
+      "infiniteIndex": 4,
+      "summary": {
+        "cols": 6,
+        "cornerCount": 2,
+        "name": "Infinite 5",
+        "requiredFeature": "hint",
+        "rows": 6,
+        "stitchCount": 0,
+        "witnessMovableWallCount": 0,
+        "witnessPathLength": 31
+      }
+    },
+    {
+      "defaultVariant": 1,
+      "digest": "9f174a6e2c7c11f57c30bf6c6db423bdced8a22050ec6c98e976727549202b62",
+      "infiniteIndex": 5,
+      "summary": {
+        "cols": 6,
+        "cornerCount": 1,
+        "name": "Infinite 6",
+        "requiredFeature": "mixed",
+        "rows": 5,
+        "stitchCount": 1,
+        "witnessMovableWallCount": 0,
+        "witnessPathLength": 25
+      }
+    },
+    {
+      "defaultVariant": 1,
+      "digest": "2a89577a34ad5cb0011cac5ac7e3ec0c828c6219b019781d2e9a2420c5d36422",
+      "infiniteIndex": 17,
+      "summary": {
+        "cols": 5,
+        "cornerCount": 2,
+        "name": "Infinite 18",
+        "requiredFeature": "mixed",
+        "rows": 6,
+        "stitchCount": 2,
+        "witnessMovableWallCount": 0,
+        "witnessPathLength": 24
+      }
+    },
+    {
+      "defaultVariant": 3,
+      "digest": "4bc875b20e3a7e782a55831a703ec91a276d5d68f2ddfaeeecd522ccabd0edc8",
+      "infiniteIndex": 63,
+      "summary": {
+        "cols": 6,
+        "cornerCount": 1,
+        "name": "Infinite 64",
+        "requiredFeature": "rps",
+        "rows": 6,
+        "stitchCount": 0,
+        "witnessMovableWallCount": 0,
+        "witnessPathLength": 29
+      }
+    },
+    {
+      "defaultVariant": 0,
+      "digest": "12b37039489f37dd333e6208fc72f68816e34ce640f99ce55144b52942576f34",
+      "infiniteIndex": 127,
+      "summary": {
+        "cols": 6,
+        "cornerCount": 2,
+        "name": "Infinite 128",
+        "requiredFeature": "movable",
+        "rows": 5,
+        "stitchCount": 0,
+        "witnessMovableWallCount": 1,
+        "witnessPathLength": 24
+      }
+    },
+    {
+      "defaultVariant": 3,
+      "digest": "4a69de3d71b385f51483fd108432f1fd1ac25156226241c460a6e8c4ca1ec96c",
+      "infiniteIndex": 255,
+      "summary": {
+        "cols": 6,
+        "cornerCount": 1,
+        "name": "Infinite 256",
+        "requiredFeature": "rps",
+        "rows": 5,
+        "stitchCount": 0,
+        "witnessMovableWallCount": 1,
+        "witnessPathLength": 26
+      }
+    }
+  ],
+  "pathTransitions": [
+    {
+      "name": "end-retract",
+      "nextPath": [
+        {
+          "c": 0,
+          "r": 0
+        },
+        {
+          "c": 1,
+          "r": 0
+        }
+      ],
+      "prevPath": [
+        {
+          "c": 0,
+          "r": 0
+        },
+        {
+          "c": 1,
+          "r": 0
+        },
+        {
+          "c": 2,
+          "r": 0
+        }
+      ],
+      "result": {
+        "endTip": {
+          "c": 1,
+          "r": 0
+        },
+        "isEndAdvanceTransition": false,
+        "isEndRetractTransition": true,
+        "isPathReversed": false,
+        "isRetractUnturnEnd": false,
+        "isRetractUnturnStart": false,
+        "isStartAdvanceTransition": false,
+        "isStartRetractTransition": false,
+        "normalizeFlowOffset": 110.5,
+        "pathsMatch": false,
+        "resolvePathSignatureNext": "2|0,0|0,1",
+        "resolvePathSignaturePrev": "3|0,0|0,2",
+        "startTip": {
+          "c": 0,
+          "r": 0
+        }
+      }
+    },
+    {
+      "name": "start-retract",
+      "nextPath": [
+        {
+          "c": 1,
+          "r": 0
+        },
+        {
+          "c": 2,
+          "r": 0
+        }
+      ],
+      "prevPath": [
+        {
+          "c": 0,
+          "r": 0
+        },
+        {
+          "c": 1,
+          "r": 0
+        },
+        {
+          "c": 2,
+          "r": 0
+        }
+      ],
+      "result": {
+        "endTip": {
+          "c": 2,
+          "r": 0
+        },
+        "isEndAdvanceTransition": false,
+        "isEndRetractTransition": false,
+        "isPathReversed": false,
+        "isRetractUnturnEnd": false,
+        "isRetractUnturnStart": false,
+        "isStartAdvanceTransition": false,
+        "isStartRetractTransition": true,
+        "normalizeFlowOffset": 110.5,
+        "pathsMatch": false,
+        "resolvePathSignatureNext": "2|0,1|0,2",
+        "resolvePathSignaturePrev": "3|0,0|0,2",
+        "startTip": {
+          "c": 1,
+          "r": 0
+        }
+      }
+    },
+    {
+      "name": "end-advance",
+      "nextPath": [
+        {
+          "c": 0,
+          "r": 0
+        },
+        {
+          "c": 1,
+          "r": 0
+        },
+        {
+          "c": 1,
+          "r": 1
+        }
+      ],
+      "prevPath": [
+        {
+          "c": 0,
+          "r": 0
+        },
+        {
+          "c": 1,
+          "r": 0
+        }
+      ],
+      "result": {
+        "endTip": {
+          "c": 1,
+          "r": 1
+        },
+        "isEndAdvanceTransition": true,
+        "isEndRetractTransition": false,
+        "isPathReversed": false,
+        "isRetractUnturnEnd": false,
+        "isRetractUnturnStart": false,
+        "isStartAdvanceTransition": false,
+        "isStartRetractTransition": false,
+        "normalizeFlowOffset": 110.5,
+        "pathsMatch": false,
+        "resolvePathSignatureNext": "3|0,0|1,1",
+        "resolvePathSignaturePrev": "2|0,0|0,1",
+        "startTip": {
+          "c": 0,
+          "r": 0
+        }
+      }
+    },
+    {
+      "name": "start-advance",
+      "nextPath": [
+        {
+          "c": 0,
+          "r": 0
+        },
+        {
+          "c": 1,
+          "r": 0
+        },
+        {
+          "c": 1,
+          "r": 1
+        }
+      ],
+      "prevPath": [
+        {
+          "c": 1,
+          "r": 0
+        },
+        {
+          "c": 1,
+          "r": 1
+        }
+      ],
+      "result": {
+        "endTip": {
+          "c": 1,
+          "r": 1
+        },
+        "isEndAdvanceTransition": false,
+        "isEndRetractTransition": false,
+        "isPathReversed": false,
+        "isRetractUnturnEnd": false,
+        "isRetractUnturnStart": false,
+        "isStartAdvanceTransition": true,
+        "isStartRetractTransition": false,
+        "normalizeFlowOffset": 110.5,
+        "pathsMatch": false,
+        "resolvePathSignatureNext": "3|0,0|1,1",
+        "resolvePathSignaturePrev": "2|0,1|1,1",
+        "startTip": {
+          "c": 0,
+          "r": 0
+        }
+      }
+    },
+    {
+      "name": "reversed",
+      "nextPath": [
+        {
+          "c": 1,
+          "r": 1
+        },
+        {
+          "c": 1,
+          "r": 0
+        },
+        {
+          "c": 0,
+          "r": 0
+        }
+      ],
+      "prevPath": [
+        {
+          "c": 0,
+          "r": 0
+        },
+        {
+          "c": 1,
+          "r": 0
+        },
+        {
+          "c": 1,
+          "r": 1
+        }
+      ],
+      "result": {
+        "endTip": {
+          "c": 0,
+          "r": 0
+        },
+        "isEndAdvanceTransition": false,
+        "isEndRetractTransition": false,
+        "isPathReversed": true,
+        "isRetractUnturnEnd": true,
+        "isRetractUnturnStart": true,
+        "isStartAdvanceTransition": false,
+        "isStartRetractTransition": false,
+        "normalizeFlowOffset": 110.5,
+        "pathsMatch": false,
+        "resolvePathSignatureNext": "3|1,1|0,0",
+        "resolvePathSignaturePrev": "3|0,0|1,1",
+        "startTip": {
+          "c": 1,
+          "r": 1
+        }
+      }
+    }
+  ],
+  "scenarios": [
+    {
+      "commands": [
+        {
+          "payload": {
+            "c": 0,
+            "r": 0
+          },
+          "type": "path/start-or-step"
+        },
+        {
+          "payload": {
+            "c": 0,
+            "r": 1
+          },
+          "type": "path/start-or-step-from-start"
+        },
+        {
+          "payload": {
+            "c": -1,
+            "r": 1
+          },
+          "type": "path/start-or-step-from-start"
+        },
+        {
+          "payload": {
+            "c": 0,
+            "r": 2
+          },
+          "type": "path/start-or-step-from-start"
+        },
+        {
+          "payload": {
+            "c": -1,
+            "r": 1
+          },
+          "type": "path/start-or-step-from-start"
+        },
+        {
+          "payload": {
+            "c": 0,
+            "r": -1
+          },
+          "type": "path/start-or-step"
+        },
+        {
+          "payload": {
+            "c": 0,
+            "r": -1
+          },
+          "type": "path/start-or-step"
+        },
+        {
+          "payload": {
+            "c": 1,
+            "r": 1
+          },
+          "type": "path/start-or-step"
+        },
+        {
+          "payload": {
+            "c": 1,
+            "r": -1
+          },
+          "type": "path/start-or-step"
+        },
+        {
+          "payload": {
+            "c": 1,
+            "r": 3
+          },
+          "type": "path/start-or-step-from-start"
+        },
+        {
+          "payload": {},
+          "type": "path/finalize-after-pointer"
+        },
+        {
+          "payload": {
+            "c": 0,
+            "r": 3
+          },
+          "type": "path/start-or-step-from-start"
+        },
+        {
+          "payload": {
+            "c": -1,
+            "r": 4
+          },
+          "type": "path/start-or-step-from-start"
+        },
+        {
+          "payload": {
+            "c": 1,
+            "r": 2
+          },
+          "type": "path/start-or-step-from-start"
+        },
+        {
+          "payload": {
+            "c": -1,
+            "r": 3
+          },
+          "type": "path/start-or-step-from-start"
+        },
+        {
+          "payload": {},
+          "type": "path/reverse"
+        },
+        {
+          "payload": {
+            "c": 1,
+            "r": 0
+          },
+          "type": "path/start-or-step-from-start"
+        },
+        {
+          "payload": {
+            "c": 0,
+            "r": 4
+          },
+          "type": "path/start-or-step"
+        }
+      ],
+      "frames": [
+        {
+          "command": {
+            "payload": {
+              "c": 0,
+              "r": 0
+            },
+            "type": "path/start-or-step"
+          },
+          "evaluation": {
+            "canonicalSignature": "-|-|5,2:0:-||-",
+            "completion": {
+              "allVisited": false,
+              "hintStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "cornerVertexStatus": [
+                  [
+                    "4,5",
+                    "pending"
+                  ],
+                  [
+                    "5,2",
+                    "good"
+                  ]
+                ],
+                "good": 1,
+                "goodKeys": [],
+                "pending": 3,
+                "summary": "1/4",
+                "total": 4
+              },
+              "hintsOk": false,
+              "kind": "bad",
+              "message": "",
+              "rpsOk": true,
+              "rpsStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "good": 0,
+                "goodKeys": [],
+                "summary": "—",
+                "total": 0
+              },
+              "stitchStatus": {
+                "bad": 0,
+                "good": 0,
+                "summary": "0/2",
+                "total": 2,
+                "vertexStatus": [
+                  [
+                    "5,1",
+                    {
+                      "diagA": "pending",
+                      "diagB": "pending"
+                    }
+                  ]
+                ]
+              },
+              "stitchesOk": false
+            },
+            "digest": "bd37c993eae574e7c1fce6c088d840626a8546445ee6f3d0e33f2646d76c3f5e"
+          },
+          "snapshot": {
+            "cols": 6,
+            "levelIndex": 0,
+            "movableWalls": [],
+            "pathKey": "0,0;",
+            "pathLength": 1,
+            "rows": 6,
+            "totalUsable": 30,
+            "visitedCount": 1
+          },
+          "transition": {
+            "changed": true,
+            "meta": null,
+            "rebuildGrid": false,
+            "validate": false
+          }
+        },
+        {
+          "command": {
+            "payload": {
+              "c": 0,
+              "r": 1
+            },
+            "type": "path/start-or-step-from-start"
+          },
+          "evaluation": {
+            "canonicalSignature": "-|-|5,2:0:-||-",
+            "completion": {
+              "allVisited": false,
+              "hintStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "cornerVertexStatus": [
+                  [
+                    "4,5",
+                    "pending"
+                  ],
+                  [
+                    "5,2",
+                    "good"
+                  ]
+                ],
+                "good": 1,
+                "goodKeys": [],
+                "pending": 3,
+                "summary": "1/4",
+                "total": 4
+              },
+              "hintsOk": false,
+              "kind": "bad",
+              "message": "",
+              "rpsOk": true,
+              "rpsStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "good": 0,
+                "goodKeys": [],
+                "summary": "—",
+                "total": 0
+              },
+              "stitchStatus": {
+                "bad": 0,
+                "good": 0,
+                "summary": "0/2",
+                "total": 2,
+                "vertexStatus": [
+                  [
+                    "5,1",
+                    {
+                      "diagA": "pending",
+                      "diagB": "pending"
+                    }
+                  ]
+                ]
+              },
+              "stitchesOk": false
+            },
+            "digest": "9ba2876a7298c492c7e34916b7848f14b8871ed5455c5bf10124d26e78785f20"
+          },
+          "snapshot": {
+            "cols": 6,
+            "levelIndex": 0,
+            "movableWalls": [],
+            "pathKey": "1,0;0,0;",
+            "pathLength": 2,
+            "rows": 6,
+            "totalUsable": 30,
+            "visitedCount": 2
+          },
+          "transition": {
+            "changed": true,
+            "meta": null,
+            "rebuildGrid": false,
+            "validate": false
+          }
+        },
+        {
+          "command": {
+            "payload": {
+              "c": -1,
+              "r": 1
+            },
+            "type": "path/start-or-step-from-start"
+          },
+          "evaluation": {
+            "canonicalSignature": "-|-|5,2:0:-||-",
+            "completion": {
+              "allVisited": false,
+              "hintStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "cornerVertexStatus": [
+                  [
+                    "4,5",
+                    "pending"
+                  ],
+                  [
+                    "5,2",
+                    "good"
+                  ]
+                ],
+                "good": 1,
+                "goodKeys": [],
+                "pending": 3,
+                "summary": "1/4",
+                "total": 4
+              },
+              "hintsOk": false,
+              "kind": "bad",
+              "message": "",
+              "rpsOk": true,
+              "rpsStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "good": 0,
+                "goodKeys": [],
+                "summary": "—",
+                "total": 0
+              },
+              "stitchStatus": {
+                "bad": 0,
+                "good": 0,
+                "summary": "0/2",
+                "total": 2,
+                "vertexStatus": [
+                  [
+                    "5,1",
+                    {
+                      "diagA": "pending",
+                      "diagB": "pending"
+                    }
+                  ]
+                ]
+              },
+              "stitchesOk": false
+            },
+            "digest": "9ba2876a7298c492c7e34916b7848f14b8871ed5455c5bf10124d26e78785f20"
+          },
+          "snapshot": {
+            "cols": 6,
+            "levelIndex": 0,
+            "movableWalls": [],
+            "pathKey": "1,0;0,0;",
+            "pathLength": 2,
+            "rows": 6,
+            "totalUsable": 30,
+            "visitedCount": 2
+          },
+          "transition": {
+            "changed": false,
+            "meta": null,
+            "rebuildGrid": false,
+            "validate": false
+          }
+        },
+        {
+          "command": {
+            "payload": {
+              "c": 0,
+              "r": 2
+            },
+            "type": "path/start-or-step-from-start"
+          },
+          "evaluation": {
+            "canonicalSignature": "-|-|5,2:0:-||-",
+            "completion": {
+              "allVisited": false,
+              "hintStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "cornerVertexStatus": [
+                  [
+                    "4,5",
+                    "pending"
+                  ],
+                  [
+                    "5,2",
+                    "good"
+                  ]
+                ],
+                "good": 1,
+                "goodKeys": [],
+                "pending": 3,
+                "summary": "1/4",
+                "total": 4
+              },
+              "hintsOk": false,
+              "kind": "bad",
+              "message": "",
+              "rpsOk": true,
+              "rpsStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "good": 0,
+                "goodKeys": [],
+                "summary": "—",
+                "total": 0
+              },
+              "stitchStatus": {
+                "bad": 0,
+                "good": 0,
+                "summary": "0/2",
+                "total": 2,
+                "vertexStatus": [
+                  [
+                    "5,1",
+                    {
+                      "diagA": "pending",
+                      "diagB": "pending"
+                    }
+                  ]
+                ]
+              },
+              "stitchesOk": false
+            },
+            "digest": "6c10e68d40cf3efe681f639aba0cbe99d10f492ccb705b03a17012879e43bd50"
+          },
+          "snapshot": {
+            "cols": 6,
+            "levelIndex": 0,
+            "movableWalls": [],
+            "pathKey": "2,0;1,0;0,0;",
+            "pathLength": 3,
+            "rows": 6,
+            "totalUsable": 30,
+            "visitedCount": 3
+          },
+          "transition": {
+            "changed": true,
+            "meta": null,
+            "rebuildGrid": false,
+            "validate": false
+          }
+        },
+        {
+          "command": {
+            "payload": {
+              "c": -1,
+              "r": 1
+            },
+            "type": "path/start-or-step-from-start"
+          },
+          "evaluation": {
+            "canonicalSignature": "-|-|5,2:0:-||-",
+            "completion": {
+              "allVisited": false,
+              "hintStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "cornerVertexStatus": [
+                  [
+                    "4,5",
+                    "pending"
+                  ],
+                  [
+                    "5,2",
+                    "good"
+                  ]
+                ],
+                "good": 1,
+                "goodKeys": [],
+                "pending": 3,
+                "summary": "1/4",
+                "total": 4
+              },
+              "hintsOk": false,
+              "kind": "bad",
+              "message": "",
+              "rpsOk": true,
+              "rpsStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "good": 0,
+                "goodKeys": [],
+                "summary": "—",
+                "total": 0
+              },
+              "stitchStatus": {
+                "bad": 0,
+                "good": 0,
+                "summary": "0/2",
+                "total": 2,
+                "vertexStatus": [
+                  [
+                    "5,1",
+                    {
+                      "diagA": "pending",
+                      "diagB": "pending"
+                    }
+                  ]
+                ]
+              },
+              "stitchesOk": false
+            },
+            "digest": "6c10e68d40cf3efe681f639aba0cbe99d10f492ccb705b03a17012879e43bd50"
+          },
+          "snapshot": {
+            "cols": 6,
+            "levelIndex": 0,
+            "movableWalls": [],
+            "pathKey": "2,0;1,0;0,0;",
+            "pathLength": 3,
+            "rows": 6,
+            "totalUsable": 30,
+            "visitedCount": 3
+          },
+          "transition": {
+            "changed": false,
+            "meta": null,
+            "rebuildGrid": false,
+            "validate": false
+          }
+        },
+        {
+          "command": {
+            "payload": {
+              "c": 0,
+              "r": -1
+            },
+            "type": "path/start-or-step"
+          },
+          "evaluation": {
+            "canonicalSignature": "-|-|5,2:0:-||-",
+            "completion": {
+              "allVisited": false,
+              "hintStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "cornerVertexStatus": [
+                  [
+                    "4,5",
+                    "pending"
+                  ],
+                  [
+                    "5,2",
+                    "good"
+                  ]
+                ],
+                "good": 1,
+                "goodKeys": [],
+                "pending": 3,
+                "summary": "1/4",
+                "total": 4
+              },
+              "hintsOk": false,
+              "kind": "bad",
+              "message": "",
+              "rpsOk": true,
+              "rpsStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "good": 0,
+                "goodKeys": [],
+                "summary": "—",
+                "total": 0
+              },
+              "stitchStatus": {
+                "bad": 0,
+                "good": 0,
+                "summary": "0/2",
+                "total": 2,
+                "vertexStatus": [
+                  [
+                    "5,1",
+                    {
+                      "diagA": "pending",
+                      "diagB": "pending"
+                    }
+                  ]
+                ]
+              },
+              "stitchesOk": false
+            },
+            "digest": "6c10e68d40cf3efe681f639aba0cbe99d10f492ccb705b03a17012879e43bd50"
+          },
+          "snapshot": {
+            "cols": 6,
+            "levelIndex": 0,
+            "movableWalls": [],
+            "pathKey": "2,0;1,0;0,0;",
+            "pathLength": 3,
+            "rows": 6,
+            "totalUsable": 30,
+            "visitedCount": 3
+          },
+          "transition": {
+            "changed": false,
+            "meta": null,
+            "rebuildGrid": false,
+            "validate": false
+          }
+        },
+        {
+          "command": {
+            "payload": {
+              "c": 0,
+              "r": -1
+            },
+            "type": "path/start-or-step"
+          },
+          "evaluation": {
+            "canonicalSignature": "-|-|5,2:0:-||-",
+            "completion": {
+              "allVisited": false,
+              "hintStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "cornerVertexStatus": [
+                  [
+                    "4,5",
+                    "pending"
+                  ],
+                  [
+                    "5,2",
+                    "good"
+                  ]
+                ],
+                "good": 1,
+                "goodKeys": [],
+                "pending": 3,
+                "summary": "1/4",
+                "total": 4
+              },
+              "hintsOk": false,
+              "kind": "bad",
+              "message": "",
+              "rpsOk": true,
+              "rpsStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "good": 0,
+                "goodKeys": [],
+                "summary": "—",
+                "total": 0
+              },
+              "stitchStatus": {
+                "bad": 0,
+                "good": 0,
+                "summary": "0/2",
+                "total": 2,
+                "vertexStatus": [
+                  [
+                    "5,1",
+                    {
+                      "diagA": "pending",
+                      "diagB": "pending"
+                    }
+                  ]
+                ]
+              },
+              "stitchesOk": false
+            },
+            "digest": "6c10e68d40cf3efe681f639aba0cbe99d10f492ccb705b03a17012879e43bd50"
+          },
+          "snapshot": {
+            "cols": 6,
+            "levelIndex": 0,
+            "movableWalls": [],
+            "pathKey": "2,0;1,0;0,0;",
+            "pathLength": 3,
+            "rows": 6,
+            "totalUsable": 30,
+            "visitedCount": 3
+          },
+          "transition": {
+            "changed": false,
+            "meta": null,
+            "rebuildGrid": false,
+            "validate": false
+          }
+        },
+        {
+          "command": {
+            "payload": {
+              "c": 1,
+              "r": 1
+            },
+            "type": "path/start-or-step"
+          },
+          "evaluation": {
+            "canonicalSignature": "-|-|5,2:0:-||-",
+            "completion": {
+              "allVisited": false,
+              "hintStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "cornerVertexStatus": [
+                  [
+                    "4,5",
+                    "pending"
+                  ],
+                  [
+                    "5,2",
+                    "good"
+                  ]
+                ],
+                "good": 1,
+                "goodKeys": [],
+                "pending": 3,
+                "summary": "1/4",
+                "total": 4
+              },
+              "hintsOk": false,
+              "kind": "bad",
+              "message": "",
+              "rpsOk": true,
+              "rpsStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "good": 0,
+                "goodKeys": [],
+                "summary": "—",
+                "total": 0
+              },
+              "stitchStatus": {
+                "bad": 0,
+                "good": 0,
+                "summary": "0/2",
+                "total": 2,
+                "vertexStatus": [
+                  [
+                    "5,1",
+                    {
+                      "diagA": "pending",
+                      "diagB": "pending"
+                    }
+                  ]
+                ]
+              },
+              "stitchesOk": false
+            },
+            "digest": "6c10e68d40cf3efe681f639aba0cbe99d10f492ccb705b03a17012879e43bd50"
+          },
+          "snapshot": {
+            "cols": 6,
+            "levelIndex": 0,
+            "movableWalls": [],
+            "pathKey": "2,0;1,0;0,0;",
+            "pathLength": 3,
+            "rows": 6,
+            "totalUsable": 30,
+            "visitedCount": 3
+          },
+          "transition": {
+            "changed": false,
+            "meta": null,
+            "rebuildGrid": false,
+            "validate": false
+          }
+        },
+        {
+          "command": {
+            "payload": {
+              "c": 1,
+              "r": -1
+            },
+            "type": "path/start-or-step"
+          },
+          "evaluation": {
+            "canonicalSignature": "-|-|5,2:0:-||-",
+            "completion": {
+              "allVisited": false,
+              "hintStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "cornerVertexStatus": [
+                  [
+                    "4,5",
+                    "pending"
+                  ],
+                  [
+                    "5,2",
+                    "good"
+                  ]
+                ],
+                "good": 1,
+                "goodKeys": [],
+                "pending": 3,
+                "summary": "1/4",
+                "total": 4
+              },
+              "hintsOk": false,
+              "kind": "bad",
+              "message": "",
+              "rpsOk": true,
+              "rpsStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "good": 0,
+                "goodKeys": [],
+                "summary": "—",
+                "total": 0
+              },
+              "stitchStatus": {
+                "bad": 0,
+                "good": 0,
+                "summary": "0/2",
+                "total": 2,
+                "vertexStatus": [
+                  [
+                    "5,1",
+                    {
+                      "diagA": "pending",
+                      "diagB": "pending"
+                    }
+                  ]
+                ]
+              },
+              "stitchesOk": false
+            },
+            "digest": "6c10e68d40cf3efe681f639aba0cbe99d10f492ccb705b03a17012879e43bd50"
+          },
+          "snapshot": {
+            "cols": 6,
+            "levelIndex": 0,
+            "movableWalls": [],
+            "pathKey": "2,0;1,0;0,0;",
+            "pathLength": 3,
+            "rows": 6,
+            "totalUsable": 30,
+            "visitedCount": 3
+          },
+          "transition": {
+            "changed": false,
+            "meta": null,
+            "rebuildGrid": false,
+            "validate": false
+          }
+        },
+        {
+          "command": {
+            "payload": {
+              "c": 1,
+              "r": 3
+            },
+            "type": "path/start-or-step-from-start"
+          },
+          "evaluation": {
+            "canonicalSignature": "-|-|5,2:0:-||-",
+            "completion": {
+              "allVisited": false,
+              "hintStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "cornerVertexStatus": [
+                  [
+                    "4,5",
+                    "pending"
+                  ],
+                  [
+                    "5,2",
+                    "good"
+                  ]
+                ],
+                "good": 1,
+                "goodKeys": [],
+                "pending": 3,
+                "summary": "1/4",
+                "total": 4
+              },
+              "hintsOk": false,
+              "kind": "bad",
+              "message": "",
+              "rpsOk": true,
+              "rpsStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "good": 0,
+                "goodKeys": [],
+                "summary": "—",
+                "total": 0
+              },
+              "stitchStatus": {
+                "bad": 0,
+                "good": 0,
+                "summary": "0/2",
+                "total": 2,
+                "vertexStatus": [
+                  [
+                    "5,1",
+                    {
+                      "diagA": "pending",
+                      "diagB": "pending"
+                    }
+                  ]
+                ]
+              },
+              "stitchesOk": false
+            },
+            "digest": "6c10e68d40cf3efe681f639aba0cbe99d10f492ccb705b03a17012879e43bd50"
+          },
+          "snapshot": {
+            "cols": 6,
+            "levelIndex": 0,
+            "movableWalls": [],
+            "pathKey": "2,0;1,0;0,0;",
+            "pathLength": 3,
+            "rows": 6,
+            "totalUsable": 30,
+            "visitedCount": 3
+          },
+          "transition": {
+            "changed": false,
+            "meta": null,
+            "rebuildGrid": false,
+            "validate": false
+          }
+        },
+        {
+          "command": {
+            "payload": {},
+            "type": "path/finalize-after-pointer"
+          },
+          "evaluation": {
+            "canonicalSignature": "-|-|5,2:0:-||-",
+            "completion": {
+              "allVisited": false,
+              "hintStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "cornerVertexStatus": [
+                  [
+                    "4,5",
+                    "pending"
+                  ],
+                  [
+                    "5,2",
+                    "good"
+                  ]
+                ],
+                "good": 1,
+                "goodKeys": [],
+                "pending": 3,
+                "summary": "1/4",
+                "total": 4
+              },
+              "hintsOk": false,
+              "kind": "bad",
+              "message": "",
+              "rpsOk": true,
+              "rpsStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "good": 0,
+                "goodKeys": [],
+                "summary": "—",
+                "total": 0
+              },
+              "stitchStatus": {
+                "bad": 0,
+                "good": 0,
+                "summary": "0/2",
+                "total": 2,
+                "vertexStatus": [
+                  [
+                    "5,1",
+                    {
+                      "diagA": "pending",
+                      "diagB": "pending"
+                    }
+                  ]
+                ]
+              },
+              "stitchesOk": false
+            },
+            "digest": "6c10e68d40cf3efe681f639aba0cbe99d10f492ccb705b03a17012879e43bd50"
+          },
+          "snapshot": {
+            "cols": 6,
+            "levelIndex": 0,
+            "movableWalls": [],
+            "pathKey": "2,0;1,0;0,0;",
+            "pathLength": 3,
+            "rows": 6,
+            "totalUsable": 30,
+            "visitedCount": 3
+          },
+          "transition": {
+            "changed": false,
+            "meta": null,
+            "rebuildGrid": false,
+            "validate": true
+          }
+        },
+        {
+          "command": {
+            "payload": {
+              "c": 0,
+              "r": 3
+            },
+            "type": "path/start-or-step-from-start"
+          },
+          "evaluation": {
+            "canonicalSignature": "-|-|5,2:0:-||-",
+            "completion": {
+              "allVisited": false,
+              "hintStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "cornerVertexStatus": [
+                  [
+                    "4,5",
+                    "pending"
+                  ],
+                  [
+                    "5,2",
+                    "good"
+                  ]
+                ],
+                "good": 1,
+                "goodKeys": [],
+                "pending": 3,
+                "summary": "1/4",
+                "total": 4
+              },
+              "hintsOk": false,
+              "kind": "bad",
+              "message": "",
+              "rpsOk": true,
+              "rpsStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "good": 0,
+                "goodKeys": [],
+                "summary": "—",
+                "total": 0
+              },
+              "stitchStatus": {
+                "bad": 0,
+                "good": 0,
+                "summary": "0/2",
+                "total": 2,
+                "vertexStatus": [
+                  [
+                    "5,1",
+                    {
+                      "diagA": "pending",
+                      "diagB": "pending"
+                    }
+                  ]
+                ]
+              },
+              "stitchesOk": false
+            },
+            "digest": "ab6dc69a44ba7da1ac837dafe3538b7642883bc220e757feabbf1c7cf8fc604a"
+          },
+          "snapshot": {
+            "cols": 6,
+            "levelIndex": 0,
+            "movableWalls": [],
+            "pathKey": "3,0;2,0;1,0;0,0;",
+            "pathLength": 4,
+            "rows": 6,
+            "totalUsable": 30,
+            "visitedCount": 4
+          },
+          "transition": {
+            "changed": true,
+            "meta": null,
+            "rebuildGrid": false,
+            "validate": false
+          }
+        },
+        {
+          "command": {
+            "payload": {
+              "c": -1,
+              "r": 4
+            },
+            "type": "path/start-or-step-from-start"
+          },
+          "evaluation": {
+            "canonicalSignature": "-|-|5,2:0:-||-",
+            "completion": {
+              "allVisited": false,
+              "hintStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "cornerVertexStatus": [
+                  [
+                    "4,5",
+                    "pending"
+                  ],
+                  [
+                    "5,2",
+                    "good"
+                  ]
+                ],
+                "good": 1,
+                "goodKeys": [],
+                "pending": 3,
+                "summary": "1/4",
+                "total": 4
+              },
+              "hintsOk": false,
+              "kind": "bad",
+              "message": "",
+              "rpsOk": true,
+              "rpsStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "good": 0,
+                "goodKeys": [],
+                "summary": "—",
+                "total": 0
+              },
+              "stitchStatus": {
+                "bad": 0,
+                "good": 0,
+                "summary": "0/2",
+                "total": 2,
+                "vertexStatus": [
+                  [
+                    "5,1",
+                    {
+                      "diagA": "pending",
+                      "diagB": "pending"
+                    }
+                  ]
+                ]
+              },
+              "stitchesOk": false
+            },
+            "digest": "ab6dc69a44ba7da1ac837dafe3538b7642883bc220e757feabbf1c7cf8fc604a"
+          },
+          "snapshot": {
+            "cols": 6,
+            "levelIndex": 0,
+            "movableWalls": [],
+            "pathKey": "3,0;2,0;1,0;0,0;",
+            "pathLength": 4,
+            "rows": 6,
+            "totalUsable": 30,
+            "visitedCount": 4
+          },
+          "transition": {
+            "changed": false,
+            "meta": null,
+            "rebuildGrid": false,
+            "validate": false
+          }
+        },
+        {
+          "command": {
+            "payload": {
+              "c": 1,
+              "r": 2
+            },
+            "type": "path/start-or-step-from-start"
+          },
+          "evaluation": {
+            "canonicalSignature": "-|-|5,2:0:-||-",
+            "completion": {
+              "allVisited": false,
+              "hintStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "cornerVertexStatus": [
+                  [
+                    "4,5",
+                    "pending"
+                  ],
+                  [
+                    "5,2",
+                    "good"
+                  ]
+                ],
+                "good": 1,
+                "goodKeys": [],
+                "pending": 3,
+                "summary": "1/4",
+                "total": 4
+              },
+              "hintsOk": false,
+              "kind": "bad",
+              "message": "",
+              "rpsOk": true,
+              "rpsStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "good": 0,
+                "goodKeys": [],
+                "summary": "—",
+                "total": 0
+              },
+              "stitchStatus": {
+                "bad": 0,
+                "good": 0,
+                "summary": "0/2",
+                "total": 2,
+                "vertexStatus": [
+                  [
+                    "5,1",
+                    {
+                      "diagA": "pending",
+                      "diagB": "pending"
+                    }
+                  ]
+                ]
+              },
+              "stitchesOk": false
+            },
+            "digest": "ab6dc69a44ba7da1ac837dafe3538b7642883bc220e757feabbf1c7cf8fc604a"
+          },
+          "snapshot": {
+            "cols": 6,
+            "levelIndex": 0,
+            "movableWalls": [],
+            "pathKey": "3,0;2,0;1,0;0,0;",
+            "pathLength": 4,
+            "rows": 6,
+            "totalUsable": 30,
+            "visitedCount": 4
+          },
+          "transition": {
+            "changed": false,
+            "meta": null,
+            "rebuildGrid": false,
+            "validate": false
+          }
+        },
+        {
+          "command": {
+            "payload": {
+              "c": -1,
+              "r": 3
+            },
+            "type": "path/start-or-step-from-start"
+          },
+          "evaluation": {
+            "canonicalSignature": "-|-|5,2:0:-||-",
+            "completion": {
+              "allVisited": false,
+              "hintStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "cornerVertexStatus": [
+                  [
+                    "4,5",
+                    "pending"
+                  ],
+                  [
+                    "5,2",
+                    "good"
+                  ]
+                ],
+                "good": 1,
+                "goodKeys": [],
+                "pending": 3,
+                "summary": "1/4",
+                "total": 4
+              },
+              "hintsOk": false,
+              "kind": "bad",
+              "message": "",
+              "rpsOk": true,
+              "rpsStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "good": 0,
+                "goodKeys": [],
+                "summary": "—",
+                "total": 0
+              },
+              "stitchStatus": {
+                "bad": 0,
+                "good": 0,
+                "summary": "0/2",
+                "total": 2,
+                "vertexStatus": [
+                  [
+                    "5,1",
+                    {
+                      "diagA": "pending",
+                      "diagB": "pending"
+                    }
+                  ]
+                ]
+              },
+              "stitchesOk": false
+            },
+            "digest": "ab6dc69a44ba7da1ac837dafe3538b7642883bc220e757feabbf1c7cf8fc604a"
+          },
+          "snapshot": {
+            "cols": 6,
+            "levelIndex": 0,
+            "movableWalls": [],
+            "pathKey": "3,0;2,0;1,0;0,0;",
+            "pathLength": 4,
+            "rows": 6,
+            "totalUsable": 30,
+            "visitedCount": 4
+          },
+          "transition": {
+            "changed": false,
+            "meta": null,
+            "rebuildGrid": false,
+            "validate": false
+          }
+        },
+        {
+          "command": {
+            "payload": {},
+            "type": "path/reverse"
+          },
+          "evaluation": {
+            "canonicalSignature": "-|-|5,2:0:-||-",
+            "completion": {
+              "allVisited": false,
+              "hintStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "cornerVertexStatus": [
+                  [
+                    "4,5",
+                    "pending"
+                  ],
+                  [
+                    "5,2",
+                    "good"
+                  ]
+                ],
+                "good": 1,
+                "goodKeys": [],
+                "pending": 3,
+                "summary": "1/4",
+                "total": 4
+              },
+              "hintsOk": false,
+              "kind": "bad",
+              "message": "",
+              "rpsOk": true,
+              "rpsStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "good": 0,
+                "goodKeys": [],
+                "summary": "—",
+                "total": 0
+              },
+              "stitchStatus": {
+                "bad": 0,
+                "good": 0,
+                "summary": "0/2",
+                "total": 2,
+                "vertexStatus": [
+                  [
+                    "5,1",
+                    {
+                      "diagA": "pending",
+                      "diagB": "pending"
+                    }
+                  ]
+                ]
+              },
+              "stitchesOk": false
+            },
+            "digest": "0536b73c4cc745d7cfb74f914932f3502a0c82f1f1395080cca3aaa43f5c753e"
+          },
+          "snapshot": {
+            "cols": 6,
+            "levelIndex": 0,
+            "movableWalls": [],
+            "pathKey": "0,0;1,0;2,0;3,0;",
+            "pathLength": 4,
+            "rows": 6,
+            "totalUsable": 30,
+            "visitedCount": 4
+          },
+          "transition": {
+            "changed": true,
+            "meta": null,
+            "rebuildGrid": false,
+            "validate": true
+          }
+        },
+        {
+          "command": {
+            "payload": {
+              "c": 1,
+              "r": 0
+            },
+            "type": "path/start-or-step-from-start"
+          },
+          "evaluation": {
+            "canonicalSignature": "-|-|5,2:0:-||-",
+            "completion": {
+              "allVisited": false,
+              "hintStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "cornerVertexStatus": [
+                  [
+                    "4,5",
+                    "pending"
+                  ],
+                  [
+                    "5,2",
+                    "good"
+                  ]
+                ],
+                "good": 1,
+                "goodKeys": [],
+                "pending": 3,
+                "summary": "1/4",
+                "total": 4
+              },
+              "hintsOk": false,
+              "kind": "bad",
+              "message": "",
+              "rpsOk": true,
+              "rpsStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "good": 0,
+                "goodKeys": [],
+                "summary": "—",
+                "total": 0
+              },
+              "stitchStatus": {
+                "bad": 0,
+                "good": 0,
+                "summary": "0/2",
+                "total": 2,
+                "vertexStatus": [
+                  [
+                    "5,1",
+                    {
+                      "diagA": "pending",
+                      "diagB": "pending"
+                    }
+                  ]
+                ]
+              },
+              "stitchesOk": false
+            },
+            "digest": "9fd64acb09ab6af9aa26019a3130177a50a9b7bf31eace3c03b74aec393b8c0d"
+          },
+          "snapshot": {
+            "cols": 6,
+            "levelIndex": 0,
+            "movableWalls": [],
+            "pathKey": "0,1;0,0;1,0;2,0;3,0;",
+            "pathLength": 5,
+            "rows": 6,
+            "totalUsable": 30,
+            "visitedCount": 5
+          },
+          "transition": {
+            "changed": true,
+            "meta": null,
+            "rebuildGrid": false,
+            "validate": false
+          }
+        },
+        {
+          "command": {
+            "payload": {
+              "c": 0,
+              "r": 4
+            },
+            "type": "path/start-or-step"
+          },
+          "evaluation": {
+            "canonicalSignature": "-|-|5,2:0:-||-",
+            "completion": {
+              "allVisited": false,
+              "hintStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "cornerVertexStatus": [
+                  [
+                    "4,5",
+                    "pending"
+                  ],
+                  [
+                    "5,2",
+                    "good"
+                  ]
+                ],
+                "good": 1,
+                "goodKeys": [],
+                "pending": 3,
+                "summary": "1/4",
+                "total": 4
+              },
+              "hintsOk": false,
+              "kind": "bad",
+              "message": "",
+              "rpsOk": true,
+              "rpsStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "good": 0,
+                "goodKeys": [],
+                "summary": "—",
+                "total": 0
+              },
+              "stitchStatus": {
+                "bad": 0,
+                "good": 0,
+                "summary": "0/2",
+                "total": 2,
+                "vertexStatus": [
+                  [
+                    "5,1",
+                    {
+                      "diagA": "pending",
+                      "diagB": "pending"
+                    }
+                  ]
+                ]
+              },
+              "stitchesOk": false
+            },
+            "digest": "f56ac505619ef624325dc4579f5711e2ae28ef5ebee1b8ee81cc85a1d11afe1b"
+          },
+          "snapshot": {
+            "cols": 6,
+            "levelIndex": 0,
+            "movableWalls": [],
+            "pathKey": "0,1;0,0;1,0;2,0;3,0;4,0;",
+            "pathLength": 6,
+            "rows": 6,
+            "totalUsable": 30,
+            "visitedCount": 6
+          },
+          "transition": {
+            "changed": true,
+            "meta": null,
+            "rebuildGrid": false,
+            "validate": false
+          }
+        }
+      ],
+      "infiniteIndex": 0
+    },
+    {
+      "commands": [
+        {
+          "payload": {
+            "c": 0,
+            "r": 0
+          },
+          "type": "path/start-or-step"
+        },
+        {
+          "payload": {
+            "c": 1,
+            "r": 1
+          },
+          "type": "path/start-or-step-from-start"
+        },
+        {
+          "payload": {},
+          "type": "path/finalize-after-pointer"
+        },
+        {
+          "payload": {
+            "c": 0,
+            "r": 0
+          },
+          "type": "path/start-or-step"
+        },
+        {
+          "payload": {
+            "c": 0,
+            "r": -1
+          },
+          "type": "path/start-or-step"
+        },
+        {
+          "payload": {
+            "c": 1,
+            "r": -1
+          },
+          "type": "path/start-or-step-from-start"
+        },
+        {
+          "payload": {},
+          "type": "path/finalize-after-pointer"
+        },
+        {
+          "payload": {
+            "c": 0,
+            "r": 0
+          },
+          "type": "path/start-or-step"
+        },
+        {
+          "payload": {
+            "c": 1,
+            "r": 0
+          },
+          "type": "path/start-or-step-from-start"
+        },
+        {
+          "payload": {
+            "c": 1,
+            "r": 0
+          },
+          "type": "path/start-or-step"
+        },
+        {
+          "payload": {
+            "c": 1,
+            "r": -1
+          },
+          "type": "path/start-or-step-from-start"
+        },
+        {
+          "payload": {
+            "c": 2,
+            "r": 1
+          },
+          "type": "path/start-or-step-from-start"
+        },
+        {
+          "payload": {
+            "c": 2,
+            "r": -1
+          },
+          "type": "path/start-or-step-from-start"
+        },
+        {
+          "payload": {
+            "c": 2,
+            "r": 1
+          },
+          "type": "path/start-or-step"
+        },
+        {
+          "payload": {
+            "c": 0,
+            "r": -1
+          },
+          "type": "path/start-or-step-from-start"
+        },
+        {
+          "payload": {
+            "c": 2,
+            "r": 1
+          },
+          "type": "path/start-or-step"
+        },
+        {
+          "payload": {
+            "c": 1,
+            "r": 1
+          },
+          "type": "path/start-or-step"
+        },
+        {
+          "payload": {
+            "c": 1,
+            "r": -1
+          },
+          "type": "path/start-or-step-from-start"
+        }
+      ],
+      "frames": [
+        {
+          "command": {
+            "payload": {
+              "c": 0,
+              "r": 0
+            },
+            "type": "path/start-or-step"
+          },
+          "evaluation": {
+            "canonicalSignature": "-|-|-||-",
+            "completion": {
+              "allVisited": false,
+              "hintStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "cornerVertexStatus": [
+                  [
+                    "4,3",
+                    "pending"
+                  ]
+                ],
+                "good": 0,
+                "goodKeys": [],
+                "pending": 3,
+                "summary": "0/3",
+                "total": 3
+              },
+              "hintsOk": false,
+              "kind": "bad",
+              "message": "",
+              "rpsOk": true,
+              "rpsStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "good": 0,
+                "goodKeys": [],
+                "summary": "—",
+                "total": 0
+              },
+              "stitchStatus": {
+                "bad": 0,
+                "good": 0,
+                "summary": "0/2",
+                "total": 2,
+                "vertexStatus": [
+                  [
+                    "4,1",
+                    {
+                      "diagA": "pending",
+                      "diagB": "pending"
+                    }
+                  ]
+                ]
+              },
+              "stitchesOk": false
+            },
+            "digest": "c347ca6b49ab76398caa7b7f54c85e930ddbfee2b4894934254facfbd4d0ec13"
+          },
+          "snapshot": {
+            "cols": 6,
+            "levelIndex": 0,
+            "movableWalls": [],
+            "pathKey": "0,0;",
+            "pathLength": 1,
+            "rows": 5,
+            "totalUsable": 25,
+            "visitedCount": 1
+          },
+          "transition": {
+            "changed": true,
+            "meta": null,
+            "rebuildGrid": false,
+            "validate": false
+          }
+        },
+        {
+          "command": {
+            "payload": {
+              "c": 1,
+              "r": 1
+            },
+            "type": "path/start-or-step-from-start"
+          },
+          "evaluation": {
+            "canonicalSignature": "-|-|-||-",
+            "completion": {
+              "allVisited": false,
+              "hintStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "cornerVertexStatus": [
+                  [
+                    "4,3",
+                    "pending"
+                  ]
+                ],
+                "good": 0,
+                "goodKeys": [],
+                "pending": 3,
+                "summary": "0/3",
+                "total": 3
+              },
+              "hintsOk": false,
+              "kind": "bad",
+              "message": "",
+              "rpsOk": true,
+              "rpsStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "good": 0,
+                "goodKeys": [],
+                "summary": "—",
+                "total": 0
+              },
+              "stitchStatus": {
+                "bad": 0,
+                "good": 0,
+                "summary": "0/2",
+                "total": 2,
+                "vertexStatus": [
+                  [
+                    "4,1",
+                    {
+                      "diagA": "pending",
+                      "diagB": "pending"
+                    }
+                  ]
+                ]
+              },
+              "stitchesOk": false
+            },
+            "digest": "c347ca6b49ab76398caa7b7f54c85e930ddbfee2b4894934254facfbd4d0ec13"
+          },
+          "snapshot": {
+            "cols": 6,
+            "levelIndex": 0,
+            "movableWalls": [],
+            "pathKey": "0,0;",
+            "pathLength": 1,
+            "rows": 5,
+            "totalUsable": 25,
+            "visitedCount": 1
+          },
+          "transition": {
+            "changed": false,
+            "meta": null,
+            "rebuildGrid": false,
+            "validate": false
+          }
+        },
+        {
+          "command": {
+            "payload": {},
+            "type": "path/finalize-after-pointer"
+          },
+          "evaluation": {
+            "canonicalSignature": "",
+            "completion": {
+              "allVisited": false,
+              "hintStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "cornerVertexStatus": [
+                  [
+                    "4,3",
+                    "pending"
+                  ]
+                ],
+                "good": 0,
+                "goodKeys": [],
+                "pending": 3,
+                "summary": "0/3",
+                "total": 3
+              },
+              "hintsOk": false,
+              "kind": "bad",
+              "message": "",
+              "rpsOk": true,
+              "rpsStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "good": 0,
+                "goodKeys": [],
+                "summary": "—",
+                "total": 0
+              },
+              "stitchStatus": {
+                "bad": 0,
+                "good": 0,
+                "summary": "0/2",
+                "total": 2,
+                "vertexStatus": [
+                  [
+                    "4,1",
+                    {
+                      "diagA": "pending",
+                      "diagB": "pending"
+                    }
+                  ]
+                ]
+              },
+              "stitchesOk": false
+            },
+            "digest": "e94d7ee77d5f5c45c371238431f5a55c3fed8247efe5dd554e0e1d6206913403"
+          },
+          "snapshot": {
+            "cols": 6,
+            "levelIndex": 0,
+            "movableWalls": [],
+            "pathKey": "",
+            "pathLength": 0,
+            "rows": 5,
+            "totalUsable": 25,
+            "visitedCount": 0
+          },
+          "transition": {
+            "changed": true,
+            "meta": null,
+            "rebuildGrid": false,
+            "validate": true
+          }
+        },
+        {
+          "command": {
+            "payload": {
+              "c": 0,
+              "r": 0
+            },
+            "type": "path/start-or-step"
+          },
+          "evaluation": {
+            "canonicalSignature": "-|-|-||-",
+            "completion": {
+              "allVisited": false,
+              "hintStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "cornerVertexStatus": [
+                  [
+                    "4,3",
+                    "pending"
+                  ]
+                ],
+                "good": 0,
+                "goodKeys": [],
+                "pending": 3,
+                "summary": "0/3",
+                "total": 3
+              },
+              "hintsOk": false,
+              "kind": "bad",
+              "message": "",
+              "rpsOk": true,
+              "rpsStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "good": 0,
+                "goodKeys": [],
+                "summary": "—",
+                "total": 0
+              },
+              "stitchStatus": {
+                "bad": 0,
+                "good": 0,
+                "summary": "0/2",
+                "total": 2,
+                "vertexStatus": [
+                  [
+                    "4,1",
+                    {
+                      "diagA": "pending",
+                      "diagB": "pending"
+                    }
+                  ]
+                ]
+              },
+              "stitchesOk": false
+            },
+            "digest": "c347ca6b49ab76398caa7b7f54c85e930ddbfee2b4894934254facfbd4d0ec13"
+          },
+          "snapshot": {
+            "cols": 6,
+            "levelIndex": 0,
+            "movableWalls": [],
+            "pathKey": "0,0;",
+            "pathLength": 1,
+            "rows": 5,
+            "totalUsable": 25,
+            "visitedCount": 1
+          },
+          "transition": {
+            "changed": true,
+            "meta": null,
+            "rebuildGrid": false,
+            "validate": false
+          }
+        },
+        {
+          "command": {
+            "payload": {
+              "c": 0,
+              "r": -1
+            },
+            "type": "path/start-or-step"
+          },
+          "evaluation": {
+            "canonicalSignature": "-|-|-||-",
+            "completion": {
+              "allVisited": false,
+              "hintStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "cornerVertexStatus": [
+                  [
+                    "4,3",
+                    "pending"
+                  ]
+                ],
+                "good": 0,
+                "goodKeys": [],
+                "pending": 3,
+                "summary": "0/3",
+                "total": 3
+              },
+              "hintsOk": false,
+              "kind": "bad",
+              "message": "",
+              "rpsOk": true,
+              "rpsStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "good": 0,
+                "goodKeys": [],
+                "summary": "—",
+                "total": 0
+              },
+              "stitchStatus": {
+                "bad": 0,
+                "good": 0,
+                "summary": "0/2",
+                "total": 2,
+                "vertexStatus": [
+                  [
+                    "4,1",
+                    {
+                      "diagA": "pending",
+                      "diagB": "pending"
+                    }
+                  ]
+                ]
+              },
+              "stitchesOk": false
+            },
+            "digest": "c347ca6b49ab76398caa7b7f54c85e930ddbfee2b4894934254facfbd4d0ec13"
+          },
+          "snapshot": {
+            "cols": 6,
+            "levelIndex": 0,
+            "movableWalls": [],
+            "pathKey": "0,0;",
+            "pathLength": 1,
+            "rows": 5,
+            "totalUsable": 25,
+            "visitedCount": 1
+          },
+          "transition": {
+            "changed": false,
+            "meta": null,
+            "rebuildGrid": false,
+            "validate": false
+          }
+        },
+        {
+          "command": {
+            "payload": {
+              "c": 1,
+              "r": -1
+            },
+            "type": "path/start-or-step-from-start"
+          },
+          "evaluation": {
+            "canonicalSignature": "-|-|-||-",
+            "completion": {
+              "allVisited": false,
+              "hintStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "cornerVertexStatus": [
+                  [
+                    "4,3",
+                    "pending"
+                  ]
+                ],
+                "good": 0,
+                "goodKeys": [],
+                "pending": 3,
+                "summary": "0/3",
+                "total": 3
+              },
+              "hintsOk": false,
+              "kind": "bad",
+              "message": "",
+              "rpsOk": true,
+              "rpsStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "good": 0,
+                "goodKeys": [],
+                "summary": "—",
+                "total": 0
+              },
+              "stitchStatus": {
+                "bad": 0,
+                "good": 0,
+                "summary": "0/2",
+                "total": 2,
+                "vertexStatus": [
+                  [
+                    "4,1",
+                    {
+                      "diagA": "pending",
+                      "diagB": "pending"
+                    }
+                  ]
+                ]
+              },
+              "stitchesOk": false
+            },
+            "digest": "c347ca6b49ab76398caa7b7f54c85e930ddbfee2b4894934254facfbd4d0ec13"
+          },
+          "snapshot": {
+            "cols": 6,
+            "levelIndex": 0,
+            "movableWalls": [],
+            "pathKey": "0,0;",
+            "pathLength": 1,
+            "rows": 5,
+            "totalUsable": 25,
+            "visitedCount": 1
+          },
+          "transition": {
+            "changed": false,
+            "meta": null,
+            "rebuildGrid": false,
+            "validate": false
+          }
+        },
+        {
+          "command": {
+            "payload": {},
+            "type": "path/finalize-after-pointer"
+          },
+          "evaluation": {
+            "canonicalSignature": "",
+            "completion": {
+              "allVisited": false,
+              "hintStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "cornerVertexStatus": [
+                  [
+                    "4,3",
+                    "pending"
+                  ]
+                ],
+                "good": 0,
+                "goodKeys": [],
+                "pending": 3,
+                "summary": "0/3",
+                "total": 3
+              },
+              "hintsOk": false,
+              "kind": "bad",
+              "message": "",
+              "rpsOk": true,
+              "rpsStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "good": 0,
+                "goodKeys": [],
+                "summary": "—",
+                "total": 0
+              },
+              "stitchStatus": {
+                "bad": 0,
+                "good": 0,
+                "summary": "0/2",
+                "total": 2,
+                "vertexStatus": [
+                  [
+                    "4,1",
+                    {
+                      "diagA": "pending",
+                      "diagB": "pending"
+                    }
+                  ]
+                ]
+              },
+              "stitchesOk": false
+            },
+            "digest": "e94d7ee77d5f5c45c371238431f5a55c3fed8247efe5dd554e0e1d6206913403"
+          },
+          "snapshot": {
+            "cols": 6,
+            "levelIndex": 0,
+            "movableWalls": [],
+            "pathKey": "",
+            "pathLength": 0,
+            "rows": 5,
+            "totalUsable": 25,
+            "visitedCount": 0
+          },
+          "transition": {
+            "changed": true,
+            "meta": null,
+            "rebuildGrid": false,
+            "validate": true
+          }
+        },
+        {
+          "command": {
+            "payload": {
+              "c": 0,
+              "r": 0
+            },
+            "type": "path/start-or-step"
+          },
+          "evaluation": {
+            "canonicalSignature": "-|-|-||-",
+            "completion": {
+              "allVisited": false,
+              "hintStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "cornerVertexStatus": [
+                  [
+                    "4,3",
+                    "pending"
+                  ]
+                ],
+                "good": 0,
+                "goodKeys": [],
+                "pending": 3,
+                "summary": "0/3",
+                "total": 3
+              },
+              "hintsOk": false,
+              "kind": "bad",
+              "message": "",
+              "rpsOk": true,
+              "rpsStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "good": 0,
+                "goodKeys": [],
+                "summary": "—",
+                "total": 0
+              },
+              "stitchStatus": {
+                "bad": 0,
+                "good": 0,
+                "summary": "0/2",
+                "total": 2,
+                "vertexStatus": [
+                  [
+                    "4,1",
+                    {
+                      "diagA": "pending",
+                      "diagB": "pending"
+                    }
+                  ]
+                ]
+              },
+              "stitchesOk": false
+            },
+            "digest": "c347ca6b49ab76398caa7b7f54c85e930ddbfee2b4894934254facfbd4d0ec13"
+          },
+          "snapshot": {
+            "cols": 6,
+            "levelIndex": 0,
+            "movableWalls": [],
+            "pathKey": "0,0;",
+            "pathLength": 1,
+            "rows": 5,
+            "totalUsable": 25,
+            "visitedCount": 1
+          },
+          "transition": {
+            "changed": true,
+            "meta": null,
+            "rebuildGrid": false,
+            "validate": false
+          }
+        },
+        {
+          "command": {
+            "payload": {
+              "c": 1,
+              "r": 0
+            },
+            "type": "path/start-or-step-from-start"
+          },
+          "evaluation": {
+            "canonicalSignature": "-|-|-||-",
+            "completion": {
+              "allVisited": false,
+              "hintStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "cornerVertexStatus": [
+                  [
+                    "4,3",
+                    "pending"
+                  ]
+                ],
+                "good": 0,
+                "goodKeys": [],
+                "pending": 3,
+                "summary": "0/3",
+                "total": 3
+              },
+              "hintsOk": false,
+              "kind": "bad",
+              "message": "",
+              "rpsOk": true,
+              "rpsStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "good": 0,
+                "goodKeys": [],
+                "summary": "—",
+                "total": 0
+              },
+              "stitchStatus": {
+                "bad": 0,
+                "good": 0,
+                "summary": "0/2",
+                "total": 2,
+                "vertexStatus": [
+                  [
+                    "4,1",
+                    {
+                      "diagA": "pending",
+                      "diagB": "pending"
+                    }
+                  ]
+                ]
+              },
+              "stitchesOk": false
+            },
+            "digest": "be50418902cece2ad27abd09beebd4fa65c523b0466dc8e96aa30ac542995262"
+          },
+          "snapshot": {
+            "cols": 6,
+            "levelIndex": 0,
+            "movableWalls": [],
+            "pathKey": "0,1;0,0;",
+            "pathLength": 2,
+            "rows": 5,
+            "totalUsable": 25,
+            "visitedCount": 2
+          },
+          "transition": {
+            "changed": true,
+            "meta": null,
+            "rebuildGrid": false,
+            "validate": false
+          }
+        },
+        {
+          "command": {
+            "payload": {
+              "c": 1,
+              "r": 0
+            },
+            "type": "path/start-or-step"
+          },
+          "evaluation": {
+            "canonicalSignature": "-|-|-||-",
+            "completion": {
+              "allVisited": false,
+              "hintStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "cornerVertexStatus": [
+                  [
+                    "4,3",
+                    "pending"
+                  ]
+                ],
+                "good": 0,
+                "goodKeys": [],
+                "pending": 3,
+                "summary": "0/3",
+                "total": 3
+              },
+              "hintsOk": false,
+              "kind": "bad",
+              "message": "",
+              "rpsOk": true,
+              "rpsStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "good": 0,
+                "goodKeys": [],
+                "summary": "—",
+                "total": 0
+              },
+              "stitchStatus": {
+                "bad": 0,
+                "good": 0,
+                "summary": "0/2",
+                "total": 2,
+                "vertexStatus": [
+                  [
+                    "4,1",
+                    {
+                      "diagA": "pending",
+                      "diagB": "pending"
+                    }
+                  ]
+                ]
+              },
+              "stitchesOk": false
+            },
+            "digest": "2c8bd79b68b39920098641ee807e660084cba6477982b72c3c8fc0f37d5d9aed"
+          },
+          "snapshot": {
+            "cols": 6,
+            "levelIndex": 0,
+            "movableWalls": [],
+            "pathKey": "0,1;",
+            "pathLength": 1,
+            "rows": 5,
+            "totalUsable": 25,
+            "visitedCount": 1
+          },
+          "transition": {
+            "changed": true,
+            "meta": null,
+            "rebuildGrid": false,
+            "validate": false
+          }
+        },
+        {
+          "command": {
+            "payload": {
+              "c": 1,
+              "r": -1
+            },
+            "type": "path/start-or-step-from-start"
+          },
+          "evaluation": {
+            "canonicalSignature": "-|-|-||-",
+            "completion": {
+              "allVisited": false,
+              "hintStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "cornerVertexStatus": [
+                  [
+                    "4,3",
+                    "pending"
+                  ]
+                ],
+                "good": 0,
+                "goodKeys": [],
+                "pending": 3,
+                "summary": "0/3",
+                "total": 3
+              },
+              "hintsOk": false,
+              "kind": "bad",
+              "message": "",
+              "rpsOk": true,
+              "rpsStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "good": 0,
+                "goodKeys": [],
+                "summary": "—",
+                "total": 0
+              },
+              "stitchStatus": {
+                "bad": 0,
+                "good": 0,
+                "summary": "0/2",
+                "total": 2,
+                "vertexStatus": [
+                  [
+                    "4,1",
+                    {
+                      "diagA": "pending",
+                      "diagB": "pending"
+                    }
+                  ]
+                ]
+              },
+              "stitchesOk": false
+            },
+            "digest": "2c8bd79b68b39920098641ee807e660084cba6477982b72c3c8fc0f37d5d9aed"
+          },
+          "snapshot": {
+            "cols": 6,
+            "levelIndex": 0,
+            "movableWalls": [],
+            "pathKey": "0,1;",
+            "pathLength": 1,
+            "rows": 5,
+            "totalUsable": 25,
+            "visitedCount": 1
+          },
+          "transition": {
+            "changed": false,
+            "meta": null,
+            "rebuildGrid": false,
+            "validate": false
+          }
+        },
+        {
+          "command": {
+            "payload": {
+              "c": 2,
+              "r": 1
+            },
+            "type": "path/start-or-step-from-start"
+          },
+          "evaluation": {
+            "canonicalSignature": "-|-|-||-",
+            "completion": {
+              "allVisited": false,
+              "hintStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "cornerVertexStatus": [
+                  [
+                    "4,3",
+                    "pending"
+                  ]
+                ],
+                "good": 0,
+                "goodKeys": [],
+                "pending": 3,
+                "summary": "0/3",
+                "total": 3
+              },
+              "hintsOk": false,
+              "kind": "bad",
+              "message": "",
+              "rpsOk": true,
+              "rpsStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "good": 0,
+                "goodKeys": [],
+                "summary": "—",
+                "total": 0
+              },
+              "stitchStatus": {
+                "bad": 0,
+                "good": 0,
+                "summary": "0/2",
+                "total": 2,
+                "vertexStatus": [
+                  [
+                    "4,1",
+                    {
+                      "diagA": "pending",
+                      "diagB": "pending"
+                    }
+                  ]
+                ]
+              },
+              "stitchesOk": false
+            },
+            "digest": "2c8bd79b68b39920098641ee807e660084cba6477982b72c3c8fc0f37d5d9aed"
+          },
+          "snapshot": {
+            "cols": 6,
+            "levelIndex": 0,
+            "movableWalls": [],
+            "pathKey": "0,1;",
+            "pathLength": 1,
+            "rows": 5,
+            "totalUsable": 25,
+            "visitedCount": 1
+          },
+          "transition": {
+            "changed": false,
+            "meta": null,
+            "rebuildGrid": false,
+            "validate": false
+          }
+        },
+        {
+          "command": {
+            "payload": {
+              "c": 2,
+              "r": -1
+            },
+            "type": "path/start-or-step-from-start"
+          },
+          "evaluation": {
+            "canonicalSignature": "-|-|-||-",
+            "completion": {
+              "allVisited": false,
+              "hintStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "cornerVertexStatus": [
+                  [
+                    "4,3",
+                    "pending"
+                  ]
+                ],
+                "good": 0,
+                "goodKeys": [],
+                "pending": 3,
+                "summary": "0/3",
+                "total": 3
+              },
+              "hintsOk": false,
+              "kind": "bad",
+              "message": "",
+              "rpsOk": true,
+              "rpsStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "good": 0,
+                "goodKeys": [],
+                "summary": "—",
+                "total": 0
+              },
+              "stitchStatus": {
+                "bad": 0,
+                "good": 0,
+                "summary": "0/2",
+                "total": 2,
+                "vertexStatus": [
+                  [
+                    "4,1",
+                    {
+                      "diagA": "pending",
+                      "diagB": "pending"
+                    }
+                  ]
+                ]
+              },
+              "stitchesOk": false
+            },
+            "digest": "2c8bd79b68b39920098641ee807e660084cba6477982b72c3c8fc0f37d5d9aed"
+          },
+          "snapshot": {
+            "cols": 6,
+            "levelIndex": 0,
+            "movableWalls": [],
+            "pathKey": "0,1;",
+            "pathLength": 1,
+            "rows": 5,
+            "totalUsable": 25,
+            "visitedCount": 1
+          },
+          "transition": {
+            "changed": false,
+            "meta": null,
+            "rebuildGrid": false,
+            "validate": false
+          }
+        },
+        {
+          "command": {
+            "payload": {
+              "c": 2,
+              "r": 1
+            },
+            "type": "path/start-or-step"
+          },
+          "evaluation": {
+            "canonicalSignature": "-|-|-||-",
+            "completion": {
+              "allVisited": false,
+              "hintStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "cornerVertexStatus": [
+                  [
+                    "4,3",
+                    "pending"
+                  ]
+                ],
+                "good": 0,
+                "goodKeys": [],
+                "pending": 3,
+                "summary": "0/3",
+                "total": 3
+              },
+              "hintsOk": false,
+              "kind": "bad",
+              "message": "",
+              "rpsOk": true,
+              "rpsStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "good": 0,
+                "goodKeys": [],
+                "summary": "—",
+                "total": 0
+              },
+              "stitchStatus": {
+                "bad": 0,
+                "good": 0,
+                "summary": "0/2",
+                "total": 2,
+                "vertexStatus": [
+                  [
+                    "4,1",
+                    {
+                      "diagA": "pending",
+                      "diagB": "pending"
+                    }
+                  ]
+                ]
+              },
+              "stitchesOk": false
+            },
+            "digest": "2c8bd79b68b39920098641ee807e660084cba6477982b72c3c8fc0f37d5d9aed"
+          },
+          "snapshot": {
+            "cols": 6,
+            "levelIndex": 0,
+            "movableWalls": [],
+            "pathKey": "0,1;",
+            "pathLength": 1,
+            "rows": 5,
+            "totalUsable": 25,
+            "visitedCount": 1
+          },
+          "transition": {
+            "changed": false,
+            "meta": null,
+            "rebuildGrid": false,
+            "validate": false
+          }
+        },
+        {
+          "command": {
+            "payload": {
+              "c": 0,
+              "r": -1
+            },
+            "type": "path/start-or-step-from-start"
+          },
+          "evaluation": {
+            "canonicalSignature": "-|-|-||-",
+            "completion": {
+              "allVisited": false,
+              "hintStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "cornerVertexStatus": [
+                  [
+                    "4,3",
+                    "pending"
+                  ]
+                ],
+                "good": 0,
+                "goodKeys": [],
+                "pending": 3,
+                "summary": "0/3",
+                "total": 3
+              },
+              "hintsOk": false,
+              "kind": "bad",
+              "message": "",
+              "rpsOk": true,
+              "rpsStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "good": 0,
+                "goodKeys": [],
+                "summary": "—",
+                "total": 0
+              },
+              "stitchStatus": {
+                "bad": 0,
+                "good": 0,
+                "summary": "0/2",
+                "total": 2,
+                "vertexStatus": [
+                  [
+                    "4,1",
+                    {
+                      "diagA": "pending",
+                      "diagB": "pending"
+                    }
+                  ]
+                ]
+              },
+              "stitchesOk": false
+            },
+            "digest": "2c8bd79b68b39920098641ee807e660084cba6477982b72c3c8fc0f37d5d9aed"
+          },
+          "snapshot": {
+            "cols": 6,
+            "levelIndex": 0,
+            "movableWalls": [],
+            "pathKey": "0,1;",
+            "pathLength": 1,
+            "rows": 5,
+            "totalUsable": 25,
+            "visitedCount": 1
+          },
+          "transition": {
+            "changed": false,
+            "meta": null,
+            "rebuildGrid": false,
+            "validate": false
+          }
+        },
+        {
+          "command": {
+            "payload": {
+              "c": 2,
+              "r": 1
+            },
+            "type": "path/start-or-step"
+          },
+          "evaluation": {
+            "canonicalSignature": "-|-|-||-",
+            "completion": {
+              "allVisited": false,
+              "hintStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "cornerVertexStatus": [
+                  [
+                    "4,3",
+                    "pending"
+                  ]
+                ],
+                "good": 0,
+                "goodKeys": [],
+                "pending": 3,
+                "summary": "0/3",
+                "total": 3
+              },
+              "hintsOk": false,
+              "kind": "bad",
+              "message": "",
+              "rpsOk": true,
+              "rpsStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "good": 0,
+                "goodKeys": [],
+                "summary": "—",
+                "total": 0
+              },
+              "stitchStatus": {
+                "bad": 0,
+                "good": 0,
+                "summary": "0/2",
+                "total": 2,
+                "vertexStatus": [
+                  [
+                    "4,1",
+                    {
+                      "diagA": "pending",
+                      "diagB": "pending"
+                    }
+                  ]
+                ]
+              },
+              "stitchesOk": false
+            },
+            "digest": "2c8bd79b68b39920098641ee807e660084cba6477982b72c3c8fc0f37d5d9aed"
+          },
+          "snapshot": {
+            "cols": 6,
+            "levelIndex": 0,
+            "movableWalls": [],
+            "pathKey": "0,1;",
+            "pathLength": 1,
+            "rows": 5,
+            "totalUsable": 25,
+            "visitedCount": 1
+          },
+          "transition": {
+            "changed": false,
+            "meta": null,
+            "rebuildGrid": false,
+            "validate": false
+          }
+        },
+        {
+          "command": {
+            "payload": {
+              "c": 1,
+              "r": 1
+            },
+            "type": "path/start-or-step"
+          },
+          "evaluation": {
+            "canonicalSignature": "-|-|-||-",
+            "completion": {
+              "allVisited": false,
+              "hintStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "cornerVertexStatus": [
+                  [
+                    "4,3",
+                    "pending"
+                  ]
+                ],
+                "good": 0,
+                "goodKeys": [],
+                "pending": 3,
+                "summary": "0/3",
+                "total": 3
+              },
+              "hintsOk": false,
+              "kind": "bad",
+              "message": "",
+              "rpsOk": true,
+              "rpsStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "good": 0,
+                "goodKeys": [],
+                "summary": "—",
+                "total": 0
+              },
+              "stitchStatus": {
+                "bad": 0,
+                "good": 0,
+                "summary": "0/2",
+                "total": 2,
+                "vertexStatus": [
+                  [
+                    "4,1",
+                    {
+                      "diagA": "pending",
+                      "diagB": "pending"
+                    }
+                  ]
+                ]
+              },
+              "stitchesOk": false
+            },
+            "digest": "2c8bd79b68b39920098641ee807e660084cba6477982b72c3c8fc0f37d5d9aed"
+          },
+          "snapshot": {
+            "cols": 6,
+            "levelIndex": 0,
+            "movableWalls": [],
+            "pathKey": "0,1;",
+            "pathLength": 1,
+            "rows": 5,
+            "totalUsable": 25,
+            "visitedCount": 1
+          },
+          "transition": {
+            "changed": false,
+            "meta": null,
+            "rebuildGrid": false,
+            "validate": false
+          }
+        },
+        {
+          "command": {
+            "payload": {
+              "c": 1,
+              "r": -1
+            },
+            "type": "path/start-or-step-from-start"
+          },
+          "evaluation": {
+            "canonicalSignature": "-|-|-||-",
+            "completion": {
+              "allVisited": false,
+              "hintStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "cornerVertexStatus": [
+                  [
+                    "4,3",
+                    "pending"
+                  ]
+                ],
+                "good": 0,
+                "goodKeys": [],
+                "pending": 3,
+                "summary": "0/3",
+                "total": 3
+              },
+              "hintsOk": false,
+              "kind": "bad",
+              "message": "",
+              "rpsOk": true,
+              "rpsStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "good": 0,
+                "goodKeys": [],
+                "summary": "—",
+                "total": 0
+              },
+              "stitchStatus": {
+                "bad": 0,
+                "good": 0,
+                "summary": "0/2",
+                "total": 2,
+                "vertexStatus": [
+                  [
+                    "4,1",
+                    {
+                      "diagA": "pending",
+                      "diagB": "pending"
+                    }
+                  ]
+                ]
+              },
+              "stitchesOk": false
+            },
+            "digest": "2c8bd79b68b39920098641ee807e660084cba6477982b72c3c8fc0f37d5d9aed"
+          },
+          "snapshot": {
+            "cols": 6,
+            "levelIndex": 0,
+            "movableWalls": [],
+            "pathKey": "0,1;",
+            "pathLength": 1,
+            "rows": 5,
+            "totalUsable": 25,
+            "visitedCount": 1
+          },
+          "transition": {
+            "changed": false,
+            "meta": null,
+            "rebuildGrid": false,
+            "validate": false
+          }
+        }
+      ],
+      "infiniteIndex": 5
+    },
+    {
+      "commands": [
+        {
+          "payload": {
+            "c": 1,
+            "r": 0
+          },
+          "type": "path/start-or-step"
+        },
+        {
+          "payload": {
+            "c": 1,
+            "r": -1
+          },
+          "type": "path/start-or-step-from-start"
+        },
+        {
+          "payload": {
+            "c": 2,
+            "r": 0
+          },
+          "type": "path/start-or-step"
+        },
+        {
+          "payload": {
+            "c": 0,
+            "r": 1
+          },
+          "type": "path/start-or-step-from-start"
+        },
+        {
+          "payload": {
+            "c": 2,
+            "r": -1
+          },
+          "type": "path/start-or-step-from-start"
+        },
+        {
+          "payload": {
+            "c": 3,
+            "r": 0
+          },
+          "type": "path/start-or-step"
+        },
+        {
+          "payload": {
+            "c": 1,
+            "r": 1
+          },
+          "type": "path/start-or-step-from-start"
+        },
+        {
+          "payload": {
+            "c": 2,
+            "r": 1
+          },
+          "type": "path/start-or-step"
+        },
+        {
+          "payload": {
+            "c": 2,
+            "r": 0
+          },
+          "type": "path/start-or-step-from-start"
+        },
+        {
+          "payload": {
+            "c": 2,
+            "r": 1
+          },
+          "type": "path/start-or-step"
+        },
+        {
+          "payload": {
+            "c": 2,
+            "r": 2
+          },
+          "type": "path/start-or-step-from-start"
+        },
+        {
+          "payload": {
+            "c": 4,
+            "r": -1
+          },
+          "type": "path/start-or-step"
+        },
+        {
+          "payload": {
+            "c": 3,
+            "r": 1
+          },
+          "type": "path/start-or-step"
+        },
+        {
+          "payload": {
+            "c": 4,
+            "r": 1
+          },
+          "type": "path/start-or-step"
+        },
+        {
+          "payload": {
+            "c": 0,
+            "r": 0
+          },
+          "type": "path/start-or-step-from-start"
+        },
+        {
+          "payload": {
+            "c": 0,
+            "r": 0
+          },
+          "type": "path/start-or-step-from-start"
+        },
+        {
+          "payload": {
+            "c": 5,
+            "r": 1
+          },
+          "type": "path/start-or-step"
+        },
+        {
+          "payload": {
+            "c": 3,
+            "r": 2
+          },
+          "type": "path/start-or-step"
+        }
+      ],
+      "frames": [
+        {
+          "command": {
+            "payload": {
+              "c": 1,
+              "r": 0
+            },
+            "type": "path/start-or-step"
+          },
+          "evaluation": {
+            "canonicalSignature": "-|-|-||-",
+            "completion": {
+              "allVisited": false,
+              "hintStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "cornerVertexStatus": [
+                  [
+                    "3,2",
+                    "pending"
+                  ],
+                  [
+                    "5,2",
+                    "pending"
+                  ]
+                ],
+                "good": 0,
+                "goodKeys": [],
+                "pending": 3,
+                "summary": "0/3",
+                "total": 3
+              },
+              "hintsOk": false,
+              "kind": "bad",
+              "message": "",
+              "rpsOk": true,
+              "rpsStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "good": 0,
+                "goodKeys": [],
+                "summary": "—",
+                "total": 0
+              },
+              "stitchStatus": {
+                "bad": 0,
+                "good": 0,
+                "summary": "0/4",
+                "total": 4,
+                "vertexStatus": [
+                  [
+                    "1,2",
+                    {
+                      "diagA": "pending",
+                      "diagB": "pending"
+                    }
+                  ],
+                  [
+                    "1,4",
+                    {
+                      "diagA": "pending",
+                      "diagB": "pending"
+                    }
+                  ]
+                ]
+              },
+              "stitchesOk": false
+            },
+            "digest": "f9cfeb87006d74a9454ba704765c8a9ffbc846f377921a996f10a8f53f0bde05"
+          },
+          "snapshot": {
+            "cols": 5,
+            "levelIndex": 0,
+            "movableWalls": [],
+            "pathKey": "0,1;",
+            "pathLength": 1,
+            "rows": 6,
+            "totalUsable": 24,
+            "visitedCount": 1
+          },
+          "transition": {
+            "changed": true,
+            "meta": null,
+            "rebuildGrid": false,
+            "validate": false
+          }
+        },
+        {
+          "command": {
+            "payload": {
+              "c": 1,
+              "r": -1
+            },
+            "type": "path/start-or-step-from-start"
+          },
+          "evaluation": {
+            "canonicalSignature": "-|-|-||-",
+            "completion": {
+              "allVisited": false,
+              "hintStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "cornerVertexStatus": [
+                  [
+                    "3,2",
+                    "pending"
+                  ],
+                  [
+                    "5,2",
+                    "pending"
+                  ]
+                ],
+                "good": 0,
+                "goodKeys": [],
+                "pending": 3,
+                "summary": "0/3",
+                "total": 3
+              },
+              "hintsOk": false,
+              "kind": "bad",
+              "message": "",
+              "rpsOk": true,
+              "rpsStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "good": 0,
+                "goodKeys": [],
+                "summary": "—",
+                "total": 0
+              },
+              "stitchStatus": {
+                "bad": 0,
+                "good": 0,
+                "summary": "0/4",
+                "total": 4,
+                "vertexStatus": [
+                  [
+                    "1,2",
+                    {
+                      "diagA": "pending",
+                      "diagB": "pending"
+                    }
+                  ],
+                  [
+                    "1,4",
+                    {
+                      "diagA": "pending",
+                      "diagB": "pending"
+                    }
+                  ]
+                ]
+              },
+              "stitchesOk": false
+            },
+            "digest": "f9cfeb87006d74a9454ba704765c8a9ffbc846f377921a996f10a8f53f0bde05"
+          },
+          "snapshot": {
+            "cols": 5,
+            "levelIndex": 0,
+            "movableWalls": [],
+            "pathKey": "0,1;",
+            "pathLength": 1,
+            "rows": 6,
+            "totalUsable": 24,
+            "visitedCount": 1
+          },
+          "transition": {
+            "changed": false,
+            "meta": null,
+            "rebuildGrid": false,
+            "validate": false
+          }
+        },
+        {
+          "command": {
+            "payload": {
+              "c": 2,
+              "r": 0
+            },
+            "type": "path/start-or-step"
+          },
+          "evaluation": {
+            "canonicalSignature": "-|-|-||-",
+            "completion": {
+              "allVisited": false,
+              "hintStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "cornerVertexStatus": [
+                  [
+                    "3,2",
+                    "pending"
+                  ],
+                  [
+                    "5,2",
+                    "pending"
+                  ]
+                ],
+                "good": 0,
+                "goodKeys": [],
+                "pending": 3,
+                "summary": "0/3",
+                "total": 3
+              },
+              "hintsOk": false,
+              "kind": "bad",
+              "message": "",
+              "rpsOk": true,
+              "rpsStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "good": 0,
+                "goodKeys": [],
+                "summary": "—",
+                "total": 0
+              },
+              "stitchStatus": {
+                "bad": 0,
+                "good": 0,
+                "summary": "0/4",
+                "total": 4,
+                "vertexStatus": [
+                  [
+                    "1,2",
+                    {
+                      "diagA": "pending",
+                      "diagB": "pending"
+                    }
+                  ],
+                  [
+                    "1,4",
+                    {
+                      "diagA": "pending",
+                      "diagB": "pending"
+                    }
+                  ]
+                ]
+              },
+              "stitchesOk": false
+            },
+            "digest": "d335defb0273f954c4d15e78c69a790f44691a50805a91dd6c2ec12594c9f810"
+          },
+          "snapshot": {
+            "cols": 5,
+            "levelIndex": 0,
+            "movableWalls": [],
+            "pathKey": "0,1;0,2;",
+            "pathLength": 2,
+            "rows": 6,
+            "totalUsable": 24,
+            "visitedCount": 2
+          },
+          "transition": {
+            "changed": true,
+            "meta": null,
+            "rebuildGrid": false,
+            "validate": false
+          }
+        },
+        {
+          "command": {
+            "payload": {
+              "c": 0,
+              "r": 1
+            },
+            "type": "path/start-or-step-from-start"
+          },
+          "evaluation": {
+            "canonicalSignature": "-|-|-||-",
+            "completion": {
+              "allVisited": false,
+              "hintStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "cornerVertexStatus": [
+                  [
+                    "3,2",
+                    "pending"
+                  ],
+                  [
+                    "5,2",
+                    "pending"
+                  ]
+                ],
+                "good": 0,
+                "goodKeys": [],
+                "pending": 3,
+                "summary": "0/3",
+                "total": 3
+              },
+              "hintsOk": false,
+              "kind": "bad",
+              "message": "",
+              "rpsOk": true,
+              "rpsStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "good": 0,
+                "goodKeys": [],
+                "summary": "—",
+                "total": 0
+              },
+              "stitchStatus": {
+                "bad": 0,
+                "good": 0,
+                "summary": "0/4",
+                "total": 4,
+                "vertexStatus": [
+                  [
+                    "1,2",
+                    {
+                      "diagA": "pending",
+                      "diagB": "pending"
+                    }
+                  ],
+                  [
+                    "1,4",
+                    {
+                      "diagA": "pending",
+                      "diagB": "pending"
+                    }
+                  ]
+                ]
+              },
+              "stitchesOk": false
+            },
+            "digest": "d335defb0273f954c4d15e78c69a790f44691a50805a91dd6c2ec12594c9f810"
+          },
+          "snapshot": {
+            "cols": 5,
+            "levelIndex": 0,
+            "movableWalls": [],
+            "pathKey": "0,1;0,2;",
+            "pathLength": 2,
+            "rows": 6,
+            "totalUsable": 24,
+            "visitedCount": 2
+          },
+          "transition": {
+            "changed": false,
+            "meta": null,
+            "rebuildGrid": false,
+            "validate": false
+          }
+        },
+        {
+          "command": {
+            "payload": {
+              "c": 2,
+              "r": -1
+            },
+            "type": "path/start-or-step-from-start"
+          },
+          "evaluation": {
+            "canonicalSignature": "-|-|-||-",
+            "completion": {
+              "allVisited": false,
+              "hintStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "cornerVertexStatus": [
+                  [
+                    "3,2",
+                    "pending"
+                  ],
+                  [
+                    "5,2",
+                    "pending"
+                  ]
+                ],
+                "good": 0,
+                "goodKeys": [],
+                "pending": 3,
+                "summary": "0/3",
+                "total": 3
+              },
+              "hintsOk": false,
+              "kind": "bad",
+              "message": "",
+              "rpsOk": true,
+              "rpsStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "good": 0,
+                "goodKeys": [],
+                "summary": "—",
+                "total": 0
+              },
+              "stitchStatus": {
+                "bad": 0,
+                "good": 0,
+                "summary": "0/4",
+                "total": 4,
+                "vertexStatus": [
+                  [
+                    "1,2",
+                    {
+                      "diagA": "pending",
+                      "diagB": "pending"
+                    }
+                  ],
+                  [
+                    "1,4",
+                    {
+                      "diagA": "pending",
+                      "diagB": "pending"
+                    }
+                  ]
+                ]
+              },
+              "stitchesOk": false
+            },
+            "digest": "d335defb0273f954c4d15e78c69a790f44691a50805a91dd6c2ec12594c9f810"
+          },
+          "snapshot": {
+            "cols": 5,
+            "levelIndex": 0,
+            "movableWalls": [],
+            "pathKey": "0,1;0,2;",
+            "pathLength": 2,
+            "rows": 6,
+            "totalUsable": 24,
+            "visitedCount": 2
+          },
+          "transition": {
+            "changed": false,
+            "meta": null,
+            "rebuildGrid": false,
+            "validate": false
+          }
+        },
+        {
+          "command": {
+            "payload": {
+              "c": 3,
+              "r": 0
+            },
+            "type": "path/start-or-step"
+          },
+          "evaluation": {
+            "canonicalSignature": "-|-|-||-",
+            "completion": {
+              "allVisited": false,
+              "hintStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "cornerVertexStatus": [
+                  [
+                    "3,2",
+                    "pending"
+                  ],
+                  [
+                    "5,2",
+                    "pending"
+                  ]
+                ],
+                "good": 0,
+                "goodKeys": [],
+                "pending": 3,
+                "summary": "0/3",
+                "total": 3
+              },
+              "hintsOk": false,
+              "kind": "bad",
+              "message": "",
+              "rpsOk": true,
+              "rpsStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "good": 0,
+                "goodKeys": [],
+                "summary": "—",
+                "total": 0
+              },
+              "stitchStatus": {
+                "bad": 1,
+                "good": 0,
+                "summary": "0/4 (✗1)",
+                "total": 4,
+                "vertexStatus": [
+                  [
+                    "1,2",
+                    {
+                      "diagA": "pending",
+                      "diagB": "bad"
+                    }
+                  ],
+                  [
+                    "1,4",
+                    {
+                      "diagA": "pending",
+                      "diagB": "pending"
+                    }
+                  ]
+                ]
+              },
+              "stitchesOk": false
+            },
+            "digest": "ffb5f568f3eab53869f8bfe8062725e9e1db66c5b46904a255f92c86aa88721f"
+          },
+          "snapshot": {
+            "cols": 5,
+            "levelIndex": 0,
+            "movableWalls": [],
+            "pathKey": "0,1;0,2;0,3;",
+            "pathLength": 3,
+            "rows": 6,
+            "totalUsable": 24,
+            "visitedCount": 3
+          },
+          "transition": {
+            "changed": true,
+            "meta": null,
+            "rebuildGrid": false,
+            "validate": false
+          }
+        },
+        {
+          "command": {
+            "payload": {
+              "c": 1,
+              "r": 1
+            },
+            "type": "path/start-or-step-from-start"
+          },
+          "evaluation": {
+            "canonicalSignature": "t@1,1:END|-|-||-",
+            "completion": {
+              "allVisited": false,
+              "hintStatus": {
+                "bad": 1,
+                "badKeys": [
+                  "1,1"
+                ],
+                "cornerVertexStatus": [
+                  [
+                    "3,2",
+                    "pending"
+                  ],
+                  [
+                    "5,2",
+                    "pending"
+                  ]
+                ],
+                "good": 0,
+                "goodKeys": [],
+                "pending": 2,
+                "summary": "0/3 (✗1)",
+                "total": 3
+              },
+              "hintsOk": false,
+              "kind": "bad",
+              "message": "",
+              "rpsOk": true,
+              "rpsStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "good": 0,
+                "goodKeys": [],
+                "summary": "—",
+                "total": 0
+              },
+              "stitchStatus": {
+                "bad": 2,
+                "good": 0,
+                "summary": "0/4 (✗2)",
+                "total": 4,
+                "vertexStatus": [
+                  [
+                    "1,2",
+                    {
+                      "diagA": "bad",
+                      "diagB": "bad"
+                    }
+                  ],
+                  [
+                    "1,4",
+                    {
+                      "diagA": "pending",
+                      "diagB": "pending"
+                    }
+                  ]
+                ]
+              },
+              "stitchesOk": false
+            },
+            "digest": "0d018741e8eae7f6bb9a67e2f15cf14381be2b2c02e439fbe2f99ca39ec85d50"
+          },
+          "snapshot": {
+            "cols": 5,
+            "levelIndex": 0,
+            "movableWalls": [],
+            "pathKey": "1,1;0,1;0,2;0,3;",
+            "pathLength": 4,
+            "rows": 6,
+            "totalUsable": 24,
+            "visitedCount": 4
+          },
+          "transition": {
+            "changed": true,
+            "meta": null,
+            "rebuildGrid": false,
+            "validate": false
+          }
+        },
+        {
+          "command": {
+            "payload": {
+              "c": 2,
+              "r": 1
+            },
+            "type": "path/start-or-step"
+          },
+          "evaluation": {
+            "canonicalSignature": "t@1,1:END|-|-||-",
+            "completion": {
+              "allVisited": false,
+              "hintStatus": {
+                "bad": 1,
+                "badKeys": [
+                  "1,1"
+                ],
+                "cornerVertexStatus": [
+                  [
+                    "3,2",
+                    "pending"
+                  ],
+                  [
+                    "5,2",
+                    "pending"
+                  ]
+                ],
+                "good": 0,
+                "goodKeys": [],
+                "pending": 2,
+                "summary": "0/3 (✗1)",
+                "total": 3
+              },
+              "hintsOk": false,
+              "kind": "bad",
+              "message": "",
+              "rpsOk": true,
+              "rpsStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "good": 0,
+                "goodKeys": [],
+                "summary": "—",
+                "total": 0
+              },
+              "stitchStatus": {
+                "bad": 2,
+                "good": 0,
+                "summary": "0/4 (✗2)",
+                "total": 4,
+                "vertexStatus": [
+                  [
+                    "1,2",
+                    {
+                      "diagA": "bad",
+                      "diagB": "bad"
+                    }
+                  ],
+                  [
+                    "1,4",
+                    {
+                      "diagA": "pending",
+                      "diagB": "pending"
+                    }
+                  ]
+                ]
+              },
+              "stitchesOk": false
+            },
+            "digest": "0d018741e8eae7f6bb9a67e2f15cf14381be2b2c02e439fbe2f99ca39ec85d50"
+          },
+          "snapshot": {
+            "cols": 5,
+            "levelIndex": 0,
+            "movableWalls": [],
+            "pathKey": "1,1;0,1;0,2;0,3;",
+            "pathLength": 4,
+            "rows": 6,
+            "totalUsable": 24,
+            "visitedCount": 4
+          },
+          "transition": {
+            "changed": false,
+            "meta": null,
+            "rebuildGrid": false,
+            "validate": false
+          }
+        },
+        {
+          "command": {
+            "payload": {
+              "c": 2,
+              "r": 0
+            },
+            "type": "path/start-or-step-from-start"
+          },
+          "evaluation": {
+            "canonicalSignature": "t@1,1:END|-|-||-",
+            "completion": {
+              "allVisited": false,
+              "hintStatus": {
+                "bad": 1,
+                "badKeys": [
+                  "1,1"
+                ],
+                "cornerVertexStatus": [
+                  [
+                    "3,2",
+                    "pending"
+                  ],
+                  [
+                    "5,2",
+                    "pending"
+                  ]
+                ],
+                "good": 0,
+                "goodKeys": [],
+                "pending": 2,
+                "summary": "0/3 (✗1)",
+                "total": 3
+              },
+              "hintsOk": false,
+              "kind": "bad",
+              "message": "",
+              "rpsOk": true,
+              "rpsStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "good": 0,
+                "goodKeys": [],
+                "summary": "—",
+                "total": 0
+              },
+              "stitchStatus": {
+                "bad": 2,
+                "good": 0,
+                "summary": "0/4 (✗2)",
+                "total": 4,
+                "vertexStatus": [
+                  [
+                    "1,2",
+                    {
+                      "diagA": "bad",
+                      "diagB": "bad"
+                    }
+                  ],
+                  [
+                    "1,4",
+                    {
+                      "diagA": "pending",
+                      "diagB": "pending"
+                    }
+                  ]
+                ]
+              },
+              "stitchesOk": false
+            },
+            "digest": "0d018741e8eae7f6bb9a67e2f15cf14381be2b2c02e439fbe2f99ca39ec85d50"
+          },
+          "snapshot": {
+            "cols": 5,
+            "levelIndex": 0,
+            "movableWalls": [],
+            "pathKey": "1,1;0,1;0,2;0,3;",
+            "pathLength": 4,
+            "rows": 6,
+            "totalUsable": 24,
+            "visitedCount": 4
+          },
+          "transition": {
+            "changed": false,
+            "meta": null,
+            "rebuildGrid": false,
+            "validate": false
+          }
+        },
+        {
+          "command": {
+            "payload": {
+              "c": 2,
+              "r": 1
+            },
+            "type": "path/start-or-step"
+          },
+          "evaluation": {
+            "canonicalSignature": "t@1,1:END|-|-||-",
+            "completion": {
+              "allVisited": false,
+              "hintStatus": {
+                "bad": 1,
+                "badKeys": [
+                  "1,1"
+                ],
+                "cornerVertexStatus": [
+                  [
+                    "3,2",
+                    "pending"
+                  ],
+                  [
+                    "5,2",
+                    "pending"
+                  ]
+                ],
+                "good": 0,
+                "goodKeys": [],
+                "pending": 2,
+                "summary": "0/3 (✗1)",
+                "total": 3
+              },
+              "hintsOk": false,
+              "kind": "bad",
+              "message": "",
+              "rpsOk": true,
+              "rpsStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "good": 0,
+                "goodKeys": [],
+                "summary": "—",
+                "total": 0
+              },
+              "stitchStatus": {
+                "bad": 2,
+                "good": 0,
+                "summary": "0/4 (✗2)",
+                "total": 4,
+                "vertexStatus": [
+                  [
+                    "1,2",
+                    {
+                      "diagA": "bad",
+                      "diagB": "bad"
+                    }
+                  ],
+                  [
+                    "1,4",
+                    {
+                      "diagA": "pending",
+                      "diagB": "pending"
+                    }
+                  ]
+                ]
+              },
+              "stitchesOk": false
+            },
+            "digest": "0d018741e8eae7f6bb9a67e2f15cf14381be2b2c02e439fbe2f99ca39ec85d50"
+          },
+          "snapshot": {
+            "cols": 5,
+            "levelIndex": 0,
+            "movableWalls": [],
+            "pathKey": "1,1;0,1;0,2;0,3;",
+            "pathLength": 4,
+            "rows": 6,
+            "totalUsable": 24,
+            "visitedCount": 4
+          },
+          "transition": {
+            "changed": false,
+            "meta": null,
+            "rebuildGrid": false,
+            "validate": false
+          }
+        },
+        {
+          "command": {
+            "payload": {
+              "c": 2,
+              "r": 2
+            },
+            "type": "path/start-or-step-from-start"
+          },
+          "evaluation": {
+            "canonicalSignature": "t@1,1:END|-|-||-",
+            "completion": {
+              "allVisited": false,
+              "hintStatus": {
+                "bad": 1,
+                "badKeys": [
+                  "1,1"
+                ],
+                "cornerVertexStatus": [
+                  [
+                    "3,2",
+                    "pending"
+                  ],
+                  [
+                    "5,2",
+                    "pending"
+                  ]
+                ],
+                "good": 0,
+                "goodKeys": [],
+                "pending": 2,
+                "summary": "0/3 (✗1)",
+                "total": 3
+              },
+              "hintsOk": false,
+              "kind": "bad",
+              "message": "",
+              "rpsOk": true,
+              "rpsStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "good": 0,
+                "goodKeys": [],
+                "summary": "—",
+                "total": 0
+              },
+              "stitchStatus": {
+                "bad": 2,
+                "good": 0,
+                "summary": "0/4 (✗2)",
+                "total": 4,
+                "vertexStatus": [
+                  [
+                    "1,2",
+                    {
+                      "diagA": "bad",
+                      "diagB": "bad"
+                    }
+                  ],
+                  [
+                    "1,4",
+                    {
+                      "diagA": "pending",
+                      "diagB": "pending"
+                    }
+                  ]
+                ]
+              },
+              "stitchesOk": false
+            },
+            "digest": "0d018741e8eae7f6bb9a67e2f15cf14381be2b2c02e439fbe2f99ca39ec85d50"
+          },
+          "snapshot": {
+            "cols": 5,
+            "levelIndex": 0,
+            "movableWalls": [],
+            "pathKey": "1,1;0,1;0,2;0,3;",
+            "pathLength": 4,
+            "rows": 6,
+            "totalUsable": 24,
+            "visitedCount": 4
+          },
+          "transition": {
+            "changed": false,
+            "meta": null,
+            "rebuildGrid": false,
+            "validate": false
+          }
+        },
+        {
+          "command": {
+            "payload": {
+              "c": 4,
+              "r": -1
+            },
+            "type": "path/start-or-step"
+          },
+          "evaluation": {
+            "canonicalSignature": "t@1,1:END|-|-||-",
+            "completion": {
+              "allVisited": false,
+              "hintStatus": {
+                "bad": 1,
+                "badKeys": [
+                  "1,1"
+                ],
+                "cornerVertexStatus": [
+                  [
+                    "3,2",
+                    "pending"
+                  ],
+                  [
+                    "5,2",
+                    "pending"
+                  ]
+                ],
+                "good": 0,
+                "goodKeys": [],
+                "pending": 2,
+                "summary": "0/3 (✗1)",
+                "total": 3
+              },
+              "hintsOk": false,
+              "kind": "bad",
+              "message": "",
+              "rpsOk": true,
+              "rpsStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "good": 0,
+                "goodKeys": [],
+                "summary": "—",
+                "total": 0
+              },
+              "stitchStatus": {
+                "bad": 2,
+                "good": 0,
+                "summary": "0/4 (✗2)",
+                "total": 4,
+                "vertexStatus": [
+                  [
+                    "1,2",
+                    {
+                      "diagA": "bad",
+                      "diagB": "bad"
+                    }
+                  ],
+                  [
+                    "1,4",
+                    {
+                      "diagA": "pending",
+                      "diagB": "pending"
+                    }
+                  ]
+                ]
+              },
+              "stitchesOk": false
+            },
+            "digest": "0d018741e8eae7f6bb9a67e2f15cf14381be2b2c02e439fbe2f99ca39ec85d50"
+          },
+          "snapshot": {
+            "cols": 5,
+            "levelIndex": 0,
+            "movableWalls": [],
+            "pathKey": "1,1;0,1;0,2;0,3;",
+            "pathLength": 4,
+            "rows": 6,
+            "totalUsable": 24,
+            "visitedCount": 4
+          },
+          "transition": {
+            "changed": false,
+            "meta": null,
+            "rebuildGrid": false,
+            "validate": false
+          }
+        },
+        {
+          "command": {
+            "payload": {
+              "c": 3,
+              "r": 1
+            },
+            "type": "path/start-or-step"
+          },
+          "evaluation": {
+            "canonicalSignature": "t@1,1:END|-|-||-",
+            "completion": {
+              "allVisited": false,
+              "hintStatus": {
+                "bad": 1,
+                "badKeys": [
+                  "1,1"
+                ],
+                "cornerVertexStatus": [
+                  [
+                    "3,2",
+                    "pending"
+                  ],
+                  [
+                    "5,2",
+                    "pending"
+                  ]
+                ],
+                "good": 0,
+                "goodKeys": [],
+                "pending": 2,
+                "summary": "0/3 (✗1)",
+                "total": 3
+              },
+              "hintsOk": false,
+              "kind": "bad",
+              "message": "",
+              "rpsOk": true,
+              "rpsStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "good": 0,
+                "goodKeys": [],
+                "summary": "—",
+                "total": 0
+              },
+              "stitchStatus": {
+                "bad": 3,
+                "good": 0,
+                "summary": "0/4 (✗3)",
+                "total": 4,
+                "vertexStatus": [
+                  [
+                    "1,2",
+                    {
+                      "diagA": "bad",
+                      "diagB": "bad"
+                    }
+                  ],
+                  [
+                    "1,4",
+                    {
+                      "diagA": "bad",
+                      "diagB": "pending"
+                    }
+                  ]
+                ]
+              },
+              "stitchesOk": false
+            },
+            "digest": "3f64ab30432fc63c880e2c42c82b4c677471e79754d9144daad425a2e937287d"
+          },
+          "snapshot": {
+            "cols": 5,
+            "levelIndex": 0,
+            "movableWalls": [],
+            "pathKey": "1,1;0,1;0,2;0,3;1,3;",
+            "pathLength": 5,
+            "rows": 6,
+            "totalUsable": 24,
+            "visitedCount": 5
+          },
+          "transition": {
+            "changed": true,
+            "meta": null,
+            "rebuildGrid": false,
+            "validate": false
+          }
+        },
+        {
+          "command": {
+            "payload": {
+              "c": 4,
+              "r": 1
+            },
+            "type": "path/start-or-step"
+          },
+          "evaluation": {
+            "canonicalSignature": "t@1,1:END|-|-||-",
+            "completion": {
+              "allVisited": false,
+              "hintStatus": {
+                "bad": 1,
+                "badKeys": [
+                  "1,1"
+                ],
+                "cornerVertexStatus": [
+                  [
+                    "3,2",
+                    "pending"
+                  ],
+                  [
+                    "5,2",
+                    "pending"
+                  ]
+                ],
+                "good": 0,
+                "goodKeys": [],
+                "pending": 2,
+                "summary": "0/3 (✗1)",
+                "total": 3
+              },
+              "hintsOk": false,
+              "kind": "bad",
+              "message": "",
+              "rpsOk": true,
+              "rpsStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "good": 0,
+                "goodKeys": [],
+                "summary": "—",
+                "total": 0
+              },
+              "stitchStatus": {
+                "bad": 4,
+                "good": 0,
+                "summary": "0/4 (✗4)",
+                "total": 4,
+                "vertexStatus": [
+                  [
+                    "1,2",
+                    {
+                      "diagA": "bad",
+                      "diagB": "bad"
+                    }
+                  ],
+                  [
+                    "1,4",
+                    {
+                      "diagA": "bad",
+                      "diagB": "bad"
+                    }
+                  ]
+                ]
+              },
+              "stitchesOk": false
+            },
+            "digest": "99a58f4bafa47c9d7a324ad965744df2d50cdd01333da987db123e594aa45a6e"
+          },
+          "snapshot": {
+            "cols": 5,
+            "levelIndex": 0,
+            "movableWalls": [],
+            "pathKey": "1,1;0,1;0,2;0,3;1,3;1,4;",
+            "pathLength": 6,
+            "rows": 6,
+            "totalUsable": 24,
+            "visitedCount": 6
+          },
+          "transition": {
+            "changed": true,
+            "meta": null,
+            "rebuildGrid": false,
+            "validate": false
+          }
+        },
+        {
+          "command": {
+            "payload": {
+              "c": 0,
+              "r": 0
+            },
+            "type": "path/start-or-step-from-start"
+          },
+          "evaluation": {
+            "canonicalSignature": "t@1,1:END|-|-||-",
+            "completion": {
+              "allVisited": false,
+              "hintStatus": {
+                "bad": 1,
+                "badKeys": [
+                  "1,1"
+                ],
+                "cornerVertexStatus": [
+                  [
+                    "3,2",
+                    "pending"
+                  ],
+                  [
+                    "5,2",
+                    "pending"
+                  ]
+                ],
+                "good": 0,
+                "goodKeys": [],
+                "pending": 2,
+                "summary": "0/3 (✗1)",
+                "total": 3
+              },
+              "hintsOk": false,
+              "kind": "bad",
+              "message": "",
+              "rpsOk": true,
+              "rpsStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "good": 0,
+                "goodKeys": [],
+                "summary": "—",
+                "total": 0
+              },
+              "stitchStatus": {
+                "bad": 4,
+                "good": 0,
+                "summary": "0/4 (✗4)",
+                "total": 4,
+                "vertexStatus": [
+                  [
+                    "1,2",
+                    {
+                      "diagA": "bad",
+                      "diagB": "bad"
+                    }
+                  ],
+                  [
+                    "1,4",
+                    {
+                      "diagA": "bad",
+                      "diagB": "bad"
+                    }
+                  ]
+                ]
+              },
+              "stitchesOk": false
+            },
+            "digest": "99a58f4bafa47c9d7a324ad965744df2d50cdd01333da987db123e594aa45a6e"
+          },
+          "snapshot": {
+            "cols": 5,
+            "levelIndex": 0,
+            "movableWalls": [],
+            "pathKey": "1,1;0,1;0,2;0,3;1,3;1,4;",
+            "pathLength": 6,
+            "rows": 6,
+            "totalUsable": 24,
+            "visitedCount": 6
+          },
+          "transition": {
+            "changed": false,
+            "meta": null,
+            "rebuildGrid": false,
+            "validate": false
+          }
+        },
+        {
+          "command": {
+            "payload": {
+              "c": 0,
+              "r": 0
+            },
+            "type": "path/start-or-step-from-start"
+          },
+          "evaluation": {
+            "canonicalSignature": "t@1,1:END|-|-||-",
+            "completion": {
+              "allVisited": false,
+              "hintStatus": {
+                "bad": 1,
+                "badKeys": [
+                  "1,1"
+                ],
+                "cornerVertexStatus": [
+                  [
+                    "3,2",
+                    "pending"
+                  ],
+                  [
+                    "5,2",
+                    "pending"
+                  ]
+                ],
+                "good": 0,
+                "goodKeys": [],
+                "pending": 2,
+                "summary": "0/3 (✗1)",
+                "total": 3
+              },
+              "hintsOk": false,
+              "kind": "bad",
+              "message": "",
+              "rpsOk": true,
+              "rpsStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "good": 0,
+                "goodKeys": [],
+                "summary": "—",
+                "total": 0
+              },
+              "stitchStatus": {
+                "bad": 4,
+                "good": 0,
+                "summary": "0/4 (✗4)",
+                "total": 4,
+                "vertexStatus": [
+                  [
+                    "1,2",
+                    {
+                      "diagA": "bad",
+                      "diagB": "bad"
+                    }
+                  ],
+                  [
+                    "1,4",
+                    {
+                      "diagA": "bad",
+                      "diagB": "bad"
+                    }
+                  ]
+                ]
+              },
+              "stitchesOk": false
+            },
+            "digest": "99a58f4bafa47c9d7a324ad965744df2d50cdd01333da987db123e594aa45a6e"
+          },
+          "snapshot": {
+            "cols": 5,
+            "levelIndex": 0,
+            "movableWalls": [],
+            "pathKey": "1,1;0,1;0,2;0,3;1,3;1,4;",
+            "pathLength": 6,
+            "rows": 6,
+            "totalUsable": 24,
+            "visitedCount": 6
+          },
+          "transition": {
+            "changed": false,
+            "meta": null,
+            "rebuildGrid": false,
+            "validate": false
+          }
+        },
+        {
+          "command": {
+            "payload": {
+              "c": 5,
+              "r": 1
+            },
+            "type": "path/start-or-step"
+          },
+          "evaluation": {
+            "canonicalSignature": "t@1,1:END|-|-||-",
+            "completion": {
+              "allVisited": false,
+              "hintStatus": {
+                "bad": 1,
+                "badKeys": [
+                  "1,1"
+                ],
+                "cornerVertexStatus": [
+                  [
+                    "3,2",
+                    "pending"
+                  ],
+                  [
+                    "5,2",
+                    "pending"
+                  ]
+                ],
+                "good": 0,
+                "goodKeys": [],
+                "pending": 2,
+                "summary": "0/3 (✗1)",
+                "total": 3
+              },
+              "hintsOk": false,
+              "kind": "bad",
+              "message": "",
+              "rpsOk": true,
+              "rpsStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "good": 0,
+                "goodKeys": [],
+                "summary": "—",
+                "total": 0
+              },
+              "stitchStatus": {
+                "bad": 4,
+                "good": 0,
+                "summary": "0/4 (✗4)",
+                "total": 4,
+                "vertexStatus": [
+                  [
+                    "1,2",
+                    {
+                      "diagA": "bad",
+                      "diagB": "bad"
+                    }
+                  ],
+                  [
+                    "1,4",
+                    {
+                      "diagA": "bad",
+                      "diagB": "bad"
+                    }
+                  ]
+                ]
+              },
+              "stitchesOk": false
+            },
+            "digest": "99a58f4bafa47c9d7a324ad965744df2d50cdd01333da987db123e594aa45a6e"
+          },
+          "snapshot": {
+            "cols": 5,
+            "levelIndex": 0,
+            "movableWalls": [],
+            "pathKey": "1,1;0,1;0,2;0,3;1,3;1,4;",
+            "pathLength": 6,
+            "rows": 6,
+            "totalUsable": 24,
+            "visitedCount": 6
+          },
+          "transition": {
+            "changed": false,
+            "meta": null,
+            "rebuildGrid": false,
+            "validate": false
+          }
+        },
+        {
+          "command": {
+            "payload": {
+              "c": 3,
+              "r": 2
+            },
+            "type": "path/start-or-step"
+          },
+          "evaluation": {
+            "canonicalSignature": "t@1,1:END|-|-||-",
+            "completion": {
+              "allVisited": false,
+              "hintStatus": {
+                "bad": 1,
+                "badKeys": [
+                  "1,1"
+                ],
+                "cornerVertexStatus": [
+                  [
+                    "3,2",
+                    "pending"
+                  ],
+                  [
+                    "5,2",
+                    "pending"
+                  ]
+                ],
+                "good": 0,
+                "goodKeys": [],
+                "pending": 2,
+                "summary": "0/3 (✗1)",
+                "total": 3
+              },
+              "hintsOk": false,
+              "kind": "bad",
+              "message": "",
+              "rpsOk": true,
+              "rpsStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "good": 0,
+                "goodKeys": [],
+                "summary": "—",
+                "total": 0
+              },
+              "stitchStatus": {
+                "bad": 4,
+                "good": 0,
+                "summary": "0/4 (✗4)",
+                "total": 4,
+                "vertexStatus": [
+                  [
+                    "1,2",
+                    {
+                      "diagA": "bad",
+                      "diagB": "bad"
+                    }
+                  ],
+                  [
+                    "1,4",
+                    {
+                      "diagA": "bad",
+                      "diagB": "bad"
+                    }
+                  ]
+                ]
+              },
+              "stitchesOk": false
+            },
+            "digest": "99a58f4bafa47c9d7a324ad965744df2d50cdd01333da987db123e594aa45a6e"
+          },
+          "snapshot": {
+            "cols": 5,
+            "levelIndex": 0,
+            "movableWalls": [],
+            "pathKey": "1,1;0,1;0,2;0,3;1,3;1,4;",
+            "pathLength": 6,
+            "rows": 6,
+            "totalUsable": 24,
+            "visitedCount": 6
+          },
+          "transition": {
+            "changed": false,
+            "meta": null,
+            "rebuildGrid": false,
+            "validate": false
+          }
+        }
+      ],
+      "infiniteIndex": 17
+    },
+    {
+      "commands": [
+        {
+          "payload": {
+            "c": 0,
+            "r": 0
+          },
+          "type": "path/start-or-step"
+        },
+        {
+          "payload": {
+            "c": -1,
+            "r": 1
+          },
+          "type": "path/start-or-step"
+        },
+        {
+          "payload": {
+            "c": -1,
+            "r": -1
+          },
+          "type": "path/start-or-step-from-start"
+        },
+        {
+          "payload": {},
+          "type": "path/reset"
+        },
+        {
+          "payload": {
+            "c": 0,
+            "r": 0
+          },
+          "type": "path/start-or-step"
+        },
+        {
+          "payload": {
+            "c": -1,
+            "r": 0
+          },
+          "type": "path/start-or-step"
+        },
+        {
+          "payload": {
+            "c": -1,
+            "r": -1
+          },
+          "type": "path/start-or-step-from-start"
+        },
+        {
+          "payload": {
+            "c": -1,
+            "r": 0
+          },
+          "type": "path/start-or-step-from-start"
+        },
+        {
+          "payload": {
+            "c": -1,
+            "r": 1
+          },
+          "type": "path/start-or-step-from-start"
+        },
+        {
+          "payload": {
+            "c": 1,
+            "r": 1
+          },
+          "type": "path/start-or-step"
+        },
+        {
+          "payload": {
+            "c": -1,
+            "r": 1
+          },
+          "type": "path/start-or-step-from-start"
+        },
+        {
+          "payload": {
+            "c": 0,
+            "r": 1
+          },
+          "type": "path/start-or-step-from-start"
+        },
+        {
+          "payload": {
+            "c": 1,
+            "r": -1
+          },
+          "type": "path/start-or-step"
+        },
+        {
+          "payload": {
+            "c": -1,
+            "r": 0
+          },
+          "type": "path/start-or-step"
+        },
+        {
+          "payload": {
+            "c": 1,
+            "r": 0
+          },
+          "type": "path/start-or-step-from-start"
+        },
+        {
+          "payload": {
+            "c": 1,
+            "r": 1
+          },
+          "type": "path/start-or-step"
+        },
+        {
+          "payload": {
+            "c": 1,
+            "r": 0
+          },
+          "type": "path/start-or-step"
+        },
+        {
+          "payload": {},
+          "type": "path/reset"
+        }
+      ],
+      "frames": [
+        {
+          "command": {
+            "payload": {
+              "c": 0,
+              "r": 0
+            },
+            "type": "path/start-or-step"
+          },
+          "evaluation": {
+            "canonicalSignature": "-|-|-||-",
+            "completion": {
+              "allVisited": false,
+              "hintStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "cornerVertexStatus": [
+                  [
+                    "2,2",
+                    "pending"
+                  ]
+                ],
+                "good": 0,
+                "goodKeys": [],
+                "pending": 3,
+                "summary": "0/3",
+                "total": 3
+              },
+              "hintsOk": false,
+              "kind": "bad",
+              "message": "",
+              "rpsOk": true,
+              "rpsStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "good": 0,
+                "goodKeys": [],
+                "summary": "—",
+                "total": 0
+              },
+              "stitchStatus": {
+                "bad": 0,
+                "good": 0,
+                "summary": "—",
+                "total": 0,
+                "vertexStatus": []
+              },
+              "stitchesOk": true
+            },
+            "digest": "823bc3013e8619d02d933e1d625f975fe9b802ec942605f267e57efe191e1a4e"
+          },
+          "snapshot": {
+            "cols": 6,
+            "levelIndex": 0,
+            "movableWalls": [],
+            "pathKey": "0,0;",
+            "pathLength": 1,
+            "rows": 6,
+            "totalUsable": 29,
+            "visitedCount": 1
+          },
+          "transition": {
+            "changed": true,
+            "meta": null,
+            "rebuildGrid": false,
+            "validate": false
+          }
+        },
+        {
+          "command": {
+            "payload": {
+              "c": -1,
+              "r": 1
+            },
+            "type": "path/start-or-step"
+          },
+          "evaluation": {
+            "canonicalSignature": "-|-|-||-",
+            "completion": {
+              "allVisited": false,
+              "hintStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "cornerVertexStatus": [
+                  [
+                    "2,2",
+                    "pending"
+                  ]
+                ],
+                "good": 0,
+                "goodKeys": [],
+                "pending": 3,
+                "summary": "0/3",
+                "total": 3
+              },
+              "hintsOk": false,
+              "kind": "bad",
+              "message": "",
+              "rpsOk": true,
+              "rpsStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "good": 0,
+                "goodKeys": [],
+                "summary": "—",
+                "total": 0
+              },
+              "stitchStatus": {
+                "bad": 0,
+                "good": 0,
+                "summary": "—",
+                "total": 0,
+                "vertexStatus": []
+              },
+              "stitchesOk": true
+            },
+            "digest": "823bc3013e8619d02d933e1d625f975fe9b802ec942605f267e57efe191e1a4e"
+          },
+          "snapshot": {
+            "cols": 6,
+            "levelIndex": 0,
+            "movableWalls": [],
+            "pathKey": "0,0;",
+            "pathLength": 1,
+            "rows": 6,
+            "totalUsable": 29,
+            "visitedCount": 1
+          },
+          "transition": {
+            "changed": false,
+            "meta": null,
+            "rebuildGrid": false,
+            "validate": false
+          }
+        },
+        {
+          "command": {
+            "payload": {
+              "c": -1,
+              "r": -1
+            },
+            "type": "path/start-or-step-from-start"
+          },
+          "evaluation": {
+            "canonicalSignature": "-|-|-||-",
+            "completion": {
+              "allVisited": false,
+              "hintStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "cornerVertexStatus": [
+                  [
+                    "2,2",
+                    "pending"
+                  ]
+                ],
+                "good": 0,
+                "goodKeys": [],
+                "pending": 3,
+                "summary": "0/3",
+                "total": 3
+              },
+              "hintsOk": false,
+              "kind": "bad",
+              "message": "",
+              "rpsOk": true,
+              "rpsStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "good": 0,
+                "goodKeys": [],
+                "summary": "—",
+                "total": 0
+              },
+              "stitchStatus": {
+                "bad": 0,
+                "good": 0,
+                "summary": "—",
+                "total": 0,
+                "vertexStatus": []
+              },
+              "stitchesOk": true
+            },
+            "digest": "823bc3013e8619d02d933e1d625f975fe9b802ec942605f267e57efe191e1a4e"
+          },
+          "snapshot": {
+            "cols": 6,
+            "levelIndex": 0,
+            "movableWalls": [],
+            "pathKey": "0,0;",
+            "pathLength": 1,
+            "rows": 6,
+            "totalUsable": 29,
+            "visitedCount": 1
+          },
+          "transition": {
+            "changed": false,
+            "meta": null,
+            "rebuildGrid": false,
+            "validate": false
+          }
+        },
+        {
+          "command": {
+            "payload": {},
+            "type": "path/reset"
+          },
+          "evaluation": {
+            "canonicalSignature": "",
+            "completion": {
+              "allVisited": false,
+              "hintStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "cornerVertexStatus": [
+                  [
+                    "2,2",
+                    "pending"
+                  ]
+                ],
+                "good": 0,
+                "goodKeys": [],
+                "pending": 3,
+                "summary": "0/3",
+                "total": 3
+              },
+              "hintsOk": false,
+              "kind": "bad",
+              "message": "",
+              "rpsOk": true,
+              "rpsStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "good": 0,
+                "goodKeys": [],
+                "summary": "—",
+                "total": 0
+              },
+              "stitchStatus": {
+                "bad": 0,
+                "good": 0,
+                "summary": "—",
+                "total": 0,
+                "vertexStatus": []
+              },
+              "stitchesOk": true
+            },
+            "digest": "94c23cf88ca1619dc96732402dbbcfc6cab4da3b92ff4fc42c402aafc3817350"
+          },
+          "snapshot": {
+            "cols": 6,
+            "levelIndex": 0,
+            "movableWalls": [],
+            "pathKey": "",
+            "pathLength": 0,
+            "rows": 6,
+            "totalUsable": 29,
+            "visitedCount": 0
+          },
+          "transition": {
+            "changed": true,
+            "meta": {
+              "resetMode": "cleared",
+              "storedResetCandidate": false
+            },
+            "rebuildGrid": false,
+            "validate": false
+          }
+        },
+        {
+          "command": {
+            "payload": {
+              "c": 0,
+              "r": 0
+            },
+            "type": "path/start-or-step"
+          },
+          "evaluation": {
+            "canonicalSignature": "-|-|-||-",
+            "completion": {
+              "allVisited": false,
+              "hintStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "cornerVertexStatus": [
+                  [
+                    "2,2",
+                    "pending"
+                  ]
+                ],
+                "good": 0,
+                "goodKeys": [],
+                "pending": 3,
+                "summary": "0/3",
+                "total": 3
+              },
+              "hintsOk": false,
+              "kind": "bad",
+              "message": "",
+              "rpsOk": true,
+              "rpsStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "good": 0,
+                "goodKeys": [],
+                "summary": "—",
+                "total": 0
+              },
+              "stitchStatus": {
+                "bad": 0,
+                "good": 0,
+                "summary": "—",
+                "total": 0,
+                "vertexStatus": []
+              },
+              "stitchesOk": true
+            },
+            "digest": "823bc3013e8619d02d933e1d625f975fe9b802ec942605f267e57efe191e1a4e"
+          },
+          "snapshot": {
+            "cols": 6,
+            "levelIndex": 0,
+            "movableWalls": [],
+            "pathKey": "0,0;",
+            "pathLength": 1,
+            "rows": 6,
+            "totalUsable": 29,
+            "visitedCount": 1
+          },
+          "transition": {
+            "changed": true,
+            "meta": null,
+            "rebuildGrid": false,
+            "validate": false
+          }
+        },
+        {
+          "command": {
+            "payload": {
+              "c": -1,
+              "r": 0
+            },
+            "type": "path/start-or-step"
+          },
+          "evaluation": {
+            "canonicalSignature": "-|-|-||-",
+            "completion": {
+              "allVisited": false,
+              "hintStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "cornerVertexStatus": [
+                  [
+                    "2,2",
+                    "pending"
+                  ]
+                ],
+                "good": 0,
+                "goodKeys": [],
+                "pending": 3,
+                "summary": "0/3",
+                "total": 3
+              },
+              "hintsOk": false,
+              "kind": "bad",
+              "message": "",
+              "rpsOk": true,
+              "rpsStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "good": 0,
+                "goodKeys": [],
+                "summary": "—",
+                "total": 0
+              },
+              "stitchStatus": {
+                "bad": 0,
+                "good": 0,
+                "summary": "—",
+                "total": 0,
+                "vertexStatus": []
+              },
+              "stitchesOk": true
+            },
+            "digest": "823bc3013e8619d02d933e1d625f975fe9b802ec942605f267e57efe191e1a4e"
+          },
+          "snapshot": {
+            "cols": 6,
+            "levelIndex": 0,
+            "movableWalls": [],
+            "pathKey": "0,0;",
+            "pathLength": 1,
+            "rows": 6,
+            "totalUsable": 29,
+            "visitedCount": 1
+          },
+          "transition": {
+            "changed": false,
+            "meta": null,
+            "rebuildGrid": false,
+            "validate": false
+          }
+        },
+        {
+          "command": {
+            "payload": {
+              "c": -1,
+              "r": -1
+            },
+            "type": "path/start-or-step-from-start"
+          },
+          "evaluation": {
+            "canonicalSignature": "-|-|-||-",
+            "completion": {
+              "allVisited": false,
+              "hintStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "cornerVertexStatus": [
+                  [
+                    "2,2",
+                    "pending"
+                  ]
+                ],
+                "good": 0,
+                "goodKeys": [],
+                "pending": 3,
+                "summary": "0/3",
+                "total": 3
+              },
+              "hintsOk": false,
+              "kind": "bad",
+              "message": "",
+              "rpsOk": true,
+              "rpsStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "good": 0,
+                "goodKeys": [],
+                "summary": "—",
+                "total": 0
+              },
+              "stitchStatus": {
+                "bad": 0,
+                "good": 0,
+                "summary": "—",
+                "total": 0,
+                "vertexStatus": []
+              },
+              "stitchesOk": true
+            },
+            "digest": "823bc3013e8619d02d933e1d625f975fe9b802ec942605f267e57efe191e1a4e"
+          },
+          "snapshot": {
+            "cols": 6,
+            "levelIndex": 0,
+            "movableWalls": [],
+            "pathKey": "0,0;",
+            "pathLength": 1,
+            "rows": 6,
+            "totalUsable": 29,
+            "visitedCount": 1
+          },
+          "transition": {
+            "changed": false,
+            "meta": null,
+            "rebuildGrid": false,
+            "validate": false
+          }
+        },
+        {
+          "command": {
+            "payload": {
+              "c": -1,
+              "r": 0
+            },
+            "type": "path/start-or-step-from-start"
+          },
+          "evaluation": {
+            "canonicalSignature": "-|-|-||-",
+            "completion": {
+              "allVisited": false,
+              "hintStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "cornerVertexStatus": [
+                  [
+                    "2,2",
+                    "pending"
+                  ]
+                ],
+                "good": 0,
+                "goodKeys": [],
+                "pending": 3,
+                "summary": "0/3",
+                "total": 3
+              },
+              "hintsOk": false,
+              "kind": "bad",
+              "message": "",
+              "rpsOk": true,
+              "rpsStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "good": 0,
+                "goodKeys": [],
+                "summary": "—",
+                "total": 0
+              },
+              "stitchStatus": {
+                "bad": 0,
+                "good": 0,
+                "summary": "—",
+                "total": 0,
+                "vertexStatus": []
+              },
+              "stitchesOk": true
+            },
+            "digest": "823bc3013e8619d02d933e1d625f975fe9b802ec942605f267e57efe191e1a4e"
+          },
+          "snapshot": {
+            "cols": 6,
+            "levelIndex": 0,
+            "movableWalls": [],
+            "pathKey": "0,0;",
+            "pathLength": 1,
+            "rows": 6,
+            "totalUsable": 29,
+            "visitedCount": 1
+          },
+          "transition": {
+            "changed": false,
+            "meta": null,
+            "rebuildGrid": false,
+            "validate": false
+          }
+        },
+        {
+          "command": {
+            "payload": {
+              "c": -1,
+              "r": 1
+            },
+            "type": "path/start-or-step-from-start"
+          },
+          "evaluation": {
+            "canonicalSignature": "-|-|-||-",
+            "completion": {
+              "allVisited": false,
+              "hintStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "cornerVertexStatus": [
+                  [
+                    "2,2",
+                    "pending"
+                  ]
+                ],
+                "good": 0,
+                "goodKeys": [],
+                "pending": 3,
+                "summary": "0/3",
+                "total": 3
+              },
+              "hintsOk": false,
+              "kind": "bad",
+              "message": "",
+              "rpsOk": true,
+              "rpsStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "good": 0,
+                "goodKeys": [],
+                "summary": "—",
+                "total": 0
+              },
+              "stitchStatus": {
+                "bad": 0,
+                "good": 0,
+                "summary": "—",
+                "total": 0,
+                "vertexStatus": []
+              },
+              "stitchesOk": true
+            },
+            "digest": "823bc3013e8619d02d933e1d625f975fe9b802ec942605f267e57efe191e1a4e"
+          },
+          "snapshot": {
+            "cols": 6,
+            "levelIndex": 0,
+            "movableWalls": [],
+            "pathKey": "0,0;",
+            "pathLength": 1,
+            "rows": 6,
+            "totalUsable": 29,
+            "visitedCount": 1
+          },
+          "transition": {
+            "changed": false,
+            "meta": null,
+            "rebuildGrid": false,
+            "validate": false
+          }
+        },
+        {
+          "command": {
+            "payload": {
+              "c": 1,
+              "r": 1
+            },
+            "type": "path/start-or-step"
+          },
+          "evaluation": {
+            "canonicalSignature": "-|-|-||-",
+            "completion": {
+              "allVisited": false,
+              "hintStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "cornerVertexStatus": [
+                  [
+                    "2,2",
+                    "pending"
+                  ]
+                ],
+                "good": 0,
+                "goodKeys": [],
+                "pending": 3,
+                "summary": "0/3",
+                "total": 3
+              },
+              "hintsOk": false,
+              "kind": "bad",
+              "message": "",
+              "rpsOk": true,
+              "rpsStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "good": 0,
+                "goodKeys": [],
+                "summary": "—",
+                "total": 0
+              },
+              "stitchStatus": {
+                "bad": 0,
+                "good": 0,
+                "summary": "—",
+                "total": 0,
+                "vertexStatus": []
+              },
+              "stitchesOk": true
+            },
+            "digest": "823bc3013e8619d02d933e1d625f975fe9b802ec942605f267e57efe191e1a4e"
+          },
+          "snapshot": {
+            "cols": 6,
+            "levelIndex": 0,
+            "movableWalls": [],
+            "pathKey": "0,0;",
+            "pathLength": 1,
+            "rows": 6,
+            "totalUsable": 29,
+            "visitedCount": 1
+          },
+          "transition": {
+            "changed": false,
+            "meta": null,
+            "rebuildGrid": false,
+            "validate": false
+          }
+        },
+        {
+          "command": {
+            "payload": {
+              "c": -1,
+              "r": 1
+            },
+            "type": "path/start-or-step-from-start"
+          },
+          "evaluation": {
+            "canonicalSignature": "-|-|-||-",
+            "completion": {
+              "allVisited": false,
+              "hintStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "cornerVertexStatus": [
+                  [
+                    "2,2",
+                    "pending"
+                  ]
+                ],
+                "good": 0,
+                "goodKeys": [],
+                "pending": 3,
+                "summary": "0/3",
+                "total": 3
+              },
+              "hintsOk": false,
+              "kind": "bad",
+              "message": "",
+              "rpsOk": true,
+              "rpsStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "good": 0,
+                "goodKeys": [],
+                "summary": "—",
+                "total": 0
+              },
+              "stitchStatus": {
+                "bad": 0,
+                "good": 0,
+                "summary": "—",
+                "total": 0,
+                "vertexStatus": []
+              },
+              "stitchesOk": true
+            },
+            "digest": "823bc3013e8619d02d933e1d625f975fe9b802ec942605f267e57efe191e1a4e"
+          },
+          "snapshot": {
+            "cols": 6,
+            "levelIndex": 0,
+            "movableWalls": [],
+            "pathKey": "0,0;",
+            "pathLength": 1,
+            "rows": 6,
+            "totalUsable": 29,
+            "visitedCount": 1
+          },
+          "transition": {
+            "changed": false,
+            "meta": null,
+            "rebuildGrid": false,
+            "validate": false
+          }
+        },
+        {
+          "command": {
+            "payload": {
+              "c": 0,
+              "r": 1
+            },
+            "type": "path/start-or-step-from-start"
+          },
+          "evaluation": {
+            "canonicalSignature": "-|-|-||-",
+            "completion": {
+              "allVisited": false,
+              "hintStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "cornerVertexStatus": [
+                  [
+                    "2,2",
+                    "pending"
+                  ]
+                ],
+                "good": 0,
+                "goodKeys": [],
+                "pending": 3,
+                "summary": "0/3",
+                "total": 3
+              },
+              "hintsOk": false,
+              "kind": "bad",
+              "message": "",
+              "rpsOk": true,
+              "rpsStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "good": 0,
+                "goodKeys": [],
+                "summary": "—",
+                "total": 0
+              },
+              "stitchStatus": {
+                "bad": 0,
+                "good": 0,
+                "summary": "—",
+                "total": 0,
+                "vertexStatus": []
+              },
+              "stitchesOk": true
+            },
+            "digest": "f5c5d6b6e8ee98b3831e083bbc76047f3ae4bb55f0e42959879afbda19adf1f9"
+          },
+          "snapshot": {
+            "cols": 6,
+            "levelIndex": 0,
+            "movableWalls": [],
+            "pathKey": "1,0;0,0;",
+            "pathLength": 2,
+            "rows": 6,
+            "totalUsable": 29,
+            "visitedCount": 2
+          },
+          "transition": {
+            "changed": true,
+            "meta": null,
+            "rebuildGrid": false,
+            "validate": false
+          }
+        },
+        {
+          "command": {
+            "payload": {
+              "c": 1,
+              "r": -1
+            },
+            "type": "path/start-or-step"
+          },
+          "evaluation": {
+            "canonicalSignature": "-|-|-||-",
+            "completion": {
+              "allVisited": false,
+              "hintStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "cornerVertexStatus": [
+                  [
+                    "2,2",
+                    "pending"
+                  ]
+                ],
+                "good": 0,
+                "goodKeys": [],
+                "pending": 3,
+                "summary": "0/3",
+                "total": 3
+              },
+              "hintsOk": false,
+              "kind": "bad",
+              "message": "",
+              "rpsOk": true,
+              "rpsStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "good": 0,
+                "goodKeys": [],
+                "summary": "—",
+                "total": 0
+              },
+              "stitchStatus": {
+                "bad": 0,
+                "good": 0,
+                "summary": "—",
+                "total": 0,
+                "vertexStatus": []
+              },
+              "stitchesOk": true
+            },
+            "digest": "f5c5d6b6e8ee98b3831e083bbc76047f3ae4bb55f0e42959879afbda19adf1f9"
+          },
+          "snapshot": {
+            "cols": 6,
+            "levelIndex": 0,
+            "movableWalls": [],
+            "pathKey": "1,0;0,0;",
+            "pathLength": 2,
+            "rows": 6,
+            "totalUsable": 29,
+            "visitedCount": 2
+          },
+          "transition": {
+            "changed": false,
+            "meta": null,
+            "rebuildGrid": false,
+            "validate": false
+          }
+        },
+        {
+          "command": {
+            "payload": {
+              "c": -1,
+              "r": 0
+            },
+            "type": "path/start-or-step"
+          },
+          "evaluation": {
+            "canonicalSignature": "-|-|-||-",
+            "completion": {
+              "allVisited": false,
+              "hintStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "cornerVertexStatus": [
+                  [
+                    "2,2",
+                    "pending"
+                  ]
+                ],
+                "good": 0,
+                "goodKeys": [],
+                "pending": 3,
+                "summary": "0/3",
+                "total": 3
+              },
+              "hintsOk": false,
+              "kind": "bad",
+              "message": "",
+              "rpsOk": true,
+              "rpsStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "good": 0,
+                "goodKeys": [],
+                "summary": "—",
+                "total": 0
+              },
+              "stitchStatus": {
+                "bad": 0,
+                "good": 0,
+                "summary": "—",
+                "total": 0,
+                "vertexStatus": []
+              },
+              "stitchesOk": true
+            },
+            "digest": "f5c5d6b6e8ee98b3831e083bbc76047f3ae4bb55f0e42959879afbda19adf1f9"
+          },
+          "snapshot": {
+            "cols": 6,
+            "levelIndex": 0,
+            "movableWalls": [],
+            "pathKey": "1,0;0,0;",
+            "pathLength": 2,
+            "rows": 6,
+            "totalUsable": 29,
+            "visitedCount": 2
+          },
+          "transition": {
+            "changed": false,
+            "meta": null,
+            "rebuildGrid": false,
+            "validate": false
+          }
+        },
+        {
+          "command": {
+            "payload": {
+              "c": 1,
+              "r": 0
+            },
+            "type": "path/start-or-step-from-start"
+          },
+          "evaluation": {
+            "canonicalSignature": "-|-|-||-",
+            "completion": {
+              "allVisited": false,
+              "hintStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "cornerVertexStatus": [
+                  [
+                    "2,2",
+                    "pending"
+                  ]
+                ],
+                "good": 0,
+                "goodKeys": [],
+                "pending": 3,
+                "summary": "0/3",
+                "total": 3
+              },
+              "hintsOk": false,
+              "kind": "bad",
+              "message": "",
+              "rpsOk": true,
+              "rpsStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "good": 0,
+                "goodKeys": [],
+                "summary": "—",
+                "total": 0
+              },
+              "stitchStatus": {
+                "bad": 0,
+                "good": 0,
+                "summary": "—",
+                "total": 0,
+                "vertexStatus": []
+              },
+              "stitchesOk": true
+            },
+            "digest": "f5c5d6b6e8ee98b3831e083bbc76047f3ae4bb55f0e42959879afbda19adf1f9"
+          },
+          "snapshot": {
+            "cols": 6,
+            "levelIndex": 0,
+            "movableWalls": [],
+            "pathKey": "1,0;0,0;",
+            "pathLength": 2,
+            "rows": 6,
+            "totalUsable": 29,
+            "visitedCount": 2
+          },
+          "transition": {
+            "changed": false,
+            "meta": null,
+            "rebuildGrid": false,
+            "validate": false
+          }
+        },
+        {
+          "command": {
+            "payload": {
+              "c": 1,
+              "r": 1
+            },
+            "type": "path/start-or-step"
+          },
+          "evaluation": {
+            "canonicalSignature": "-|-|-||-",
+            "completion": {
+              "allVisited": false,
+              "hintStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "cornerVertexStatus": [
+                  [
+                    "2,2",
+                    "pending"
+                  ]
+                ],
+                "good": 0,
+                "goodKeys": [],
+                "pending": 3,
+                "summary": "0/3",
+                "total": 3
+              },
+              "hintsOk": false,
+              "kind": "bad",
+              "message": "",
+              "rpsOk": true,
+              "rpsStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "good": 0,
+                "goodKeys": [],
+                "summary": "—",
+                "total": 0
+              },
+              "stitchStatus": {
+                "bad": 0,
+                "good": 0,
+                "summary": "—",
+                "total": 0,
+                "vertexStatus": []
+              },
+              "stitchesOk": true
+            },
+            "digest": "f5c5d6b6e8ee98b3831e083bbc76047f3ae4bb55f0e42959879afbda19adf1f9"
+          },
+          "snapshot": {
+            "cols": 6,
+            "levelIndex": 0,
+            "movableWalls": [],
+            "pathKey": "1,0;0,0;",
+            "pathLength": 2,
+            "rows": 6,
+            "totalUsable": 29,
+            "visitedCount": 2
+          },
+          "transition": {
+            "changed": false,
+            "meta": null,
+            "rebuildGrid": false,
+            "validate": false
+          }
+        },
+        {
+          "command": {
+            "payload": {
+              "c": 1,
+              "r": 0
+            },
+            "type": "path/start-or-step"
+          },
+          "evaluation": {
+            "canonicalSignature": "s@0,1:END|-|-||-",
+            "completion": {
+              "allVisited": false,
+              "hintStatus": {
+                "bad": 1,
+                "badKeys": [
+                  "0,1"
+                ],
+                "cornerVertexStatus": [
+                  [
+                    "2,2",
+                    "pending"
+                  ]
+                ],
+                "good": 0,
+                "goodKeys": [],
+                "pending": 2,
+                "summary": "0/3 (✗1)",
+                "total": 3
+              },
+              "hintsOk": false,
+              "kind": "bad",
+              "message": "",
+              "rpsOk": true,
+              "rpsStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "good": 0,
+                "goodKeys": [],
+                "summary": "—",
+                "total": 0
+              },
+              "stitchStatus": {
+                "bad": 0,
+                "good": 0,
+                "summary": "—",
+                "total": 0,
+                "vertexStatus": []
+              },
+              "stitchesOk": true
+            },
+            "digest": "c760e68f5bf3fc3a06da14f383afe5c07cc537c8e9d40d60e25a72ed215367fd"
+          },
+          "snapshot": {
+            "cols": 6,
+            "levelIndex": 0,
+            "movableWalls": [],
+            "pathKey": "1,0;0,0;0,1;",
+            "pathLength": 3,
+            "rows": 6,
+            "totalUsable": 29,
+            "visitedCount": 3
+          },
+          "transition": {
+            "changed": true,
+            "meta": null,
+            "rebuildGrid": false,
+            "validate": false
+          }
+        },
+        {
+          "command": {
+            "payload": {},
+            "type": "path/reset"
+          },
+          "evaluation": {
+            "canonicalSignature": "",
+            "completion": {
+              "allVisited": false,
+              "hintStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "cornerVertexStatus": [
+                  [
+                    "2,2",
+                    "pending"
+                  ]
+                ],
+                "good": 0,
+                "goodKeys": [],
+                "pending": 3,
+                "summary": "0/3",
+                "total": 3
+              },
+              "hintsOk": false,
+              "kind": "bad",
+              "message": "",
+              "rpsOk": true,
+              "rpsStatus": {
+                "bad": 0,
+                "badKeys": [],
+                "good": 0,
+                "goodKeys": [],
+                "summary": "—",
+                "total": 0
+              },
+              "stitchStatus": {
+                "bad": 0,
+                "good": 0,
+                "summary": "—",
+                "total": 0,
+                "vertexStatus": []
+              },
+              "stitchesOk": true
+            },
+            "digest": "94c23cf88ca1619dc96732402dbbcfc6cab4da3b92ff4fc42c402aafc3817350"
+          },
+          "snapshot": {
+            "cols": 6,
+            "levelIndex": 0,
+            "movableWalls": [],
+            "pathKey": "",
+            "pathLength": 0,
+            "rows": 6,
+            "totalUsable": 29,
+            "visitedCount": 0
+          },
+          "transition": {
+            "changed": true,
+            "meta": {
+              "resetMode": "cleared",
+              "storedResetCandidate": true
+            },
+            "rebuildGrid": false,
+            "validate": false
+          }
+        }
+      ],
+      "infiniteIndex": 63
+    }
+  ],
+  "utcDates": [
+    {
+      "dateId": "2026-03-12",
+      "utcStartMs": 1773273600000
+    },
+    {
+      "dateId": "2024-02-29",
+      "utcStartMs": 1709164800000
+    },
+    {
+      "dateId": "bad",
+      "utcStartMs": null
+    },
+    {
+      "dateId": "",
+      "utcStartMs": null
+    },
+    {
+      "dateId": "2026-13-01",
+      "utcStartMs": 1798761600000
+    }
+  ],
+  "version": 1
+}
