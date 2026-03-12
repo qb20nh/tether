@@ -23,12 +23,12 @@ const DEFAULT_PORTS = Object.freeze({
 });
 const DEFAULT_MODES = Object.freeze(['normal', 'low-power']);
 const WORKLOAD_GUARD_FILES = Object.freeze([
-  'src/infinite.js',
-  'src/core/level_provider.js',
-  'src/state/game_state_store.js',
-  'src/state/snapshot_rules.js',
-  'src/utils.js',
-  'src/config.js',
+  'src/infinite.ts',
+  'src/core/level_provider.ts',
+  'src/state/game_state_store.ts',
+  'src/state/snapshot_rules.ts',
+  'src/utils.ts',
+  'src/config.ts',
 ]);
 const WORKTREE_LABEL = 'WORKTREE';
 const WORKTREE_EXCLUDED_NAMES = new Set([
@@ -226,7 +226,7 @@ const resolveWorkloadGuardValue = (revision, relativePath) => {
     : Promise.resolve(resolveFileText(revision, relativePath));
 
   return source.then((text) => {
-    if (relativePath !== 'src/config.js') {
+    if (relativePath !== 'src/config.ts') {
       return hashText(text);
     }
     const sentinel = '\nexport const ELEMENT_IDS';

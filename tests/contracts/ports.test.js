@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createDefaultAdapters } from '../../src/runtime/default_adapters.js';
+import { createDefaultAdapters } from '../../src/runtime/default_adapters.ts';
 
 test('default adapters expose required contract methods', () => {
   const adapters = createDefaultAdapters({ windowObj: null });

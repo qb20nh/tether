@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { resolveLatestUpdateBuildNumber } from '../../src/app/update_build_resolver.js';
+import { resolveLatestUpdateBuildNumber } from '../../src/app/update_build_resolver.ts';
 
 test('resolver keeps hint when stronger than other sources', async () => {
   let resolverInput = null;

@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createDomInputAdapter } from '../../src/input/dom_input_adapter.js';
+import { createDomInputAdapter } from '../../src/input/dom_input_adapter.ts';
 import {
   GAME_COMMANDS,
   INTENT_TYPES,
   INTERACTION_UPDATES,
   UI_ACTIONS,
-} from '../../src/runtime/intents.js';
-import { createGameStateStore } from '../../src/state/game_state_store.js';
+} from '../../src/runtime/intents.ts';
+import { createGameStateStore } from '../../src/state/game_state_store.ts';
 
 const LEVEL = {
   name: 'Input Adapter',

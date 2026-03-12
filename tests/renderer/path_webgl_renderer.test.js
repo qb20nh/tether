@@ -4,7 +4,7 @@ import {
   buildTutorialBracketMesh,
   buildUnifiedPathMesh,
   createPathWebglRenderer,
-} from '../../src/renderer/path_webgl_renderer.js';
+} from '../../src/renderer/path_webgl_renderer.ts';
 
 const assertIndexBounds = (mesh) => {
   for (const index of mesh.indices) {

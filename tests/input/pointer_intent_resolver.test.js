@@ -4,7 +4,7 @@ import {
   buildPathDragCandidates,
   choosePathDragCell,
   chooseSlipperyPathDragStep,
-} from '../../src/input/pointer_intent_resolver.js';
+} from '../../src/input/pointer_intent_resolver.ts';
 
 test('buildPathDragCandidates filters visited non-backtrack candidates', () => {
   const snapshot = {

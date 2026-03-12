@@ -1,25 +1,25 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
-import { renderAppShellMarkup } from '../../src/app_shell_markup.js';
+import { renderAppShellMarkup, renderBootShellMarkup } from '../../src/app_shell_markup.tsx';
 
-test('templates source uses material icon ligatures for header and dialog icons', () => {
-  const source = readFileSync(new URL('../../src/app_shell_markup.js', import.meta.url), 'utf8');
+test('templates render material icon ligatures for header and dialog icons', () => {
+  const markup = renderAppShellMarkup();
 
-  assert.match(source, /<span class="uiIconMaterial" aria-hidden="true">notifications<\/span>/);
-  assert.match(source, /<span class="uiIconMaterial" aria-hidden="true">settings<\/span>/);
-  assert.match(source, /<span class="uiIconMaterial settingsLabelIcon" aria-hidden="true">language<\/span>/);
-  assert.match(source, /<span class="uiIconMaterial settingsLabelIcon" aria-hidden="true">palette<\/span>/);
-  assert.match(source, /<span class="uiIconMaterial controlActionIcon" aria-hidden="true">restart_alt<\/span>/);
-  assert.match(source, /<span class="uiIconMaterial controlActionIcon" aria-hidden="true">swap_horiz<\/span>/);
-  assert.match(source, /<span class="themeSwitchDialog__icon uiIconMaterial" aria-hidden="true">warning<\/span>/);
-  assert.match(source, /<span class="themeSwitchDialog__actionIcon uiIconMaterial" aria-hidden="true">close<\/span>/);
-  assert.match(source, /<span class="themeSwitchDialog__actionIcon uiIconMaterial" aria-hidden="true">check<\/span>/);
-  assert.equal(source.includes('🔔'), false);
-  assert.equal(source.includes('⚙'), false);
-  assert.equal(source.includes('⚠'), false);
-  assert.equal(source.includes('✕'), false);
-  assert.equal(source.includes('✓'), false);
+  assert.match(markup, /<span class="uiIconMaterial" aria-hidden="true">notifications<\/span>/);
+  assert.match(markup, /<span class="uiIconMaterial" aria-hidden="true">settings<\/span>/);
+  assert.match(markup, /<span class="uiIconMaterial settingsLabelIcon" aria-hidden="true">language<\/span>/);
+  assert.match(markup, /<span class="uiIconMaterial settingsLabelIcon" aria-hidden="true">palette<\/span>/);
+  assert.match(markup, /<span class="uiIconMaterial controlActionIcon" aria-hidden="true">restart_alt<\/span>/);
+  assert.match(markup, /<span class="uiIconMaterial controlActionIcon" aria-hidden="true">swap_horiz<\/span>/);
+  assert.match(markup, /<span class="themeSwitchDialog__icon uiIconMaterial" aria-hidden="true">warning<\/span>/);
+  assert.match(markup, /<span class="themeSwitchDialog__actionIcon uiIconMaterial" aria-hidden="true">close<\/span>/);
+  assert.match(markup, /<span class="themeSwitchDialog__actionIcon uiIconMaterial" aria-hidden="true">check<\/span>/);
+  assert.equal(markup.includes('🔔'), false);
+  assert.equal(markup.includes('⚙'), false);
+  assert.equal(markup.includes('⚠'), false);
+  assert.equal(markup.includes('✕'), false);
+  assert.equal(markup.includes('✓'), false);
 });
 
 test('index head preloads the bundled icon font without remote Google font boot hints', () => {
@@ -105,15 +105,15 @@ test('boot shell board keeps the same outer inset as the live board grid', () =>
 });
 
 test('boot shell guide message uses text-driven wrapping instead of fixed placeholder lines', () => {
-  const source = readFileSync(new URL('../../src/app_shell_markup.js', import.meta.url), 'utf8');
+  const markup = renderBootShellMarkup();
   const stylesheet = readFileSync(new URL('../../src/styles.css', import.meta.url), 'utf8');
   const guideRuleMatch = stylesheet.match(/\.bootShellGuideLine\s*\{[^}]+\}/);
 
-  assert.match(source, /bootShellMessageText/);
-  assert.match(source, /bootShellGuideLine/);
-  assert.doesNotMatch(source, /bootShellTextLine--wide/);
-  assert.ok(source.includes('Goal visit every open cell once.'));
-  assert.ok(source.includes('This level start anywhere.'));
+  assert.match(markup, /bootShellMessageText/);
+  assert.match(markup, /bootShellGuideLine/);
+  assert.doesNotMatch(markup, /bootShellTextLine--wide/);
+  assert.ok(markup.includes('Goal visit every open cell once.'));
+  assert.ok(markup.includes('This level start anywhere.'));
   assert.ok(stylesheet.includes('.bootShellGuideLine {'));
   assert.ok(stylesheet.includes('box-decoration-break: clone;'));
   assert.ok(guideRuleMatch);

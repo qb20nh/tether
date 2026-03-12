@@ -6,7 +6,7 @@ import {
   normalizeDailyHistory,
   normalizeDailyPayload,
   normalizeDailyPayloadHeader,
-} from '../../src/shared/daily_payload_schema.js';
+} from '../../src/shared/daily_payload_schema.ts';
 
 const createPayload = (overrides = {}) => ({
   schemaVersion: DAILY_PAYLOAD_SCHEMA_VERSION,

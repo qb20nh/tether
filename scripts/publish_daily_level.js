@@ -6,7 +6,7 @@ import {
   DAILY_POOL_MANIFEST_REPO_FILE,
   PUBLIC_DAILY_HISTORY_REPO_FILE,
   PUBLIC_DAILY_PAYLOAD_REPO_FILE,
-} from '../src/shared/paths.js';
+} from '../src/shared/paths.ts';
 import {
   DAILY_POOL_BASE_VARIANT_ID,
   DAILY_POOL_MAX_SLOTS,
@@ -27,7 +27,7 @@ import {
   normalizeDailyHistoryEntry,
   normalizeDailyPayload,
   normalizeDailyPayloadHeader,
-} from '../src/shared/daily_payload_schema.js';
+} from '../src/shared/daily_payload_schema.ts';
 import {
   parsePositiveInt,
   readJsonFile,

@@ -7,10 +7,10 @@ import {
   INFINITE_MAX_LEVELS,
   generateInfiniteLevelFromVariant,
   selectDefaultInfiniteCandidate,
-} from '../src/infinite.js';
-import { canonicalConstraintSignature } from '../src/infinite_canonical.js';
-import { encodePackedOverridePayload } from '../src/shared/packed_override_codec.js';
-import { INFINITE_OVERRIDES_REPO_FILE } from '../src/shared/paths.js';
+} from '../src/infinite.ts';
+import { canonicalConstraintSignature } from '../src/infinite_canonical.ts';
+import { encodePackedOverridePayload } from '../src/shared/packed_override_codec.ts';
+import { INFINITE_OVERRIDES_REPO_FILE } from '../src/shared/paths.ts';
 import { parsePositiveInt, readRequiredArgValue } from './lib/cli_utils.js';
 
 const FORMAT_MAGIC = 0x49; // 'I'

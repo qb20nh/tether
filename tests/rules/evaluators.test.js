@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { evaluateHints, evaluateRPS, evaluateStitches } from '../../src/rules.js';
-import { createGameStateStore } from '../../src/state/game_state_store.js';
-import { keyOf } from '../../src/utils.js';
+import { evaluateHints, evaluateRPS, evaluateStitches } from '../../src/rules.ts';
+import { createGameStateStore } from '../../src/state/game_state_store.ts';
+import { keyOf } from '../../src/utils.ts';
 
 const buildSnapshot = (level, steps) => {
   const state = createGameStateStore(() => level);

@@ -1,3 +1,65 @@
+@layer theme, components, utilities;
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);
+
+@layer components {
+  .app {
+    @apply relative mx-auto grid grid-cols-1;
+  }
+
+  .topbarRow {
+    @apply flex items-start justify-between gap-3;
+  }
+
+  .topbarControls {
+    @apply flex items-start gap-2;
+  }
+
+  .controls {
+    @apply flex flex-wrap items-center justify-between gap-3;
+  }
+
+  .left {
+    @apply flex flex-wrap items-center gap-2;
+  }
+
+  .levelSelectGroup {
+    @apply flex flex-wrap items-center gap-2;
+  }
+
+  .progressNav {
+    @apply flex flex-wrap justify-end gap-2;
+  }
+
+  .layout {
+    @apply grid gap-2 md:grid-cols-2;
+  }
+
+  .panelHead {
+    @apply flex items-center justify-between gap-2;
+  }
+
+  .panelBody {
+    @apply min-w-0;
+  }
+
+  .settingsField {
+    @apply flex flex-wrap items-center justify-between gap-2;
+  }
+
+  .settingsCheckbox {
+    @apply inline-flex items-center gap-2;
+  }
+
+  .notificationHistoryList {
+    @apply flex flex-col gap-1.5;
+  }
+
+  .appFooter {
+    @apply flex items-center justify-between gap-3;
+  }
+}
+
 @font-face {
   font-family: "Material Symbols Rounded Local";
   font-style: normal;

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createBoardRendererCore } from '../../src/renderer/board_renderer_core.js';
-import { createDomRenderer } from '../../src/renderer/dom_renderer.js';
+import { createBoardRendererCore } from '../../src/renderer/board_renderer_core.ts';
+import { createDomRenderer } from '../../src/renderer/dom_renderer.ts';
 
 class FakeStyle {
   constructor() {

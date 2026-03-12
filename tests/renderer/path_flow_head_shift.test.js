@@ -3,7 +3,7 @@ import test from 'node:test';
 import {
   resolveHeadShiftStepCount,
   resolveTipArrivalSyntheticPrevPath,
-} from '../../src/renderer.js';
+} from '../../src/renderer.ts';
 
 test('resolveHeadShiftStepCount detects single-step head growth', () => {
   const previousPath = [

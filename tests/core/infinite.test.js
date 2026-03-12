@@ -4,7 +4,7 @@ import test from 'node:test';
 import {
   INFINITE_FEATURE_CYCLE,
   generateInfiniteLevelFromVariant,
-} from '../../src/infinite.js';
+} from '../../src/infinite.ts';
 
 const assertGeneratedLevelShape = (level, infiniteIndex) => {
   assert.equal(level.name, `Infinite ${infiniteIndex + 1}`);

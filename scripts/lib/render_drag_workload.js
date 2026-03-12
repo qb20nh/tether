@@ -1,9 +1,9 @@
-import { INFINITE_MAX_LEVELS } from '../../src/infinite.js';
-import { createLevelProvider } from '../../src/core/level_provider.js';
-import { createDefaultCore } from '../../src/core/default_core.js';
-import { hashString32, makeMulberry32Rng, mix32 } from '../../src/shared/hash32.js';
-import { createGameStateStore } from '../../src/state/game_state_store.js';
-import { isUsableCell } from '../../src/state/snapshot_rules.js';
+import { INFINITE_MAX_LEVELS } from '../../src/infinite.ts';
+import { createLevelProvider } from '../../src/core/level_provider.ts';
+import { createDefaultCore } from '../../src/core/default_core.ts';
+import { hashString32, makeMulberry32Rng, mix32 } from '../../src/shared/hash32.ts';
+import { createGameStateStore } from '../../src/state/game_state_store.ts';
+import { isUsableCell } from '../../src/state/snapshot_rules.ts';
 
 const DEFAULT_SEED = 'render-drag-bench-v1';
 const DEFAULT_POINTER_MOVES_PER_SEGMENT = 4;

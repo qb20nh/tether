@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { syncPathTipDragHoverCell } from '../../src/renderer.js';
+import { syncPathTipDragHoverCell } from '../../src/renderer.ts';
 
 const createClassList = (initial = []) => {
   const tokens = new Set(initial);

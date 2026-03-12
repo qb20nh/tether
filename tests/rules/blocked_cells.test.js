@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { evaluateBlockedCells } from '../../src/rules.js';
-import { createGameStateStore } from '../../src/state/game_state_store.js';
+import { evaluateBlockedCells } from '../../src/rules.ts';
+import { createGameStateStore } from '../../src/state/game_state_store.ts';
 
 const CHAMBER_LEVEL = {
   name: 'Blocked Chamber Regression',

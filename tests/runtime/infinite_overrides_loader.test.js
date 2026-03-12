@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { gzipSync } from 'node:zlib';
-import { __TEST__ } from '../../src/infinite_overrides.js';
+import { __TEST__ } from '../../src/infinite_overrides.ts';
 
 const PACKED_PAYLOAD = Uint8Array.from([
   0x49, // format magic

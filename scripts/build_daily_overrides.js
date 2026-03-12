@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 import path from 'node:path';
-import { INFINITE_MAX_LEVELS } from '../src/infinite.js';
+import { INFINITE_MAX_LEVELS } from '../src/infinite.ts';
 import {
   DAILY_OVERRIDES_REPO_FILE,
   DAILY_POOL_MANIFEST_REPO_FILE,
-} from '../src/shared/paths.js';
+} from '../src/shared/paths.ts';
 import {
   DAILY_POOL_BASE_VARIANT_ID,
   DAILY_POOL_DIFFICULTY_VARIANT_WINDOW,

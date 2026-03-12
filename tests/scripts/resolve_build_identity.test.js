@@ -7,7 +7,7 @@ import {
   DAILY_OVERRIDES_REPO_FILE,
   DAILY_POOL_MANIFEST_REPO_FILE,
   INFINITE_OVERRIDES_REPO_FILE,
-} from '../../src/shared/paths.js';
+} from '../../src/shared/paths.ts';
 
 const runGit = (args) => execFileSync('git', args, {
   cwd: process.cwd(),

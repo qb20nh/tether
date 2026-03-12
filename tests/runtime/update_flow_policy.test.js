@@ -6,7 +6,7 @@ import {
   resolveUpdateCheckDecision,
   shouldReloadAfterManualPinConfirm,
   shouldResyncManualUpdatePolicy,
-} from '../../src/runtime/update_flow_policy.js';
+} from '../../src/runtime/update_flow_policy.ts';
 
 test('resolveUpdateCheckDecision returns NOOP when build is not newer', () => {
   const decision = resolveUpdateCheckDecision({

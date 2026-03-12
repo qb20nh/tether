@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createDefaultCore } from '../../src/core/default_core.js';
-import { createLevelProvider } from '../../src/core/level_provider.js';
-import { createMemoryPersistence } from '../../src/persistence/memory_persistence.js';
-import { createRuntime } from '../../src/runtime/create_runtime.js';
-import { GAME_COMMANDS, INTENT_TYPES } from '../../src/runtime/intents.js';
-import { createGameStateStore } from '../../src/state/game_state_store.js';
+import { createDefaultCore } from '../../src/core/default_core.ts';
+import { createLevelProvider } from '../../src/core/level_provider.ts';
+import { createMemoryPersistence } from '../../src/persistence/memory_persistence.ts';
+import { createRuntime } from '../../src/runtime/create_runtime.ts';
+import { GAME_COMMANDS, INTENT_TYPES } from '../../src/runtime/intents.ts';
+import { createGameStateStore } from '../../src/state/game_state_store.ts';
 
 const LEVEL = {
   name: 'Runtime Transition Compensation',

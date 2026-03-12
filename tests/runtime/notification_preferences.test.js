@@ -6,7 +6,7 @@ import {
   NOTIFICATION_AUTO_PROMPT_DECISIONS,
   NOTIFICATION_ENABLED_KEY,
   createNotificationPreferences,
-} from '../../src/app/notification_preferences.js';
+} from '../../src/app/notification_preferences.ts';
 
 const createStorageMock = () => {
   const store = new Map();

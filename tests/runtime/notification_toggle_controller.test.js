@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { NOTIFICATION_AUTO_PROMPT_DECISIONS } from '../../src/app/notification_preferences.js';
-import { createNotificationToggleController } from '../../src/app/notification_toggle_controller.js';
-import { ELEMENT_IDS } from '../../src/config.js';
+import { NOTIFICATION_AUTO_PROMPT_DECISIONS } from '../../src/app/notification_preferences.ts';
+import { createNotificationToggleController } from '../../src/app/notification_toggle_controller.ts';
+import { ELEMENT_IDS } from '../../src/config.ts';
 import {
   FakeElement,
   createDocumentMock,

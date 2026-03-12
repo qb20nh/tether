@@ -9,7 +9,7 @@ import {
 import {
   decodeDailyOverridesPayload,
   encodeDailyOverridesPayload,
-} from '../../src/daily_pool_codec.js';
+} from '../../src/daily_pool_codec.ts';
 
 test('daily override payload codec round-trips entries', () => {
   const overrides = new Map([

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createNotificationHistoryController } from '../../src/app/notification_history_controller.js';
-import { ELEMENT_IDS } from '../../src/config.js';
+import { createNotificationHistoryController } from '../../src/app/notification_history_controller.ts';
+import { ELEMENT_IDS } from '../../src/config.ts';
 import {
   FakeElement,
   createDocumentMock,

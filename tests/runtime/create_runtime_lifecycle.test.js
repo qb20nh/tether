@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createDefaultCore } from '../../src/core/default_core.js';
-import { createLevelProvider } from '../../src/core/level_provider.js';
-import { createMemoryPersistence } from '../../src/persistence/memory_persistence.js';
-import { createRuntime } from '../../src/runtime/create_runtime.js';
-import { GAME_COMMANDS, INTENT_TYPES, INTERACTION_UPDATES, UI_ACTIONS } from '../../src/runtime/intents.js';
-import { createGameStateStore } from '../../src/state/game_state_store.js';
+import { createDefaultCore } from '../../src/core/default_core.ts';
+import { createLevelProvider } from '../../src/core/level_provider.ts';
+import { createMemoryPersistence } from '../../src/persistence/memory_persistence.ts';
+import { createRuntime } from '../../src/runtime/create_runtime.ts';
+import { GAME_COMMANDS, INTENT_TYPES, INTERACTION_UPDATES, UI_ACTIONS } from '../../src/runtime/intents.ts';
+import { createGameStateStore } from '../../src/state/game_state_store.ts';
 
 const LEVEL = {
   name: 'Runtime Lifecycle',
@@ -411,7 +411,7 @@ test('createRuntime omits daily freeze debug hooks when __TETHER_DEV__ is false'
     else delete globalThis.__TETHER_DEV__;
   });
 
-  const moduleUrl = new URL(`../../src/runtime/create_runtime.js?prod-gate=${Date.now()}`, import.meta.url);
+  const moduleUrl = new URL(`../../src/runtime/create_runtime.ts?prod-gate=${Date.now()}`, import.meta.url);
   const { createRuntime: createRuntimeProd } = await import(moduleUrl);
   const { runtime } = createRuntimeHarness({
     dailyLevel: DAILY_LEVEL,

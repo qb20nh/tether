@@ -7,7 +7,7 @@ import {
   hasUnreadSystemHistory,
   historyEntryDotColor,
   normalizeHistoryAction,
-} from '../../src/runtime/notification_history.js';
+} from '../../src/runtime/notification_history.ts';
 
 test('hasUnreadSystemHistory only reflects unread system entries', () => {
   assert.equal(hasUnreadSystemHistory([]), false);

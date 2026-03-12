@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createSwUpdateOrchestrator } from '../../src/app/sw_update_orchestrator.js';
+import { createSwUpdateOrchestrator } from '../../src/app/sw_update_orchestrator.ts';
 
 const SW_MESSAGE_TYPES = Object.freeze({
   SYNC_DAILY_STATE: 'SW_SYNC_DAILY_STATE',

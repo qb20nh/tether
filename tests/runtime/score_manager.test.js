@@ -5,8 +5,8 @@ import {
   buildCanonicalSolutionSignature,
   createScoreManager,
   SCORE_MODES,
-} from '../../src/runtime/score_manager.js';
-import { createGameStateStore } from '../../src/state/game_state_store.js';
+} from '../../src/runtime/score_manager.ts';
+import { createGameStateStore } from '../../src/state/game_state_store.ts';
 
 const LEVEL_STRAIGHT = {
   name: 'Straight',

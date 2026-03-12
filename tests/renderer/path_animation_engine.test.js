@@ -4,7 +4,7 @@ import {
   createPathAnimationEngine,
   resolveHeadShiftTransitionWindow,
   resolveTipArrivalSyntheticPrevPath,
-} from '../../src/renderer/path_animation_engine.js';
+} from '../../src/renderer/path_animation_engine.ts';
 
 test('resolveHeadShiftTransitionWindow returns pure head-shift window', () => {
   const previousPath = [

@@ -1,21 +1,21 @@
 #!/usr/bin/env node
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { HINT_CODES } from '../src/config.js';
-import { DEFAULT_LEVEL_INDEX, LEVELS } from '../src/levels.js';
+import { HINT_CODES } from '../src/config.ts';
+import { DEFAULT_LEVEL_INDEX, LEVELS } from '../src/levels.ts';
 import {
   evaluateBlockedCells,
   evaluateHints,
   evaluateRPS,
   evaluateStitches,
-} from '../src/rules.js';
-import { hashString32, makeMulberry32Rng, mix32 } from '../src/shared/hash32.js';
+} from '../src/rules.ts';
+import { hashString32, makeMulberry32Rng, mix32 } from '../src/shared/hash32.ts';
 import {
   buildStitchLookups,
   countCornerOrthConnections,
   isOrthogonalStep,
-} from '../src/shared/stitch_corner_geometry.js';
-import { keyOf, keyV, parseLevel } from '../src/utils.js';
+} from '../src/shared/stitch_corner_geometry.ts';
+import { keyOf, keyV, parseLevel } from '../src/utils.ts';
 import { parseNonNegativeInt, readRequiredArgValue } from './lib/cli_utils.js';
 
 const CONSTRAINT_CODES = new Set(['t', 'r', 'l', 's', 'h', 'v', 'g', 'b', 'p']);
@@ -35,7 +35,7 @@ const ALL_DIRS = [
 
 const GOLDEN_RATIO_32 = 0x9e3779b9;
 const DIFFICULTY_VERSION = 1;
-const LEVELS_FILE_PATH = fileURLToPath(new URL('../src/levels.js', import.meta.url));
+const LEVELS_FILE_PATH = fileURLToPath(new URL('../src/levels.ts', import.meta.url));
 const KNOWN_LEVEL_KEYS = new Set([
   'name',
   'nameKey',

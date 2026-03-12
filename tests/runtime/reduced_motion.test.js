@@ -4,8 +4,8 @@ import {
   DEBUG_REDUCED_MOTION_CLASS,
   readDebugReducedMotionSimulation,
   setDebugReducedMotionSimulation,
-} from '../../src/debug/reduced_motion_debug.js';
-import { isReducedMotionPreferred } from '../../src/reduced_motion.js';
+} from '../../src/debug/reduced_motion_debug.ts';
+import { isReducedMotionPreferred } from '../../src/reduced_motion.ts';
 
 const createClassList = () => {
   const tokens = new Set();

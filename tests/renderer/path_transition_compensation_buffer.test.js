@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createPathTransitionCompensationBuffer } from '../../src/renderer/path_transition_compensation_buffer.js';
+import { createPathTransitionCompensationBuffer } from '../../src/renderer/path_transition_compensation_buffer.ts';
 
 const createBuffer = () => createPathTransitionCompensationBuffer({
   resolveShift: () => 4,

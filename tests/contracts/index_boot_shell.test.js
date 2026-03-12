@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
-import { APP_BOOT_SHELL_PLACEHOLDER, injectBootShellIntoIndexHtml } from '../../src/index_boot_shell.js';
+import { APP_BOOT_SHELL_PLACEHOLDER, injectBootShellIntoIndexHtml } from '../../src/index_boot_shell.ts';
 
 const indexFile = path.join(process.cwd(), 'index.html');
 const indexHtml = fs.readFileSync(indexFile, 'utf8');
@@ -19,7 +19,7 @@ test('transformed index ships the static boot shell inside the app root', () => 
   assert.match(transformedIndexHtml, /bootShellTextBlock--label/);
   assert.match(transformedIndexHtml, /<div class="bootShellMessageText" aria-hidden="true">/);
   assert.match(transformedIndexHtml, /bootShellGuideLine/);
-  assert.match(transformedIndexHtml, /Goal visit every open cell once\.<br>This level start anywhere\./);
+  assert.match(transformedIndexHtml, /Goal visit every open cell once\.<br\/?>This level start anywhere\./);
   assert.match(transformedIndexHtml, /id="levelSel" class="bootShellSelect"[\s\S]*?<option selected><\/option>/);
   assert.match(transformedIndexHtml, /id="keyboardGamepadToggle"/);
   assert.match(transformedIndexHtml, /<div class="panelBlock is-hidden" id="legendPanel">/);

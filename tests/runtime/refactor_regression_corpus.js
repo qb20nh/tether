@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 
-import { encodeDailyOverridesPayload, decodeDailyOverridesPayload } from '../../src/daily_pool_codec.js';
-import { generateInfiniteLevel, selectDefaultInfiniteVariant } from '../../src/infinite.js';
+import { encodeDailyOverridesPayload, decodeDailyOverridesPayload } from '../../src/daily_pool_codec.ts';
+import { generateInfiniteLevel, selectDefaultInfiniteVariant } from '../../src/infinite.ts';
 import {
   getPathTipFromPath,
   isEndAdvanceTransition,
@@ -13,18 +13,18 @@ import {
   normalizeFlowOffset,
   pathsMatch,
   resolvePathSignature,
-} from '../../src/renderer/path_transition_utils.js';
+} from '../../src/renderer/path_transition_utils.ts';
 import {
   checkCompletion,
   evaluateBlockedCells,
   evaluateHints,
   evaluateRPS,
   evaluateStitches,
-} from '../../src/rules.js';
-import { buildCanonicalSolutionSignature } from '../../src/runtime/score_manager.js';
-import { createGameStateStore } from '../../src/state/game_state_store.js';
-import { normalizeDailyPayload } from '../../src/app/daily_payload_service.js';
-import { utcStartMsFromDateId } from '../../src/runtime/daily_timer.js';
+} from '../../src/rules.ts';
+import { buildCanonicalSolutionSignature } from '../../src/runtime/score_manager.ts';
+import { createGameStateStore } from '../../src/state/game_state_store.ts';
+import { normalizeDailyPayload } from '../../src/app/daily_payload_service.ts';
+import { utcStartMsFromDateId } from '../../src/runtime/daily_timer.ts';
 
 const INFINITE_LEVEL_INDICES = Object.freeze([0, 1, 2, 3, 4, 5, 17, 63, 127, 255]);
 const SCENARIO_INDICES = Object.freeze([0, 5, 17, 63]);

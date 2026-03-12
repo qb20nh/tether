@@ -4,7 +4,7 @@ import {
   createDailyPayloadService,
   normalizeDailyPayload,
   utcDateIdFromMs,
-} from '../../src/app/daily_payload_service.js';
+} from '../../src/app/daily_payload_service.ts';
 
 const DAILY_URL = 'https://example.com/daily/today.json';
 

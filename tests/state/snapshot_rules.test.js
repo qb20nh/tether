@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { canDropWall, isUsableCell } from '../../src/state/snapshot_rules.js';
+import { canDropWall, isUsableCell } from '../../src/state/snapshot_rules.ts';
 
 const buildSnapshot = (overrides = {}) => ({
   rows: 3,

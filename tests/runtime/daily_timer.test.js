@@ -5,7 +5,7 @@ import {
   formatDailyDateLabel,
   formatDailyMonthDayLabel,
   utcStartMsFromDateId,
-} from '../../src/runtime/daily_timer.js';
+} from '../../src/runtime/daily_timer.ts';
 
 test('utcStartMsFromDateId parses valid UTC date ids', () => {
   assert.equal(utcStartMsFromDateId('2026-03-01'), Date.UTC(2026, 2, 1, 0, 0, 0, 0));

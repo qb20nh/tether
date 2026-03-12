@@ -1,0 +1,46 @@
+// @ts-nocheck
+import { baseGoalText } from '../config.ts';
+import {
+  checkCompletion,
+  evaluateBlockedCells,
+  evaluateHints,
+  evaluateRPS,
+  evaluateStitches,
+} from '../rules.ts';
+
+export function createDefaultCore(levelProvider) {
+  if (!levelProvider || typeof levelProvider.getLevel !== 'function') {
+    throw new Error('createDefaultCore requires a levelProvider');
+  }
+
+  const evaluate = (snapshot, evaluateOptions = {}) => ({
+    hintStatus: evaluateHints(snapshot, evaluateOptions),
+    stitchStatus: evaluateStitches(snapshot),
+    rpsStatus: evaluateRPS(snapshot),
+    blockedStatus: evaluateBlockedCells(snapshot),
+  });
+
+  const check = (snapshot, evaluateResult, translate) =>
+    checkCompletion(snapshot, evaluateResult, translate);
+
+  const goalText = (levelIndex, translate) =>
+    baseGoalText(levelProvider.getLevel(levelIndex), translate);
+
+  return {
+    getLevel: levelProvider.getLevel,
+    evaluate,
+    checkCompletion: check,
+    goalText,
+    getCampaignLevelCount: levelProvider.getCampaignLevelCount,
+    getInfiniteMaxIndex: levelProvider.getInfiniteMaxIndex,
+    isInfiniteAbsIndex: levelProvider.isInfiniteAbsIndex,
+    toInfiniteIndex: levelProvider.toInfiniteIndex,
+    toAbsInfiniteIndex: levelProvider.toAbsInfiniteIndex,
+    clampInfiniteIndex: levelProvider.clampInfiniteIndex,
+    ensureInfiniteAbsIndex: levelProvider.ensureInfiniteAbsIndex,
+    getDailyAbsIndex: levelProvider.getDailyAbsIndex,
+    isDailyAbsIndex: levelProvider.isDailyAbsIndex,
+    hasDailyLevel: levelProvider.hasDailyLevel,
+    getDailyId: levelProvider.getDailyId,
+  };
+}

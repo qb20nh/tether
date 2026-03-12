@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mountLocalDebugPanel } from '../../src/debug/local_debug_panel.js';
+import { mountLocalDebugPanel } from '../../src/debug/local_debug_panel.ts';
 
 class FakeClassList {
   constructor(owner) {

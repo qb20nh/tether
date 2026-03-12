@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createLocaleController } from '../../src/app/locale_controller.js';
+import { createLocaleController } from '../../src/app/locale_controller.ts';
 
 const createDeferred = () => {
   let resolve;

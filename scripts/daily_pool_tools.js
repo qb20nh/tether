@@ -5,23 +5,23 @@ import { gunzipSync, gzipSync } from 'node:zlib';
 import {
   decodeDailyOverridesPayload,
   encodeDailyOverridesPayload,
-} from '../src/daily_pool_codec.js';
+} from '../src/daily_pool_codec.ts';
 import {
   INFINITE_MAX_LEVELS,
   generateInfiniteLevel,
   generateInfiniteLevelFromVariant,
-} from '../src/infinite.js';
-import { canonicalConstraintFingerprint } from '../src/infinite_canonical.js';
+} from '../src/infinite.ts';
+import { canonicalConstraintFingerprint } from '../src/infinite_canonical.ts';
 import {
   checkCompletion,
   evaluateBlockedCells,
   evaluateHints,
   evaluateRPS,
   evaluateStitches,
-} from '../src/rules.js';
-import { parseCoordinatePair } from '../src/shared/coordinate_pair.js';
-import { parseUtcDateIdStartMs, utcDateIdFromMs } from '../src/shared/utc_date.js';
-import { createGameStateStore } from '../src/state/game_state_store.js';
+} from '../src/rules.ts';
+import { parseCoordinatePair } from '../src/shared/coordinate_pair.ts';
+import { parseUtcDateIdStartMs, utcDateIdFromMs } from '../src/shared/utc_date.ts';
+import { createGameStateStore } from '../src/state/game_state_store.ts';
 
 
 
@@ -416,4 +416,4 @@ export const toDailyPayloadLevel = (level, dailyId) => ({
     : [],
 });
 
-export { utcDateIdFromMs } from '../src/shared/utc_date.js';
+export { utcDateIdFromMs } from '../src/shared/utc_date.ts';

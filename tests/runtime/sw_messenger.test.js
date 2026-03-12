@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createSwMessenger } from '../../src/app/sw_messenger.js';
+import { createSwMessenger } from '../../src/app/sw_messenger.ts';
 
 const createWindowMock = () => ({
   isSecureContext: true,

@@ -7,17 +7,17 @@ import {
   MAX_WALL_DENSITY,
   MIN_CONSTRAINT_DENSITY,
   generateInfiniteLevel,
-} from '../src/infinite.js';
-import { canonicalConstraintSignature } from '../src/infinite_canonical.js';
+} from '../src/infinite.ts';
+import { canonicalConstraintSignature } from '../src/infinite_canonical.ts';
 import {
   checkCompletion,
   evaluateBlockedCells,
   evaluateHints,
   evaluateRPS,
   evaluateStitches,
-} from '../src/rules.js';
-import { buildStitchLookups } from '../src/shared/stitch_corner_geometry.js';
-import { keyV } from '../src/utils.js';
+} from '../src/rules.ts';
+import { buildStitchLookups } from '../src/shared/stitch_corner_geometry.ts';
+import { keyV } from '../src/utils.ts';
 import { parseNonNegativeInt, readRequiredArgValue } from './lib/cli_utils.js';
 import { solveLevel } from './verify_level_properties.js';
 

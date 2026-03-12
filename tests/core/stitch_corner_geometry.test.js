@@ -6,7 +6,7 @@ import {
   buildOrthEdgeSet,
   buildStitchLookups,
   countCornerOrthConnections,
-} from '../../src/shared/stitch_corner_geometry.js';
+} from '../../src/shared/stitch_corner_geometry.ts';
 
 const edgeKey = (a, b) => {
   const ka = `${a.r},${a.c}`;

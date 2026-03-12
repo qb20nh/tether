@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createGameStateStore } from '../../src/state/game_state_store.js';
+import { createGameStateStore } from '../../src/state/game_state_store.ts';
 
 const LEVEL = {
   name: 'Test',

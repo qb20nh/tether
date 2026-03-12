@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { parseCoordinatePair } from '../../src/shared/coordinate_pair.js';
+import { parseCoordinatePair } from '../../src/shared/coordinate_pair.ts';
 
 test('parseCoordinatePair accepts array and object coordinates', () => {
   assert.deepEqual(parseCoordinatePair([2, 3]), { r: 2, c: 3 });

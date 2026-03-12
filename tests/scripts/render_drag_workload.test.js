@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createRenderDragWorkload } from '../../scripts/lib/render_drag_workload.js';
-import { createDefaultCore } from '../../src/core/default_core.js';
-import { createLevelProvider } from '../../src/core/level_provider.js';
-import { createGameStateStore } from '../../src/state/game_state_store.js';
-import { isUsableCell } from '../../src/state/snapshot_rules.js';
+import { createDefaultCore } from '../../src/core/default_core.ts';
+import { createLevelProvider } from '../../src/core/level_provider.ts';
+import { createGameStateStore } from '../../src/state/game_state_store.ts';
+import { isUsableCell } from '../../src/state/snapshot_rules.ts';
 
 const buildBoardSnapshot = (infiniteIndex) => {
   const levelProvider = createLevelProvider();

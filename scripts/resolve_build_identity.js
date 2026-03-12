@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import {
   BUILD_IDENTITY_IGNORED_REPO_FILES,
-} from '../src/shared/paths.js';
+} from '../src/shared/paths.ts';
 
 const buildExcludeArgs = () => BUILD_IDENTITY_IGNORED_REPO_FILES.map((filePath) => `:(exclude)${filePath}`);
 

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { getCellSize } from '../../src/geometry.js';
+import { getCellSize } from '../../src/geometry.ts';
 
 class FakeElement {
   constructor({ id = '', inlineCell = '', width = 0 } = {}) {

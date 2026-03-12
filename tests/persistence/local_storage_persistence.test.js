@@ -3,7 +3,7 @@ import test from 'node:test';
 import {
   createLocalStoragePersistence,
   STORAGE_KEYS,
-} from '../../src/persistence/local_storage_persistence.js';
+} from '../../src/persistence/local_storage_persistence.ts';
 
 const createFakeStorage = () => {
   const map = new Map();
