@@ -1,9 +1,6 @@
-export const utcStartMsFromDateId = (dateId) => {
-    if (typeof dateId !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(dateId)) return null;
-    const [y, m, d] = dateId.split('-').map((part) => Number.parseInt(part, 10));
-    if (!Number.isInteger(y) || !Number.isInteger(m) || !Number.isInteger(d)) return null;
-    return Date.UTC(y, m - 1, d, 0, 0, 0, 0);
-};
+import { parseUtcDateIdStartMs } from '../shared/utc_date.js';
+
+export const utcStartMsFromDateId = parseUtcDateIdStartMs;
 
 const parseUtcDateFromDateId = (dateId) => {
     const startMs = utcStartMsFromDateId(dateId);

@@ -1,4 +1,10 @@
 import { CELL_TYPES, HINT_CODES, RPS_CODES } from '../config.js';
+import {
+  buildCornerEventMask,
+  buildCornerOrthEdgeRefs,
+  countCornerOrthConnections,
+  isOrthogonalStep,
+} from '../shared/stitch_corner_geometry.js';
 import { isAdjacentMove, keyOf } from '../utils.js';
 
 export const SCORE_MODES = Object.freeze({
@@ -137,31 +143,7 @@ const orthEdgeKey = (r1, c1, r2, c2) => {
   return ka < kb ? `${ka}|${kb}` : `${kb}|${ka}`;
 };
 
-const isOrthEdge = (a, b) => Math.abs(a.r - b.r) + Math.abs(a.c - b.c) === 1;
-
-const buildCornerEventMask = (vr, vc, orthEdges) => {
-  const north = orthEdges.has(orthEdgeKey(vr - 1, vc - 1, vr - 1, vc)) ? 1 : 0;
-  const west = orthEdges.has(orthEdgeKey(vr - 1, vc - 1, vr, vc - 1)) ? 1 : 0;
-  const east = orthEdges.has(orthEdgeKey(vr - 1, vc, vr, vc)) ? 1 : 0;
-  const south = orthEdges.has(orthEdgeKey(vr, vc - 1, vr, vc)) ? 1 : 0;
-  return (north << 3) | (west << 2) | (east << 1) | south;
-};
-
-const countCornerOrthConnections = (vr, vc, orthEdges) => {
-  let count = 0;
-  if (orthEdges.has(orthEdgeKey(vr - 1, vc - 1, vr - 1, vc))) count += 1;
-  if (orthEdges.has(orthEdgeKey(vr - 1, vc - 1, vr, vc - 1))) count += 1;
-  if (orthEdges.has(orthEdgeKey(vr - 1, vc, vr, vc))) count += 1;
-  if (orthEdges.has(orthEdgeKey(vr, vc - 1, vr, vc))) count += 1;
-  return count;
-};
-
-const collectCornerEdgeRefs = (vr, vc) => ([
-  { edgeKey: orthEdgeKey(vr - 1, vc - 1, vr - 1, vc), edgeLabel: 'N' },
-  { edgeKey: orthEdgeKey(vr - 1, vc - 1, vr, vc - 1), edgeLabel: 'W' },
-  { edgeKey: orthEdgeKey(vr - 1, vc, vr, vc), edgeLabel: 'E' },
-  { edgeKey: orthEdgeKey(vr, vc - 1, vr, vc), edgeLabel: 'S' },
-]);
+const orthEdgeKeyFromPoints = (a, b) => orthEdgeKey(a.r, a.c, b.r, b.c);
 
 const buildCornerTraversalToken = (cornerState) => (
   cornerState && cornerState.edgeTrace.length > 0
@@ -233,7 +215,7 @@ const buildCornerTracking = (corners) => {
       edgeTrace: [],
     });
 
-    const edgeRefs = collectCornerEdgeRefs(vr, vc);
+    const edgeRefs = buildCornerOrthEdgeRefs(vr, vc, orthEdgeKeyFromPoints);
     for (const edgeRef of edgeRefs) {
       if (!cornerRefsByEdgeKey.has(edgeRef.edgeKey)) cornerRefsByEdgeKey.set(edgeRef.edgeKey, []);
       cornerRefsByEdgeKey.get(edgeRef.edgeKey).push({
@@ -251,7 +233,7 @@ const buildCornerTracking = (corners) => {
 };
 
 const appendCornerEvent = (cornerEvents, cornerKey, vr, vc, orthEdgeSet, cornerStateByKey) => {
-  const mask = buildCornerEventMask(vr, vc, orthEdgeSet).toString(16);
+  const mask = buildCornerEventMask(vr, vc, orthEdgeSet, orthEdgeKeyFromPoints).toString(16);
   cornerEvents.push(`${cornerKey}:${mask}:${buildCornerTraversalToken(cornerStateByKey.get(cornerKey))}`);
 };
 
@@ -296,7 +278,7 @@ const recordCornerTraversalForEdge = (
   cornerRefsByEdgeKey,
   cornerStateByKey,
 ) => {
-  if (!isOrthEdge(prev, cur)) return;
+  if (!isOrthogonalStep(prev, cur)) return;
 
   orthEdgeSet.add(currentEdgeKey);
   const cornerRefs = cornerRefsByEdgeKey.get(currentEdgeKey);
@@ -322,7 +304,7 @@ const appendSatisfiedCornerEvents = (
     const [vr, vc, target] = element;
     const cornerKey = cornerKeyOf(vr, vc);
     if (seenCorners.has(cornerKey)) continue;
-    if (countCornerOrthConnections(vr, vc, orthEdgeSet) !== target) continue;
+    if (countCornerOrthConnections(vr, vc, orthEdgeSet, orthEdgeKeyFromPoints) !== target) continue;
     seenCorners.add(cornerKey);
     appendCornerEvent(cornerEvents, cornerKey, vr, vc, orthEdgeSet, cornerStateByKey);
   }

@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -21,9 +20,20 @@ import {
   utcDateIdFromMs,
   utcStartMsFromDateId,
 } from './daily_pool_tools.js';
-
-const HISTORY_SCHEMA_VERSION = 1;
-const PAYLOAD_SCHEMA_VERSION = 1;
+import {
+  DAILY_HISTORY_SCHEMA_VERSION,
+  DAILY_PAYLOAD_SCHEMA_VERSION,
+  normalizeDailyHistory,
+  normalizeDailyHistoryEntry,
+  normalizeDailyPayload,
+  normalizeDailyPayloadHeader,
+} from '../src/shared/daily_payload_schema.js';
+import {
+  parsePositiveInt,
+  readJsonFile,
+  readRequiredArgValue,
+  writeJsonFile,
+} from './lib/cli_utils.js';
 
 const DEFAULTS = {
   manifestFile: path.resolve(process.cwd(), DAILY_POOL_MANIFEST_REPO_FILE),
@@ -41,9 +51,9 @@ const parseArgs = (argv) => {
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     const nextValue = () => {
-      i += 1;
-      if (i >= argv.length) throw new Error(`Missing value for ${arg}`);
-      return argv[i];
+      const result = readRequiredArgValue(argv, i, arg);
+      i = result.nextIndex;
+      return result.value;
     };
 
     if (arg === '--manifest') opts.manifestFile = path.resolve(process.cwd(), nextValue());
@@ -51,11 +61,7 @@ const parseArgs = (argv) => {
     else if (arg === '--history') opts.historyFile = path.resolve(process.cwd(), nextValue());
     else if (arg === '--today') opts.todayFile = path.resolve(process.cwd(), nextValue());
     else if (arg === '--now-ms') {
-      const parsed = Number.parseInt(nextValue(), 10);
-      if (!Number.isFinite(parsed) || parsed <= 0) {
-        throw new Error(`--now-ms must be a positive integer, got ${parsed}`);
-      }
-      opts.nowMs = parsed;
+      opts.nowMs = parsePositiveInt('--now-ms', nextValue());
     }
     else if (arg === '--json') opts.json = true;
     else if (arg === '--help' || arg === '-h') {
@@ -81,22 +87,6 @@ const parseArgs = (argv) => {
   }
 
   return opts;
-};
-
-const readJson = (filePath, fallback = undefined) => {
-  try {
-    return JSON.parse(fs.readFileSync(filePath, 'utf8'));
-  } catch (error) {
-    if (fallback !== undefined && error && typeof error === 'object' && error.code === 'ENOENT') {
-      return fallback;
-    }
-    throw error;
-  }
-};
-
-const writeJson = (filePath, value) => {
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`);
 };
 
 const sortHistoryEntriesByDailyId = (entries = []) =>
@@ -131,45 +121,12 @@ const pruneHistoryForAppend = (entries = [], {
   return out;
 };
 
-const normalizeHistory = (raw) => {
-  if (!raw || typeof raw !== 'object') {
-    return { schemaVersion: HISTORY_SCHEMA_VERSION, entries: [] };
-  }
-
-  const entries = Array.isArray(raw.entries) ? raw.entries.filter((entry) => entry && typeof entry === 'object') : [];
-  return {
-    schemaVersion: Number.isInteger(raw.schemaVersion) ? raw.schemaVersion : HISTORY_SCHEMA_VERSION,
-    entries: entries.map((entry) => ({
-      dailyId: String(entry.dailyId || ''),
-      dailySlot: Number.isInteger(entry.dailySlot) ? entry.dailySlot : -1,
-      canonicalKey: String(entry.canonicalKey || ''),
-      poolVersion: String(entry.poolVersion || ''),
-      publishedAtUtcMs: Number.isInteger(entry.publishedAtUtcMs) ? entry.publishedAtUtcMs : 0,
-    })).filter((entry) => entry.dailyId && entry.dailySlot >= 0 && entry.canonicalKey),
-  };
-};
-
-const normalizeTodayPayload = (raw) => {
-  if (!raw || typeof raw !== 'object') return null;
-  const dailyId = typeof raw.dailyId === 'string' ? raw.dailyId : '';
-  const dailySlot = Number.isInteger(raw.dailySlot) ? raw.dailySlot : -1;
-  const canonicalKey = typeof raw.canonicalKey === 'string' ? raw.canonicalKey : '';
-  const generatedAtUtcMs = Number.isInteger(raw.generatedAtUtcMs) ? raw.generatedAtUtcMs : 0;
-  if (!dailyId || dailySlot < 0 || !canonicalKey) return null;
-  return {
-    dailyId,
-    dailySlot,
-    canonicalKey,
-    generatedAtUtcMs,
-  };
-};
-
 export const publishDailyLevel = (rawOptions = {}) => {
   const opts = { ...DEFAULTS, ...rawOptions };
 
   const nowMs = Number.isInteger(opts.nowMs) ? opts.nowMs : Date.now();
   const dailyId = utcDateIdFromMs(nowMs);
-  const manifest = readJson(opts.manifestFile);
+  const manifest = readJsonFile(opts.manifestFile);
   const maxSlots = Number.isInteger(manifest?.maxSlots) ? manifest.maxSlots : DAILY_POOL_MAX_SLOTS;
   if (!Number.isInteger(maxSlots) || maxSlots <= 0) {
     throw new Error(`Invalid maxSlots in manifest: ${manifest?.maxSlots}`);
@@ -177,7 +134,10 @@ export const publishDailyLevel = (rawOptions = {}) => {
   const baseVariantId = Number.isInteger(manifest?.baseVariantId)
     ? manifest.baseVariantId
     : DAILY_POOL_BASE_VARIANT_ID;
-  const history = normalizeHistory(readJson(opts.historyFile, { schemaVersion: HISTORY_SCHEMA_VERSION, entries: [] }));
+  const history = normalizeDailyHistory(
+    readJsonFile(opts.historyFile, { schemaVersion: DAILY_HISTORY_SCHEMA_VERSION, entries: [] }),
+    { schemaVersion: DAILY_HISTORY_SCHEMA_VERSION },
+  );
   history.entries = trimHistoryEntries(
     sortHistoryEntriesByDailyId(history.entries),
     maxSlots,
@@ -185,7 +145,7 @@ export const publishDailyLevel = (rawOptions = {}) => {
   const todayEntry = history.entries.find((entry) => entry.dailyId === dailyId);
 
   if (todayEntry) {
-    const existingTodayPayload = normalizeTodayPayload(readJson(opts.todayFile, null));
+    const existingTodayPayload = normalizeDailyPayloadHeader(readJsonFile(opts.todayFile, null));
     const payloadMatchesHistory = Boolean(
       existingTodayPayload?.dailyId === dailyId
       && existingTodayPayload.dailySlot === todayEntry.dailySlot
@@ -242,7 +202,7 @@ export const publishDailyLevel = (rawOptions = {}) => {
     canonicalKey: materialized.canonicalKey,
   });
 
-  const existingTodayPayload = normalizeTodayPayload(readJson(opts.todayFile, null));
+  const existingTodayPayload = normalizeDailyPayloadHeader(readJsonFile(opts.todayFile, null));
   const stableGeneratedAtUtcMs = (
     existingTodayPayload?.dailyId === dailyId
       && existingTodayPayload.dailySlot === dailySlot
@@ -253,8 +213,8 @@ export const publishDailyLevel = (rawOptions = {}) => {
   );
 
   const tomorrowId = addUtcDaysToDateId(dailyId, 1);
-  const payload = {
-    schemaVersion: PAYLOAD_SCHEMA_VERSION,
+  const payload = normalizeDailyPayload({
+    schemaVersion: DAILY_PAYLOAD_SCHEMA_VERSION,
     poolVersion: String(manifest.poolVersion || ''),
     dailyId,
     dailySlot,
@@ -262,22 +222,29 @@ export const publishDailyLevel = (rawOptions = {}) => {
     generatedAtUtcMs: stableGeneratedAtUtcMs,
     hardInvalidateAtUtcMs: utcStartMsFromDateId(tomorrowId),
     level: toDailyPayloadLevel(materialized.level, dailyId),
-  };
+  });
+  if (!payload) {
+    throw new Error(`Generated invalid daily payload for ${dailyId}`);
+  }
 
-  history.entries.push({
+  const historyEntry = normalizeDailyHistoryEntry({
     dailyId,
     dailySlot,
     canonicalKey: materialized.canonicalKey,
     poolVersion: String(manifest.poolVersion || ''),
     publishedAtUtcMs: stableGeneratedAtUtcMs,
   });
+  if (!historyEntry) {
+    throw new Error(`Generated invalid daily history entry for ${dailyId}`);
+  }
+  history.entries.push(historyEntry);
   history.entries = trimHistoryEntries(
     sortHistoryEntriesByDailyId(history.entries),
     maxSlots,
   );
 
-  writeJson(opts.todayFile, payload);
-  writeJson(opts.historyFile, history);
+  writeJsonFile(opts.todayFile, payload);
+  writeJsonFile(opts.historyFile, history);
 
   return {
     ok: true,

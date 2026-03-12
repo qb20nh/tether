@@ -19,6 +19,7 @@ import {
   evaluateRPS,
   evaluateStitches,
 } from '../src/rules.js';
+import { parseCoordinatePair } from '../src/shared/coordinate_pair.js';
 import { parseUtcDateIdStartMs, utcDateIdFromMs } from '../src/shared/utc_date.js';
 import { createGameStateStore } from '../src/state/game_state_store.js';
 
@@ -33,13 +34,6 @@ export const DAILY_POOL_MAX_VARIANT_PROBE = 255;
 export const DAILY_POOL_DIFFICULTY_VARIANT_WINDOW = 8;
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-
-const parsePair = (entry) => {
-  const r = Array.isArray(entry) ? entry[0] : entry?.r;
-  const c = Array.isArray(entry) ? entry[1] : entry?.c;
-  if (!Number.isInteger(r) || !Number.isInteger(c)) return null;
-  return { r, c };
-};
 
 const countMovableWalls = (level) => {
   let count = 0;
@@ -68,8 +62,8 @@ const countWitnessTurns = (witnessPathRaw) => {
   let prevDc = null;
 
   for (let i = 1; i < witnessPathRaw.length; i++) {
-    const prev = parsePair(witnessPathRaw[i - 1]);
-    const next = parsePair(witnessPathRaw[i]);
+    const prev = parseCoordinatePair(witnessPathRaw[i - 1]);
+    const next = parseCoordinatePair(witnessPathRaw[i]);
     if (!prev || !next) continue;
 
     const dr = next.r - prev.r;
@@ -147,7 +141,7 @@ export const replayWitnessAndValidate = (level) => {
 
   const witnessPath = [];
   for (const element of witnessPathRaw) {
-    const parsed = parsePair(element);
+    const parsed = parseCoordinatePair(element);
     if (!parsed) return false;
     witnessPath.push(parsed);
   }

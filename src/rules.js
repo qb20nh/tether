@@ -1,4 +1,5 @@
 import { CELL_TYPES, HINT_CODES, RPS_CODES, RPS_WIN_ORDER } from './config.js';
+import { buildOrthEdgeSet, countCornerOrthConnections } from './shared/stitch_corner_geometry.js';
 import { inBounds, keyOf } from './utils.js';
 
 const isHintCode = (ch) => HINT_CODES.has(ch);
@@ -129,33 +130,6 @@ const evalHintAtIndex = (i, clue, path, suppressEndpointRequirement, suppressEnd
     : evaluateInteriorHint(clue, path, i);
 };
 
-const buildOrthEdgeSet = (path) => {
-  const edges = new Set();
-  for (let i = 1; i < path.length; i++) {
-    const a = path[i - 1];
-    const b = path[i];
-    const dr = Math.abs(a.r - b.r);
-    const dc = Math.abs(a.c - b.c);
-    if (dr + dc !== 1) continue;
-    edges.add(edgeKey(a, b));
-  }
-  return edges;
-};
-
-const countCornerOrthConnections = (vr, vc, orthEdges) => {
-  const nw = { r: vr - 1, c: vc - 1 };
-  const ne = { r: vr - 1, c: vc };
-  const sw = { r: vr, c: vc - 1 };
-  const se = { r: vr, c: vc };
-
-  let count = 0;
-  if (orthEdges.has(edgeKey(nw, ne))) count++;
-  if (orthEdges.has(edgeKey(nw, sw))) count++;
-  if (orthEdges.has(edgeKey(ne, se))) count++;
-  if (orthEdges.has(edgeKey(sw, se))) count++;
-  return count;
-};
-
 const cornerWallStats = (snapshot, vr, vc) => {
   const nwWall = isWall(snapshot.gridData[vr - 1][vc - 1]);
   const neWall = isWall(snapshot.gridData[vr - 1][vc]);
@@ -185,7 +159,7 @@ const isCornerAdjacentClosed = (snapshot, vr, vc, wallStats) => (
 );
 
 const evaluateCornerCount = (snapshot, orthEdges, isComplete, vr, vc, target) => {
-  const actual = countCornerOrthConnections(vr, vc, orthEdges);
+  const actual = countCornerOrthConnections(vr, vc, orthEdges, edgeKey);
   const wallStats = cornerWallStats(snapshot, vr, vc);
   const allAdjacentClosed = isCornerAdjacentClosed(snapshot, vr, vc, wallStats);
 
@@ -242,7 +216,7 @@ const evaluateCornerHints = (snapshot, isComplete) => {
     pending: 0,
     cornerVertexStatus: new Map(),
   };
-  const orthEdges = buildOrthEdgeSet(snapshot.path);
+  const orthEdges = buildOrthEdgeSet(snapshot.path, edgeKey);
 
   for (const [vr, vc, target] of snapshot.cornerCounts ?? []) {
     result.total++;

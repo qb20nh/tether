@@ -1,4 +1,5 @@
 import { isObstacle } from './config.js';
+import { buildStitchLookups } from './shared/stitch_corner_geometry.js';
 
 export const keyOf = (r, c) => `${r},${c}`;
 export const keyV = (vr, vc) => `${vr},${vc}`;
@@ -20,7 +21,7 @@ export const parseLevel = (level) => {
   }
 
   const stitches = (level.stitches || []).map((p) => [p[0], p[1]]);
-  const stitchVertices = new Set(stitches.map(([vr, vc]) => keyV(vr, vc)));
+  const { stitchSet: stitchVertices } = buildStitchLookups(stitches, keyV);
 
   const cornerCountsRaw = level.cornerCounts || [];
   const seenCornerVertices = new Set();

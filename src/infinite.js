@@ -1,6 +1,7 @@
 import { canonicalConstraintFingerprint } from './infinite_canonical.js';
 import { INFINITE_OVERRIDE_BY_INDEX } from './infinite_overrides.js';
 import { hashString32, makeMulberry32Rng, mix32 } from './shared/hash32.js';
+import { buildOrthEdgeSet, countCornerOrthConnections } from './shared/stitch_corner_geometry.js';
 
 export const INFINITE_GLOBAL_SEED = 'TETHER_INFINITE_V2';
 export const INFINITE_FEATURE_CYCLE = Object.freeze([
@@ -436,33 +437,6 @@ const applyStitchTransitions = (path, selectedTransitions) => {
   }
 };
 
-const buildOrthEdgeSet = (path) => {
-  const edges = new Set();
-  for (let i = 1; i < path.length; i++) {
-    const a = path[i - 1];
-    const b = path[i];
-    const dr = Math.abs(a.r - b.r);
-    const dc = Math.abs(a.c - b.c);
-    if (dr + dc !== 1) continue;
-    edges.add(edgeKey(a, b));
-  }
-  return edges;
-};
-
-const countCornerOrthConnections = (vr, vc, orthEdges) => {
-  const nw = { r: vr - 1, c: vc - 1 };
-  const ne = { r: vr - 1, c: vc };
-  const sw = { r: vr, c: vc - 1 };
-  const se = { r: vr, c: vc };
-
-  let count = 0;
-  if (orthEdges.has(edgeKey(nw, ne))) count++;
-  if (orthEdges.has(edgeKey(nw, sw))) count++;
-  if (orthEdges.has(edgeKey(ne, se))) count++;
-  if (orthEdges.has(edgeKey(sw, se))) count++;
-  return count;
-};
-
 const isWallCell = (grid, r, c) => {
   if (!Array.isArray(grid) || !Array.isArray(grid[r])) return false;
   const ch = grid[r][c];
@@ -712,7 +686,7 @@ const collectCornerCandidates = (rows, cols, orthEdges, forbiddenVertices = new 
       const vk = `${vr},${vc}`;
       if (forbiddenVertices.has(vk)) continue;
 
-      const count = countCornerOrthConnections(vr, vc, orthEdges);
+      const count = countCornerOrthConnections(vr, vc, orthEdges, edgeKey);
       if (count < 0 || count > 3) continue;
       if (isUnsatisfiableCornerConstraint(grid, vr, vc, count)) continue;
       candidates.push([vr, vc, count]);
@@ -784,7 +758,7 @@ const findFallbackCornerCount = (
     for (let vc = 1; vc < cols; vc++) {
       const vk = `${vr},${vc}`;
       if (forbiddenVertices.has(vk)) continue;
-      const count = countCornerOrthConnections(vr, vc, orthEdges);
+      const count = countCornerOrthConnections(vr, vc, orthEdges, edgeKey);
       if (count < 0 || count > 3) continue;
       if (isUnsatisfiableCornerConstraint(grid, vr, vc, count)) continue;
       return [vr, vc, count];
@@ -1180,7 +1154,7 @@ const createCoreLevel = (infiniteIndex, variantId) => {
   applyMinimumGridFeatures(grid, path, plan, requiredFeature, rng);
   scrambleMovableStartPositionsOrThrow(grid, path, solvedMovableCells, infiniteIndex, variantId, rng);
 
-  const orthEdges = buildOrthEdgeSet(path);
+  const orthEdges = buildOrthEdgeSet(path, edgeKey);
   let cornerCounts = buildCornerCounts(rows, cols, orthEdges, rng, requiredFeature, stitchVertexSet, grid);
   enforceConstraintDensityBandOrThrow({ grid, path, stitches, cornerCounts, requiredFeature, rng }, variantContext);
 

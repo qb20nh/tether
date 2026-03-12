@@ -1,4 +1,6 @@
 import { CELL_TYPES } from '../config.js';
+import { parseCoordinatePair } from '../shared/coordinate_pair.js';
+import { buildStitchLookups } from '../shared/stitch_corner_geometry.js';
 import { inBounds, isAdjacentMove, keyOf, parseLevel } from '../utils.js';
 import { canDropWall as canDropWallOnSnapshot } from './snapshot_rules.js';
 
@@ -34,19 +36,7 @@ export function createGameStateStore(levelSource) {
   const isUsable = (r, c) => inBounds(rows, cols, r, c) && !isWall(r, c);
 
   const buildStitches = () => {
-    stitchSet = new Set();
-    stitchReq = new Map();
-
-    for (const [vr, vc] of stitches) {
-      const vk = `${vr},${vc}`;
-      stitchSet.add(vk);
-      stitchReq.set(vk, {
-        nw: { r: vr - 1, c: vc - 1 },
-        ne: { r: vr - 1, c: vc },
-        sw: { r: vr, c: vc - 1 },
-        se: { r: vr, c: vc },
-      });
-    }
+    ({ stitchSet, stitchReq } = buildStitchLookups(stitches));
   };
 
   const invalidateSnapshotCache = () => {
@@ -72,10 +62,8 @@ export function createGameStateStore(levelSource) {
   };
 
   const parsePair = (entry) => {
-    const r = Array.isArray(entry) ? entry[0] : entry?.r;
-    const c = Array.isArray(entry) ? entry[1] : entry?.c;
-    if (!Number.isInteger(r) || !Number.isInteger(c)) return null;
-    return [r, c];
+    const parsed = parseCoordinatePair(entry);
+    return parsed ? [parsed.r, parsed.c] : null;
   };
 
   const isMutableCell = (cell) => {

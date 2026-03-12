@@ -11,6 +11,7 @@ import {
 import { canonicalConstraintSignature } from '../src/infinite_canonical.js';
 import { encodePackedOverridePayload } from '../src/shared/packed_override_codec.js';
 import { INFINITE_OVERRIDES_REPO_FILE } from '../src/shared/paths.js';
+import { parsePositiveInt, readRequiredArgValue } from './lib/cli_utils.js';
 
 const FORMAT_MAGIC = 0x49; // 'I'
 const FORMAT_VERSION = 1;
@@ -22,26 +23,18 @@ const DEFAULTS = {
   json: false,
 };
 
-const toInt = (name, value) => {
-  const parsed = Number.parseInt(value, 10);
-  if (!Number.isInteger(parsed) || parsed <= 0) {
-    throw new Error(`${name} must be a positive integer, got: ${value}`);
-  }
-  return parsed;
-};
-
 const parseArgs = (argv) => {
   const opts = { ...DEFAULTS };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     const nextValue = () => {
-      i += 1;
-      if (i >= argv.length) throw new Error(`Missing value for ${arg}`);
-      return argv[i];
+      const result = readRequiredArgValue(argv, i, arg);
+      i = result.nextIndex;
+      return result.value;
     };
 
-    if (arg === '--max-levels') opts.maxLevels = toInt('--max-levels', nextValue());
-    else if (arg === '--max-variant-probe') opts.maxVariantProbe = toInt('--max-variant-probe', nextValue());
+    if (arg === '--max-levels') opts.maxLevels = parsePositiveInt('--max-levels', nextValue());
+    else if (arg === '--max-variant-probe') opts.maxVariantProbe = parsePositiveInt('--max-variant-probe', nextValue());
     else if (arg === '--out' || arg === '--out-bin') opts.outBinFile = path.resolve(process.cwd(), nextValue());
     else if (arg === '--json') opts.json = true;
     else if (arg === '--help' || arg === '-h') {

@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-import fs from 'node:fs';
 import path from 'node:path';
 import { INFINITE_MAX_LEVELS } from '../src/infinite.js';
 import {
@@ -19,6 +18,12 @@ import {
   selectDailyCandidateForSlot,
   writeDailyOverridesGzipFile,
 } from './daily_pool_tools.js';
+import {
+  parseNonNegativeInt,
+  parsePositiveInt,
+  readRequiredArgValue,
+  writeJsonFile,
+} from './lib/cli_utils.js';
 
 const DEFAULTS = {
   maxSlots: DAILY_POOL_MAX_SLOTS,
@@ -32,42 +37,26 @@ const DEFAULTS = {
   json: false,
 };
 
-const toInt = (name, value) => {
-  const parsed = Number.parseInt(value, 10);
-  if (!Number.isInteger(parsed) || parsed <= 0) {
-    throw new Error(`${name} must be a positive integer, got ${value}`);
-  }
-  return parsed;
-};
-
-const toNonNegativeInt = (name, value) => {
-  const parsed = Number.parseInt(value, 10);
-  if (!Number.isInteger(parsed) || parsed < 0) {
-    throw new Error(`${name} must be a non-negative integer, got ${value}`);
-  }
-  return parsed;
-};
-
 const parseArgs = (argv) => {
   const opts = { ...DEFAULTS };
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     const nextValue = () => {
-      i += 1;
-      if (i >= argv.length) throw new Error(`Missing value for ${arg}`);
-      return argv[i];
+      const result = readRequiredArgValue(argv, i, arg);
+      i = result.nextIndex;
+      return result.value;
     };
 
     switch (arg) {
       case '--max-slots':
-        opts.maxSlots = toInt('--max-slots', nextValue());
+        opts.maxSlots = parsePositiveInt('--max-slots', nextValue());
         break;
       case '--max-variant-probe':
-        opts.maxVariantProbe = toInt('--max-variant-probe', nextValue());
+        opts.maxVariantProbe = parsePositiveInt('--max-variant-probe', nextValue());
         break;
       case '--difficulty-variant-window':
-        opts.difficultyVariantWindow = toInt('--difficulty-variant-window', nextValue());
+        opts.difficultyVariantWindow = parsePositiveInt('--difficulty-variant-window', nextValue());
         break;
       case '--out':
       case '--out-bin':
@@ -77,7 +66,7 @@ const parseArgs = (argv) => {
         opts.outManifestFile = path.resolve(process.cwd(), nextValue());
         break;
       case '--generated-at-utc-ms':
-        opts.generatedAtUtcMs = toNonNegativeInt('--generated-at-utc-ms', nextValue());
+        opts.generatedAtUtcMs = parseNonNegativeInt('--generated-at-utc-ms', nextValue());
         break;
       case '--pool-version':
         opts.poolVersion = String(nextValue()).trim();
@@ -128,11 +117,6 @@ const parseArgs = (argv) => {
   }
 
   return opts;
-};
-
-const writeJson = (filePath, value) => {
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`);
 };
 
 function main() {
@@ -203,7 +187,7 @@ function main() {
     },
   };
 
-  writeJson(opts.outManifestFile, manifest);
+  writeJsonFile(opts.outManifestFile, manifest);
 
   const summary = {
     ok: true,

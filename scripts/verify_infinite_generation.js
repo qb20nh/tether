@@ -16,7 +16,9 @@ import {
   evaluateRPS,
   evaluateStitches,
 } from '../src/rules.js';
+import { buildStitchLookups } from '../src/shared/stitch_corner_geometry.js';
 import { keyV } from '../src/utils.js';
+import { parseNonNegativeInt, readRequiredArgValue } from './lib/cli_utils.js';
 import { solveLevel } from './verify_level_properties.js';
 
 const HINT_CODES = new Set(['t', 'r', 'l', 's', 'h', 'v']);
@@ -36,14 +38,6 @@ const DEFAULTS = {
   minUniqueRatio: 0.4,
   minFeatureUniqueRatio: DEFAULT_FEATURE_UNIQUE_RATIO,
   json: false,
-};
-
-const toInt = (name, value) => {
-  const parsed = Number.parseInt(value, 10);
-  if (!Number.isInteger(parsed) || parsed < 0) {
-    throw new Error(`${name} must be a non-negative integer, got ${value}`);
-  }
-  return parsed;
 };
 
 const toRatio = (name, value) => {
@@ -115,17 +109,17 @@ const parseArgs = (argv) => {
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     const nextValue = () => {
-      i += 1;
-      if (i >= argv.length) throw new Error(`Missing value for ${arg}`);
-      return argv[i];
+      const result = readRequiredArgValue(argv, i, arg);
+      i = result.nextIndex;
+      return result.value;
     };
 
-    if (arg === '--samples') opts.samples = toInt('--samples', nextValue());
-    else if (arg === '--coverage') opts.coverage = toInt('--coverage', nextValue());
-    else if (arg === '--canonical-scan') opts.canonicalScan = toInt('--canonical-scan', nextValue());
-    else if (arg === '--solve-time-ms') opts.solveTimeMs = toInt('--solve-time-ms', nextValue());
-    else if (arg === '--retry-solve-time-ms') opts.retrySolveTimeMs = toInt('--retry-solve-time-ms', nextValue());
-    else if (arg === '--perf-runs') opts.perfRuns = toInt('--perf-runs', nextValue());
+    if (arg === '--samples') opts.samples = parseNonNegativeInt('--samples', nextValue());
+    else if (arg === '--coverage') opts.coverage = parseNonNegativeInt('--coverage', nextValue());
+    else if (arg === '--canonical-scan') opts.canonicalScan = parseNonNegativeInt('--canonical-scan', nextValue());
+    else if (arg === '--solve-time-ms') opts.solveTimeMs = parseNonNegativeInt('--solve-time-ms', nextValue());
+    else if (arg === '--retry-solve-time-ms') opts.retrySolveTimeMs = parseNonNegativeInt('--retry-solve-time-ms', nextValue());
+    else if (arg === '--perf-runs') opts.perfRuns = parseNonNegativeInt('--perf-runs', nextValue());
     else if (arg === '--min-unique-ratio') opts.minUniqueRatio = toRatio('--min-unique-ratio', nextValue());
     else if (arg === '--min-feature-unique-ratio') {
       opts.minFeatureUniqueRatio = {
@@ -299,19 +293,6 @@ const hasUnsatisfiableCorner = (level) => {
 const inBounds = (rows, cols, r, c) => r >= 0 && r < rows && c >= 0 && c < cols;
 const keyOf = (r, c) => `${r},${c}`;
 const isObstacle = (ch) => ch === '#' || ch === 'm';
-
-const buildStitchReq = (stitches) => {
-  const req = new Map();
-  for (const [vr, vc] of stitches) {
-    req.set(keyV(vr, vc), {
-      nw: { r: vr - 1, c: vc - 1 },
-      ne: { r: vr - 1, c: vc },
-      sw: { r: vr, c: vc - 1 },
-      se: { r: vr, c: vc },
-    });
-  }
-  return req;
-};
 
 const getGridDimensions = (level) => {
   const rows = level.grid?.length || 0;
@@ -491,7 +472,7 @@ const verifyWitnessReplay = (level) => {
   }
 
   const stitches = (level.stitches || []).map(([vr, vc]) => [vr, vc]);
-  const stitchSet = new Set(stitches.map(([vr, vc]) => keyV(vr, vc)));
+  const { stitchSet, stitchReq } = buildStitchLookups(stitches, keyV);
 
   const trajResult = validateWitnessPathTrajectory(path, gridData, stitchSet);
   if (!trajResult.ok) return trajResult;
@@ -507,7 +488,7 @@ const verifyWitnessReplay = (level) => {
     visited,
     stitches,
     stitchSet,
-    stitchReq: buildStitchReq(stitches),
+    stitchReq,
     cornerCounts: level.cornerCounts || [],
     idxByKey,
   };

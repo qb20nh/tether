@@ -1,6 +1,7 @@
 import { INFINITE_MAX_LEVELS } from '../../src/infinite.js';
 import { createLevelProvider } from '../../src/core/level_provider.js';
 import { createDefaultCore } from '../../src/core/default_core.js';
+import { hashString32, makeMulberry32Rng, mix32 } from '../../src/shared/hash32.js';
 import { createGameStateStore } from '../../src/state/game_state_store.js';
 import { isUsableCell } from '../../src/state/snapshot_rules.js';
 
@@ -19,36 +20,8 @@ const ORTHOGONAL_DIRS = Object.freeze([
 
 const keyOf = (r, c) => `${r},${c}`;
 
-const hashString32 = (input) => {
-  let hash = 0x811c9dc5;
-  const text = String(input);
-  for (let i = 0; i < text.length; i += 1) {
-    hash ^= text.charCodeAt(i);
-    hash = Math.imul(hash, 0x01000193);
-  }
-  return hash >>> 0;
-};
-
-const mix32 = (input) => {
-  let value = input >>> 0;
-  value ^= value >>> 16;
-  value = Math.imul(value, 0x7feb352d) >>> 0;
-  value ^= value >>> 15;
-  value = Math.imul(value, 0x846ca68b) >>> 0;
-  value ^= value >>> 16;
-  return value >>> 0;
-};
-
 const createDeterministicRng = (seed) => {
-  let state = mix32(hashString32(seed));
-  if (state === 0) state = 0x6d2b79f5;
-  return () => {
-    state = (state + 0x6d2b79f5) >>> 0;
-    let value = state;
-    value = Math.imul(value ^ (value >>> 15), value | 1);
-    value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
-    return ((value ^ (value >>> 14)) >>> 0) / 0x100000000;
-  };
+  return makeMulberry32Rng(mix32(hashString32(String(seed))));
 };
 
 const randomInt = (rng, maxExclusive) => {

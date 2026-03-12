@@ -10,7 +10,13 @@ import {
   evaluateStitches,
 } from '../src/rules.js';
 import { hashString32, makeMulberry32Rng, mix32 } from '../src/shared/hash32.js';
+import {
+  buildStitchLookups,
+  countCornerOrthConnections,
+  isOrthogonalStep,
+} from '../src/shared/stitch_corner_geometry.js';
 import { keyOf, keyV, parseLevel } from '../src/utils.js';
+import { parseNonNegativeInt, readRequiredArgValue } from './lib/cli_utils.js';
 
 const CONSTRAINT_CODES = new Set(['t', 'r', 'l', 's', 'h', 'v', 'g', 'b', 'p']);
 const ORTH_DIRS = [
@@ -99,14 +105,6 @@ const usage = () => {
   );
 };
 
-const toInt = (name, value) => {
-  const n = Number.parseInt(value, 10);
-  if (!Number.isInteger(n) || n < 0) {
-    throw new Error(`${name} must be a non-negative integer, got: ${value}`);
-  }
-  return n;
-};
-
 const clamp = (value, lo, hi) => Math.max(lo, Math.min(hi, value));
 const roundFixed = (value, digits = 6) => {
   if (!Number.isFinite(value)) return 0;
@@ -138,9 +136,9 @@ function parseArgs(argv) {
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const next = () => {
-      i += 1;
-      if (i >= argv.length) throw new Error(`Missing value for ${a}`);
-      return argv[i];
+      const result = readRequiredArgValue(argv, i, a);
+      i = result.nextIndex;
+      return result.value;
     };
 
     switch (a) {
@@ -165,31 +163,31 @@ function parseArgs(argv) {
         break;
       }
       case '--difficulty-proof-time-ms':
-        opts.difficultyProofTimeMs = toInt('--difficulty-proof-time-ms', next());
+        opts.difficultyProofTimeMs = parseNonNegativeInt('--difficulty-proof-time-ms', next());
         break;
       case '--difficulty-proof-node-cap':
-        opts.difficultyProofNodeCap = toInt('--difficulty-proof-node-cap', next());
+        opts.difficultyProofNodeCap = parseNonNegativeInt('--difficulty-proof-node-cap', next());
         break;
       case '--level':
         opts.levels.push(next());
         break;
       case '--min-raw':
-        opts.minRaw = toInt('--min-raw', next());
+        opts.minRaw = parseNonNegativeInt('--min-raw', next());
         break;
       case '--min-canonical':
-        opts.minCanonical = toInt('--min-canonical', next());
+        opts.minCanonical = parseNonNegativeInt('--min-canonical', next());
         break;
       case '--min-hint-orders':
-        opts.minHintOrders = toInt('--min-hint-orders', next());
+        opts.minHintOrders = parseNonNegativeInt('--min-hint-orders', next());
         break;
       case '--min-corner-orders':
-        opts.minCornerOrders = toInt('--min-corner-orders', next());
+        opts.minCornerOrders = parseNonNegativeInt('--min-corner-orders', next());
         break;
       case '--max-solutions':
-        opts.maxSolutions = toInt('--max-solutions', next());
+        opts.maxSolutions = parseNonNegativeInt('--max-solutions', next());
         break;
       case '--time-ms':
-        opts.timeMs = toInt('--time-ms', next());
+        opts.timeMs = parseNonNegativeInt('--time-ms', next());
         break;
       default:
         throw new Error(`Unknown option: ${a}`);
@@ -239,15 +237,6 @@ const edgeKey = (a, b) => {
   return ka < kb ? `${ka}|${kb}` : `${kb}|${ka}`;
 };
 
-const cornerCountFromEdges = (vr, vc, edgeSet) => {
-  let count = 0;
-  if (edgeSet.has(`${vr - 1},${vc - 1}|${vr - 1},${vc}`)) count++;
-  if (edgeSet.has(`${vr - 1},${vc - 1}|${vr},${vc - 1}`)) count++;
-  if (edgeSet.has(`${vr - 1},${vc}|${vr},${vc}`)) count++;
-  if (edgeSet.has(`${vr},${vc - 1}|${vr},${vc}`)) count++;
-  return count;
-};
-
 const cornerOrderSignature = (path, cornerCounts) => {
   if (!cornerCounts || cornerCounts.length === 0) return '';
 
@@ -266,14 +255,14 @@ const cornerOrderSignature = (path, cornerCounts) => {
   for (let i = 1; i < path.length; i++) {
     const prev = path[i - 1];
     const cur = path[i];
-    if (Math.abs(prev.r - cur.r) + Math.abs(prev.c - cur.c) === 1) {
+    if (isOrthogonalStep(prev, cur)) {
       edgeSet.add(edgeKey(prev, cur));
     }
 
     for (const [vr, vc, target] of cornerCounts) {
       const key = `${vr},${vc}`;
       if (satisfied.has(key)) continue;
-      if (cornerCountFromEdges(vr, vc, edgeSet) === target) {
+      if (countCornerOrthConnections(vr, vc, edgeSet, edgeKey) === target) {
         satisfied.add(key);
         order.push(key);
       }
@@ -281,19 +270,6 @@ const cornerOrderSignature = (path, cornerCounts) => {
   }
 
   return order.join('>');
-};
-
-const buildStitchReq = (stitches) => {
-  const req = new Map();
-  for (const [vr, vc] of stitches) {
-    req.set(keyV(vr, vc), {
-      nw: { r: vr - 1, c: vc - 1 },
-      ne: { r: vr - 1, c: vc },
-      sw: { r: vr, c: vc - 1 },
-      se: { r: vr, c: vc },
-    });
-  }
-  return req;
 };
 
 const chooseCount = (n, k) => {
@@ -372,8 +348,7 @@ export function buildLevelContext(level) {
   const baseGrid = cloneGrid(parsed.g);
   const rows = parsed.rows;
   const cols = parsed.cols;
-  const stitchSet = new Set(parsed.stitches.map(([vr, vc]) => keyV(vr, vc)));
-  const stitchReq = buildStitchReq(parsed.stitches);
+  const { stitchSet, stitchReq } = buildStitchLookups(parsed.stitches, keyV);
   const cornerCounts = parsed.cornerCounts || [];
 
   const movableWalls = [];
@@ -508,6 +483,89 @@ function isValidPrefix(placement, path, visited) {
   return true;
 }
 
+function traversePlacementPaths(
+  placement,
+  {
+    shouldStop = () => false,
+    beforeVisitNode = () => true,
+    onCompletePath = () => { },
+  } = {},
+) {
+  const dfs = (path, visited) => {
+    if (shouldStop()) return;
+    if (!beforeVisitNode()) return;
+
+    if (!isValidPrefix(placement, path, visited)) return;
+
+    if (path.length === placement.totalUsable) {
+      onCompletePath(path, placement);
+      return;
+    }
+
+    const last = path[path.length - 1];
+    const neighbors = placement.neighborMap.get(keyOf(last.r, last.c)) || [];
+    for (const next of neighbors) {
+      const nextKey = keyOf(next.r, next.c);
+      if (visited.has(nextKey)) continue;
+
+      visited.add(nextKey);
+      path.push(next);
+      dfs(path, visited);
+      path.pop();
+      visited.delete(nextKey);
+
+      if (shouldStop()) return;
+    }
+  };
+
+  for (const start of placement.startCells) {
+    if (shouldStop()) break;
+    const visited = new Set([keyOf(start.r, start.c)]);
+    dfs([{ r: start.r, c: start.c }], visited);
+  }
+}
+
+function visitPlacementStates(
+  levelCtx,
+  {
+    shouldStop = () => false,
+    beforePlacementStep = () => true,
+    onPlacement = () => { },
+  } = {},
+) {
+  let placementsVisited = 0;
+  const visit = (wallCells) => {
+    placementsVisited += 1;
+    onPlacement(buildPlacementState(levelCtx, wallCells));
+  };
+
+  if (levelCtx.movableWallsCount === 0) {
+    visit([]);
+    return placementsVisited;
+  }
+
+  const selected = [];
+  const choosePlacement = (startIndex, picksLeft) => {
+    if (shouldStop()) return;
+    if (!beforePlacementStep()) return;
+
+    if (picksLeft === 0) {
+      visit(selected);
+      return;
+    }
+
+    for (let i = startIndex; i <= levelCtx.movableCandidates.length - picksLeft; i++) {
+      selected.push(levelCtx.movableCandidates[i]);
+      choosePlacement(i + 1, picksLeft - 1);
+      selected.pop();
+      if (shouldStop()) return;
+    }
+  };
+
+  choosePlacement(0, levelCtx.movableWallsCount);
+  return placementsVisited;
+}
+
 export function solveLevel(level, opts) {
   const levelCtx = buildLevelContext(level);
 
@@ -528,82 +586,36 @@ export function solveLevel(level, opts) {
     hintOrderSet.size >= opts.minHintOrders &&
     cornerOrderSet.size >= opts.minCornerOrders;
 
-  const runForPlacement = (wallCells) => {
-    const placement = buildPlacementState(levelCtx, wallCells);
-
-    const dfs = (path, visited) => {
-      if (rawSet.size >= opts.maxSolutions || earlySatisfied) return;
-      if (Date.now() > deadline) {
-        timedOut = true;
-        return;
-      }
-
-      if (!isValidPrefix(placement, path, visited)) return;
-
-      if (path.length === placement.totalUsable) {
-        rawSet.add(pathKey(path));
-        const canonical = canonicalPathKey(path);
-        if (!canonicalSet.has(canonical)) {
-          canonicalSet.add(canonical);
-          hintOrderSet.add(hintOrderSignature(path, placement.gridData));
-          cornerOrderSet.add(cornerOrderSignature(path, levelCtx.cornerCounts));
-        }
-        if (requirementsMet()) earlySatisfied = true;
-        return;
-      }
-
-      const last = path[path.length - 1];
-      const nbs = placement.neighborMap.get(keyOf(last.r, last.c)) || [];
-      for (const nb of nbs) {
-        const nk = keyOf(nb.r, nb.c);
-        if (visited.has(nk)) continue;
-
-        visited.add(nk);
-        path.push(nb);
-        dfs(path, visited);
-        path.pop();
-        visited.delete(nk);
-
-        if (timedOut || rawSet.size >= opts.maxSolutions || earlySatisfied) return;
-      }
-    };
-
-    for (const start of placement.startCells) {
-      if (earlySatisfied) break;
-      const visited = new Set([keyOf(start.r, start.c)]);
-      dfs([{ r: start.r, c: start.c }], visited);
-      if (timedOut || rawSet.size >= opts.maxSolutions || earlySatisfied) break;
+  const shouldStop = () => timedOut || rawSet.size >= opts.maxSolutions || earlySatisfied;
+  const beforeVisitNode = () => {
+    if (Date.now() > deadline) {
+      timedOut = true;
+      return false;
     }
+    return true;
+  };
+  const onCompletePath = (path, placement) => {
+    rawSet.add(pathKey(path));
+    const canonical = canonicalPathKey(path);
+    if (!canonicalSet.has(canonical)) {
+      canonicalSet.add(canonical);
+      hintOrderSet.add(hintOrderSignature(path, placement.gridData));
+      cornerOrderSet.add(cornerOrderSignature(path, levelCtx.cornerCounts));
+    }
+    if (requirementsMet()) earlySatisfied = true;
   };
 
-  if (levelCtx.movableWallsCount === 0) {
-    wallPlacementsChecked = 1;
-    runForPlacement([]);
-  } else {
-    const selected = [];
-    const choosePlacement = (startIndex, picksLeft) => {
-      if (timedOut || rawSet.size >= opts.maxSolutions || earlySatisfied) return;
-      if (Date.now() > deadline) {
-        timedOut = true;
-        return;
-      }
-
-      if (picksLeft === 0) {
-        wallPlacementsChecked += 1;
-        runForPlacement(selected);
-        return;
-      }
-
-      for (let i = startIndex; i <= levelCtx.movableCandidates.length - picksLeft; i++) {
-        selected.push(levelCtx.movableCandidates[i]);
-        choosePlacement(i + 1, picksLeft - 1);
-        selected.pop();
-        if (timedOut || rawSet.size >= opts.maxSolutions || earlySatisfied) return;
-      }
-    };
-
-    choosePlacement(0, levelCtx.movableWallsCount);
-  }
+  wallPlacementsChecked = visitPlacementStates(levelCtx, {
+    shouldStop,
+    beforePlacementStep: beforeVisitNode,
+    onPlacement: (placement) => {
+      traversePlacementPaths(placement, {
+        shouldStop,
+        beforeVisitNode,
+        onCompletePath,
+      });
+    },
+  });
 
   return {
     rawSolutions: rawSet.size,
@@ -770,67 +782,28 @@ function proveSatisfiableOrUnsat(levelCtx, opts) {
     nodesVisited += 1;
     return true;
   };
-
-  const runPlacement = (placement) => {
-    const dfs = (path, visited) => {
-      if (found || timedOut || nodeCapHit) return;
-      if (!consumeBudget()) return;
-
-      if (!isValidPrefix(placement, path, visited)) return;
-      if (path.length === placement.totalUsable) {
-        found = true;
-        return;
-      }
-
-      const last = path[path.length - 1];
-      const nbs = placement.neighborMap.get(keyOf(last.r, last.c)) || [];
-      for (const nb of nbs) {
-        const nk = keyOf(nb.r, nb.c);
-        if (visited.has(nk)) continue;
-
-        visited.add(nk);
-        path.push(nb);
-        dfs(path, visited);
-        path.pop();
-        visited.delete(nk);
-
-        if (found || timedOut || nodeCapHit) return;
-      }
-    };
-
-    for (const start of placement.startCells) {
-      if (found || timedOut || nodeCapHit) return;
-      const visited = new Set([keyOf(start.r, start.c)]);
-      dfs([{ r: start.r, c: start.c }], visited);
+  const shouldStop = () => found || timedOut || nodeCapHit;
+  const beforePlacementStep = () => {
+    if (Date.now() > deadline) {
+      timedOut = true;
+      return false;
     }
+    return true;
   };
 
-  if (levelCtx.movableWallsCount === 0) {
-    runPlacement(buildPlacementState(levelCtx, []));
-  } else {
-    const selected = [];
-    const choosePlacement = (startIndex, picksLeft) => {
-      if (found || timedOut || nodeCapHit) return;
-      if (Date.now() > deadline) {
-        timedOut = true;
-        return;
-      }
-
-      if (picksLeft === 0) {
-        runPlacement(buildPlacementState(levelCtx, selected));
-        return;
-      }
-
-      for (let i = startIndex; i <= levelCtx.movableCandidates.length - picksLeft; i++) {
-        selected.push(levelCtx.movableCandidates[i]);
-        choosePlacement(i + 1, picksLeft - 1);
-        selected.pop();
-        if (found || timedOut || nodeCapHit) return;
-      }
-    };
-
-    choosePlacement(0, levelCtx.movableWallsCount);
-  }
+  visitPlacementStates(levelCtx, {
+    shouldStop,
+    beforePlacementStep,
+    onPlacement: (placement) => {
+      traversePlacementPaths(placement, {
+        shouldStop,
+        beforeVisitNode: consumeBudget,
+        onCompletePath: () => {
+          found = true;
+        },
+      });
+    },
+  });
 
   let status = 'proven_unsat';
   if (found) status = 'satisfiable_found';
