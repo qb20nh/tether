@@ -37,6 +37,7 @@ const LOW_POWER_HINT_AVG_DROP_RATIO = 0.8;
 const LOW_POWER_HINT_P99_DROP_RATIO = 0.72;
 const LOW_POWER_HINT_MIN_AVG_DROP_FPS = 8;
 const LOW_POWER_HINT_MIN_P99_DROP_FPS = 8;
+const IS_TETHER_DEV_RUNTIME = typeof __TETHER_DEV__ === 'boolean' ? __TETHER_DEV__ : true;
 
 const createDebugDailyFreezeDev = ({
   getLocked,
@@ -158,11 +159,6 @@ const resolveLevelNameCore = (level, translate) => {
     String(name || '').trim(),
     level?.nameKey,
   );
-};
-
-const isDevRuntimeEnabled = () => {
-  if (typeof __TETHER_DEV__ === 'boolean') return __TETHER_DEV__;
-  return true;
 };
 
 const buildSelectOption = (value, label, options = {}) => {
@@ -1425,8 +1421,7 @@ export function createRuntime(options) {
     }
   };
 
-  const debugDailyFreezeEnabled = isDevRuntimeEnabled();
-  const debugDailyFreeze = debugDailyFreezeEnabled
+  const debugDailyFreeze = IS_TETHER_DEV_RUNTIME
     ? createDebugDailyFreezeDev({
       getLocked: () => dailyBoardLocked,
       renderDailyMeta: () => renderDailyMeta(),

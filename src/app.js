@@ -42,6 +42,7 @@ const APP_TOAST_ID = 'appToast';
 const UPDATE_PROGRESS_OVERLAY_ID = 'updateProgressOverlay';
 const APP_TOAST_VISIBLE_MS = 3200;
 const BUILD_LABEL_HASH_RE = /\b[0-9a-f]{7,40}\b/i;
+const IS_TETHER_DEV_RUNTIME = typeof __TETHER_DEV__ === 'boolean' ? __TETHER_DEV__ : true;
 
 const SW_MESSAGE_TYPES = Object.freeze({
   SYNC_DAILY_STATE: 'SW_SYNC_DAILY_STATE',
@@ -764,7 +765,7 @@ export async function initTetherApp() {
   appEl.removeAttribute('aria-busy');
   notificationCenter.refreshToggleUi();
   notificationCenter.refreshHistoryUi();
-  if (typeof __TETHER_DEV__ === 'boolean' ? __TETHER_DEV__ : true) {
+  if (IS_TETHER_DEV_RUNTIME) {
     void mountRuntimePlugins({
       isLocalhostHostname,
       canUseServiceWorker,

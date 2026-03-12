@@ -236,6 +236,7 @@ const createRuntimeHarness = ({
   rendererOverrides = {},
   persistenceInitialState = {},
   persistenceOverrides = {},
+  createRuntimeImpl = createRuntime,
 } = {}) => {
   const levelProvider = createLevelProvider({
     levels,
@@ -319,7 +320,7 @@ const createRuntimeHarness = ({
     ...i18nOverrides,
   };
 
-  const runtime = createRuntime({
+  const runtime = createRuntimeImpl({
     appEl: {
       querySelectorAll: () => [],
     },
@@ -397,6 +398,30 @@ const emitSolvePath = (runtime, cells) => {
     payload: { commandType: GAME_COMMANDS.FINALIZE_PATH },
   });
 };
+
+test('createRuntime omits daily freeze debug hooks when __TETHER_DEV__ is false', async (t) => {
+  installBrowserEnv(t);
+
+  const hadDevFlag = Object.hasOwn(globalThis, '__TETHER_DEV__');
+  const previousDevFlag = globalThis.__TETHER_DEV__;
+  globalThis.__TETHER_DEV__ = false;
+
+  t.after(() => {
+    if (hadDevFlag) globalThis.__TETHER_DEV__ = previousDevFlag;
+    else delete globalThis.__TETHER_DEV__;
+  });
+
+  const moduleUrl = new URL(`../../src/runtime/create_runtime.js?prod-gate=${Date.now()}`, import.meta.url);
+  const { createRuntime: createRuntimeProd } = await import(moduleUrl);
+  const { runtime } = createRuntimeHarness({
+    dailyLevel: DAILY_LEVEL,
+    createRuntimeImpl: createRuntimeProd,
+  });
+
+  assert.equal('readDebugDailyFreezeState' in runtime, false);
+  assert.equal('setDebugForceDailyFrozen' in runtime, false);
+  assert.equal('toggleDebugForceDailyFrozen' in runtime, false);
+});
 
 test('createRuntime destroy removes listeners, disconnects observers, and cancels pending work', (t) => {
   const env = installBrowserEnv(t);
