@@ -280,3 +280,98 @@ test('local debug panel mounts with tabs and animation controls', () => {
     globalObject.cancelAnimationFrame = originalCancelRaf;
   }
 });
+
+test('local debug panel notification and daily actions invoke callbacks', async () => {
+  const documentObj = createDocumentHarness();
+  const calls: Array<{ kind: string; payload?: unknown }> = [];
+  const originalWindow = globalObject.window;
+  const originalDocument = globalObject.document;
+  const originalRaf = globalObject.requestAnimationFrame;
+  const originalCancelRaf = globalObject.cancelAnimationFrame;
+
+  globalObject.window = ({
+    matchMedia: () => ({ matches: false, media: '(prefers-reduced-motion: reduce)' }),
+    location: {
+      reload() {
+        calls.push({ kind: 'reload' });
+      },
+    },
+  } as any);
+  globalObject.document = (documentObj as any);
+  globalObject.requestAnimationFrame = () => 1;
+  globalObject.cancelAnimationFrame = () => {};
+
+  try {
+    mountLocalDebugPanel({
+      requestNotificationPermission: async () => {
+        calls.push({ kind: 'permission' });
+        return 'granted';
+      },
+      showToast: (text: unknown) => {
+        calls.push({ kind: 'toast', payload: String(text) });
+      },
+      triggerSystemNotification: async (payload?: { kind?: string }) => {
+        calls.push({ kind: 'system', payload });
+        return true;
+      },
+      clearNotifications: async () => {
+        calls.push({ kind: 'clear' });
+        return true;
+      },
+      readDailyDebugSnapshot: () => ({ frozen: false }),
+      runDailyCheck: async () => {
+        calls.push({ kind: 'daily-check' });
+        return true;
+      },
+      toggleForceDailyFrozenState: () => {
+        calls.push({ kind: 'toggle-frozen' });
+        return { frozen: true };
+      },
+      fetchDailyPayload: async (payload?: { bypassCache?: boolean }) => {
+        calls.push({ kind: 'fetch-daily', payload });
+        return {
+          dailyId: '2026-01-01',
+          dailySlot: 1,
+          generatedAtUtcMs: Date.UTC(2026, 0, 1),
+          hardInvalidateAtUtcMs: Date.UTC(2026, 0, 2),
+          level: {
+            grid: ['..', '..'],
+          },
+        };
+      },
+      reloadApp: () => {
+        calls.push({ kind: 'reload-app' });
+      },
+    });
+
+    const root = documentObj.getElementById('tetherLocalDebugPanel');
+    const dailyButton = documentObj.getElementById('tetherLocalDebugPanelTabDaily');
+    assert.ok(root);
+    assert.ok(dailyButton);
+
+    findButtonByText(root, 'Permission')?.click();
+    findButtonByText(root, 'Toast')?.click();
+    findButtonByText(root, 'System: Warning')?.click();
+    findButtonByText(root, 'Clear Notifications')?.click();
+    dailyButton.click();
+    findButtonByText(root, 'Snapshot')?.click();
+    findButtonByText(root, 'Run Daily Check')?.click();
+    findButtonByText(root, 'Toggle Force Frozen')?.click();
+    findButtonByText(root, 'Fetch Daily (Bypass)')?.click();
+    findButtonByText(root, 'Reload App')?.click();
+
+    assert.equal(calls.some((entry) => entry.kind === 'permission'), true);
+    assert.equal(calls.some((entry) => entry.kind === 'toast'), true);
+    assert.equal(calls.some((entry) => entry.kind === 'system'), true);
+    assert.equal(calls.some((entry) => entry.kind === 'clear'), true);
+    assert.equal(calls.some((entry) => entry.kind === 'daily-check'), true);
+    assert.equal(calls.some((entry) => entry.kind === 'toggle-frozen'), true);
+    assert.equal(calls.some((entry) => entry.kind === 'fetch-daily' && (entry.payload as { bypassCache?: boolean })?.bypassCache === true), true);
+    assert.equal(calls.some((entry) => entry.kind === 'reload-app'), true);
+  } finally {
+    globalObject.window = originalWindow;
+    globalObject.document = originalDocument;
+    globalObject.requestAnimationFrame = originalRaf;
+    globalObject.cancelAnimationFrame = originalCancelRaf;
+  }
+});

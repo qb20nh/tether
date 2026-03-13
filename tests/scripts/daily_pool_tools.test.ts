@@ -5,6 +5,10 @@ import {
   computeDayOrdinal,
   materializeDailyLevelForSlot,
   replayWitnessAndValidate,
+  selectDailyCandidateForSlot,
+  toDailyPayloadLevel,
+  utcStartMsFromDateId,
+  addUtcDaysToDateId,
 } from '../../scripts/daily_pool_tools.ts';
 import {
   decodeDailyOverridesPayload,
@@ -47,4 +51,80 @@ test('materialized daily level witness validates', () => {
   assert.equal(typeof daily.canonicalKey, 'string');
   assert.equal(daily.canonicalKey.length > 0, true);
   assert.equal(replayWitnessAndValidate(daily.level), true);
+});
+
+test('daily pool helpers validate inputs and normalize payload fields', () => {
+  assert.throws(() => buildSecretPermutation('', 8), /non-empty string/);
+  assert.throws(() => buildSecretPermutation('secret', 0), /positive integer/);
+  assert.throws(() => utcStartMsFromDateId('not-a-date'), /Invalid UTC date id/);
+  assert.throws(() => addUtcDaysToDateId('2026-01-01', 1.5), /deltaDays must be an integer/);
+
+  assert.deepEqual(toDailyPayloadLevel(null, '2026-01-01'), {
+    name: 'Daily 2026-01-01',
+    grid: [],
+    stitches: [],
+    cornerCounts: [],
+  });
+});
+
+test('selectDailyCandidateForSlot uses the best in-window variant and falls back past the difficulty window', () => {
+  const baseCandidate = materializeDailyLevelForSlot(0, null, 0);
+  const variantOne = materializeDailyLevelForSlot(0, { 0: 1 }, 0);
+  const variantTwo = materializeDailyLevelForSlot(0, { 0: 2 }, 0);
+
+  const bestWindowCandidate = selectDailyCandidateForSlot(0, {
+    infiniteCanonicalKeys: new Set<string>(),
+    dailyCanonicalKeys: new Set<string>(),
+    maxVariantProbe: 2,
+    baseVariantId: 0,
+    difficultyVariantWindow: 2,
+  });
+  assert.equal(bestWindowCandidate.variantId === 0 || bestWindowCandidate.variantId === 1, true);
+
+  const fallbackCandidate = selectDailyCandidateForSlot(0, {
+    infiniteCanonicalKeys: new Set<string>(),
+    dailyCanonicalKeys: new Set<string>([
+      baseCandidate.canonicalKey,
+      variantOne.canonicalKey,
+    ]),
+    maxVariantProbe: 2,
+    baseVariantId: 0,
+    difficultyVariantWindow: 1,
+  });
+  assert.equal(fallbackCandidate.variantId, 2);
+  assert.equal(fallbackCandidate.canonicalKey, variantTwo.canonicalKey);
+});
+
+test('selectDailyCandidateForSlot rejects impossible or invalid ranges', () => {
+  assert.throws(() => {
+    selectDailyCandidateForSlot(0, {
+      infiniteCanonicalKeys: new Set<string>(),
+      dailyCanonicalKeys: new Set<string>(),
+      maxVariantProbe: -1,
+      baseVariantId: 0,
+    });
+  }, /maxVariantProbe/);
+
+  assert.throws(() => {
+    selectDailyCandidateForSlot(0, {
+      infiniteCanonicalKeys: new Set<string>(),
+      dailyCanonicalKeys: new Set<string>(),
+      difficultyVariantWindow: 0,
+    });
+  }, /difficultyVariantWindow/);
+
+  const lockedKeys = new Set<string>();
+  for (let variantId = 0; variantId <= 2; variantId += 1) {
+    lockedKeys.add(materializeDailyLevelForSlot(0, { 0: variantId }, 0).canonicalKey);
+  }
+
+  assert.throws(() => {
+    selectDailyCandidateForSlot(0, {
+      infiniteCanonicalKeys: lockedKeys,
+      dailyCanonicalKeys: new Set<string>(),
+      maxVariantProbe: 2,
+      baseVariantId: 0,
+      difficultyVariantWindow: 3,
+    });
+  }, /Unable to find unique solvable daily variant/);
 });
