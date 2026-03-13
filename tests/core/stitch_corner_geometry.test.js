@@ -34,7 +34,7 @@ test('buildOrthEdgeSet ignores diagonal path segments', () => {
     { r: 1, c: 1 },
   ], edgeKey);
 
-  assert.deepEqual([...orthEdges].toSorted(), [
+  assert.deepEqual([...orthEdges].sort(), [
     edgeKey({ r: 0, c: 0 }, { r: 0, c: 1 }),
     edgeKey({ r: 1, c: 1 }, { r: 1, c: 2 }),
   ]);

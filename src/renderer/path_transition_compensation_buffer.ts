@@ -1,17 +1,58 @@
-// @ts-nocheck
 import {
   normalizeFlowOffset,
   pathsMatch,
   resolvePathSignature,
 } from './path_transition_utils.ts';
+import type {
+  GameSnapshot,
+  GridPoint,
+} from '../contracts/ports.ts';
 
-const resolveSnapshotPath = (snapshotOrPath) => {
+type SnapshotOrPath = GameSnapshot | readonly GridPoint[] | null | undefined;
+
+const resolveSnapshotPath = (snapshotOrPath: SnapshotOrPath): readonly GridPoint[] | null => {
   if (Array.isArray(snapshotOrPath)) return snapshotOrPath;
-  if (Array.isArray(snapshotOrPath?.path)) return snapshotOrPath.path;
+  if (
+    snapshotOrPath
+    && typeof snapshotOrPath === 'object'
+    && 'path' in snapshotOrPath
+    && Array.isArray(snapshotOrPath.path)
+  ) {
+    return snapshotOrPath.path;
+  }
   return null;
 };
 
-export function createPathTransitionCompensationBuffer({ resolveShift }) {
+interface PathTransitionCompensationBuffer {
+  hasPending: () => boolean;
+  clear: () => void;
+  record: (
+    previousSnapshot: SnapshotOrPath,
+    nextSnapshot: SnapshotOrPath,
+    refs?: unknown,
+  ) => number;
+  consume: (
+    path: readonly GridPoint[] | null | undefined,
+    currentOffset?: number,
+    flowCycle?: number,
+  ) => {
+    consumed: boolean;
+    stale: boolean;
+    appliedShift: number;
+    transitionCount: number;
+    nextOffset: number;
+  };
+}
+
+export function createPathTransitionCompensationBuffer({
+  resolveShift,
+}: {
+  resolveShift?: (
+    nextPath: readonly GridPoint[],
+    previousPath: readonly GridPoint[],
+    refs?: unknown,
+  ) => number;
+}): PathTransitionCompensationBuffer {
   let pendingPathFlowOffsetShift = 0;
   let pendingPathFlowTransitionCount = 0;
   let pendingPathFlowTargetSignature = '';

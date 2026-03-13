@@ -2,6 +2,12 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createSwMessenger } from '../../src/app/sw_messenger.ts';
 
+/**
+ * @typedef {{ data?: unknown }} FakeMessageEvent
+ * @typedef {{ onmessage: ((event?: FakeMessageEvent) => void) | null, close: () => void }} FakeMessagePort
+ * @typedef {{ port1: FakeMessagePort, port2: FakeMessagePort & { dispatch?: (data: unknown) => void } }} FakeMessageChannel
+ */
+
 const createWindowMock = () => ({
   isSecureContext: true,
   Notification: {},
@@ -40,7 +46,7 @@ test('postMessage queues and flushes pending messages when target becomes availa
   const queued = await messenger.postMessage(payload, { queueWhenUnavailable: true });
   assert.equal(queued, false);
 
-  const posted = [];
+  const posted = /** @type {unknown[]} */ ([]);
   const target = {
     postMessage(message) {
       posted.push(message);
@@ -62,7 +68,7 @@ test('postMessageWithReply returns response payload from message target', async 
     windowObj: createWindowMock(),
     navigatorObj,
     messageChannelFactory: () => {
-      const channel = {
+      const channel = /** @type {FakeMessageChannel} */ ({
         port1: {
           onmessage: null,
           close() { },
@@ -75,7 +81,7 @@ test('postMessageWithReply returns response payload from message target', async 
             }
           },
         },
-      };
+      });
       return channel;
     },
   });
@@ -83,7 +89,8 @@ test('postMessageWithReply returns response payload from message target', async 
   messenger.setRegistration({
     active: {
       postMessage(message, ports) {
-        ports[0].dispatch({ ok: true, received: message.type });
+        const replyPort = /** @type {FakeMessageChannel['port2'] | undefined} */ (ports?.[0]);
+        replyPort?.dispatch?.({ ok: true, received: /** @type {{ type?: string }} */ (message).type });
       },
     },
     waiting: null,
@@ -100,11 +107,11 @@ test('postMessageWithReply returns null on timeout/failure', async () => {
     windowObj: {
       isSecureContext: true,
       Notification: {},
-      setTimeout(fn) {
+      setTimeout: /** @type {typeof globalThis.setTimeout} */ ((fn) => {
         fn();
         return 1;
-      },
-      clearTimeout() { },
+      }),
+      clearTimeout: globalThis.clearTimeout.bind(globalThis),
     },
     navigatorObj,
     messageChannelFactory: () => ({
@@ -132,7 +139,7 @@ test('postMessageWithReply returns null on timeout/failure', async () => {
 
 test('bindHistoryUpdates handles only matching type and binds once', () => {
   const harness = createNavigatorMock();
-  const payloads = [];
+  const payloads = /** @type {unknown[]} */ ([]);
   const messenger = createSwMessenger({
     windowObj: createWindowMock(),
     navigatorObj: harness.navigatorObj,

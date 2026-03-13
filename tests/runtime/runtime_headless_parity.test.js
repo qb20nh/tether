@@ -7,6 +7,8 @@ import { createHeadlessRuntime, createRuntime } from '../../src/runtime/create_r
 import { GAME_COMMANDS, INTENT_TYPES } from '../../src/runtime/intents.ts';
 import { createGameStateStore } from '../../src/state/game_state_store.ts';
 
+const globalObject = /** @type {any} */ (globalThis);
+
 const CAMPAIGN_LEVEL = {
   name: 'Campaign',
   grid: [
@@ -50,7 +52,7 @@ const INFINITE_SCORE_LEVEL = {
 
 const createClassList = () => {
   const tokens = new Set();
-  return {
+  return /** @type {any} */ ({
     add: (...values) => values.forEach((value) => tokens.add(value)),
     remove: (...values) => values.forEach((value) => tokens.delete(value)),
     toggle: (value, force) => {
@@ -60,10 +62,10 @@ const createClassList = () => {
       return shouldHave;
     },
     contains: (value) => tokens.has(value),
-  };
+  });
 };
 
-const createElement = () => ({
+const createElement = () => /** @type {any} */ ({
   hidden: false,
   disabled: false,
   textContent: '',
@@ -97,7 +99,7 @@ const createRefs = () => {
   const levelSelectGroup = createElement();
   levelSelectGroup.parentElement = createElement();
 
-  return {
+  return /** @type {any} */ ({
     boardWrap: createElement(),
     gridEl: createElement(),
     legend: createElement(),
@@ -126,7 +128,7 @@ const createRefs = () => {
     reverseBtn: createElement(),
     langSel: createElement(),
     msgEl: createElement(),
-  };
+  });
 };
 
 const installBrowserEnv = (t) => {
@@ -167,7 +169,7 @@ const installBrowserEnv = (t) => {
     }
   }
 
-  globalThis.window = {
+  globalObject.window = /** @type {any} */ ({
     addEventListener(eventName, handler) {
       ensureListeners(eventName).add(handler);
     },
@@ -183,8 +185,8 @@ const installBrowserEnv = (t) => {
     clearInterval(id) {
       intervalCallbacks.delete(id);
     },
-  };
-  globalThis.document = {
+  });
+  globalObject.document = /** @type {any} */ ({
     documentElement: {
       lang: '',
       dataset: {},
@@ -192,9 +194,9 @@ const installBrowserEnv = (t) => {
       setAttribute() { },
     },
     body: null,
-  };
-  globalThis.ResizeObserver = FakeResizeObserver;
-  globalThis.requestAnimationFrame = (callback) => {
+  });
+  globalObject.ResizeObserver = /** @type {any} */ (FakeResizeObserver);
+  globalObject.requestAnimationFrame = (callback) => {
     const id = nextRafId;
     nextRafId += 1;
     rafCallbacks.set(id, (...args) => {
@@ -203,10 +205,10 @@ const installBrowserEnv = (t) => {
     });
     return id;
   };
-  globalThis.cancelAnimationFrame = (id) => {
+  globalObject.cancelAnimationFrame = (id) => {
     rafCallbacks.delete(id);
   };
-  globalThis.setTimeout = (callback) => {
+  globalObject.setTimeout = (callback) => {
     const id = nextTimeoutId;
     nextTimeoutId += 1;
     timeoutCallbacks.set(id, (...args) => {
@@ -215,22 +217,22 @@ const installBrowserEnv = (t) => {
     });
     return id;
   };
-  globalThis.clearTimeout = (id) => {
+  globalObject.clearTimeout = (id) => {
     timeoutCallbacks.delete(id);
   };
-  globalThis.setInterval = globalThis.window.setInterval;
-  globalThis.clearInterval = globalThis.window.clearInterval;
+  globalObject.setInterval = globalObject.window.setInterval;
+  globalObject.clearInterval = globalObject.window.clearInterval;
 
   t.after(() => {
-    globalThis.window = originalWindow;
-    globalThis.document = originalDocument;
-    globalThis.ResizeObserver = originalResizeObserver;
-    globalThis.requestAnimationFrame = originalRaf;
-    globalThis.cancelAnimationFrame = originalCancelRaf;
-    globalThis.setTimeout = originalSetTimeout;
-    globalThis.clearTimeout = originalClearTimeout;
-    globalThis.setInterval = originalSetInterval;
-    globalThis.clearInterval = originalClearInterval;
+    globalObject.window = originalWindow;
+    globalObject.document = originalDocument;
+    globalObject.ResizeObserver = originalResizeObserver;
+    globalObject.requestAnimationFrame = originalRaf;
+    globalObject.cancelAnimationFrame = originalCancelRaf;
+    globalObject.setTimeout = originalSetTimeout;
+    globalObject.clearTimeout = originalClearTimeout;
+    globalObject.setInterval = originalSetInterval;
+    globalObject.clearInterval = originalClearInterval;
   });
 
   return {
@@ -250,7 +252,7 @@ const flushCallbacks = (callbackMap, arg) => {
   }
 };
 
-const createUiHarness = ({ levels, infiniteMaxLevels = 4, generateInfiniteLevel, dailyLevel = null, dailyId = null }, t) => {
+const createUiHarness = (/** @type {any} */ { levels, infiniteMaxLevels = 4, generateInfiniteLevel, dailyLevel = null, dailyId = null }, t) => {
   const env = installBrowserEnv(t);
   const levelProvider = createLevelProvider({
     levels,
@@ -265,12 +267,12 @@ const createUiHarness = ({ levels, infiniteMaxLevels = 4, generateInfiniteLevel,
     dailyAbsIndex: core.getDailyAbsIndex(),
     activeDailyId: core.getDailyId(),
   });
-  const refs = createRefs();
+  const refs = /** @type {any} */ (createRefs());
 
   const runtime = createRuntime({
-    appEl: {
+    appEl: /** @type {any} */ ({
       querySelectorAll: () => [],
-    },
+    }),
     core,
     state,
     persistence,
@@ -291,9 +293,13 @@ const createUiHarness = ({ levels, infiniteMaxLevels = 4, generateInfiniteLevel,
     },
     input: {
       bind() { },
+      setKeyboardGamepadControlsEnabled() { },
+      setBoardControlSuppressed() { },
+      syncSnapshot() { },
       unbind() { },
     },
     i18n: {
+      initialize: async () => 'en',
       resolveLocale: () => 'en',
       createTranslator: () => (key, vars = {}) => {
         if (key === 'ui.infiniteLevelOption') return `Infinite ${vars.n ?? ''}`.trim();
@@ -301,8 +307,15 @@ const createUiHarness = ({ levels, infiniteMaxLevels = 4, generateInfiniteLevel,
         return key;
       },
       getLocale: () => 'en',
-      setLocale: () => 'en',
+      setLocale: async () => 'en',
       getLocaleOptions: () => [{ value: 'en', label: 'English' }],
+      translateNow: (key, vars = {}) => {
+        if (key === 'ui.infiniteLevelOption') return `Infinite ${vars.n ?? ''}`.trim();
+        if (key === 'ui.dailyLevelOptionWithDate') return `${vars.label} ${vars.date}`.trim();
+        return key;
+      },
+      preloadAllLocales: async () => [{ value: 'en', label: 'English' }],
+      isOnline: () => true,
     },
     ui: {
       buildLegendTemplate: () => '',
@@ -370,12 +383,12 @@ const dispatchHeadlessPath = (runtime, cells, finalize = true) => {
 };
 
 test('ui and headless runtimes keep daily solve score and solved date in parity', (t) => {
-  const options = {
+  const options = /** @type {any} */ ({
     levels: [CAMPAIGN_LEVEL],
     generateInfiniteLevel: () => CAMPAIGN_LEVEL,
     dailyLevel: DAILY_LEVEL,
     dailyId: '2026-03-08',
-  };
+  });
   const ui = createUiHarness(options, t);
   const headless = createHeadlessHarness(options);
   const dailyIndex = ui.core.getDailyAbsIndex();
@@ -440,12 +453,12 @@ test('ui and headless runtimes keep infinite solve score and progress in parity'
 });
 
 test('ui and headless runtimes serialize session boards identically', (t) => {
-  const options = {
+  const options = /** @type {any} */ ({
     levels: [CAMPAIGN_LEVEL],
     generateInfiniteLevel: () => CAMPAIGN_LEVEL,
     dailyLevel: DAILY_SESSION_LEVEL,
     dailyId: '2026-03-08',
-  };
+  });
   const ui = createUiHarness(options, t);
   const headless = createHeadlessHarness(options);
   const dailyIndex = ui.core.getDailyAbsIndex();

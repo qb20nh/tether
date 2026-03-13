@@ -9,26 +9,41 @@ import {
   normalizeHistoryAction,
 } from '../../src/runtime/notification_history.ts';
 
+/** @typedef {import('../../src/contracts/ports.ts').NotificationHistoryEntry} NotificationHistoryEntry */
+
+/**
+ * @param {Partial<NotificationHistoryEntry> & Pick<NotificationHistoryEntry, 'source' | 'marker'>} entry
+ * @returns {NotificationHistoryEntry}
+ */
+const createHistoryEntry = (entry) => ({
+  id: 'id',
+  kind: 'toast',
+  title: '',
+  body: '',
+  createdAtUtcMs: 0,
+  ...entry,
+});
+
 test('hasUnreadSystemHistory only reflects unread system entries', () => {
   assert.equal(hasUnreadSystemHistory([]), false);
   assert.equal(hasUnreadSystemHistory([
-    { source: 'toast', marker: 'unread' },
-    { source: 'system', marker: 'just-read' },
+    createHistoryEntry({ source: 'toast', marker: 'unread' }),
+    createHistoryEntry({ source: 'system', marker: 'just-read' }),
   ]), false);
   assert.equal(hasUnreadSystemHistory([
-    { source: 'toast', marker: 'unread' },
-    { source: 'system', marker: 'unread' },
+    createHistoryEntry({ source: 'toast', marker: 'unread' }),
+    createHistoryEntry({ source: 'system', marker: 'unread' }),
   ]), true);
 });
 
 test('historyEntryDotColor applies source rules for all marker states', () => {
-  assert.equal(historyEntryDotColor({ source: 'system', marker: 'unread' }), HISTORY_DOT_COLORS.RED);
-  assert.equal(historyEntryDotColor({ source: 'system', marker: 'just-read' }), HISTORY_DOT_COLORS.RED);
-  assert.equal(historyEntryDotColor({ source: 'system', marker: 'older' }), HISTORY_DOT_COLORS.RED);
-  assert.equal(historyEntryDotColor({ source: 'toast', marker: 'unread' }), HISTORY_DOT_COLORS.BLUE);
-  assert.equal(historyEntryDotColor({ source: 'toast', marker: 'just-read' }), HISTORY_DOT_COLORS.BLUE);
-  assert.equal(historyEntryDotColor({ source: 'toast', marker: 'older' }), HISTORY_DOT_COLORS.BLUE);
-  assert.equal(historyEntryDotColor({ source: 'unknown', marker: 'older' }), HISTORY_DOT_COLORS.NONE);
+  assert.equal(historyEntryDotColor(createHistoryEntry({ source: 'system', marker: 'unread' })), HISTORY_DOT_COLORS.RED);
+  assert.equal(historyEntryDotColor(createHistoryEntry({ source: 'system', marker: 'just-read' })), HISTORY_DOT_COLORS.RED);
+  assert.equal(historyEntryDotColor(createHistoryEntry({ source: 'system', marker: 'older' })), HISTORY_DOT_COLORS.RED);
+  assert.equal(historyEntryDotColor(createHistoryEntry({ source: 'toast', marker: 'unread' })), HISTORY_DOT_COLORS.BLUE);
+  assert.equal(historyEntryDotColor(createHistoryEntry({ source: 'toast', marker: 'just-read' })), HISTORY_DOT_COLORS.BLUE);
+  assert.equal(historyEntryDotColor(createHistoryEntry({ source: 'toast', marker: 'older' })), HISTORY_DOT_COLORS.BLUE);
+  assert.equal(historyEntryDotColor(/** @type {any} */ ({ source: 'unknown', marker: 'older' })), HISTORY_DOT_COLORS.NONE);
 });
 
 test('normalizeHistoryAction accepts apply-update action with valid build number', () => {

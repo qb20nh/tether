@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { gzipSync } from 'node:zlib';
-import { publishDailyLevel } from '../../scripts/publish_daily_level.js';
+import { publishDailyLevel } from '../../scripts/publish_daily_level.ts';
 
 const writeJson = (filePath, value) => {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });

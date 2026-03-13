@@ -1,5 +1,10 @@
-// @ts-nocheck
 import { CELL_TYPES, HINT_CODES, RPS_CODES } from '../config.ts';
+import type {
+  GameSnapshot,
+  GridPoint,
+  PersistencePort,
+  RuntimeData,
+} from '../contracts/ports.ts';
 import {
   buildCornerEventMask,
   buildCornerOrthEdgeRefs,
@@ -11,22 +16,94 @@ import { isAdjacentMove, keyOf } from '../utils.ts';
 export const SCORE_MODES = Object.freeze({
   INFINITE: 'infinite',
   DAILY: 'daily',
-});
+} as const);
+type ScoreMode = typeof SCORE_MODES[keyof typeof SCORE_MODES];
 
-export const EMPTY_SCORE_STATE = Object.freeze({
+interface NormalizedScoreState {
+  infiniteTotal: number;
+  dailyTotal: number;
+  infiniteByLevel: Record<string, string[]>;
+  dailyByDate: Record<string, string[]>;
+  [key: string]: unknown;
+}
+
+interface ScoreBucketPayload {
+  infiniteTotal: number;
+  dailyTotal: number;
+  infiniteByLevel: Map<string, Set<string>>;
+  dailyByDate: Map<string, Set<string>>;
+}
+
+interface CornerState {
+  edgeSeen: Set<string>;
+  edgeTrace: string[];
+}
+
+interface CornerEdgeRef {
+  cornerKey: string;
+  edgeLabel: 'N' | 'W' | 'E' | 'S';
+}
+
+interface CornerTrackingState {
+  cornerRefsByEdgeKey: Map<string, CornerEdgeRef[]>;
+  cornerStateByKey: Map<string, CornerState>;
+  seenCorners: Set<string>;
+}
+
+interface WallIsland {
+  x: number;
+  y: number;
+}
+
+interface TopologyRay extends WallIsland {
+  id: string;
+}
+
+interface TopologyHit {
+  t: number;
+  token: string;
+}
+
+interface ScoreTotals {
+  infiniteTotal: number;
+  dailyTotal: number;
+}
+
+type GridDataSnapshot = Pick<GameSnapshot, 'gridData'>;
+
+interface ReadDistinctCountOptions {
+  mode: ScoreMode;
+  levelKey: string;
+}
+
+interface RegisterSolvedOptions extends ReadDistinctCountOptions {
+  signature: string;
+}
+
+interface RegisterSolvedResult {
+  mode: ScoreMode;
+  levelKey: string;
+  awarded: number;
+  isNew: boolean;
+  levelDistinctCount: number;
+  modeTotal: number;
+  totals: ScoreTotals;
+}
+
+export const EMPTY_SCORE_STATE: Readonly<NormalizedScoreState> = Object.freeze({
   infiniteTotal: 0,
   dailyTotal: 0,
   infiniteByLevel: Object.freeze({}),
   dailyByDate: Object.freeze({}),
 });
 
-const WALL_CODES = new Set([CELL_TYPES.WALL, CELL_TYPES.MOVABLE_WALL]);
+const WALL_CODES: ReadonlySet<string> = new Set([CELL_TYPES.WALL, CELL_TYPES.MOVABLE_WALL]);
 const CONSTRAINT_CODES = new Set([
   ...HINT_CODES,
   ...RPS_CODES,
 ]);
 
-const DIRECTION_TOKEN_BY_DELTA = Object.freeze({
+const DIRECTION_TOKEN_BY_DELTA: Readonly<Record<string, string>> = Object.freeze({
   '-1,0': 'U',
   '1,0': 'D',
   '0,-1': 'L',
@@ -37,22 +114,22 @@ const DIRECTION_TOKEN_BY_DELTA = Object.freeze({
   '1,1': 'DR',
 });
 
-const ORTHOGONAL_DELTAS = Object.freeze([
+const ORTHOGONAL_DELTAS: readonly [number, number][] = Object.freeze([
   [-1, 0],
   [1, 0],
   [0, -1],
   [0, 1],
 ]);
 
-const toNonNegativeInt = (value) => {
-  const parsed = Number.parseInt(value, 10);
+const toNonNegativeInt = (value: unknown): number => {
+  const parsed = Number.parseInt(String(value ?? ''), 10);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : 0;
 };
 
-const normalizeSignatureArray = (value) => {
+const normalizeSignatureArray = (value: unknown): string[] => {
   if (!Array.isArray(value)) return [];
-  const out = [];
-  const seen = new Set();
+  const out: string[] = [];
+  const seen = new Set<string>();
   for (const element of value) {
     const signature = typeof element === 'string' ? element.trim() : '';
     if (!signature || seen.has(signature)) continue;
@@ -62,9 +139,9 @@ const normalizeSignatureArray = (value) => {
   return out;
 };
 
-const normalizeByLevelRecord = (value) => {
+const normalizeByLevelRecord = (value: unknown): Record<string, string[]> => {
   if (!value || typeof value !== 'object') return {};
-  const out = {};
+  const out: Record<string, string[]> = {};
   const entries = Object.entries(value);
   for (const element of entries) {
     const [rawKey, signatures] = element;
@@ -76,26 +153,28 @@ const normalizeByLevelRecord = (value) => {
   return out;
 };
 
-const scoreAwardForDistinctCount = (distinctCount) => {
+const scoreAwardForDistinctCount = (distinctCount: number): number => {
   if (!Number.isInteger(distinctCount) || distinctCount <= 0) return 0;
   return Math.max(0, Math.round(Math.sqrt(2 * distinctCount)));
 };
 
-const compareStringsAscending = (left, right) => {
+const compareStringsAscending = (left: string, right: string): number => {
   if (left < right) return -1;
   if (left > right) return 1;
   return 0;
 };
 
-const toSortedSignatureList = (signatureSet) => [...signatureSet].sort(compareStringsAscending);
+const toSortedSignatureList = (signatureSet: ReadonlySet<string>): string[] =>
+  [...signatureSet].sort(compareStringsAscending);
 
-export const normalizeScoreState = (value) => {
+export const normalizeScoreState = (value: unknown): NormalizedScoreState => {
   const source = value && typeof value === 'object' ? value : EMPTY_SCORE_STATE;
+  const sourceRecord = source as Partial<NormalizedScoreState>;
   return {
-    infiniteTotal: toNonNegativeInt(source.infiniteTotal),
-    dailyTotal: toNonNegativeInt(source.dailyTotal),
-    infiniteByLevel: normalizeByLevelRecord(source.infiniteByLevel),
-    dailyByDate: normalizeByLevelRecord(source.dailyByDate),
+    infiniteTotal: toNonNegativeInt(sourceRecord.infiniteTotal),
+    dailyTotal: toNonNegativeInt(sourceRecord.dailyTotal),
+    infiniteByLevel: normalizeByLevelRecord(sourceRecord.infiniteByLevel),
+    dailyByDate: normalizeByLevelRecord(sourceRecord.dailyByDate),
   };
 };
 
@@ -104,9 +183,9 @@ const serializeScoreState = ({
   dailyTotal,
   infiniteByLevel,
   dailyByDate,
-}) => {
-  const outInfiniteByLevel = {};
-  const outDailyByDate = {};
+}: ScoreBucketPayload): NormalizedScoreState => {
+  const outInfiniteByLevel: Record<string, string[]> = {};
+  const outDailyByDate: Record<string, string[]> = {};
 
   for (const [levelKey, signatureSet] of infiniteByLevel.entries()) {
     const signatures = toSortedSignatureList(signatureSet);
@@ -126,38 +205,38 @@ const serializeScoreState = ({
   };
 };
 
-const directionToken = (from, to) => {
+const directionToken = (from: GridPoint, to: GridPoint): string => {
   const dr = to.r - from.r;
   const dc = to.c - from.c;
   return DIRECTION_TOKEN_BY_DELTA[`${dr},${dc}`] || '?';
 };
 
-const edgeKey = (a, b) => {
+const edgeKey = (a: GridPoint, b: GridPoint): string => {
   const ka = keyOf(a.r, a.c);
   const kb = keyOf(b.r, b.c);
   return ka < kb ? `${ka}|${kb}` : `${kb}|${ka}`;
 };
 
-const orthEdgeKey = (r1, c1, r2, c2) => {
+const orthEdgeKey = (r1: number, c1: number, r2: number, c2: number): string => {
   const ka = keyOf(r1, c1);
   const kb = keyOf(r2, c2);
   return ka < kb ? `${ka}|${kb}` : `${kb}|${ka}`;
 };
 
-const orthEdgeKeyFromPoints = (a, b) => orthEdgeKey(a.r, a.c, b.r, b.c);
+const orthEdgeKeyFromPoints = (a: GridPoint, b: GridPoint): string => orthEdgeKey(a.r, a.c, b.r, b.c);
 
-const buildCornerTraversalToken = (cornerState) => (
+const buildCornerTraversalToken = (cornerState?: CornerState): string => (
   cornerState && cornerState.edgeTrace.length > 0
     ? cornerState.edgeTrace.join(',')
     : '-'
 );
 
-const joinEventPart = (events) => (events.length > 0 ? events.join('>') : '-');
+const joinEventPart = (events: readonly string[]): string => (events.length > 0 ? events.join('>') : '-');
 
-const cornerKeyOf = (vr, vc) => `${vr},${vc}`;
+const cornerKeyOf = (vr: number, vc: number): string => `${vr},${vc}`;
 
-const buildClueEventsForPath = (snapshot, path) => {
-  const clueEvents = [];
+const buildClueEventsForPath = (snapshot: GameSnapshot, path: readonly GridPoint[]): string[] => {
+  const clueEvents: string[] = [];
   const lastIndex = path.length - 1;
 
   for (let i = 0; i < path.length; i += 1) {
@@ -185,11 +264,10 @@ const buildClueEventsForPath = (snapshot, path) => {
   return clueEvents;
 };
 
-const buildStitchEventByEdge = (stitches) => {
-  const stitchEventByEdge = new Map();
-  const entries = Array.isArray(stitches) ? stitches : [];
+const buildStitchEventByEdge = (stitches: GameSnapshot['stitches']): Map<string, string[]> => {
+  const stitchEventByEdge = new Map<string, string[]>();
 
-  for (const element of entries) {
+  for (const element of stitches) {
     const [vr, vc] = element;
     const aEdge = edgeKey({ r: vr - 1, c: vc - 1 }, { r: vr, c: vc });
     const bEdge = edgeKey({ r: vr - 1, c: vc }, { r: vr, c: vc - 1 });
@@ -197,29 +275,33 @@ const buildStitchEventByEdge = (stitches) => {
     if (!stitchEventByEdge.has(aEdge)) stitchEventByEdge.set(aEdge, []);
     if (!stitchEventByEdge.has(bEdge)) stitchEventByEdge.set(bEdge, []);
 
-    stitchEventByEdge.get(aEdge).push(`${vr},${vc}:A`);
-    stitchEventByEdge.get(bEdge).push(`${vr},${vc}:B`);
+    const aEvents = stitchEventByEdge.get(aEdge);
+    const bEvents = stitchEventByEdge.get(bEdge);
+    if (aEvents) aEvents.push(`${vr},${vc}:A`);
+    if (bEvents) bEvents.push(`${vr},${vc}:B`);
   }
 
   return stitchEventByEdge;
 };
 
-const buildCornerTracking = (corners) => {
-  const cornerStateByKey = new Map();
-  const cornerRefsByEdgeKey = new Map();
+const buildCornerTracking = (corners: readonly [number, number, number][]): CornerTrackingState => {
+  const cornerStateByKey = new Map<string, CornerState>();
+  const cornerRefsByEdgeKey = new Map<string, CornerEdgeRef[]>();
 
   for (const element of corners) {
     const [vr, vc] = element;
     const cornerKey = cornerKeyOf(vr, vc);
     cornerStateByKey.set(cornerKey, {
-      edgeSeen: new Set(),
+      edgeSeen: new Set<string>(),
       edgeTrace: [],
     });
 
     const edgeRefs = buildCornerOrthEdgeRefs(vr, vc, orthEdgeKeyFromPoints);
     for (const edgeRef of edgeRefs) {
       if (!cornerRefsByEdgeKey.has(edgeRef.edgeKey)) cornerRefsByEdgeKey.set(edgeRef.edgeKey, []);
-      cornerRefsByEdgeKey.get(edgeRef.edgeKey).push({
+      const refs = cornerRefsByEdgeKey.get(edgeRef.edgeKey);
+      if (!refs) continue;
+      refs.push({
         cornerKey,
         edgeLabel: edgeRef.edgeLabel,
       });
@@ -229,22 +311,29 @@ const buildCornerTracking = (corners) => {
   return {
     cornerRefsByEdgeKey,
     cornerStateByKey,
-    seenCorners: new Set(),
+    seenCorners: new Set<string>(),
   };
 };
 
-const appendCornerEvent = (cornerEvents, cornerKey, vr, vc, orthEdgeSet, cornerStateByKey) => {
+const appendCornerEvent = (
+  cornerEvents: string[],
+  cornerKey: string,
+  vr: number,
+  vc: number,
+  orthEdgeSet: ReadonlySet<string>,
+  cornerStateByKey: ReadonlyMap<string, CornerState>,
+): void => {
   const mask = buildCornerEventMask(vr, vc, orthEdgeSet, orthEdgeKeyFromPoints).toString(16);
   cornerEvents.push(`${cornerKey}:${mask}:${buildCornerTraversalToken(cornerStateByKey.get(cornerKey))}`);
 };
 
 const appendZeroTargetCornerEvents = (
-  corners,
-  seenCorners,
-  orthEdgeSet,
-  cornerStateByKey,
-  cornerEvents,
-) => {
+  corners: readonly [number, number, number][],
+  seenCorners: Set<string>,
+  orthEdgeSet: ReadonlySet<string>,
+  cornerStateByKey: ReadonlyMap<string, CornerState>,
+  cornerEvents: string[],
+): void => {
   for (const element of corners) {
     const [vr, vc, target] = element;
     if (target !== 0) continue;
@@ -255,11 +344,11 @@ const appendZeroTargetCornerEvents = (
 };
 
 const recordStitchEventsForEdge = (
-  currentEdgeKey,
-  stitchEventByEdge,
-  seenStitchEvents,
-  stitchEvents,
-) => {
+  currentEdgeKey: string,
+  stitchEventByEdge: ReadonlyMap<string, string[]>,
+  seenStitchEvents: Set<string>,
+  stitchEvents: string[],
+): void => {
   const events = stitchEventByEdge.get(currentEdgeKey);
   if (!events) return;
 
@@ -271,14 +360,14 @@ const recordStitchEventsForEdge = (
 };
 
 const recordCornerTraversalForEdge = (
-  prev,
-  cur,
-  stepIndex,
-  currentEdgeKey,
-  orthEdgeSet,
-  cornerRefsByEdgeKey,
-  cornerStateByKey,
-) => {
+  prev: GridPoint,
+  cur: GridPoint,
+  stepIndex: number,
+  currentEdgeKey: string,
+  orthEdgeSet: Set<string>,
+  cornerRefsByEdgeKey: ReadonlyMap<string, CornerEdgeRef[]>,
+  cornerStateByKey: Map<string, CornerState>,
+): void => {
   if (!isOrthogonalStep(prev, cur)) return;
 
   orthEdgeSet.add(currentEdgeKey);
@@ -295,12 +384,12 @@ const recordCornerTraversalForEdge = (
 };
 
 const appendSatisfiedCornerEvents = (
-  corners,
-  seenCorners,
-  orthEdgeSet,
-  cornerStateByKey,
-  cornerEvents,
-) => {
+  corners: readonly [number, number, number][],
+  seenCorners: Set<string>,
+  orthEdgeSet: ReadonlySet<string>,
+  cornerStateByKey: ReadonlyMap<string, CornerState>,
+  cornerEvents: string[],
+): void => {
   for (const element of corners) {
     const [vr, vc, target] = element;
     const cornerKey = cornerKeyOf(vr, vc);
@@ -311,15 +400,14 @@ const appendSatisfiedCornerEvents = (
   }
 };
 
-const buildConstraintSignatureForPath = (snapshot, path) => {
+const buildConstraintSignatureForPath = (snapshot: GameSnapshot, path: readonly GridPoint[]): string => {
   const clueEvents = buildClueEventsForPath(snapshot, path);
-  const stitchEvents = [];
-  const cornerEvents = [];
+  const stitchEvents: string[] = [];
+  const cornerEvents: string[] = [];
   const stitchEventByEdge = buildStitchEventByEdge(snapshot.stitches);
-  const seenStitchEvents = new Set();
-  const orthEdgeSet = new Set();
-
-  const corners = Array.isArray(snapshot.cornerCounts) ? snapshot.cornerCounts : [];
+  const seenStitchEvents = new Set<string>();
+  const orthEdgeSet = new Set<string>();
+  const corners = snapshot.cornerCounts;
   const { seenCorners, cornerStateByKey, cornerRefsByEdgeKey } = buildCornerTracking(corners);
 
   appendZeroTargetCornerEvents(corners, seenCorners, orthEdgeSet, cornerStateByKey, cornerEvents);
@@ -345,11 +433,19 @@ const buildConstraintSignatureForPath = (snapshot, path) => {
   return `${joinEventPart(clueEvents)}|${joinEventPart(stitchEvents)}|${joinEventPart(cornerEvents)}`;
 };
 
-const isBoundaryCell = (r, c, rows, cols) => (
+const isBoundaryCell = (r: number, c: number, rows: number, cols: number): boolean => (
   r === 0 || r === rows - 1 || c === 0 || c === cols - 1
 );
 
-const enqueueAdjacentWallCells = (queue, rr, cc, rows, cols, gridData, visited) => {
+const enqueueAdjacentWallCells = (
+  queue: GridPoint[],
+  rr: number,
+  cc: number,
+  rows: number,
+  cols: number,
+  gridData: readonly string[][],
+  visited: boolean[][],
+): void => {
   for (const [dr, dc] of ORTHOGONAL_DELTAS) {
     const nr = rr + dr;
     const nc = cc + dc;
@@ -361,7 +457,14 @@ const enqueueAdjacentWallCells = (queue, rr, cc, rows, cols, gridData, visited) 
   }
 };
 
-const collectWallIsland = (startR, startC, rows, cols, gridData, visited) => {
+const collectWallIsland = (
+  startR: number,
+  startC: number,
+  rows: number,
+  cols: number,
+  gridData: readonly string[][],
+  visited: boolean[][],
+): WallIsland | null => {
   let touchesBoundary = false;
   let sumX = 0;
   let sumY = 0;
@@ -389,20 +492,21 @@ const collectWallIsland = (startR, startC, rows, cols, gridData, visited) => {
   };
 };
 
-const collectInteriorWallIslands = (gridData) => {
+const collectInteriorWallIslands = (gridData: unknown): WallIsland[] => {
   if (!Array.isArray(gridData) || gridData.length === 0) return [];
   const rows = gridData.length;
   const cols = Array.isArray(gridData[0]) ? gridData[0].length : 0;
   if (!rows || !cols) return [];
 
   const visited = Array.from({ length: rows }, () => new Array(cols).fill(false));
-  const islands = [];
+  const islands: WallIsland[] = [];
+  const typedGridData = gridData as string[][];
 
   for (let r = 0; r < rows; r += 1) {
     for (let c = 0; c < cols; c += 1) {
       if (visited[r][c]) continue;
-      if (!WALL_CODES.has(gridData[r][c])) continue;
-      const island = collectWallIsland(r, c, rows, cols, gridData, visited);
+      if (!WALL_CODES.has(typedGridData[r][c])) continue;
+      const island = collectWallIsland(r, c, rows, cols, typedGridData, visited);
       if (island) islands.push(island);
     }
   }
@@ -415,13 +519,13 @@ const collectInteriorWallIslands = (gridData) => {
   return islands;
 };
 
-const inverseToken = (token) => {
+const inverseToken = (token: string): string => {
   const sign = token[0] === '+' ? '-' : '+';
   return `${sign}${token.slice(1)}`;
 };
 
-const reduceTopologyTokens = (tokens) => {
-  const out = [];
+const reduceTopologyTokens = (tokens: readonly string[]): string[] => {
+  const out: string[] = [];
   for (const element of tokens) {
     const token = element;
     const last = out.at(-1);
@@ -434,21 +538,21 @@ const reduceTopologyTokens = (tokens) => {
   return out;
 };
 
-const normalizeTokenLabelsByAppearance = (tokens) => {
+const normalizeTokenLabelsByAppearance = (tokens: readonly string[]): string => {
   if (tokens.length === 0) return '-';
 
-  const tokenMap = new Map();
+  const tokenMap = new Map<string, string>();
   let nextIndex = 0;
 
-  const normalizeId = (id) => {
+  const normalizeId = (id: string): string => {
     if (!tokenMap.has(id)) {
       nextIndex += 1;
       tokenMap.set(id, nextIndex.toString(36));
     }
-    return tokenMap.get(id);
+    return tokenMap.get(id) || '';
   };
 
-  const out = [];
+  const out: string[] = [];
   for (const element of tokens) {
     const token = element;
     out.push(`${token[0]}${normalizeId(token.slice(1))}`);
@@ -457,13 +561,13 @@ const normalizeTokenLabelsByAppearance = (tokens) => {
   return out.join(',');
 };
 
-const buildTopologyRays = (gridData) => collectInteriorWallIslands(gridData).map((island, index) => ({
+const buildTopologyRays = (gridData: unknown): TopologyRay[] => collectInteriorWallIslands(gridData).map((island, index) => ({
   id: String(index + 1),
   x: island.x,
   y: island.y + ((index + 1) * 1e-5),
 }));
 
-const buildRayHit = (x1, y1, x2, y2, ray) => {
+const buildRayHit = (x1: number, y1: number, x2: number, y2: number, ray: TopologyRay): TopologyHit | null => {
   const crossing = (
     (y1 <= ray.y && y2 > ray.y)
     || (y2 <= ray.y && y1 > ray.y)
@@ -480,12 +584,12 @@ const buildRayHit = (x1, y1, x2, y2, ray) => {
   };
 };
 
-const compareRayHits = (left, right) => {
+const compareRayHits = (left: TopologyHit, right: TopologyHit): number => {
   if (left.t !== right.t) return left.t - right.t;
   return compareStringsAscending(left.token, right.token);
 };
 
-const collectTopologyHitsForSegment = (a, b, rays) => {
+const collectTopologyHitsForSegment = (a: GridPoint, b: GridPoint, rays: readonly TopologyRay[]): TopologyHit[] => {
   const x1 = a.c + 0.5;
   const y1 = a.r + 0.5;
   const x2 = b.c + 0.5;
@@ -493,7 +597,7 @@ const collectTopologyHitsForSegment = (a, b, rays) => {
 
   if (y1 === y2) return [];
 
-  const hits = [];
+  const hits: TopologyHit[] = [];
   for (const ray of rays) {
     const hit = buildRayHit(x1, y1, x2, y2, ray);
     if (hit) hits.push(hit);
@@ -503,11 +607,11 @@ const collectTopologyHitsForSegment = (a, b, rays) => {
   return hits;
 };
 
-const buildTopologySignatureForPath = (snapshot, path) => {
+const buildTopologySignatureForPath = (snapshot: GridDataSnapshot, path: readonly GridPoint[]): string => {
   const rays = buildTopologyRays(snapshot.gridData);
   if (rays.length === 0) return '-';
 
-  const rawTokens = [];
+  const rawTokens: string[] = [];
 
   for (let i = 1; i < path.length; i += 1) {
     const hits = collectTopologyHitsForSegment(path[i - 1], path[i], rays);
@@ -518,23 +622,24 @@ const buildTopologySignatureForPath = (snapshot, path) => {
   return normalizeTokenLabelsByAppearance(reduced);
 };
 
-const pathKey = (path) => path.map((point) => `${point.r},${point.c}`).join('|');
+const pathKey = (path: readonly GridPoint[]): string => path.map((point) => `${point.r},${point.c}`).join('|');
 
-const rotatePath = (path, offset) => {
+const rotatePath = (path: readonly GridPoint[], offset: number): GridPoint[] => {
   const count = path.length;
-  const out = new Array(count);
+  const out = new Array<GridPoint>(count);
   for (let i = 0; i < count; i += 1) {
-    out[i] = path[(offset + i) % count];
+    out[i] = path[(offset + i) % count] as GridPoint;
   }
   return out;
 };
 
-const isCycleCutPath = (path, stitchSet) => {
+const isCycleCutPath = (path: readonly GridPoint[], stitchSet: Set<string>): boolean => {
   if (!Array.isArray(path) || path.length < 3) return false;
-  return isAdjacentMove({ stitchSet }, path[0], path.at(-1));
+  const last = path[path.length - 1];
+  return last ? isAdjacentMove({ stitchSet }, path[0] as GridPoint, last) : false;
 };
 
-const enumerateCanonicalCandidates = (snapshot) => {
+const enumerateCanonicalCandidates = (snapshot: GameSnapshot): GridPoint[][] => {
   const path = Array.isArray(snapshot.path) ? snapshot.path : [];
   if (path.length === 0) return [];
 
@@ -545,8 +650,8 @@ const enumerateCanonicalCandidates = (snapshot) => {
     return [path, reversed];
   }
 
-  const out = [];
-  const seen = new Set();
+  const out: GridPoint[][] = [];
+  const seen = new Set<string>();
   for (let offset = 0; offset < path.length; offset += 1) {
     const forwardRotation = rotatePath(path, offset);
     const reverseRotation = rotatePath(reversed, offset);
@@ -568,13 +673,13 @@ const enumerateCanonicalCandidates = (snapshot) => {
   return out;
 };
 
-export const buildCanonicalSolutionSignature = (snapshot) => {
+export const buildCanonicalSolutionSignature = (snapshot: GameSnapshot | null | undefined): string => {
   if (!snapshot || !Array.isArray(snapshot.path) || snapshot.path.length === 0) return '';
 
   const candidates = enumerateCanonicalCandidates(snapshot);
   if (candidates.length === 0) return '';
 
-  let best = null;
+  let best: string | null = null;
 
   for (const element of candidates) {
     const path = element;
@@ -590,14 +695,14 @@ export const buildCanonicalSolutionSignature = (snapshot) => {
   return best || '';
 };
 
-export const createScoreManager = (bootScoreState, persistence) => {
+export const createScoreManager = (bootScoreState: unknown, persistence: PersistencePort | null) => {
   const normalized = normalizeScoreState(bootScoreState);
 
   let infiniteTotal = normalized.infiniteTotal;
   let dailyTotal = normalized.dailyTotal;
 
-  const infiniteByLevel = new Map();
-  const dailyByDate = new Map();
+  const infiniteByLevel = new Map<string, Set<string>>();
+  const dailyByDate = new Map<string, Set<string>>();
 
   for (const [levelKey, signatures] of Object.entries(normalized.infiniteByLevel)) {
     infiniteByLevel.set(levelKey, new Set(signatures));
@@ -607,7 +712,7 @@ export const createScoreManager = (bootScoreState, persistence) => {
     dailyByDate.set(dailyId, new Set(signatures));
   }
 
-  const writeState = () => {
+  const writeState = (): void => {
     if (!persistence || typeof persistence.writeScoreState !== 'function') return;
     persistence.writeScoreState(
       serializeScoreState({
@@ -615,31 +720,31 @@ export const createScoreManager = (bootScoreState, persistence) => {
         dailyTotal,
         infiniteByLevel,
         dailyByDate,
-      }),
+      }) as RuntimeData,
     );
   };
 
-  const readTotals = () => ({
+  const readTotals = (): ScoreTotals => ({
     infiniteTotal,
     dailyTotal,
   });
 
-  const getBucket = (mode) => {
+  const getBucket = (mode: ScoreMode): Map<string, Set<string>> | null => {
     if (mode === SCORE_MODES.INFINITE) return infiniteByLevel;
     if (mode === SCORE_MODES.DAILY) return dailyByDate;
     return null;
   };
 
-  const getModeTotal = (mode) => (mode === SCORE_MODES.INFINITE ? infiniteTotal : dailyTotal);
+  const getModeTotal = (mode: ScoreMode): number => (mode === SCORE_MODES.INFINITE ? infiniteTotal : dailyTotal);
 
-  const readDistinctCount = ({ mode, levelKey }) => {
+  const readDistinctCount = ({ mode, levelKey }: ReadDistinctCountOptions): number => {
     const bucket = getBucket(mode);
     const normalizedLevelKey = String(levelKey || '').trim();
     if (!bucket || !normalizedLevelKey || !bucket.has(normalizedLevelKey)) return 0;
-    return bucket.get(normalizedLevelKey).size;
+    return bucket.get(normalizedLevelKey)?.size || 0;
   };
 
-  const registerSolved = ({ mode, levelKey, signature }) => {
+  const registerSolved = ({ mode, levelKey, signature }: RegisterSolvedOptions): RegisterSolvedResult => {
     const normalizedLevelKey = String(levelKey || '').trim();
     const normalizedSignature = typeof signature === 'string' ? signature.trim() : '';
 
@@ -657,10 +762,21 @@ export const createScoreManager = (bootScoreState, persistence) => {
     }
 
     if (!bucket.has(normalizedLevelKey)) {
-      bucket.set(normalizedLevelKey, new Set());
+      bucket.set(normalizedLevelKey, new Set<string>());
     }
 
     const signatures = bucket.get(normalizedLevelKey);
+    if (!signatures) {
+      return {
+        mode,
+        levelKey: normalizedLevelKey,
+        awarded: 0,
+        isNew: false,
+        levelDistinctCount: 0,
+        modeTotal: getModeTotal(mode),
+        totals: readTotals(),
+      };
+    }
 
     if (signatures.has(normalizedSignature)) {
       return {
@@ -697,7 +813,7 @@ export const createScoreManager = (bootScoreState, persistence) => {
     };
   };
 
-  const readScoreState = () => normalizeScoreState(
+  const readScoreState = (): NormalizedScoreState => normalizeScoreState(
     serializeScoreState({
       infiniteTotal,
       dailyTotal,

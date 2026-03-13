@@ -8,27 +8,27 @@ const createBuffer = () => createPathTransitionCompensationBuffer({
 
 test('path flow compensation buffer accumulates transitions and consumes once', () => {
   const buffer = createBuffer();
-  const snapshotA = {
+  const snapshotA = /** @type {any} */ ({
     path: [
       { r: 0, c: 0 },
       { r: 0, c: 1 },
       { r: 0, c: 2 },
     ],
-  };
-  const snapshotB = {
+  });
+  const snapshotB = /** @type {any} */ ({
     path: [
       { r: 0, c: 1 },
       { r: 0, c: 2 },
       { r: 0, c: 3 },
     ],
-  };
-  const snapshotC = {
+  });
+  const snapshotC = /** @type {any} */ ({
     path: [
       { r: 0, c: 2 },
       { r: 0, c: 3 },
       { r: 1, c: 3 },
     ],
-  };
+  });
 
   buffer.record(snapshotA, snapshotB);
   buffer.record(snapshotB, snapshotC);
@@ -46,20 +46,20 @@ test('path flow compensation buffer accumulates transitions and consumes once', 
 
 test('path flow compensation buffer clears stale signature mismatches', () => {
   const buffer = createBuffer();
-  const previousSnapshot = {
+  const previousSnapshot = /** @type {any} */ ({
     path: [
       { r: 1, c: 1 },
       { r: 1, c: 2 },
       { r: 1, c: 3 },
     ],
-  };
-  const nextSnapshot = {
+  });
+  const nextSnapshot = /** @type {any} */ ({
     path: [
       { r: 1, c: 2 },
       { r: 1, c: 3 },
       { r: 2, c: 3 },
     ],
-  };
+  });
   const unrelatedPath = [
     { r: 3, c: 3 },
     { r: 3, c: 4 },
@@ -78,18 +78,18 @@ test('path flow compensation buffer clears stale signature mismatches', () => {
 
 test('path flow compensation buffer can be cleared explicitly', () => {
   const buffer = createBuffer();
-  const previousSnapshot = {
+  const previousSnapshot = /** @type {any} */ ({
     path: [
       { r: 2, c: 0 },
       { r: 2, c: 1 },
     ],
-  };
-  const nextSnapshot = {
+  });
+  const nextSnapshot = /** @type {any} */ ({
     path: [
       { r: 2, c: 1 },
       { r: 2, c: 2 },
     ],
-  };
+  });
 
   buffer.record(previousSnapshot, nextSnapshot);
   buffer.clear();

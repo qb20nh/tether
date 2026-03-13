@@ -1,5 +1,6 @@
-// @ts-nocheck
-export const LEVELS = [
+import type { LevelDefinition } from './contracts/ports.ts';
+
+export const LEVELS: LevelDefinition[] = [
   {
     "name": "기본 1) 기본",
     "nameKey": "level.tutorial_1.name",

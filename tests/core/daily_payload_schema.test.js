@@ -46,6 +46,7 @@ test('normalizeDailyPayloadHeader keeps publisher match fields only', () => {
 
 test('normalizeDailyPayload validates full consumer payload shape', () => {
   const payload = normalizeDailyPayload(createPayload());
+  assert.ok(payload);
 
   assert.equal(payload.dailyId, '2026-03-07');
   assert.equal(payload.hardInvalidateAtUtcMs, Date.UTC(2026, 2, 8, 0, 0, 0));

@@ -1,6 +1,12 @@
 #!/usr/bin/env node
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import type {
+  GameSnapshot,
+  GridPoint,
+  GridTuple,
+  StitchRequirement,
+} from '../src/contracts/ports.ts';
 import { HINT_CODES } from '../src/config.ts';
 import { DEFAULT_LEVEL_INDEX, LEVELS } from '../src/levels.ts';
 import {
@@ -16,16 +22,231 @@ import {
   isOrthogonalStep,
 } from '../src/shared/stitch_corner_geometry.ts';
 import { keyOf, keyV, parseLevel } from '../src/utils.ts';
-import { parseNonNegativeInt, readRequiredArgValue } from './lib/cli_utils.js';
+import { parseNonNegativeInt, readRequiredArgValue } from './lib/cli_utils.ts';
+
+type CornerCount = [number, number, number];
+type ParsedLevel = ReturnType<typeof parseLevel>;
+export interface ScriptLevel {
+  name?: string;
+  nameKey?: string;
+  desc?: string;
+  descKey?: string;
+  grid: string[];
+  stitches?: GridTuple[];
+  cornerCounts?: CornerCount[];
+  difficulty?: unknown;
+  [key: string]: unknown;
+}
+type ScriptLevelWithDifficulty = ScriptLevel & {
+  difficulty?: DifficultyMetadata;
+};
+
+interface DifficultyProfile {
+  trials: number;
+  trialNodeCap: number;
+}
+
+export const DIFFICULTY_PROFILES = {
+  standard256: {
+    trials: 256,
+    trialNodeCap: 25000,
+  },
+  lite96: {
+    trials: 96,
+    trialNodeCap: 18000,
+  },
+  heavy512: {
+    trials: 512,
+    trialNodeCap: 35000,
+  },
+} as const satisfies Record<string, DifficultyProfile>;
+
+export type DifficultyProfileName = keyof typeof DIFFICULTY_PROFILES;
+
+export interface SolveOptions {
+  minRaw: number;
+  minCanonical: number;
+  minHintOrders: number;
+  minCornerOrders: number;
+  maxSolutions: number;
+  timeMs: number;
+}
+
+interface VerifyCliOptions extends SolveOptions {
+  levels: string[];
+  difficulty: boolean;
+  difficultyProfile: DifficultyProfileName;
+  difficultyProofTimeMs: number;
+  difficultyProofNodeCap: number;
+  json: boolean;
+}
+
+interface TimeoutState {
+  timedOut: boolean;
+}
+
+interface LevelContext {
+  level: ScriptLevel;
+  parsed: ParsedLevel;
+  baseGrid: string[][];
+  rows: number;
+  cols: number;
+  stitchSet: Set<string>;
+  stitchReq: Map<string, StitchRequirement>;
+  cornerCounts: CornerCount[];
+  movableWalls: GridPoint[];
+  movableWallsCount: number;
+  movableCandidates: GridPoint[];
+  wallPlacementsTotal: number;
+}
+
+interface PlacementState {
+  rows: number;
+  cols: number;
+  totalUsable: number;
+  gridData: string[][];
+  path: GridPoint[];
+  visited: Set<string>;
+  stitches: GridTuple[];
+  stitchSet: Set<string>;
+  stitchReq: Map<string, StitchRequirement>;
+  cornerCounts: CornerCount[];
+  usableCells: GridPoint[];
+  startCells: GridPoint[];
+  neighborMap: Map<string, GridPoint[]>;
+}
+
+interface SolveMetrics {
+  rawSolutions: number;
+  canonicalSolutions: number;
+  distinctHintOrders: number;
+  distinctCornerOrders: number;
+  timedOut: boolean;
+  hitMaxSolutions: boolean;
+  earlySatisfied: boolean;
+  movableWallsPresent: boolean;
+  movableWallsCount: number;
+  wallPlacementsChecked: number;
+  wallPlacementsTotal: number;
+}
+
+interface RandomSolveTrialResult {
+  solved: boolean;
+  backtracks: number;
+  nodeExpansions: number;
+  deadEnds: number;
+  maxDepth: number;
+  nodeCapReached: boolean;
+  placementSignature: string;
+}
+
+interface RandomSolveBatchResult {
+  trials: number;
+  solvedTrials: number;
+  successRate: number;
+  meanBacktracksSolved: number;
+  p90BacktracksSolved: number;
+  cvBacktracksSolved: number;
+  meanNodeExpansions: number;
+  meanDeadEnds: number;
+  p90MaxDepth: number;
+  nodeCapHits: number;
+  uniqueWallPlacementsSampled: number;
+}
+
+interface BaselineMetrics {
+  baselineMeanBacktracks: number;
+  baselineCvBacktracks: number;
+}
+
+interface DifficultyComponents {
+  backtracking: number;
+  retries: number;
+  volatility: number;
+}
+
+interface DifficultyMetrics {
+  trials: number;
+  solvedTrials: number;
+  successRate: number;
+  meanBacktracksSolved: number;
+  p90BacktracksSolved: number;
+  expectedRetries: number;
+  baselineMeanBacktracks: number;
+  baselineCvBacktracks: number;
+  unsatProofStatus: UnsatProofStatus;
+  cvBacktracksSolved: number;
+  uniqueWallPlacementsSampled: number;
+  meanNodeExpansions: number;
+  meanDeadEnds: number;
+  p90MaxDepth: number;
+  nodeCapHits: number;
+}
+
+interface DifficultyMetadata {
+  version: number;
+  profile: DifficultyProfileName;
+  score: number;
+  label: string;
+  components: DifficultyComponents;
+  metrics: DifficultyMetrics;
+}
+
+interface LevelResultRow extends SolveMetrics {
+  index: number;
+  nameKey: string | null;
+  name: string | null;
+  pass: boolean;
+  failures: string[];
+  difficulty?: DifficultyMetadata;
+}
+
+interface DifficultySummary {
+  profile: DifficultyProfileName;
+  trials: number;
+  trialNodeCap: number;
+  proofTimeMs: number;
+  proofNodeCap: number;
+  levelsFile: string;
+}
+
+interface VerifySummary {
+  checked: number;
+  passed: number;
+  failed: number;
+  defaults: SolveOptions;
+  difficulty?: DifficultySummary;
+}
+
+interface TraversePlacementOptions {
+  shouldStop?: () => boolean;
+  beforeVisitNode?: () => boolean;
+  onCompletePath?: (path: GridPoint[], placement: PlacementState) => void;
+}
+
+interface VisitPlacementOptions {
+  shouldStop?: () => boolean;
+  beforePlacementStep?: () => boolean;
+  onPlacement?: (placement: PlacementState) => void;
+}
+
+type UnsatProofStatus = 'not_run' | 'proven_unsat' | 'satisfiable_found' | 'inconclusive';
+
+interface UnsatProofResult {
+  status: Exclude<UnsatProofStatus, 'not_run'>;
+  nodesVisited: number;
+  timedOut: boolean;
+  nodeCapHit: boolean;
+}
 
 const CONSTRAINT_CODES = new Set(['t', 'r', 'l', 's', 'h', 'v', 'g', 'b', 'p']);
-const ORTH_DIRS = [
+const ORTH_DIRS: readonly GridTuple[] = [
   [-1, 0],
   [1, 0],
   [0, -1],
   [0, 1],
 ];
-const ALL_DIRS = [
+const ALL_DIRS: readonly GridTuple[] = [
   ...ORTH_DIRS,
   [-1, -1],
   [-1, 1],
@@ -46,23 +267,11 @@ const KNOWN_LEVEL_KEYS = new Set([
   'cornerCounts',
   'difficulty',
 ]);
+const ALL_LEVELS = LEVELS as readonly ScriptLevelWithDifficulty[];
+const DIFFICULTY_PROFILE_NAMES = Object.keys(DIFFICULTY_PROFILES) as DifficultyProfileName[];
 
-export const DIFFICULTY_PROFILES = {
-  standard256: {
-    trials: 256,
-    trialNodeCap: 25000,
-  },
-  lite96: {
-    trials: 96,
-    trialNodeCap: 18000,
-  },
-  heavy512: {
-    trials: 512,
-    trialNodeCap: 35000,
-  },
-};
-
-const DEFAULTS = {
+const DEFAULTS: VerifyCliOptions = {
+  levels: [],
   minRaw: 1,
   minCanonical: 2,
   minHintOrders: 0,
@@ -73,13 +282,14 @@ const DEFAULTS = {
   difficultyProfile: 'standard256',
   difficultyProofTimeMs: 30000,
   difficultyProofNodeCap: 5000000,
+  json: false,
 };
 
-const usage = () => {
+const usage = (): void => {
   console.log(
     [
       'Usage:',
-      '  node scripts/verify_level_properties.js [options]',
+      '  node --import tsx scripts/verify_level_properties.ts [options]',
       '',
       'Options:',
       '  --level <selector>                  Level index, nameKey, or name. Repeatable.',
@@ -97,28 +307,35 @@ const usage = () => {
       '  --help                              Show this help.',
       '',
       'Examples:',
-      '  node scripts/verify_level_properties.js --level level.tutorial_6.name',
-      '  node scripts/verify_level_properties.js --level 18 --min-canonical 2 --min-hint-orders 2',
-      '  node scripts/verify_level_properties.js --difficulty --difficulty-profile standard256',
-      '  node scripts/verify_level_properties.js --difficulty --json',
+      '  node --import tsx scripts/verify_level_properties.ts --level level.tutorial_6.name',
+      '  node --import tsx scripts/verify_level_properties.ts --level 18 --min-canonical 2 --min-hint-orders 2',
+      '  node --import tsx scripts/verify_level_properties.ts --difficulty --difficulty-profile standard256',
+      '  node --import tsx scripts/verify_level_properties.ts --difficulty --json',
     ].join('\n'),
   );
 };
 
-const clamp = (value, lo, hi) => Math.max(lo, Math.min(hi, value));
-const roundFixed = (value, digits = 6) => {
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+
+const isDifficultyProfileName = (value: string): value is DifficultyProfileName =>
+  Object.hasOwn(DIFFICULTY_PROFILES, value);
+
+const clamp = (value: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, value));
+
+const roundFixed = (value: number, digits = 6): number => {
   if (!Number.isFinite(value)) return 0;
   const scale = 10 ** digits;
   return Math.round(value * scale) / scale;
 };
 
-const asInt = (value, fallback = 0) => {
+const asInt = (value: unknown, fallback = 0): number => {
   const n = Number.parseInt(String(value), 10);
   return Number.isInteger(n) ? n : fallback;
 };
 
-function parseArgs(argv) {
-  const opts = {
+function parseArgs(argv: readonly string[]): VerifyCliOptions {
+  const opts: VerifyCliOptions = {
     levels: [],
     minRaw: DEFAULTS.minRaw,
     minCanonical: DEFAULTS.minCanonical,
@@ -137,8 +354,8 @@ function parseArgs(argv) {
   while (index < argv.length) {
     const a = argv[index];
     let nextArgIndex = index + 1;
-    const next = () => {
-      const result = readRequiredArgValue(argv, index, a);
+    const next = (): string => {
+      const result = readRequiredArgValue(argv as string[], index, a);
       nextArgIndex = result.nextIndex + 1;
       return result.value;
     };
@@ -156,9 +373,9 @@ function parseArgs(argv) {
         break;
       case '--difficulty-profile': {
         const profile = next();
-        if (!Object.hasOwn(DIFFICULTY_PROFILES, profile)) {
+        if (!isDifficultyProfileName(profile)) {
           throw new Error(
-            `--difficulty-profile must be one of ${Object.keys(DIFFICULTY_PROFILES).join(', ')}, got: ${profile}`,
+            `--difficulty-profile must be one of ${DIFFICULTY_PROFILE_NAMES.join(', ')}, got: ${profile}`,
           );
         }
         opts.difficultyProfile = profile;
@@ -201,33 +418,34 @@ function parseArgs(argv) {
   return opts;
 }
 
-function resolveLevelSelector(selector) {
+function resolveLevelSelector(selector: string): { index: number; level: ScriptLevelWithDifficulty } {
   if (/^\d+$/.test(selector)) {
     const idx = Number.parseInt(selector, 10);
-    if (idx < 0 || idx >= LEVELS.length) {
+    if (idx < 0 || idx >= ALL_LEVELS.length) {
       throw new Error(`Level index out of range: ${selector}`);
     }
-    return { index: idx, level: LEVELS[idx] };
+    return { index: idx, level: ALL_LEVELS[idx] };
   }
 
-  const byKey = LEVELS.findIndex((lv) => lv.nameKey === selector);
-  if (byKey >= 0) return { index: byKey, level: LEVELS[byKey] };
+  const byKey = ALL_LEVELS.findIndex((lv) => lv.nameKey === selector);
+  if (byKey >= 0) return { index: byKey, level: ALL_LEVELS[byKey] };
 
-  const byName = LEVELS.findIndex((lv) => lv.name === selector);
-  if (byName >= 0) return { index: byName, level: LEVELS[byName] };
+  const byName = ALL_LEVELS.findIndex((lv) => lv.name === selector);
+  if (byName >= 0) return { index: byName, level: ALL_LEVELS[byName] };
 
   throw new Error(`Could not resolve level selector: ${selector}`);
 }
 
-const pathKey = (path) => path.map((p) => `${p.r},${p.c}`).join('|');
-const canonicalPathKey = (path) => {
+const pathKey = (path: readonly GridPoint[]): string => path.map((p) => `${p.r},${p.c}`).join('|');
+
+const canonicalPathKey = (path: readonly GridPoint[]): string => {
   const f = pathKey(path);
-  const b = pathKey(path.toReversed());
+  const b = pathKey([...path].reverse());
   return f < b ? f : b;
 };
 
-const hintOrderSignature = (path, gridData) => {
-  const parts = [];
+const hintOrderSignature = (path: readonly GridPoint[], gridData: readonly string[][]): string => {
+  const parts: string[] = [];
   for (const p of path) {
     const ch = gridData[p.r][p.c];
     if (CONSTRAINT_CODES.has(ch)) parts.push(`${ch}@${p.r},${p.c}`);
@@ -235,18 +453,18 @@ const hintOrderSignature = (path, gridData) => {
   return parts.join('>');
 };
 
-const edgeKey = (a, b) => {
+const edgeKey = (a: GridPoint, b: GridPoint): string => {
   const ka = `${a.r},${a.c}`;
   const kb = `${b.r},${b.c}`;
   return ka < kb ? `${ka}|${kb}` : `${kb}|${ka}`;
 };
 
-const cornerOrderSignature = (path, cornerCounts) => {
-  if (!cornerCounts || cornerCounts.length === 0) return '';
+const cornerOrderSignature = (path: readonly GridPoint[], cornerCounts: readonly CornerCount[]): string => {
+  if (cornerCounts.length === 0) return '';
 
-  const edgeSet = new Set();
-  const satisfied = new Set();
-  const order = [];
+  const edgeSet = new Set<string>();
+  const satisfied = new Set<string>();
+  const order: string[] = [];
 
   for (const [vr, vc, target] of cornerCounts) {
     const key = `${vr},${vc}`;
@@ -256,7 +474,7 @@ const cornerOrderSignature = (path, cornerCounts) => {
     }
   }
 
-  for (let i = 1; i < path.length; i++) {
+  for (let i = 1; i < path.length; i += 1) {
     const prev = path[i - 1];
     const cur = path[i];
     if (isOrthogonalStep(prev, cur)) {
@@ -276,26 +494,26 @@ const cornerOrderSignature = (path, cornerCounts) => {
   return order.join('>');
 };
 
-const chooseCount = (n, k) => {
+const chooseCount = (n: number, k: number): number => {
   if (k < 0 || k > n) return 0;
   if (k === 0 || k === n) return 1;
   const kk = Math.min(k, n - k);
   let result = 1;
-  for (let i = 1; i <= kk; i++) {
+  for (let i = 1; i <= kk; i += 1) {
     result = (result * (n - kk + i)) / i;
   }
   return Math.round(result);
 };
 
-const compareCell = (a, b) => {
+const compareCell = (a: GridPoint, b: GridPoint): number => {
   if (a.r !== b.r) return a.r - b.r;
   return a.c - b.c;
 };
 
-const cloneGrid = (grid) => grid.map((row) => row.slice());
+const cloneGrid = (grid: readonly string[][]): string[][] => grid.map((row) => row.slice());
 
-const shuffleInPlace = (arr, rng) => {
-  for (let i = arr.length - 1; i > 0; i--) {
+const shuffleInPlace = <T>(arr: T[], rng: () => number): T[] => {
+  for (let i = arr.length - 1; i > 0; i -= 1) {
     const j = Math.floor(rng() * (i + 1));
     const tmp = arr[i];
     arr[i] = arr[j];
@@ -304,22 +522,22 @@ const shuffleInPlace = (arr, rng) => {
   return arr;
 };
 
-const percentile = (values, q) => {
-  if (!values || values.length === 0) return 0;
+const percentile = (values: readonly number[], q: number): number => {
+  if (values.length === 0) return 0;
   const sorted = [...values].sort((a, b) => a - b);
   const idx = Math.max(0, Math.min(sorted.length - 1, Math.floor((sorted.length - 1) * q)));
   return sorted[idx];
 };
 
-const mean = (values) => {
-  if (!values || values.length === 0) return 0;
+const mean = (values: readonly number[]): number => {
+  if (values.length === 0) return 0;
   let sum = 0;
   for (const v of values) sum += v;
   return sum / values.length;
 };
 
-const stddev = (values, avg) => {
-  if (!values || values.length === 0) return 0;
+const stddev = (values: readonly number[], avg: number): number => {
+  if (values.length === 0) return 0;
   if (!Number.isFinite(avg)) return 0;
   let sumSq = 0;
   for (const v of values) {
@@ -329,7 +547,7 @@ const stddev = (values, avg) => {
   return Math.sqrt(sumSq / values.length);
 };
 
-const checkDeadline = (deadline, timeoutState) => {
+const checkDeadline = (deadline: number, timeoutState: TimeoutState): boolean => {
   if (Date.now() > deadline) {
     timeoutState.timedOut = true;
     return false;
@@ -337,11 +555,11 @@ const checkDeadline = (deadline, timeoutState) => {
   return true;
 };
 
-const sampleWalls = (movableCandidates, count, rng) => {
+const sampleWalls = (movableCandidates: readonly GridPoint[], count: number, rng: () => number): GridPoint[] => {
   if (count === 0) return [];
   const available = movableCandidates.slice();
-  const chosen = [];
-  for (let i = 0; i < count && available.length > 0; i++) {
+  const chosen: GridPoint[] = [];
+  for (let i = 0; i < count && available.length > 0; i += 1) {
     const pick = Math.floor(rng() * available.length);
     chosen.push(available[pick]);
     available.splice(pick, 1);
@@ -350,12 +568,40 @@ const sampleWalls = (movableCandidates, count, rng) => {
   return chosen;
 };
 
-const wallPlacementSignature = (walls) => {
-  if (!walls || walls.length === 0) return 'none';
+const wallPlacementSignature = (walls: readonly GridPoint[]): string => {
+  if (walls.length === 0) return 'none';
   return walls.map((cell) => keyOf(cell.r, cell.c)).join(';');
 };
 
-export function buildLevelContext(level) {
+const buildSnapshot = (
+  placement: PlacementState,
+  path: readonly GridPoint[],
+  visited: ReadonlySet<string>,
+): GameSnapshot => {
+  const idxByKey = new Map<string, number>();
+  for (let i = 0; i < path.length; i += 1) {
+    idxByKey.set(keyOf(path[i].r, path[i].c), i);
+  }
+
+  return {
+    version: 1,
+    levelIndex: 0,
+    rows: placement.rows,
+    cols: placement.cols,
+    totalUsable: placement.totalUsable,
+    pathKey: pathKey(path),
+    gridData: placement.gridData,
+    path: [...path],
+    visited: new Set(visited),
+    stitches: placement.stitches,
+    stitchSet: placement.stitchSet,
+    stitchReq: placement.stitchReq,
+    cornerCounts: placement.cornerCounts,
+    idxByKey,
+  };
+};
+
+export function buildLevelContext(level: ScriptLevel): LevelContext {
   const parsed = parseLevel(level);
   const baseGrid = cloneGrid(parsed.g);
   const rows = parsed.rows;
@@ -363,10 +609,10 @@ export function buildLevelContext(level) {
   const { stitchSet, stitchReq } = buildStitchLookups(parsed.stitches, keyV);
   const cornerCounts = parsed.cornerCounts || [];
 
-  const movableWalls = [];
-  const movableCandidates = [];
-  for (let r = 0; r < rows; r++) {
-    for (let c = 0; c < cols; c++) {
+  const movableWalls: GridPoint[] = [];
+  const movableCandidates: GridPoint[] = [];
+  for (let r = 0; r < rows; r += 1) {
+    for (let c = 0; c < cols; c += 1) {
       const ch = baseGrid[r][c];
       if (ch === 'm') movableWalls.push({ r, c });
       if (ch === '.' || ch === 'm') movableCandidates.push({ r, c });
@@ -389,10 +635,10 @@ export function buildLevelContext(level) {
   };
 }
 
-function getUsableCells(gridData, rows, cols) {
-  const usableCells = [];
-  for (let r = 0; r < rows; r++) {
-    for (let c = 0; c < cols; c++) {
+function getUsableCells(gridData: readonly string[][], rows: number, cols: number): GridPoint[] {
+  const usableCells: GridPoint[] = [];
+  for (let r = 0; r < rows; r += 1) {
+    for (let c = 0; c < cols; c += 1) {
       const ch = gridData[r][c];
       if (ch === '#' || ch === 'm') continue;
       usableCells.push({ r, c });
@@ -401,8 +647,14 @@ function getUsableCells(gridData, rows, cols) {
   return usableCells;
 }
 
-function getCellNeighbors(cell, gridData, rows, cols, stitchSet) {
-  const out = [];
+function getCellNeighbors(
+  cell: GridPoint,
+  gridData: readonly string[][],
+  rows: number,
+  cols: number,
+  stitchSet: ReadonlySet<string>,
+): GridPoint[] {
+  const out: GridPoint[] = [];
   for (const [dr, dc] of ALL_DIRS) {
     const nr = cell.r + dr;
     const nc = cell.c + dc;
@@ -427,7 +679,7 @@ function getCellNeighbors(cell, gridData, rows, cols, stitchSet) {
   return out;
 }
 
-function buildPlacementState(levelCtx, wallCells) {
+function buildPlacementState(levelCtx: LevelContext, wallCells: readonly GridPoint[]): PlacementState {
   const gridData = cloneGrid(levelCtx.baseGrid);
 
   if (levelCtx.movableWallsCount > 0) {
@@ -440,12 +692,11 @@ function buildPlacementState(levelCtx, wallCells) {
   }
 
   const usableCells = getUsableCells(gridData, levelCtx.rows, levelCtx.cols);
-
-  const neighborMap = new Map();
+  const neighborMap = new Map<string, GridPoint[]>();
   for (const cell of usableCells) {
     neighborMap.set(
       keyOf(cell.r, cell.c),
-      getCellNeighbors(cell, gridData, levelCtx.rows, levelCtx.cols, levelCtx.stitchSet)
+      getCellNeighbors(cell, gridData, levelCtx.rows, levelCtx.cols, levelCtx.stitchSet),
     );
   }
 
@@ -457,7 +708,7 @@ function buildPlacementState(levelCtx, wallCells) {
     totalUsable: levelCtx.parsed.usable,
     gridData,
     path: [],
-    visited: new Set(),
+    visited: new Set<string>(),
     stitches: levelCtx.parsed.stitches,
     stitchSet: levelCtx.stitchSet,
     stitchReq: levelCtx.stitchReq,
@@ -468,25 +719,12 @@ function buildPlacementState(levelCtx, wallCells) {
   };
 }
 
-function isValidPrefix(placement, path, visited) {
-  const idxByKey = new Map();
-  for (let i = 0; i < path.length; i++) {
-    idxByKey.set(keyOf(path[i].r, path[i].c), i);
-  }
-
-  const snapshot = {
-    rows: placement.rows,
-    cols: placement.cols,
-    totalUsable: placement.totalUsable,
-    gridData: placement.gridData,
-    path,
-    visited,
-    stitches: placement.stitches,
-    stitchSet: placement.stitchSet,
-    stitchReq: placement.stitchReq,
-    cornerCounts: placement.cornerCounts,
-    idxByKey,
-  };
+function isValidPrefix(
+  placement: PlacementState,
+  path: readonly GridPoint[],
+  visited: ReadonlySet<string>,
+): boolean {
+  const snapshot = buildSnapshot(placement, path, visited);
 
   if (evaluateHints(snapshot, { suppressEndpointRequirement: true }).bad > 0) return false;
   if (evaluateStitches(snapshot).bad > 0) return false;
@@ -496,17 +734,18 @@ function isValidPrefix(placement, path, visited) {
 }
 
 function traversePlacementPaths(
-  placement,
-  {
+  placement: PlacementState,
+  options: TraversePlacementOptions = {},
+): void {
+  const {
     shouldStop = () => false,
     beforeVisitNode = () => true,
-    onCompletePath = () => { },
-  } = {},
-) {
-  const dfs = (path, visited) => {
+    onCompletePath = () => {},
+  } = options;
+
+  const dfs = (path: GridPoint[], visited: Set<string>): void => {
     if (shouldStop()) return;
     if (!beforeVisitNode()) return;
-
     if (!isValidPrefix(placement, path, visited)) return;
 
     if (path.length === placement.totalUsable) {
@@ -532,21 +771,23 @@ function traversePlacementPaths(
 
   for (const start of placement.startCells) {
     if (shouldStop()) break;
-    const visited = new Set([keyOf(start.r, start.c)]);
+    const visited = new Set<string>([keyOf(start.r, start.c)]);
     dfs([{ r: start.r, c: start.c }], visited);
   }
 }
 
 function visitPlacementStates(
-  levelCtx,
-  {
+  levelCtx: LevelContext,
+  options: VisitPlacementOptions = {},
+): number {
+  const {
     shouldStop = () => false,
     beforePlacementStep = () => true,
-    onPlacement = () => { },
-  } = {},
-) {
+    onPlacement = () => {},
+  } = options;
+
   let placementsVisited = 0;
-  const visit = (wallCells) => {
+  const visit = (wallCells: readonly GridPoint[]): void => {
     placementsVisited += 1;
     onPlacement(buildPlacementState(levelCtx, wallCells));
   };
@@ -556,8 +797,8 @@ function visitPlacementStates(
     return placementsVisited;
   }
 
-  const selected = [];
-  const choosePlacement = (startIndex, picksLeft) => {
+  const selected: GridPoint[] = [];
+  const choosePlacement = (startIndex: number, picksLeft: number): void => {
     if (shouldStop()) return;
     if (!beforePlacementStep()) return;
 
@@ -566,7 +807,7 @@ function visitPlacementStates(
       return;
     }
 
-    for (let i = startIndex; i <= levelCtx.movableCandidates.length - picksLeft; i++) {
+    for (let i = startIndex; i <= levelCtx.movableCandidates.length - picksLeft; i += 1) {
       selected.push(levelCtx.movableCandidates[i]);
       choosePlacement(i + 1, picksLeft - 1);
       selected.pop();
@@ -578,30 +819,29 @@ function visitPlacementStates(
   return placementsVisited;
 }
 
-export function solveLevel(level, opts) {
+export function solveLevel(level: ScriptLevel, opts: SolveOptions): SolveMetrics {
   const levelCtx = buildLevelContext(level);
-
   const deadline = Date.now() + opts.timeMs;
-  const timeoutState = { timedOut: false };
+  const timeoutState: TimeoutState = { timedOut: false };
 
-  const rawSet = new Set();
-  const canonicalSet = new Set();
-  const hintOrderSet = new Set();
-  const cornerOrderSet = new Set();
+  const rawSet = new Set<string>();
+  const canonicalSet = new Set<string>();
+  const hintOrderSet = new Set<string>();
+  const cornerOrderSet = new Set<string>();
 
   let earlySatisfied = false;
   let wallPlacementsChecked = 0;
 
-  const requirementsMet = () =>
+  const requirementsMet = (): boolean =>
     rawSet.size >= opts.minRaw &&
     canonicalSet.size >= opts.minCanonical &&
     hintOrderSet.size >= opts.minHintOrders &&
     cornerOrderSet.size >= opts.minCornerOrders;
 
-  const shouldStop = () =>
+  const shouldStop = (): boolean =>
     timeoutState.timedOut || rawSet.size >= opts.maxSolutions || earlySatisfied;
-  const beforeVisitNode = checkDeadline.bind(null, deadline, timeoutState);
-  const onCompletePath = (path, placement) => {
+  const beforeVisitNode = (): boolean => checkDeadline(deadline, timeoutState);
+  const onCompletePath = (path: GridPoint[], placement: PlacementState): void => {
     rawSet.add(pathKey(path));
     const canonical = canonicalPathKey(path);
     if (!canonicalSet.has(canonical)) {
@@ -639,12 +879,12 @@ export function solveLevel(level, opts) {
   };
 }
 
-function runRandomSolveTrial(levelCtx, trialSeed, trialNodeCap) {
+function runRandomSolveTrial(levelCtx: LevelContext, trialSeed: number, trialNodeCap: number): RandomSolveTrialResult {
   const rng = makeMulberry32Rng(trialSeed);
   const sampledWalls = sampleWalls(levelCtx.movableCandidates, levelCtx.movableWallsCount, rng);
   const placement = buildPlacementState(levelCtx, sampledWalls);
 
-  const result = {
+  const result: RandomSolveTrialResult = {
     solved: false,
     backtracks: 0,
     nodeExpansions: 0,
@@ -661,7 +901,7 @@ function runRandomSolveTrial(levelCtx, trialSeed, trialNodeCap) {
   const startOrder = placement.startCells.slice();
   shuffleInPlace(startOrder, rng);
 
-  const dfs = (path, visited) => {
+  const dfs = (path: GridPoint[], visited: Set<string>): boolean => {
     if (result.nodeCapReached || result.solved) return false;
     if (result.nodeExpansions >= trialNodeCap) {
       result.nodeCapReached = true;
@@ -711,7 +951,7 @@ function runRandomSolveTrial(levelCtx, trialSeed, trialNodeCap) {
   };
 
   for (const start of startOrder) {
-    const visited = new Set([keyOf(start.r, start.c)]);
+    const visited = new Set<string>([keyOf(start.r, start.c)]);
     const solved = dfs([{ r: start.r, c: start.c }], visited);
     if (solved || result.nodeCapReached) break;
   }
@@ -719,19 +959,23 @@ function runRandomSolveTrial(levelCtx, trialSeed, trialNodeCap) {
   return result;
 }
 
-export function runRandomSolveBatch(levelCtx, profile, seedMaterial) {
+export function runRandomSolveBatch(
+  levelCtx: LevelContext,
+  profile: DifficultyProfile,
+  seedMaterial: string,
+): RandomSolveBatchResult {
   const baseSeed = hashString32(seedMaterial);
 
   let solvedTrials = 0;
   let nodeCapHits = 0;
 
-  const backtracksSolved = [];
-  const nodeExpansionsAll = [];
-  const deadEndsAll = [];
-  const maxDepthAll = [];
-  const placementSet = new Set();
+  const backtracksSolved: number[] = [];
+  const nodeExpansionsAll: number[] = [];
+  const deadEndsAll: number[] = [];
+  const maxDepthAll: number[] = [];
+  const placementSet = new Set<string>();
 
-  for (let i = 0; i < profile.trials; i++) {
+  for (let i = 0; i < profile.trials; i += 1) {
     const seedOffset = Math.imul(i, GOLDEN_RATIO_32) >>> 0;
     const trialSeed = mix32((baseSeed ^ seedOffset) >>> 0);
     const trial = runRandomSolveTrial(levelCtx, trialSeed, profile.trialNodeCap);
@@ -768,16 +1012,16 @@ export function runRandomSolveBatch(levelCtx, profile, seedMaterial) {
   };
 }
 
-function proveSatisfiableOrUnsat(levelCtx, opts) {
+function proveSatisfiableOrUnsat(levelCtx: LevelContext, opts: VerifyCliOptions): UnsatProofResult {
   const deadline = Date.now() + opts.difficultyProofTimeMs;
   const nodeCap = opts.difficultyProofNodeCap;
 
   let nodesVisited = 0;
   let found = false;
-  const timeoutState = { timedOut: false };
+  const timeoutState: TimeoutState = { timedOut: false };
   let nodeCapHit = false;
 
-  const consumeBudget = () => {
+  const consumeBudget = (): boolean => {
     if (!checkDeadline(deadline, timeoutState)) return false;
     if (nodesVisited >= nodeCap) {
       nodeCapHit = true;
@@ -786,8 +1030,8 @@ function proveSatisfiableOrUnsat(levelCtx, opts) {
     nodesVisited += 1;
     return true;
   };
-  const shouldStop = () => found || timeoutState.timedOut || nodeCapHit;
-  const beforePlacementStep = checkDeadline.bind(null, deadline, timeoutState);
+  const shouldStop = (): boolean => found || timeoutState.timedOut || nodeCapHit;
+  const beforePlacementStep = (): boolean => checkDeadline(deadline, timeoutState);
 
   visitPlacementStates(levelCtx, {
     shouldStop,
@@ -803,7 +1047,7 @@ function proveSatisfiableOrUnsat(levelCtx, opts) {
     },
   });
 
-  let status = 'proven_unsat';
+  let status: UnsatProofResult['status'] = 'proven_unsat';
   if (found) status = 'satisfiable_found';
   else if (timeoutState.timedOut || nodeCapHit) status = 'inconclusive';
 
@@ -815,7 +1059,7 @@ function proveSatisfiableOrUnsat(levelCtx, opts) {
   };
 }
 
-function scoreLabel(score) {
+function scoreLabel(score: number): string {
   if (score >= 100) return 'Impossible';
   if (score >= 80) return 'Expert';
   if (score >= 60) return 'Hard';
@@ -824,7 +1068,7 @@ function scoreLabel(score) {
   return 'Trivial';
 }
 
-function makeSyntheticEmptyLevel(rows, cols) {
+function makeSyntheticEmptyLevel(rows: number, cols: number): ScriptLevel {
   return {
     name: `Baseline Empty ${rows}x${cols}`,
     nameKey: `baseline.empty.${rows}x${cols}`,
@@ -835,14 +1079,20 @@ function makeSyntheticEmptyLevel(rows, cols) {
   };
 }
 
-function difficultySeedMaterial(level, rows, cols) {
+function difficultySeedMaterial(level: ScriptLevel, rows: number, cols: number): string {
   const id = level.nameKey || level.name || 'level';
-  return `${id}|${rows}|${cols}|${(level.grid || []).join('/')}`;
+  return `${id}|${rows}|${cols}|${level.grid.join('/')}`;
 }
 
-function getBaselineMetrics(rows, cols, opts, baselineCache) {
+function getBaselineMetrics(
+  rows: number,
+  cols: number,
+  opts: VerifyCliOptions,
+  baselineCache: Map<string, BaselineMetrics>,
+): BaselineMetrics {
   const cacheKey = `${opts.difficultyProfile}|${rows}x${cols}`;
-  if (baselineCache.has(cacheKey)) return baselineCache.get(cacheKey);
+  const cached = baselineCache.get(cacheKey);
+  if (cached) return cached;
 
   const synthetic = makeSyntheticEmptyLevel(rows, cols);
   const syntheticCtx = buildLevelContext(synthetic);
@@ -853,7 +1103,7 @@ function getBaselineMetrics(rows, cols, opts, baselineCache) {
     difficultySeedMaterial(synthetic, rows, cols),
   );
 
-  const baseline = {
+  const baseline: BaselineMetrics = {
     baselineMeanBacktracks: batch.meanBacktracksSolved,
     baselineCvBacktracks: batch.cvBacktracksSolved,
   };
@@ -862,52 +1112,58 @@ function getBaselineMetrics(rows, cols, opts, baselineCache) {
   return baseline;
 }
 
-function normalizeDifficultyMetadata(meta) {
-  const score = clamp(asInt(meta?.score, 0), 0, 100);
-  const profileName =
-    typeof meta?.profile === 'string' && Object.hasOwn(DIFFICULTY_PROFILES, meta.profile)
-      ? meta.profile
+function normalizeDifficultyMetadata(meta: unknown): DifficultyMetadata {
+  const metaObject = isRecord(meta) ? meta : {};
+  const components = isRecord(metaObject.components) ? metaObject.components : {};
+  const metrics = isRecord(metaObject.metrics) ? metaObject.metrics : {};
+  const profile =
+    typeof metaObject.profile === 'string' && isDifficultyProfileName(metaObject.profile)
+      ? metaObject.profile
       : DEFAULTS.difficultyProfile;
-
-  const rawStatus =
-    typeof meta?.metrics?.unsatProofStatus === 'string'
-      ? meta.metrics.unsatProofStatus
-      : 'not_run';
-  const unsatProofStatus = ['not_run', 'proven_unsat', 'satisfiable_found', 'inconclusive'].includes(rawStatus)
-    ? rawStatus
-    : 'not_run';
+  const rawStatus = typeof metrics.unsatProofStatus === 'string' ? metrics.unsatProofStatus : 'not_run';
+  const unsatProofStatus: UnsatProofStatus = (
+    rawStatus === 'not_run' ||
+    rawStatus === 'proven_unsat' ||
+    rawStatus === 'satisfiable_found' ||
+    rawStatus === 'inconclusive'
+  ) ? rawStatus : 'not_run';
+  const score = clamp(asInt(metaObject.score, 0), 0, 100);
 
   return {
     version: DIFFICULTY_VERSION,
-    profile: profileName,
+    profile,
     score,
-    label: typeof meta?.label === 'string' ? meta.label : scoreLabel(score),
+    label: typeof metaObject.label === 'string' ? metaObject.label : scoreLabel(score),
     components: {
-      backtracking: roundFixed(meta?.components?.backtracking ?? 0),
-      retries: roundFixed(meta?.components?.retries ?? 0),
-      volatility: roundFixed(meta?.components?.volatility ?? 0),
+      backtracking: roundFixed(Number(components.backtracking ?? 0)),
+      retries: roundFixed(Number(components.retries ?? 0)),
+      volatility: roundFixed(Number(components.volatility ?? 0)),
     },
     metrics: {
-      trials: asInt(meta?.metrics?.trials, 0),
-      solvedTrials: asInt(meta?.metrics?.solvedTrials, 0),
-      successRate: roundFixed(meta?.metrics?.successRate ?? 0),
-      meanBacktracksSolved: roundFixed(meta?.metrics?.meanBacktracksSolved ?? 0),
-      p90BacktracksSolved: roundFixed(meta?.metrics?.p90BacktracksSolved ?? 0),
-      expectedRetries: roundFixed(meta?.metrics?.expectedRetries ?? 0),
-      baselineMeanBacktracks: roundFixed(meta?.metrics?.baselineMeanBacktracks ?? 0),
-      baselineCvBacktracks: roundFixed(meta?.metrics?.baselineCvBacktracks ?? 0),
+      trials: asInt(metrics.trials, 0),
+      solvedTrials: asInt(metrics.solvedTrials, 0),
+      successRate: roundFixed(Number(metrics.successRate ?? 0)),
+      meanBacktracksSolved: roundFixed(Number(metrics.meanBacktracksSolved ?? 0)),
+      p90BacktracksSolved: roundFixed(Number(metrics.p90BacktracksSolved ?? 0)),
+      expectedRetries: roundFixed(Number(metrics.expectedRetries ?? 0)),
+      baselineMeanBacktracks: roundFixed(Number(metrics.baselineMeanBacktracks ?? 0)),
+      baselineCvBacktracks: roundFixed(Number(metrics.baselineCvBacktracks ?? 0)),
       unsatProofStatus,
-      cvBacktracksSolved: roundFixed(meta?.metrics?.cvBacktracksSolved ?? 0),
-      uniqueWallPlacementsSampled: asInt(meta?.metrics?.uniqueWallPlacementsSampled, 0),
-      meanNodeExpansions: roundFixed(meta?.metrics?.meanNodeExpansions ?? 0),
-      meanDeadEnds: roundFixed(meta?.metrics?.meanDeadEnds ?? 0),
-      p90MaxDepth: roundFixed(meta?.metrics?.p90MaxDepth ?? 0),
-      nodeCapHits: asInt(meta?.metrics?.nodeCapHits, 0),
+      cvBacktracksSolved: roundFixed(Number(metrics.cvBacktracksSolved ?? 0)),
+      uniqueWallPlacementsSampled: asInt(metrics.uniqueWallPlacementsSampled, 0),
+      meanNodeExpansions: roundFixed(Number(metrics.meanNodeExpansions ?? 0)),
+      meanDeadEnds: roundFixed(Number(metrics.meanDeadEnds ?? 0)),
+      p90MaxDepth: roundFixed(Number(metrics.p90MaxDepth ?? 0)),
+      nodeCapHits: asInt(metrics.nodeCapHits, 0),
     },
   };
 }
 
-function measureDifficulty(level, opts, baselineCache) {
+function measureDifficulty(
+  level: ScriptLevel,
+  opts: VerifyCliOptions,
+  baselineCache: Map<string, BaselineMetrics>,
+): DifficultyMetadata {
   const levelCtx = buildLevelContext(level);
   const profile = DIFFICULTY_PROFILES[opts.difficultyProfile];
 
@@ -947,8 +1203,7 @@ function measureDifficulty(level, opts, baselineCache) {
   );
 
   const score99 = Math.round(clamp(backtracking + retries + volatility, 0, 99));
-
-  let unsatProofStatus = 'not_run';
+  let unsatProofStatus: UnsatProofStatus = 'not_run';
   let score = score99;
 
   if (successRate === 0) {
@@ -963,7 +1218,7 @@ function measureDifficulty(level, opts, baselineCache) {
     }
   }
 
-  const difficulty = normalizeDifficultyMetadata({
+  return normalizeDifficultyMetadata({
     version: DIFFICULTY_VERSION,
     profile: opts.difficultyProfile,
     score,
@@ -991,12 +1246,10 @@ function measureDifficulty(level, opts, baselineCache) {
       nodeCapHits: batch.nodeCapHits,
     },
   });
-
-  return difficulty;
 }
 
-function verifyResult(result, opts) {
-  const failures = [];
+function verifyResult(result: SolveMetrics, opts: SolveOptions): string[] {
+  const failures: string[] = [];
   if (result.timedOut && !result.earlySatisfied) failures.push('timeout');
   if (result.rawSolutions < opts.minRaw) {
     failures.push(`rawSolutions ${result.rawSolutions} < ${opts.minRaw}`);
@@ -1013,15 +1266,17 @@ function verifyResult(result, opts) {
   return failures;
 }
 
-function deepCloneLevel(level) {
-  const cloned = {
+function deepCloneLevel(level: ScriptLevelWithDifficulty): ScriptLevelWithDifficulty {
+  const cloned: ScriptLevelWithDifficulty = {
     ...level,
-    grid: (level.grid || []).map(String),
-    stitches: (level.stitches || []).map((entry) => [entry[0], entry[1]]),
+    grid: level.grid.map(String),
+    stitches: (level.stitches || []).map((entry) => [entry[0], entry[1]] as GridTuple),
   };
 
   if (Object.hasOwn(level, 'cornerCounts')) {
-    cloned.cornerCounts = (level.cornerCounts || []).map((entry) => [entry[0], entry[1], entry[2]]);
+    cloned.cornerCounts = (level.cornerCounts || []).map(
+      (entry) => [entry[0], entry[1], entry[2]] as CornerCount,
+    );
   }
 
   if (level.difficulty) {
@@ -1031,48 +1286,57 @@ function deepCloneLevel(level) {
   return cloned;
 }
 
-function canonicalizeLevel(level) {
-  const out = {};
+function canonicalizeLevel(level: ScriptLevelWithDifficulty): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  const levelRecord = level as Record<string, unknown>;
 
   if (Object.hasOwn(level, 'name')) out.name = level.name;
   if (Object.hasOwn(level, 'nameKey')) out.nameKey = level.nameKey;
   if (Object.hasOwn(level, 'desc')) out.desc = level.desc;
   if (Object.hasOwn(level, 'descKey')) out.descKey = level.descKey;
 
-  out.grid = (level.grid || []).map(String);
-  out.stitches = (level.stitches || []).map((entry) => [entry[0], entry[1]]);
+  out.grid = level.grid.map(String);
+  out.stitches = (level.stitches || []).map((entry) => [entry[0], entry[1]] as GridTuple);
 
   if (Object.hasOwn(level, 'cornerCounts')) {
-    out.cornerCounts = (level.cornerCounts || []).map((entry) => [entry[0], entry[1], entry[2]]);
+    out.cornerCounts = (level.cornerCounts || []).map(
+      (entry) => [entry[0], entry[1], entry[2]] as CornerCount,
+    );
   }
 
   if (level.difficulty) {
     out.difficulty = normalizeDifficultyMetadata(level.difficulty);
   }
 
-  const extras = Object.keys(level)
+  const extras = Object.keys(levelRecord)
     .filter((key) => !KNOWN_LEVEL_KEYS.has(key))
     .sort((a, b) => a.localeCompare(b));
   for (const key of extras) {
-    out[key] = level[key];
+    out[key] = levelRecord[key];
   }
 
   return out;
 }
 
-function writeCanonicalLevels(levels) {
+function writeCanonicalLevels(levels: readonly ScriptLevelWithDifficulty[]): void {
   const canonicalLevels = levels.map(canonicalizeLevel);
   const body = JSON.stringify(canonicalLevels, null, 2);
   const fileText = `export const LEVELS = ${body};\n\nexport const DEFAULT_LEVEL_INDEX = ${DEFAULT_LEVEL_INDEX};\n`;
   fs.writeFileSync(LEVELS_FILE_PATH, fileText, 'utf8');
 }
 
-function writeDifficultyUpdates(results) {
-  const byIndex = new Map(results.map((r) => [r.index, r.difficulty]));
-  const levelsForWrite = LEVELS.map((level, index) => {
+function writeDifficultyUpdates(results: readonly LevelResultRow[]): void {
+  const byIndex = new Map<number, DifficultyMetadata>();
+  for (const result of results) {
+    if (result.difficulty) {
+      byIndex.set(result.index, result.difficulty);
+    }
+  }
+  const levelsForWrite = ALL_LEVELS.map((level, index) => {
     const clone = deepCloneLevel(level);
-    if (byIndex.has(index)) {
-      clone.difficulty = normalizeDifficultyMetadata(byIndex.get(index));
+    const difficulty = byIndex.get(index);
+    if (difficulty) {
+      clone.difficulty = normalizeDifficultyMetadata(difficulty);
     } else if (clone.difficulty) {
       clone.difficulty = normalizeDifficultyMetadata(clone.difficulty);
     }
@@ -1081,44 +1345,51 @@ function writeDifficultyUpdates(results) {
   writeCanonicalLevels(levelsForWrite);
 }
 
-function getCliOptions() {
+function getCliOptions(): VerifyCliOptions {
   try {
     return parseArgs(process.argv.slice(2));
-  } catch (err) {
-    console.error(String(err.message || err));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(message);
     usage();
     process.exit(2);
   }
 }
 
-function getSelectedLevels(opts) {
+function getSelectedLevels(opts: VerifyCliOptions): Array<{ index: number; level: ScriptLevelWithDifficulty }> {
   try {
     if (opts.levels.length === 0) {
-      return LEVELS.map((level, index) => ({ index, level }));
+      return ALL_LEVELS.map((level, index) => ({ index, level }));
     }
     return opts.levels.map(resolveLevelSelector);
-  } catch (err) {
-    console.error(String(err.message || err));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(message);
     process.exit(2);
   }
 }
 
-function getLevelLabel(r) {
-  if (r.nameKey) return r.nameKey;
-  if (r.name) return r.name;
-  return `level[${r.index}]`;
+function getLevelLabel(result: Pick<LevelResultRow, 'index' | 'nameKey' | 'name'>): string {
+  if (result.nameKey) return result.nameKey;
+  if (result.name) return result.name;
+  return `level[${result.index}]`;
 }
 
-function printDifficultyResults(opts, summary, results) {
-  for (const r of results) {
-    const label = getLevelLabel(r);
-    const status = r.pass ? 'PASS' : 'FAIL';
-    const d = r.difficulty;
+function printDifficultyResults(
+  opts: VerifyCliOptions,
+  summary: VerifySummary,
+  results: readonly LevelResultRow[],
+): void {
+  for (const result of results) {
+    const label = getLevelLabel(result);
+    const status = result.pass ? 'PASS' : 'FAIL';
+    const difficulty = result.difficulty;
+    if (!difficulty) continue;
     console.log(
-      `[DIFF] idx=${r.index} ${label} score=${d.score} label=${d.label}` +
-      ` successRate=${d.metrics.successRate}` +
-      ` meanBacktracks=${d.metrics.meanBacktracksSolved}` +
-      ` unsat=${d.metrics.unsatProofStatus} verify=${status}`,
+      `[DIFF] idx=${result.index} ${label} score=${difficulty.score} label=${difficulty.label}` +
+      ` successRate=${difficulty.metrics.successRate}` +
+      ` meanBacktracks=${difficulty.metrics.meanBacktracksSolved}` +
+      ` unsat=${difficulty.metrics.unsatProofStatus} verify=${status}`,
     );
   }
   console.log(
@@ -1129,17 +1400,21 @@ function printDifficultyResults(opts, summary, results) {
   console.log(`Updated: ${LEVELS_FILE_PATH}`);
 }
 
-function printStandardResults(opts, summary, results) {
-  for (const r of results) {
-    const label = getLevelLabel(r);
-    const status = r.pass ? 'PASS' : 'FAIL';
-    const note = r.failures.length ? ` :: ${r.failures.join('; ')}` : '';
-    const movableNote = r.movableWallsPresent
-      ? ` movableWalls=${r.movableWallsCount} placements=${r.wallPlacementsChecked}/${r.wallPlacementsTotal}`
+function printStandardResults(
+  _opts: VerifyCliOptions,
+  summary: VerifySummary,
+  results: readonly LevelResultRow[],
+): void {
+  for (const result of results) {
+    const label = getLevelLabel(result);
+    const status = result.pass ? 'PASS' : 'FAIL';
+    const note = result.failures.length ? ` :: ${result.failures.join('; ')}` : '';
+    const movableNote = result.movableWallsPresent
+      ? ` movableWalls=${result.movableWallsCount} placements=${result.wallPlacementsChecked}/${result.wallPlacementsTotal}`
       : '';
     console.log(
-      `[${status}] idx=${r.index} ${label} raw=${r.rawSolutions} canonical=${r.canonicalSolutions}` +
-      ` hintOrders=${r.distinctHintOrders} cornerOrders=${r.distinctCornerOrders}` +
+      `[${status}] idx=${result.index} ${label} raw=${result.rawSolutions} canonical=${result.canonicalSolutions}` +
+      ` hintOrders=${result.distinctHintOrders} cornerOrders=${result.distinctCornerOrders}` +
       `${movableNote}${note}`,
     );
   }
@@ -1148,7 +1423,7 @@ function printStandardResults(opts, summary, results) {
   );
 }
 
-function printResults(opts, summary, results) {
+function printResults(opts: VerifyCliOptions, summary: VerifySummary, results: readonly LevelResultRow[]): void {
   if (opts.json) {
     console.log(JSON.stringify({ summary, results }, null, 2));
   } else if (opts.difficulty) {
@@ -1158,17 +1433,17 @@ function printResults(opts, summary, results) {
   }
 }
 
-function main() {
+function main(): void {
   const opts = getCliOptions();
   const selected = getSelectedLevels(opts);
+  const baselineCache = new Map<string, BaselineMetrics>();
+  const results: LevelResultRow[] = [];
 
-  const baselineCache = new Map();
-  const results = [];
   for (const { index, level } of selected) {
     const metrics = solveLevel(level, opts);
     const failures = verifyResult(metrics, opts);
 
-    const row = {
+    const row: LevelResultRow = {
       index,
       nameKey: level.nameKey || null,
       name: level.name || null,
@@ -1188,10 +1463,10 @@ function main() {
     writeDifficultyUpdates(results);
   }
 
-  const summary = {
+  const summary: VerifySummary = {
     checked: results.length,
-    passed: results.filter((r) => r.pass).length,
-    failed: results.filter((r) => !r.pass).length,
+    passed: results.filter((result) => result.pass).length,
+    failed: results.filter((result) => !result.pass).length,
     defaults: {
       minRaw: opts.minRaw,
       minCanonical: opts.minCanonical,
@@ -1203,10 +1478,11 @@ function main() {
   };
 
   if (opts.difficulty) {
+    const profile = DIFFICULTY_PROFILES[opts.difficultyProfile];
     summary.difficulty = {
       profile: opts.difficultyProfile,
-      trials: DIFFICULTY_PROFILES[opts.difficultyProfile].trials,
-      trialNodeCap: DIFFICULTY_PROFILES[opts.difficultyProfile].trialNodeCap,
+      trials: profile.trials,
+      trialNodeCap: profile.trialNodeCap,
       proofTimeMs: opts.difficultyProofTimeMs,
       proofNodeCap: opts.difficultyProofNodeCap,
       levelsFile: LEVELS_FILE_PATH,
@@ -1214,7 +1490,6 @@ function main() {
   }
 
   printResults(opts, summary, results);
-
   process.exit(summary.failed === 0 ? 0 : 1);
 }
 

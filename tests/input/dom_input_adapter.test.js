@@ -19,9 +19,12 @@ const LEVEL = {
   cornerCounts: [],
 };
 
+const globalObject = /** @type {any} */ (globalThis);
+
 class FakeElement {
   constructor(tagName = 'div') {
     this.tagName = String(tagName).toUpperCase();
+    this.id = '';
     this.listeners = new Map();
     this.style = {
       getPropertyValue: () => '',
@@ -30,6 +33,15 @@ class FakeElement {
     this.dataset = {};
     this.parentElement = null;
     this.open = false;
+    this.setPointerCapture = () => { };
+    this.getBoundingClientRect = () => ({
+      left: 0,
+      top: 0,
+      right: 0,
+      bottom: 0,
+      width: 0,
+      height: 0,
+    });
   }
 
   addEventListener(eventName, handler) {
@@ -48,15 +60,15 @@ class FakeElement {
   }
 
   focus() {
-    if (globalThis.document) {
-      globalThis.document.activeElement = this;
+    if (globalObject.document) {
+      globalObject.document.activeElement = this;
     }
     this.dispatch('focus', { target: this });
   }
 
   blur() {
-    if (globalThis.document?.activeElement === this) {
-      globalThis.document.activeElement = globalThis.document.body || null;
+    if (globalObject.document?.activeElement === this) {
+      globalObject.document.activeElement = globalObject.document.body || null;
     }
     this.dispatch('blur', { target: this });
   }
@@ -66,7 +78,7 @@ class FakeElement {
   }
 
   contains(node) {
-    return node === this;
+    return node === /** @type {unknown} */ (this);
   }
 
   closest(selector) {
@@ -88,7 +100,7 @@ class FakeElement {
   }
 }
 
-const createRefs = (gridEl) => ({
+const createRefs = (gridEl) => /** @type {any} */ ({
   boardFocusProxy: new FakeElement('button'),
   gridEl,
   levelSel: new FakeElement('select'),
@@ -150,21 +162,21 @@ const getLastIntent = (harness, matcher) => {
   return null;
 };
 
-const getLastBoardNavIntent = (harness) => getLastIntent(
+const getLastBoardNavIntent = (harness) => /** @type {any} */ (getLastIntent(
   harness,
   (intent) => (
     intent?.type === INTENT_TYPES.INTERACTION_UPDATE
     && intent.payload?.updateType === INTERACTION_UPDATES.BOARD_NAV
   ),
-);
+));
 
-const getLastInteractionIntent = (harness, updateType) => getLastIntent(
+const getLastInteractionIntent = (harness, updateType) => /** @type {any} */ (getLastIntent(
   harness,
   (intent) => (
     intent?.type === INTENT_TYPES.INTERACTION_UPDATE
     && intent.payload?.updateType === updateType
   ),
-);
+));
 
 const getLastWallDragIntent = (harness) => getLastInteractionIntent(
   harness,
@@ -176,10 +188,10 @@ const getLastWallDropTargetIntent = (harness) => getLastInteractionIntent(
   INTERACTION_UPDATES.WALL_DROP_TARGET,
 );
 
-const getLastGameCommandIntent = (harness) => getLastIntent(
+const getLastGameCommandIntent = (harness) => /** @type {any} */ (getLastIntent(
   harness,
   (intent) => intent?.type === INTENT_TYPES.GAME_COMMAND,
-);
+));
 
 const tapDirectionalKeys = (harness, keys, timestamp = 16) => {
   keys.forEach((key) => {
@@ -201,19 +213,19 @@ const installDomGlobals = (t, metrics, elementFromPoint, windowState = null) => 
   const originalCancelRaf = globalThis.cancelAnimationFrame;
 
   const documentElement = new FakeElement('html');
-  const documentTarget = new FakeElement('document');
+  const documentTarget = /** @type {any} */ (new FakeElement('document'));
   const body = new FakeElement('body');
   documentTarget.documentElement = documentElement;
   documentTarget.body = body;
   documentTarget.activeElement = body;
   documentTarget.elementFromPoint = elementFromPoint;
   documentTarget.querySelector = () => null;
-  const windowTarget = windowState || {
+  const windowTarget = /** @type {any} */ (windowState || {
     scrollX: 0,
     scrollY: 0,
     pageXOffset: 0,
     pageYOffset: 0,
-  };
+  });
   if (typeof windowTarget.addEventListener !== 'function') {
     windowTarget.addEventListener = () => { };
   }
@@ -227,10 +239,10 @@ const installDomGlobals = (t, metrics, elementFromPoint, windowState = null) => 
   let nextRafId = 1;
   let currentGamepads = [];
 
-  globalThis.document = documentTarget;
-  globalThis.Element = FakeElement;
-  globalThis.window = windowTarget;
-  Object.defineProperty(globalThis, 'navigator', {
+  globalObject.document = documentTarget;
+  globalObject.Element = FakeElement;
+  globalObject.window = windowTarget;
+  Object.defineProperty(globalObject, 'navigator', {
     configurable: true,
     writable: true,
     value: {
@@ -239,16 +251,16 @@ const installDomGlobals = (t, metrics, elementFromPoint, windowState = null) => 
       },
     },
   });
-  globalThis.requestAnimationFrame = (callback) => {
+  globalObject.requestAnimationFrame = (callback) => {
     const id = nextRafId;
     nextRafId += 1;
     rafCallbacks.set(id, callback);
     return id;
   };
-  globalThis.cancelAnimationFrame = (id) => {
+  globalObject.cancelAnimationFrame = (id) => {
     rafCallbacks.delete(id);
   };
-  globalThis.getComputedStyle = () => ({
+  globalObject.getComputedStyle = () => /** @type {any} */ ({
     getPropertyValue(name) {
       if (name === '--cell') return String(metrics.size);
       if (name === '--grid-cols') return String(metrics.cols);
@@ -261,17 +273,17 @@ const installDomGlobals = (t, metrics, elementFromPoint, windowState = null) => 
   });
 
   t.after(() => {
-    globalThis.document = originalDocument;
-    globalThis.Element = originalElement;
-    globalThis.window = originalWindow;
+    globalObject.document = originalDocument;
+    globalObject.Element = originalElement;
+    globalObject.window = originalWindow;
     if (originalNavigatorDescriptor) {
-      Object.defineProperty(globalThis, 'navigator', originalNavigatorDescriptor);
+      Object.defineProperty(globalObject, 'navigator', originalNavigatorDescriptor);
     } else {
-      delete globalThis.navigator;
+      Reflect.deleteProperty(globalObject, 'navigator');
     }
-    globalThis.requestAnimationFrame = originalRaf;
-    globalThis.cancelAnimationFrame = originalCancelRaf;
-    globalThis.getComputedStyle = originalGetComputedStyle;
+    globalObject.requestAnimationFrame = originalRaf;
+    globalObject.cancelAnimationFrame = originalCancelRaf;
+    globalObject.getComputedStyle = originalGetComputedStyle;
   });
 
   return {
@@ -341,10 +353,10 @@ const createGridHarness = (t, options = {}) => {
   const level = options.level || LEVEL;
   const store = createGameStateStore(() => level);
   store.dispatch({ type: GAME_COMMANDS.LOAD_LEVEL, payload: { levelIndex: 0 } });
-  const emittedIntents = [];
+  const emittedIntents = /** @type {any[]} */ ([]);
   const refs = createRefs(gridEl);
 
-  const adapter = createDomInputAdapter();
+  const adapter = /** @type {any} */ (createDomInputAdapter());
   adapter.bind({
     refs,
     readSnapshot: () => store.getSnapshot(),
@@ -1147,7 +1159,7 @@ test('dom input adapter emits board shortcut intents only from focused grid and 
   const harness = createGridHarness(t);
   harness.adapter.setKeyboardGamepadControlsEnabled(true);
 
-  globalThis.document.activeElement = harness.refs.levelSel;
+  globalObject.document.activeElement = harness.refs.levelSel;
   harness.gridEl.dispatch('keydown', createKeyEvent('ArrowRight'));
   harness.flushAllRafs(16, 4);
   assert.deepEqual(getLastBoardNavIntent(harness)?.payload.boardCursor, { r: 0, c: 0 });
@@ -1229,7 +1241,7 @@ test('dom input adapter hides board highlight when the board is not currently co
   harness.flushNextRaf(100);
   assert.equal(getLastBoardNavIntent(harness)?.payload.isBoardNavActive, true);
 
-  globalThis.document.activeElement = harness.refs.levelSel;
+  globalObject.document.activeElement = harness.refs.levelSel;
   harness.documentTarget.dispatch('focusin', { target: harness.refs.levelSel });
   assert.equal(getLastBoardNavIntent(harness)?.payload.isBoardNavActive, false);
 
@@ -1911,12 +1923,12 @@ test('dom input adapter ignores blocked or non-standard gamepads and edge-trigge
   const harness = createGridHarness(t);
   harness.adapter.setKeyboardGamepadControlsEnabled(true);
 
-  globalThis.document.activeElement = harness.refs.levelSel;
+  globalObject.document.activeElement = harness.refs.levelSel;
   harness.setGamepads([createGamepad({ buttons: { 15: true } })]);
   harness.flushNextRaf(100);
   assert.deepEqual(getLastBoardNavIntent(harness)?.payload.boardCursor, { r: 0, c: 0 });
 
-  globalThis.document.activeElement = globalThis.document.body;
+  globalObject.document.activeElement = globalObject.document.body;
   harness.setGamepads([createGamepad({ buttons: { 15: true }, mapping: '' })]);
   harness.flushNextRaf(200);
   assert.deepEqual(getLastBoardNavIntent(harness)?.payload.boardCursor, { r: 0, c: 0 });

@@ -7,6 +7,8 @@ import { createRuntime } from '../../src/runtime/create_runtime.ts';
 import { GAME_COMMANDS, INTENT_TYPES, INTERACTION_UPDATES, UI_ACTIONS } from '../../src/runtime/intents.ts';
 import { createGameStateStore } from '../../src/state/game_state_store.ts';
 
+const globalObject = /** @type {any} */ (globalThis);
+
 const LEVEL = {
   name: 'Runtime Lifecycle',
   grid: [
@@ -39,7 +41,7 @@ const createDeferred = () => {
 
 const createClassList = () => {
   const tokens = new Set();
-  return {
+  return /** @type {any} */ ({
     add: (...values) => values.forEach((value) => tokens.add(value)),
     remove: (...values) => values.forEach((value) => tokens.delete(value)),
     toggle: (value, force) => {
@@ -49,10 +51,10 @@ const createClassList = () => {
       return shouldHave;
     },
     contains: (value) => tokens.has(value),
-  };
+  });
 };
 
-const createElement = () => ({
+const createElement = () => /** @type {any} */ ({
   hidden: false,
   disabled: false,
   checked: false,
@@ -87,7 +89,7 @@ const createRefs = () => {
   const levelSelectGroup = createElement();
   levelSelectGroup.parentElement = createElement();
 
-  return {
+  return /** @type {any} */ ({
     boardWrap: createElement(),
     gridEl: createElement(),
     legend: createElement(),
@@ -118,7 +120,7 @@ const createRefs = () => {
     reverseBtn: createElement(),
     langSel: createElement(),
     msgEl: createElement(),
-  };
+  });
 };
 
 const flushQueuedRafs = (env, ts) => {
@@ -167,15 +169,15 @@ const installBrowserEnv = (t) => {
     }
   }
 
-  globalThis.window = {
+  globalObject.window = /** @type {any} */ ({
     addEventListener(eventName, handler) {
       ensureListeners(eventName).add(handler);
     },
     removeEventListener(eventName, handler) {
       ensureListeners(eventName).delete(handler);
     },
-  };
-  globalThis.document = {
+  });
+  globalObject.document = /** @type {any} */ ({
     documentElement: {
       lang: '',
       dataset: {},
@@ -183,9 +185,9 @@ const installBrowserEnv = (t) => {
       setAttribute() { },
     },
     body: null,
-  };
-  globalThis.ResizeObserver = FakeResizeObserver;
-  globalThis.requestAnimationFrame = (callback) => {
+  });
+  globalObject.ResizeObserver = /** @type {any} */ (FakeResizeObserver);
+  globalObject.requestAnimationFrame = (callback) => {
     const id = nextRafId;
     nextRafId += 1;
     rafCallbacks.set(id, (...args) => {
@@ -194,10 +196,10 @@ const installBrowserEnv = (t) => {
     });
     return id;
   };
-  globalThis.cancelAnimationFrame = (id) => {
+  globalObject.cancelAnimationFrame = (id) => {
     rafCallbacks.delete(id);
   };
-  globalThis.setTimeout = (callback) => {
+  globalObject.setTimeout = (callback) => {
     const id = nextTimeoutId;
     nextTimeoutId += 1;
     timeoutCallbacks.set(id, (...args) => {
@@ -206,18 +208,18 @@ const installBrowserEnv = (t) => {
     });
     return id;
   };
-  globalThis.clearTimeout = (id) => {
+  globalObject.clearTimeout = (id) => {
     timeoutCallbacks.delete(id);
   };
 
   t.after(() => {
-    globalThis.window = originalWindow;
-    globalThis.document = originalDocument;
-    globalThis.ResizeObserver = originalResizeObserver;
-    globalThis.requestAnimationFrame = originalRaf;
-    globalThis.cancelAnimationFrame = originalCancelRaf;
-    globalThis.setTimeout = originalSetTimeout;
-    globalThis.clearTimeout = originalClearTimeout;
+    globalObject.window = originalWindow;
+    globalObject.document = originalDocument;
+    globalObject.ResizeObserver = originalResizeObserver;
+    globalObject.requestAnimationFrame = originalRaf;
+    globalObject.cancelAnimationFrame = originalCancelRaf;
+    globalObject.setTimeout = originalSetTimeout;
+    globalObject.clearTimeout = originalClearTimeout;
   });
 
   return {
@@ -228,7 +230,7 @@ const installBrowserEnv = (t) => {
   };
 };
 
-const createRuntimeHarness = ({
+const createRuntimeHarness = (/** @type {any} */ {
   levels = [LEVEL],
   dailyLevel = null,
   effects = {},
@@ -263,14 +265,14 @@ const createRuntimeHarness = ({
   const keyboardGamepadControlsSetCalls = [];
   const inputSyncSnapshots = [];
 
-  const persistence = {
+  const persistence = /** @type {any} */ ({
     ...basePersistence,
     ...persistenceOverrides,
-  };
+  });
   if (!persistence.writeSessionBoard) persistence.writeSessionBoard = basePersistence.writeSessionBoard;
   if (!persistence.clearSessionBoard) persistence.clearSessionBoard = basePersistence.clearSessionBoard;
 
-  const renderer = {
+  const renderer = /** @type {any} */ ({
     mount: () => { },
     getRefs: () => refs,
     rebuildGrid: (...args) => {
@@ -291,7 +293,7 @@ const createRuntimeHarness = ({
     unmount: () => {
       unmountCount += 1;
     },
-  };
+  });
   if (rendererOverrides.mount) renderer.mount = rendererOverrides.mount;
   if (rendererOverrides.getRefs) renderer.getRefs = rendererOverrides.getRefs;
   if (rendererOverrides.renderFrame) renderer.renderFrame = rendererOverrides.renderFrame;
@@ -307,7 +309,7 @@ const createRuntimeHarness = ({
     renderer.setPathFlowFreezeImmediate = rendererOverrides.setPathFlowFreezeImmediate;
   }
 
-  const i18n = {
+  const i18n = /** @type {any} */ ({
     resolveLocale: () => 'en',
     createTranslator: () => (key, vars = {}) => {
       if (key === 'ui.infiniteLevelOption') return `Infinite ${vars.n ?? ''}`.trim();
@@ -315,20 +317,20 @@ const createRuntimeHarness = ({
       return key;
     },
     getLocale: () => 'en',
-    setLocale: () => 'en',
+    setLocale: async () => 'en',
     getLocaleOptions: () => [{ value: 'en', label: 'English' }],
     ...i18nOverrides,
-  };
+  });
 
   const runtime = createRuntimeImpl({
-    appEl: {
+    appEl: /** @type {any} */ ({
       querySelectorAll: () => [],
-    },
+    }),
     core,
     state,
     persistence,
     renderer,
-    input: {
+    input: /** @type {any} */ ({
       bind: (payload) => {
         bindCount += 1;
         lastBindPayload = payload;
@@ -339,10 +341,11 @@ const createRuntimeHarness = ({
       syncSnapshot: (snapshot) => {
         inputSyncSnapshots.push(snapshot);
       },
+      setBoardControlSuppressed: () => { },
       unbind: () => {
         unbindCount += 1;
       },
-    },
+    }),
     i18n,
     ui: {
       buildLegendTemplate: () => '',
@@ -402,17 +405,17 @@ const emitSolvePath = (runtime, cells) => {
 test('createRuntime omits daily freeze debug hooks when __TETHER_DEV__ is false', async (t) => {
   installBrowserEnv(t);
 
-  const hadDevFlag = Object.hasOwn(globalThis, '__TETHER_DEV__');
-  const previousDevFlag = globalThis.__TETHER_DEV__;
-  globalThis.__TETHER_DEV__ = false;
+  const hadDevFlag = Object.hasOwn(globalObject, '__TETHER_DEV__');
+  const previousDevFlag = globalObject.__TETHER_DEV__;
+  globalObject.__TETHER_DEV__ = false;
 
   t.after(() => {
-    if (hadDevFlag) globalThis.__TETHER_DEV__ = previousDevFlag;
-    else delete globalThis.__TETHER_DEV__;
+    if (hadDevFlag) globalObject.__TETHER_DEV__ = previousDevFlag;
+    else Reflect.deleteProperty(globalObject, '__TETHER_DEV__');
   });
 
   const moduleUrl = new URL(`../../src/runtime/create_runtime.ts?prod-gate=${Date.now()}`, import.meta.url);
-  const { createRuntime: createRuntimeProd } = await import(moduleUrl);
+  const { createRuntime: createRuntimeProd } = await import(moduleUrl.href);
   const { runtime } = createRuntimeHarness({
     dailyLevel: DAILY_LEVEL,
     createRuntimeImpl: createRuntimeProd,

@@ -1,30 +1,52 @@
-// @ts-nocheck
-export function createNotificationDialogController(options = {}) {
+import type {
+  DialogElementLike,
+  ElementLike,
+  NotificationDialogController,
+  NotificationDialogControllerOptions,
+  WindowLike,
+} from '../contracts/ports.ts';
+
+const FALLBACK_WINDOW: WindowLike = {
+  confirm: () => false,
+  clearInterval: () => { },
+  setInterval: () => 0,
+  requestAnimationFrame: () => 0,
+  cancelAnimationFrame: () => { },
+  getComputedStyle: () => ({}),
+  addEventListener: () => { },
+  removeEventListener: () => { },
+};
+
+export function createNotificationDialogController(
+  options: NotificationDialogControllerOptions,
+): NotificationDialogController {
   const {
     elementIds,
     translateNow = (key) => key,
-    windowObj = typeof window === 'undefined' ? undefined : window,
-    documentObj = typeof document === 'undefined' ? undefined : document,
+    windowObj = (typeof window === 'undefined' ? undefined : window) as WindowLike | undefined,
+    documentObj = (typeof document === 'undefined' ? undefined : document) as NotificationDialogControllerOptions['documentObj'],
   } = options;
+  const activeWindow = windowObj || FALLBACK_WINDOW;
 
   if (!elementIds || typeof elementIds !== 'object') {
     throw new Error('createNotificationDialogController requires elementIds');
   }
 
-  let updateApplyDialogEl = null;
-  let updateApplyMessageEl = null;
+  let updateApplyDialogEl: DialogElementLike | null = null;
+  let updateApplyMessageEl: ElementLike | null = null;
   let updateApplyDialogBound = false;
-  let moveDailyDialogEl = null;
-  let moveDailyMessageEl = null;
+  let moveDailyDialogEl: DialogElementLike | null = null;
+  let moveDailyMessageEl: ElementLike | null = null;
   let moveDailyDialogBound = false;
-  let moveDailyDialogResolver = null;
-  let updateApplyDialogResolver = null;
+  let moveDailyDialogResolver: ((confirmed: boolean) => void) | null = null;
+  let updateApplyDialogResolver: ((confirmed: boolean) => void) | null = null;
 
-  const resolveUpdateApplyDialogPromptText = (buildNumber = null) => {
+  const resolveUpdateApplyDialogPromptText = (buildNumber: number | null = null) => {
     const prompt = translateNow('ui.updateApplyDialogPrompt');
     if (prompt !== 'ui.updateApplyDialogPrompt') return prompt;
-    if (Number.isInteger(buildNumber) && buildNumber > 0) {
-      return `Install build ${buildNumber}?`;
+    const resolvedBuildNumber = Number.isInteger(buildNumber) ? buildNumber : null;
+    if (resolvedBuildNumber !== null && resolvedBuildNumber > 0) {
+      return `Install build ${resolvedBuildNumber}?`;
     }
     return 'Install the latest version now?';
   };
@@ -38,15 +60,16 @@ export function createNotificationDialogController(options = {}) {
   const bindUpdateApplyDialog = () => {
     if (!documentObj) return;
 
-    updateApplyDialogEl = documentObj.getElementById(elementIds.UPDATE_APPLY_DIALOG);
+    updateApplyDialogEl = documentObj.getElementById(elementIds.UPDATE_APPLY_DIALOG) as DialogElementLike | null;
     updateApplyMessageEl = documentObj.getElementById(elementIds.UPDATE_APPLY_MESSAGE);
 
     if (!updateApplyDialogEl || updateApplyDialogBound) return;
 
-    updateApplyDialogEl.addEventListener('close', () => {
-      const shouldApply = updateApplyDialogEl?.returnValue === 'confirm';
-      delete updateApplyDialogEl.dataset.pendingBuildNumber;
-      updateApplyDialogEl.returnValue = '';
+    const dialog = updateApplyDialogEl;
+    dialog.addEventListener('close', () => {
+      const shouldApply = dialog.returnValue === 'confirm';
+      delete dialog.dataset.pendingBuildNumber;
+      dialog.returnValue = '';
       const resolve = updateApplyDialogResolver;
       updateApplyDialogResolver = null;
       if (typeof resolve === 'function') {
@@ -60,14 +83,15 @@ export function createNotificationDialogController(options = {}) {
   const bindMoveDailyDialog = () => {
     if (!documentObj) return;
 
-    moveDailyDialogEl = documentObj.getElementById(elementIds.MOVE_DAILY_DIALOG);
+    moveDailyDialogEl = documentObj.getElementById(elementIds.MOVE_DAILY_DIALOG) as DialogElementLike | null;
     moveDailyMessageEl = documentObj.getElementById(elementIds.MOVE_DAILY_MESSAGE);
 
     if (!moveDailyDialogEl || moveDailyDialogBound) return;
 
-    moveDailyDialogEl.addEventListener('close', () => {
-      const confirmed = moveDailyDialogEl?.returnValue === 'confirm';
-      moveDailyDialogEl.returnValue = '';
+    const dialog = moveDailyDialogEl;
+    dialog.addEventListener('close', () => {
+      const confirmed = dialog.returnValue === 'confirm';
+      dialog.returnValue = '';
       const resolve = moveDailyDialogResolver;
       moveDailyDialogResolver = null;
       if (typeof resolve === 'function') {
@@ -78,56 +102,61 @@ export function createNotificationDialogController(options = {}) {
     moveDailyDialogBound = true;
   };
 
-  const requestUpdateApplyConfirmation = async (buildNumber) => {
+  const requestUpdateApplyConfirmation = async (buildNumber: number): Promise<boolean> => {
     if (!Number.isInteger(buildNumber) || buildNumber <= 0) return false;
     if (!updateApplyDialogEl || typeof updateApplyDialogEl.showModal !== 'function') {
-      return windowObj.confirm(resolveUpdateApplyDialogPromptText(buildNumber));
+      return activeWindow.confirm(resolveUpdateApplyDialogPromptText(buildNumber));
     }
-    if (updateApplyDialogEl.open || updateApplyDialogResolver) return false;
+    const dialog = updateApplyDialogEl;
+    const showModal = dialog.showModal!;
+    if (dialog.open || updateApplyDialogResolver) return false;
 
-    updateApplyDialogEl.dataset.pendingBuildNumber = String(buildNumber);
+    dialog.dataset.pendingBuildNumber = String(buildNumber);
     if (updateApplyMessageEl) {
       updateApplyMessageEl.textContent = resolveUpdateApplyDialogPromptText(buildNumber);
     }
 
-    return new Promise((resolve) => {
+    return new Promise<boolean>((resolve) => {
       updateApplyDialogResolver = resolve;
       try {
-        updateApplyDialogEl.showModal();
+        showModal();
       } catch {
         updateApplyDialogResolver = null;
-        delete updateApplyDialogEl.dataset.pendingBuildNumber;
-        resolve(windowObj.confirm(resolveUpdateApplyDialogPromptText(buildNumber)));
+        delete dialog.dataset.pendingBuildNumber;
+        resolve(activeWindow.confirm(resolveUpdateApplyDialogPromptText(buildNumber)));
       }
     });
   };
 
-  const requestMoveDailyConfirmation = async () => {
+  const requestMoveDailyConfirmation = async (): Promise<boolean> => {
     const promptText = resolveMoveDailyDialogPromptText();
     if (!moveDailyDialogEl || typeof moveDailyDialogEl.showModal !== 'function') {
-      return windowObj.confirm(promptText);
+      return activeWindow.confirm(promptText);
     }
-    if (moveDailyDialogEl.open || moveDailyDialogResolver) return false;
+    const dialog = moveDailyDialogEl;
+    const showModal = dialog.showModal!;
+    if (dialog.open || moveDailyDialogResolver) return false;
 
     if (moveDailyMessageEl) {
       moveDailyMessageEl.textContent = promptText;
     }
 
-    return new Promise((resolve) => {
+    return new Promise<boolean>((resolve) => {
       moveDailyDialogResolver = resolve;
       try {
-        moveDailyDialogEl.showModal();
+        showModal();
       } catch {
         moveDailyDialogResolver = null;
-        resolve(windowObj.confirm(promptText));
+        resolve(activeWindow.confirm(promptText));
       }
     });
   };
 
-  const containsOpenDialogTarget = (target) => {
+  const containsOpenDialogTarget = (target: unknown) => {
+    const targetNode = target as Node | null;
     if (!target) return false;
-    if (updateApplyDialogEl?.open && updateApplyDialogEl.contains(target)) return true;
-    if (moveDailyDialogEl?.open && moveDailyDialogEl.contains(target)) return true;
+    if (updateApplyDialogEl?.open && updateApplyDialogEl.contains(targetNode)) return true;
+    if (moveDailyDialogEl?.open && moveDailyDialogEl.contains(targetNode)) return true;
     return false;
   };
 

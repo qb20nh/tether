@@ -3,7 +3,7 @@ import test from 'node:test';
 import { buildBoardCellViewModel } from '../../src/renderer/board_view_model.ts';
 
 test('board view model maps path and statuses to classes', () => {
-  const snapshot = {
+  const snapshot = /** @type {any} */ ({
     rows: 2,
     cols: 2,
     gridData: [
@@ -11,15 +11,15 @@ test('board view model maps path and statuses to classes', () => {
       ['m', '.'],
     ],
     path: [{ r: 0, c: 0 }, { r: 1, c: 1 }],
-  };
+  });
 
   const desired = buildBoardCellViewModel(
     snapshot,
-    {
+    /** @type {any} */ ({
       hintStatus: { badKeys: ['0,0'], goodKeys: [] },
       rpsStatus: { badKeys: [], goodKeys: ['1,1'] },
       blockedStatus: { badKeys: ['1,0'] },
-    },
+    }),
     (code) => code,
   );
 
@@ -37,7 +37,7 @@ test('board view model maps path and statuses to classes', () => {
 });
 
 test('board view model reuses output matrix when provided', () => {
-  const snapshotA = {
+  const snapshotA = /** @type {any} */ ({
     rows: 2,
     cols: 2,
     gridData: [
@@ -45,8 +45,8 @@ test('board view model reuses output matrix when provided', () => {
       ['.', '.'],
     ],
     path: [{ r: 0, c: 0 }],
-  };
-  const snapshotB = {
+  });
+  const snapshotB = /** @type {any} */ ({
     rows: 2,
     cols: 2,
     gridData: [
@@ -54,13 +54,13 @@ test('board view model reuses output matrix when provided', () => {
       ['.', '.'],
     ],
     path: [{ r: 1, c: 1 }],
-  };
+  });
 
-  const reused = buildBoardCellViewModel(snapshotA, {}, (code) => code, null);
+  const reused = buildBoardCellViewModel(snapshotA, /** @type {any} */ ({}), (code) => code, null);
   const cellRef = reused[0][0];
   const classRef = reused[0][0].classes;
 
-  const next = buildBoardCellViewModel(snapshotB, {}, (code) => code, reused);
+  const next = buildBoardCellViewModel(snapshotB, /** @type {any} */ ({}), (code) => code, reused);
   assert.equal(next, reused);
   assert.equal(next[0][0], cellRef);
   assert.equal(next[0][0].classes, classRef);

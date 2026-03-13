@@ -1,9 +1,8 @@
-// @ts-nocheck
 export const UPDATE_CHECK_DECISION = Object.freeze({
   NOOP: 'noop',
   APPLY: 'apply',
   NOTIFY: 'notify',
-});
+} as const);
 
 export const UPDATE_APPLY_STATUS = Object.freeze({
   APPLIED: 'applied',
@@ -11,17 +10,34 @@ export const UPDATE_APPLY_STATUS = Object.freeze({
   ALREADY_PROMPTED: 'already-prompted',
   UPDATE_FAILED: 'update-failed',
   NO_WAITING: 'no-waiting',
-});
+} as const);
+
+const readInteger = (value: unknown): number | null =>
+  Number.isInteger(value) ? value as number : null;
+
+interface UpdateCheckDecisionOptions {
+  localBuildNumber: number;
+  updatableRemoteBuildNumber: number | null;
+  autoUpdateEnabled: boolean;
+}
+
+interface SwPolicyState {
+  autoUpdateEnabled?: boolean;
+  pinnedBuildNumber?: string | number | null;
+  servingBuildNumber?: string | number | null;
+  pinnedCacheUsable?: boolean;
+}
 
 export const resolveUpdateCheckDecision = ({
   localBuildNumber,
   updatableRemoteBuildNumber,
   autoUpdateEnabled,
-}) => {
+}: UpdateCheckDecisionOptions): string => {
   if (!Number.isInteger(localBuildNumber) || localBuildNumber <= 0) {
     return UPDATE_CHECK_DECISION.NOOP;
   }
-  if (!Number.isInteger(updatableRemoteBuildNumber) || updatableRemoteBuildNumber <= localBuildNumber) {
+  const nextBuildNumber = readInteger(updatableRemoteBuildNumber);
+  if (nextBuildNumber === null || nextBuildNumber <= localBuildNumber) {
     return UPDATE_CHECK_DECISION.NOOP;
   }
   return autoUpdateEnabled
@@ -32,7 +48,10 @@ export const resolveUpdateCheckDecision = ({
 export const shouldReloadAfterManualPinConfirm = ({
   confirmedInServiceWorker,
   applyStatus,
-}) => (
+}: {
+  confirmedInServiceWorker: boolean;
+  applyStatus: string;
+}): boolean => (
   confirmedInServiceWorker === true
   && applyStatus === UPDATE_APPLY_STATUS.NO_WAITING
 );
@@ -41,19 +60,23 @@ export const shouldResyncManualUpdatePolicy = ({
   localAutoUpdateEnabled,
   localBuildNumber,
   swPolicy,
-}) => {
+}: {
+  localAutoUpdateEnabled: boolean;
+  localBuildNumber: number;
+  swPolicy: SwPolicyState | null;
+}): boolean => {
   if (localAutoUpdateEnabled) return false;
   if (!Number.isInteger(localBuildNumber) || localBuildNumber <= 0) return false;
   if (!swPolicy || typeof swPolicy !== 'object') return true;
 
   if (swPolicy.autoUpdateEnabled === true) return true;
 
-  const pinnedBuildNumber = Number.parseInt(swPolicy.pinnedBuildNumber, 10);
+  const pinnedBuildNumber = Number.parseInt(String(swPolicy.pinnedBuildNumber ?? ''), 10);
   if (!Number.isInteger(pinnedBuildNumber) || pinnedBuildNumber !== localBuildNumber) {
     return true;
   }
 
-  const servingBuildNumber = Number.parseInt(swPolicy.servingBuildNumber, 10);
+  const servingBuildNumber = Number.parseInt(String(swPolicy.servingBuildNumber ?? ''), 10);
   if (!Number.isInteger(servingBuildNumber) || servingBuildNumber !== localBuildNumber) {
     return true;
   }

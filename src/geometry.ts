@@ -1,22 +1,24 @@
-// @ts-nocheck
-const hasPositiveValue = (value) => Number.isFinite(value) && value > 0;
+const hasPositiveValue = (value: number): boolean => Number.isFinite(value) && value > 0;
 
-const parseCellVar = (el) => {
+const parseCellVar = (el: Element | null | undefined): number => {
   if (!el || !(el instanceof Element)) return Number.NaN;
+  const style = (el as Element & {
+    style?: { getPropertyValue: (name: string) => string };
+  }).style;
 
-  const inlineParsed = Number.parseFloat(el.style.getPropertyValue('--cell').trim());
+  const inlineParsed = Number.parseFloat(style?.getPropertyValue('--cell').trim() || '');
   if (hasPositiveValue(inlineParsed)) return inlineParsed;
 
   const computedParsed = Number.parseFloat(getComputedStyle(el).getPropertyValue('--cell').trim());
   return hasPositiveValue(computedParsed) ? computedParsed : Number.NaN;
 };
 
-const getGridElement = (source) => {
+const getGridElement = (source: Element | null | undefined): Element | null => {
   if (!(source instanceof Element)) return null;
   return source.id === 'grid' ? source : source.querySelector('#grid');
 };
 
-const inferGridCellSize = (gridEl) => {
+const inferGridCellSize = (gridEl: Element | null): number => {
   if (!gridEl) return Number.NaN;
 
   const byCssVar = parseCellVar(gridEl);
@@ -33,9 +35,15 @@ const inferGridCellSize = (gridEl) => {
   return hasPositiveValue(inferred) ? inferred : Number.NaN;
 };
 
-export const getCellSize = (scope = document.documentElement) => {
-  const source =
-    scope && scope instanceof Element ? scope : document.documentElement;
+export const getCellSize = (
+  scope: Element | null | undefined = typeof document !== 'undefined' ? document.documentElement : null,
+): number => {
+  const source = scope && scope instanceof Element
+    ? scope
+    : typeof document !== 'undefined'
+      ? document.documentElement
+      : null;
+  if (!source) return 56;
   const byGrid = inferGridCellSize(getGridElement(source));
   if (hasPositiveValue(byGrid)) return byGrid;
 
@@ -49,17 +57,17 @@ export const getCellSize = (scope = document.documentElement) => {
   return hasPositiveValue(parsed) ? parsed : 56;
 };
 
-export const getGridGap = (gridEl) => {
+export const getGridGap = (gridEl: Element): number => {
   const styles = getComputedStyle(gridEl);
   return Number.parseFloat((styles.columnGap || styles.gap || '0').trim()) || 0;
 };
 
-export const getGridPadding = (gridEl) => {
+export const getGridPadding = (gridEl: Element): number => {
   const styles = getComputedStyle(gridEl);
   return Number.parseFloat((styles.paddingLeft || styles.padding || '0').trim()) || 0;
 };
 
-export const cellCenter = (r, c, gridEl) => {
+export const cellCenter = (r: number, c: number, gridEl: Element): { x: number; y: number } => {
   const size = getCellSize(gridEl);
   const gap = getGridGap(gridEl);
   const pad = getGridPadding(gridEl);
@@ -69,7 +77,7 @@ export const cellCenter = (r, c, gridEl) => {
   };
 };
 
-export const vertexPos = (vr, vc, gridEl) => {
+export const vertexPos = (vr: number, vc: number, gridEl: Element): { x: number; y: number } => {
   const size = getCellSize(gridEl);
   const gap = getGridGap(gridEl);
   const pad = getGridPadding(gridEl);

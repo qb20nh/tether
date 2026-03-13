@@ -8,7 +8,7 @@ test('parseCoordinatePair accepts array and object coordinates', () => {
 });
 
 test('parseCoordinatePair rejects malformed coordinates', () => {
-  assert.equal(parseCoordinatePair([1]), null);
+  assert.equal(parseCoordinatePair(/** @type {[number, number]} */ (/** @type {unknown} */ ([1]))), null);
   assert.equal(parseCoordinatePair({ r: 1, c: 'x' }), null);
   assert.equal(parseCoordinatePair(null), null);
 });

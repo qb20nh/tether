@@ -3,7 +3,9 @@ const BUILD_LABEL = '__TETHER_BUILD_LABEL__';
 
 const APP_CACHE_PREFIX = 'tether-app-';
 const DAILY_CACHE_PREFIX = 'tether-daily-';
+/** @param {number} buildNumber */
 const appCacheNameForBuild = (buildNumber) => `${APP_CACHE_PREFIX}${buildNumber}`;
+/** @param {number} buildNumber */
 const dailyCacheNameForBuild = (buildNumber) => `${DAILY_CACHE_PREFIX}${buildNumber}`;
 const APP_CACHE = appCacheNameForBuild(BUILD_NUMBER);
 const DAILY_CACHE = dailyCacheNameForBuild(BUILD_NUMBER);
@@ -41,6 +43,41 @@ const HISTORY_MARKERS = Object.freeze({
   OLDER: 'older',
 });
 
+/**
+ * @typedef {{ bypassCache?: boolean }} FetchFreshOptions
+ * @typedef {{ bypassCache?: boolean, shellResponse?: Response | null }} CacheShellAssetOptions
+ * @typedef {{ matcher?: ((request: Request) => boolean) | null }} TrimCacheOptions
+ * @typedef {{ cacheName?: string, pinned?: boolean }} CacheFirstRevalidateOptions
+ * @typedef {{ version?: unknown, updatedAtMs?: unknown, autoUpdateEnabled?: unknown, pinnedBuildNumber?: unknown, currentBuildNumber?: unknown }} UpdatePolicyPayload
+ * @typedef {{ version: number, updatedAtMs: number, autoUpdateEnabled: boolean, pinnedBuildNumber: number }} UpdatePolicyState
+ * @typedef {{ servingBuildNumber: number, appCacheName: string, pinned: boolean, pinnedCacheUsable?: boolean }} ServingBuildPlan
+ * @typedef {{ unsolvedTitle: string, unsolvedBody: string, newLevelTitle: string, newLevelBody: string }} NotificationTextState
+ * @typedef {{ dailyId?: unknown, hardInvalidateAtUtcMs?: unknown, dailySolvedDate?: unknown, notificationsEnabled?: unknown, warningHours?: unknown, warnedDailyId?: unknown, newLevelDailyId?: unknown, notificationText?: { unsolvedTitle?: unknown, unsolvedBody?: unknown, newLevelTitle?: unknown, newLevelBody?: unknown } | null }} DailyStatePayload
+ * @typedef {{ buildNumber: number, buildLabel: string, updatedAtMs: number, dailyId: string, hardInvalidateAtUtcMs: number | null, dailySolvedDate: string, notificationsEnabled: boolean, warningHours: number, warnedDailyId: string, newLevelDailyId: string, notificationText: NotificationTextState }} DailyState
+ * @typedef {'unread' | 'just-read' | 'older'} HistoryMarker
+ * @typedef {{ type: 'apply-update', buildNumber: number } | { type: 'open-daily', dailyId: string } | null} HistoryAction
+ * @typedef {{ id?: unknown, source?: unknown, kind?: unknown, title?: unknown, body?: unknown, createdAtUtcMs?: unknown, marker?: unknown, action?: unknown, dailyId?: unknown }} HistoryEntryInput
+ * @typedef {{ id: string, source: 'system' | 'toast', kind: string, title: string, body: string, createdAtUtcMs: number, marker: HistoryMarker, action: HistoryAction }} HistoryEntry
+ * @typedef {{ historyVersion?: unknown, entries?: unknown }} HistoryStatePayload
+ * @typedef {{ updatedAtMs: number, historyVersion: number, entries: HistoryEntry[] }} HistoryState
+ * @typedef {{ type?: unknown, payload?: unknown }} SwMessageData
+ * @typedef {Record<string, unknown>} SwPayload
+ * @typedef {{
+ *   isLocalhostHostname: (hostname?: string) => boolean,
+ *   normalizeString: (value: unknown, fallback?: string) => string,
+ *   readDailyState: () => Promise<DailyState>,
+ *   writeDailyState: (state: DailyState | DailyStatePayload) => Promise<DailyState>,
+ *   normalizeSystemNotificationKind: (kindRaw: unknown) => 'new-level' | 'unsolved-warning',
+ *   emitSystemNotification: (state: DailyState, kind: unknown) => Promise<boolean>,
+ *   clearHistoryEntries: () => Promise<HistoryState>,
+ *   closeVisibleNotifications: () => Promise<number>,
+ * }} SwPluginApi
+ * @typedef {(context: { event: ExtendableMessageEvent, data: SwMessageData, payload: SwPayload, api: SwPluginApi }) => unknown | Promise<unknown>} SwPluginMessageHandler
+ * @typedef {(event: ExtendableMessageEvent, payload: SwPayload) => void} SwSystemMessageHandler
+ */
+
+const sw = /** @type {ServiceWorkerGlobalScope & typeof globalThis} */ (globalThis);
+
 const isLocalhostHostname = (hostname = '') =>
   hostname === 'localhost'
   || hostname === '127.0.0.1'
@@ -50,17 +87,25 @@ const isLocalhostHostname = (hostname = '') =>
 
 const CURRENT_BUILD_CACHES = Object.freeze([APP_CACHE, DAILY_CACHE]);
 
+/** @param {Response | null | undefined} response */
 const isCacheableResponse = (response) =>
   Boolean(response?.ok && response.type === 'basic');
 
+/** @param {Request} request */
 const isNavigationRequest = (request) =>
   request.mode === 'navigate' || request.destination === 'document';
 
+/** @param {URL} url */
 const isVersionRequest = (url) => url.pathname.endsWith('/version.json');
+/** @param {URL} url */
 const isDailyPayloadRequest = (url) => url.pathname.endsWith(DAILY_PAYLOAD_PATH_SUFFIX);
 
+/**
+ * @param {Request} request
+ * @param {URL} url
+ */
 const isStaticAssetRequest = (request, url) => {
-  if (url.origin !== self.location.origin) return false;
+  if (url.origin !== sw.location.origin) return false;
   if (request.method !== 'GET') return false;
   if (isVersionRequest(url) || isDailyPayloadRequest(url)) return false;
   const destination = request.destination;
@@ -71,20 +116,26 @@ const isStaticAssetRequest = (request, url) => {
     || destination === 'worker';
 };
 
-const resolveShellUrl = () => new URL('index.html', self.registration.scope).toString();
-const resolveNotificationIconUrl = () => new URL('icons/icon-192.webp', self.registration.scope).toString();
-const resolveNotificationBadgeUrl = () => new URL('icons/icon-96.webp', self.registration.scope).toString();
+const resolveShellUrl = () => new URL('index.html', sw.registration.scope).toString();
+const resolveNotificationIconUrl = () => new URL('icons/icon-192.webp', sw.registration.scope).toString();
+const resolveNotificationBadgeUrl = () => new URL('icons/icon-96.webp', sw.registration.scope).toString();
 
+/** @param {string} name */
 const openCache = (name) => caches.open(name);
+/**
+ * @param {Request | URL | string} requestOrUrl
+ * @returns {URL | null}
+ */
 const toRequestUrl = (requestOrUrl) => {
   try {
     if (requestOrUrl instanceof Request) return new URL(requestOrUrl.url);
-    return new URL(String(requestOrUrl), self.location.href);
+    return new URL(String(requestOrUrl), sw.location.href);
   } catch {
     return null;
   }
 };
 
+/** @param {Request | URL | string} request */
 const resolveDailyCacheKey = (request) => {
   const url = toRequestUrl(request);
   if (!url) return request;
@@ -93,11 +144,17 @@ const resolveDailyCacheKey = (request) => {
   return url.toString();
 };
 
+/** @param {Request | URL | string} request */
 const isDailyCacheRequest = (request) => {
   const url = toRequestUrl(request);
   return Boolean(url && isDailyPayloadRequest(url));
 };
 
+/**
+ * @param {string} cacheName
+ * @param {number} maxEntries
+ * @param {TrimCacheOptions} [options]
+ */
 const trimCacheEntries = async (cacheName, maxEntries, { matcher = null } = {}) => {
   if (!Number.isInteger(maxEntries) || maxEntries < 0) return;
   const cache = await openCache(cacheName);
@@ -110,6 +167,9 @@ const trimCacheEntries = async (cacheName, maxEntries, { matcher = null } = {}) 
   }
 };
 
+/**
+ * @param {readonly string[] | Set<string>} [retainedBuildCaches]
+ */
 const cleanupCurrentBuildCaches = async (retainedBuildCaches = CURRENT_BUILD_CACHES) => {
   const retainedCacheNames = Array.isArray(retainedBuildCaches)
     ? retainedBuildCaches
@@ -118,7 +178,7 @@ const cleanupCurrentBuildCaches = async (retainedBuildCaches = CURRENT_BUILD_CAC
     ? retainedBuildCaches
     : new Set(retainedCacheNames);
 
-  if (isLocalhostHostname(self.location.hostname)) {
+  if (isLocalhostHostname(sw.location.hostname)) {
     const keys = await caches.keys();
     await Promise.all(
       keys
@@ -143,15 +203,26 @@ const cleanupCurrentBuildCaches = async (retainedBuildCaches = CURRENT_BUILD_CAC
   await Promise.all(trimTasks);
 };
 
+/**
+ * @param {Request | string} request
+ * @param {FetchFreshOptions} [options]
+ */
 const fetchFresh = (request, options = {}) => {
   const { bypassCache = false } = options;
-  const headers = new Headers(request.headers || undefined);
+  const sourceRequest = request instanceof Request
+    ? request
+    : new Request(request);
+  const headers = new Headers(sourceRequest.headers);
   if (bypassCache) {
     headers.set('x-bypass-cache', 'true');
   }
-  return fetch(new Request(request, { cache: 'no-store', headers }));
+  return fetch(new Request(sourceRequest, { cache: 'no-store', headers }));
 };
 
+/**
+ * @param {string} tagSource
+ * @param {string} attributeName
+ */
 const readHtmlTagAttribute = (tagSource, attributeName) => {
   if (typeof tagSource !== 'string' || typeof attributeName !== 'string') return '';
   const re = new RegExp(String.raw`${attributeName}\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)`, 'i');
@@ -167,22 +238,33 @@ const readHtmlTagAttribute = (tagSource, attributeName) => {
   return raw;
 };
 
+/**
+ * @param {unknown} rawValue
+ * @param {string} [baseUrl]
+ */
 const resolveLocalShellAssetUrl = (rawValue, baseUrl = resolveShellUrl()) => {
   const value = normalizeString(rawValue);
   if (!value) return '';
   try {
     const resolved = new URL(value, baseUrl);
-    if (resolved.origin !== self.location.origin) return '';
+    if (resolved.origin !== sw.location.origin) return '';
     return resolved.toString();
   } catch {
     return '';
   }
 };
 
+/**
+ * @param {string} shellHtml
+ * @param {string} [shellUrl]
+ * @returns {string[]}
+ */
 const collectCriticalShellAssetUrls = (shellHtml, shellUrl = resolveShellUrl()) => {
   if (typeof shellHtml !== 'string' || shellHtml.length === 0) return [];
+  /** @type {string[]} */
   const urls = [];
   const seen = new Set();
+  /** @param {unknown} rawValue */
   const pushUnique = (rawValue) => {
     const resolved = resolveLocalShellAssetUrl(rawValue, shellUrl);
     if (!resolved || seen.has(resolved)) return;
@@ -212,16 +294,20 @@ const collectCriticalShellAssetUrls = (shellHtml, shellUrl = resolveShellUrl()) 
   return urls;
 };
 
+/**
+ * @param {string} cacheName
+ * @param {CacheShellAssetOptions} [options]
+ */
 const cacheShellAssetDependencies = async (cacheName, options = {}) => {
   const cache = await openCache(cacheName);
   const shellUrl = resolveShellUrl();
   const bypassCache = normalizeBool(options.bypassCache, true);
-  const responseFromNavigation = options.shellResponse;
+  const responseFromNavigation = options.shellResponse ?? null;
 
   let shellHtml = '';
   let shellCached = false;
 
-  if (isCacheableResponse(responseFromNavigation)) {
+  if (responseFromNavigation && isCacheableResponse(responseFromNavigation)) {
     await cache.put(shellUrl, responseFromNavigation.clone());
     shellCached = true;
     try {
@@ -267,6 +353,7 @@ const cacheShellAssetDependencies = async (cacheName, options = {}) => {
   return allAssetsCached;
 };
 
+/** @param {string} cacheName */
 const hasCompleteCachedShellAssets = async (cacheName) => {
   const cache = await openCache(cacheName);
   const shellUrl = resolveShellUrl();
@@ -290,6 +377,7 @@ const hasCompleteCachedShellAssets = async (cacheName) => {
   return true;
 };
 
+/** @param {string} cacheName */
 const collectCachedCriticalShellAssetUrls = async (cacheName) => {
   const cache = await openCache(cacheName);
   const shellUrl = resolveShellUrl();
@@ -303,6 +391,10 @@ const collectCachedCriticalShellAssetUrls = async (cacheName) => {
   }
 };
 
+/**
+ * @param {string} cacheName
+ * @param {Request | URL | string} request
+ */
 const isPinnedCriticalAssetRequest = async (cacheName, request) => {
   const requestUrl = toRequestUrl(request);
   if (!requestUrl) return false;
@@ -313,14 +405,14 @@ const isPinnedCriticalAssetRequest = async (cacheName, request) => {
   return criticalAssetUrls.includes(requestHref);
 };
 
-self.addEventListener('install', (event) => {
+sw.addEventListener('install', /** @param {ExtendableEvent} event */ (event) => {
   event.waitUntil((async () => {
-    if (isLocalhostHostname(self.location.hostname)) return;
+    if (isLocalhostHostname(sw.location.hostname)) return;
     await cacheShellAssetDependencies(APP_CACHE, { bypassCache: true });
   })());
 });
 
-self.addEventListener('activate', (event) => {
+sw.addEventListener('activate', /** @param {ExtendableEvent} event */ (event) => {
   event.waitUntil((async () => {
     const updatePolicy = normalizeUpdatePolicyForActivation(await ensureUpdatePolicyState());
     await writeUpdatePolicyState(updatePolicy);
@@ -333,14 +425,16 @@ self.addEventListener('activate', (event) => {
     );
     await cleanupCurrentBuildCaches(retainedBuildCaches);
     await caches.delete(LEGACY_META_CACHE);
-    await self.clients.claim();
+    await sw.clients.claim();
   })());
 });
 
+/** @param {Request} request */
 const networkOnlyVersion = async (request) => {
   return fetchFresh(request);
 };
 
+/** @param {Request} request */
 const networkFirstDaily = async (request) => {
   const cache = await openCache(DAILY_CACHE);
   const cacheKey = resolveDailyCacheKey(request);
@@ -360,6 +454,11 @@ const networkFirstDaily = async (request) => {
   }
 };
 
+/**
+ * @param {FetchEvent} event
+ * @param {Request} request
+ * @param {CacheFirstRevalidateOptions} [options]
+ */
 const cacheFirstRevalidateStatic = async (event, request, options = {}) => {
   const cacheName = normalizeString(options.cacheName, APP_CACHE);
   const pinned = normalizeBool(options.pinned, false);
@@ -397,6 +496,10 @@ const cacheFirstRevalidateStatic = async (event, request, options = {}) => {
   return new Response('', { status: 503, statusText: 'Offline' });
 };
 
+/**
+ * @param {FetchEvent} event
+ * @param {Request} request
+ */
 const cacheFirstRevalidateNavigation = async (event, request) => {
   const plan = await resolveServingBuildPlan();
   const cache = await openCache(plan.appCacheName);
@@ -435,14 +538,14 @@ const cacheFirstRevalidateNavigation = async (event, request) => {
   return new Response('', { status: 503, statusText: 'Offline' });
 };
 
-self.addEventListener('fetch', (event) => {
+sw.addEventListener('fetch', /** @param {FetchEvent} event */ (event) => {
   const request = event.request;
   if (request.method !== 'GET') return;
 
   const url = new URL(request.url);
-  if (url.origin !== self.location.origin) return;
+  if (url.origin !== sw.location.origin) return;
 
-  if (isLocalhostHostname(self.location.hostname)) {
+  if (isLocalhostHostname(sw.location.hostname)) {
     if (isVersionRequest(url)) {
       event.respondWith(networkOnlyVersion(request));
       return;
@@ -480,25 +583,42 @@ self.addEventListener('fetch', (event) => {
   }
 });
 
+/**
+ * @param {unknown} value
+ * @param {string} [fallback]
+ * @returns {string}
+ */
 const normalizeString = (value, fallback = '') => {
   if (typeof value !== 'string') return fallback;
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : fallback;
 };
 
+/**
+ * @param {unknown} value
+ * @param {number | null} [fallback]
+ * @returns {number | null}
+ */
 const normalizeInt = (value, fallback = null) => {
-  const parsed = Number.parseInt(value, 10);
+  const parsed = Number.parseInt(String(value), 10);
   if (!Number.isInteger(parsed)) return fallback;
   return parsed;
 };
 
+/**
+ * @param {unknown} value
+ * @param {boolean} [fallback]
+ * @returns {boolean}
+ */
 const normalizeBool = (value, fallback = false) => {
   if (typeof value === 'boolean') return value;
   return fallback;
 };
 
+/** @type {Promise<IDBDatabase> | null} */
 let metaDbPromise = null;
 
+/** @returns {Promise<IDBDatabase>} */
 const openMetaDb = async () => {
   if (metaDbPromise) return metaDbPromise;
   if (typeof indexedDB === 'undefined') {
@@ -541,19 +661,25 @@ const openMetaDb = async () => {
   }
 };
 
+/**
+ * @param {IDBRequest<any>} request
+ * @returns {Promise<any>}
+ */
 const waitForRequest = (request) =>
   new Promise((resolve, reject) => {
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error || new Error('IndexedDB request failed.'));
   });
 
+/** @param {IDBTransaction} transaction */
 const waitForTransaction = (transaction) =>
   new Promise((resolve, reject) => {
-    transaction.oncomplete = () => resolve();
+    transaction.oncomplete = () => resolve(undefined);
     transaction.onerror = () => reject(transaction.error || new Error('IndexedDB transaction failed.'));
     transaction.onabort = () => reject(transaction.error || new Error('IndexedDB transaction aborted.'));
   });
 
+/** @param {string} key */
 const readMetaRecord = async (key) => {
   try {
     const db = await openMetaDb();
@@ -567,6 +693,10 @@ const readMetaRecord = async (key) => {
   }
 };
 
+/**
+ * @param {string} key
+ * @param {unknown} value
+ */
 const writeMetaRecord = async (key, value) => {
   try {
     const db = await openMetaDb();
@@ -581,7 +711,7 @@ const writeMetaRecord = async (key, value) => {
 };
 
 const resolveUpdatePolicyMetaRequestUrl = () =>
-  new URL('__tether_update_policy__.json', self.registration.scope).toString();
+  new URL('__tether_update_policy__.json', sw.registration.scope).toString();
 
 const readUpdatePolicyMetaFallback = async () => {
   try {
@@ -595,6 +725,7 @@ const readUpdatePolicyMetaFallback = async () => {
   }
 };
 
+/** @param {unknown} value */
 const writeUpdatePolicyMetaFallback = async (value) => {
   try {
     const cache = await openCache(UPDATE_POLICY_META_CACHE);
@@ -608,9 +739,13 @@ const writeUpdatePolicyMetaFallback = async (value) => {
   }
 };
 
+/**
+ * @param {UpdatePolicyPayload | Partial<UpdatePolicyState>} [payload]
+ * @returns {UpdatePolicyState}
+ */
 const normalizeUpdatePolicyPayload = (payload = {}) => {
   const pinnedParsed = normalizeInt(payload.pinnedBuildNumber, BUILD_NUMBER);
-  const pinnedBuildNumber = Number.isInteger(pinnedParsed) && pinnedParsed > 0
+  const pinnedBuildNumber = typeof pinnedParsed === 'number' && pinnedParsed > 0
     ? pinnedParsed
     : BUILD_NUMBER;
   return {
@@ -621,9 +756,12 @@ const normalizeUpdatePolicyPayload = (payload = {}) => {
   };
 };
 
+/** @type {UpdatePolicyState} */
 let updatePolicyState = normalizeUpdatePolicyPayload();
 let updatePolicyLoaded = false;
+/** @type {Promise<UpdatePolicyState> | null} */
 let updatePolicyLoadPromise = null;
+/** @type {{ buildNumber: number | null, usable: boolean }} */
 let pinnedBuildCacheStatus = {
   buildNumber: null,
   usable: false,
@@ -636,6 +774,10 @@ const resetPinnedBuildCacheStatus = () => {
   };
 };
 
+/**
+ * @param {UpdatePolicyPayload | Partial<UpdatePolicyState>} state
+ * @returns {UpdatePolicyState}
+ */
 const applyCachedUpdatePolicyState = (state) => {
   updatePolicyState = normalizeUpdatePolicyPayload(state);
   updatePolicyLoaded = true;
@@ -643,8 +785,9 @@ const applyCachedUpdatePolicyState = (state) => {
   return updatePolicyState;
 };
 
+/** @returns {Promise<UpdatePolicyState>} */
 const readUpdatePolicyState = async () => {
-  const stored = await readMetaRecord(META_RECORD_KEYS.UPDATE_POLICY);
+  const stored = /** @type {UpdatePolicyPayload | null} */ (await readMetaRecord(META_RECORD_KEYS.UPDATE_POLICY));
   if (stored && typeof stored === 'object') {
     return normalizeUpdatePolicyPayload(stored);
   }
@@ -655,6 +798,10 @@ const readUpdatePolicyState = async () => {
   return normalizeUpdatePolicyPayload();
 };
 
+/**
+ * @param {UpdatePolicyPayload | Partial<UpdatePolicyState>} state
+ * @returns {Promise<UpdatePolicyState>}
+ */
 const writeUpdatePolicyState = async (state) => {
   const normalized = normalizeUpdatePolicyPayload(state);
   await Promise.all([
@@ -664,6 +811,7 @@ const writeUpdatePolicyState = async (state) => {
   return applyCachedUpdatePolicyState(normalized);
 };
 
+/** @returns {Promise<UpdatePolicyState>} */
 const ensureUpdatePolicyState = async () => {
   if (updatePolicyLoaded) return updatePolicyState;
   if (updatePolicyLoadPromise) return updatePolicyLoadPromise;
@@ -678,6 +826,10 @@ const ensureUpdatePolicyState = async () => {
   }
 };
 
+/**
+ * @param {UpdatePolicyPayload | Partial<UpdatePolicyState>} [state]
+ * @returns {number}
+ */
 const resolveServingBuildNumber = (state = updatePolicyState) => {
   const normalized = normalizeUpdatePolicyPayload(state);
   if (normalized.autoUpdateEnabled) return BUILD_NUMBER;
@@ -688,18 +840,24 @@ const resolveServingBuildNumber = (state = updatePolicyState) => {
   return normalized.pinnedBuildNumber;
 };
 
+/**
+ * @param {number | null} buildNumber
+ * @returns {Promise<boolean>}
+ */
 const isPinnedBuildCacheUsable = async (buildNumber) => {
-  if (!Number.isInteger(buildNumber) || buildNumber <= 0) return false;
-  if (buildNumber === BUILD_NUMBER) return true;
-  if (pinnedBuildCacheStatus.buildNumber === buildNumber) return pinnedBuildCacheStatus.usable;
-  const usable = await hasCompleteCachedShellAssets(appCacheNameForBuild(buildNumber));
+  if (typeof buildNumber !== 'number' || !Number.isInteger(buildNumber) || buildNumber <= 0) return false;
+  const normalizedBuildNumber = /** @type {number} */ (buildNumber);
+  if (normalizedBuildNumber === BUILD_NUMBER) return true;
+  if (pinnedBuildCacheStatus.buildNumber === normalizedBuildNumber) return pinnedBuildCacheStatus.usable;
+  const usable = await hasCompleteCachedShellAssets(appCacheNameForBuild(normalizedBuildNumber));
   pinnedBuildCacheStatus = {
-    buildNumber,
+    buildNumber: normalizedBuildNumber,
     usable,
   };
   return usable;
 };
 
+/** @returns {Promise<ServingBuildPlan>} */
 const resolveServingBuildPlan = async () => {
   const policy = await ensureUpdatePolicyState();
   const servingBuildNumber = resolveServingBuildNumber(policy);
@@ -734,6 +892,10 @@ const resolveServingBuildPlan = async () => {
   };
 };
 
+/**
+ * @param {UpdatePolicyPayload | Partial<UpdatePolicyState>} state
+ * @returns {UpdatePolicyState}
+ */
 const normalizeUpdatePolicyForActivation = (state) => {
   const normalized = normalizeUpdatePolicyPayload(state);
   if (normalized.autoUpdateEnabled) {
@@ -757,6 +919,11 @@ const normalizeUpdatePolicyForActivation = (state) => {
   return normalized;
 };
 
+/**
+ * @param {UpdatePolicyPayload | Partial<UpdatePolicyState>} state
+ * @param {UpdatePolicyPayload} [payload]
+ * @returns {UpdatePolicyState}
+ */
 const mergeUpdatePolicyPayload = (state, payload = {}) => {
   const next = {
     ...normalizeUpdatePolicyPayload(state),
@@ -767,7 +934,7 @@ const mergeUpdatePolicyPayload = (state, payload = {}) => {
   }
 
   const currentBuildNumber = normalizeInt(payload.currentBuildNumber, null);
-  if (!next.autoUpdateEnabled && Number.isInteger(currentBuildNumber) && currentBuildNumber > 0) {
+  if (!next.autoUpdateEnabled && typeof currentBuildNumber === 'number' && currentBuildNumber > 0) {
     next.pinnedBuildNumber = currentBuildNumber;
   }
   if (next.autoUpdateEnabled) {
@@ -777,17 +944,25 @@ const mergeUpdatePolicyPayload = (state, payload = {}) => {
   return normalizeUpdatePolicyPayload(next);
 };
 
+/**
+ * @param {unknown} buildNumber
+ * @returns {Promise<UpdatePolicyState | null>}
+ */
 const confirmPinnedBuildUpdate = async (buildNumber) => {
   const state = await ensureUpdatePolicyState();
   const target = normalizeInt(buildNumber, null);
-  if (!Number.isInteger(target) || target <= 0) return null;
-  const nextPinnedBuildNumber = Math.min(target, BUILD_NUMBER);
+  if (typeof target !== 'number' || !Number.isInteger(target) || target <= 0) return null;
+  const nextPinnedBuildNumber = Math.min(/** @type {number} */ (target), BUILD_NUMBER);
   return writeUpdatePolicyState({
     ...state,
     pinnedBuildNumber: nextPinnedBuildNumber,
   });
 };
 
+/**
+ * @param {UpdatePolicyPayload | Partial<UpdatePolicyState>} updatePolicy
+ * @returns {Set<string>}
+ */
 const collectRetainedBuildCaches = (updatePolicy) => {
   const policy = normalizeUpdatePolicyForActivation(updatePolicy);
   const retained = new Set(CURRENT_BUILD_CACHES);
@@ -798,6 +973,10 @@ const collectRetainedBuildCaches = (updatePolicy) => {
   return retained;
 };
 
+/**
+ * @param {{ ports?: ReadonlyArray<MessagePort> | null }} event
+ * @param {unknown} payload
+ */
 const replyToMessagePort = (event, payload) => {
   const port = Array.isArray(event?.ports) ? event.ports[0] : null;
   if (!port || typeof port.postMessage !== 'function') return;
@@ -808,9 +987,11 @@ const replyToMessagePort = (event, payload) => {
   }
 };
 
+/** @type {Map<string, SwPluginMessageHandler>} */
 const swPluginMessageHandlers = new Map();
 
-self.__tetherRegisterSwPlugin = (messageHandlers = {}) => {
+/** @type {(messageHandlers?: Record<string, SwPluginMessageHandler>) => void} */
+(/** @type {any} */ (sw).__tetherRegisterSwPlugin) = (messageHandlers = {}) => {
   if (!messageHandlers || typeof messageHandlers !== 'object') return;
   for (const [messageType, handler] of Object.entries(messageHandlers)) {
     if (typeof messageType !== 'string' || messageType.length === 0) continue;
@@ -819,9 +1000,13 @@ self.__tetherRegisterSwPlugin = (messageHandlers = {}) => {
   }
 };
 
+/**
+ * @param {DailyStatePayload | Partial<DailyState>} [payload]
+ * @returns {DailyState}
+ */
 const normalizeDailyStatePayload = (payload = {}) => {
   const warningHoursParsed = normalizeInt(payload.warningHours, DEFAULT_WARNING_HOURS);
-  const warningHours = Number.isInteger(warningHoursParsed) && warningHoursParsed >= 0
+  const warningHours = typeof warningHoursParsed === 'number' && warningHoursParsed >= 0
     ? warningHoursParsed
     : DEFAULT_WARNING_HOURS;
 
@@ -849,6 +1034,11 @@ const normalizeDailyStatePayload = (payload = {}) => {
   };
 };
 
+/**
+ * @param {DailyState} state
+ * @param {DailyStatePayload} payload
+ * @returns {DailyState}
+ */
 const mergeDailyStatePayload = (state, payload) => {
   const next = {
     ...state,
@@ -857,6 +1047,7 @@ const mergeDailyStatePayload = (state, payload) => {
     },
   };
 
+  /** @type {Array<'dailyId' | 'hardInvalidateAtUtcMs' | 'dailySolvedDate' | 'notificationsEnabled' | 'warningHours' | 'warnedDailyId' | 'newLevelDailyId'>} */
   const keys = [
     'dailyId',
     'hardInvalidateAtUtcMs',
@@ -867,18 +1058,22 @@ const mergeDailyStatePayload = (state, payload) => {
     'newLevelDailyId',
   ];
 
+  const nextRecord = /** @type {Record<string, unknown>} */ (next);
+  const payloadRecord = /** @type {Record<string, unknown>} */ (payload);
   for (const key of keys) {
     if (Object.hasOwn(payload, key)) {
-      next[key] = payload[key];
+      nextRecord[key] = payloadRecord[key];
     }
   }
 
   if (payload.notificationText && typeof payload.notificationText === 'object') {
-    const texts = payload.notificationText;
+    const texts = /** @type {Record<string, unknown>} */ (payload.notificationText);
+    const notificationText = /** @type {Record<string, string>} */ (next.notificationText);
+    /** @type {Array<'unsolvedTitle' | 'unsolvedBody' | 'newLevelTitle' | 'newLevelBody'>} */
     const textKeys = ['unsolvedTitle', 'unsolvedBody', 'newLevelTitle', 'newLevelBody'];
     for (const key of textKeys) {
       if (Object.hasOwn(texts, key)) {
-        next.notificationText[key] = texts[key];
+        notificationText[key] = normalizeString(texts[key], notificationText[key]);
       }
     }
   }
@@ -886,36 +1081,50 @@ const mergeDailyStatePayload = (state, payload) => {
   return normalizeDailyStatePayload(next);
 };
 
+/** @returns {Promise<DailyState>} */
 const readDailyState = async () => {
-  const stored = await readMetaRecord(META_RECORD_KEYS.DAILY_STATE);
+  const stored = /** @type {DailyStatePayload | null} */ (await readMetaRecord(META_RECORD_KEYS.DAILY_STATE));
   const payload = stored && typeof stored === 'object' ? stored : {};
   return normalizeDailyStatePayload(payload);
 };
 
+/**
+ * @param {DailyState | DailyStatePayload} state
+ * @returns {Promise<DailyState>}
+ */
 const writeDailyState = async (state) => {
   const normalized = normalizeDailyStatePayload(state);
   await writeMetaRecord(META_RECORD_KEYS.DAILY_STATE, normalized);
   return normalized;
 };
 
+/**
+ * @param {unknown} value
+ * @returns {HistoryMarker}
+ */
 const normalizeHistoryMarker = (value) => {
   if (value === HISTORY_MARKERS.UNREAD) return HISTORY_MARKERS.UNREAD;
   if (value === HISTORY_MARKERS.JUST_READ) return HISTORY_MARKERS.JUST_READ;
   return HISTORY_MARKERS.OLDER;
 };
 
+/**
+ * @param {unknown} [action]
+ * @returns {HistoryAction}
+ */
 const normalizeHistoryAction = (action = null) => {
   if (!action || typeof action !== 'object') return null;
-  if (action.type === 'apply-update') {
-    const buildNumber = normalizeInt(action.buildNumber, null);
-    if (!Number.isInteger(buildNumber) || buildNumber <= 0) return null;
+  const normalizedAction = /** @type {{ type?: unknown, buildNumber?: unknown, dailyId?: unknown }} */ (action);
+  if (normalizedAction.type === 'apply-update') {
+    const buildNumber = normalizeInt(normalizedAction.buildNumber, null);
+    if (typeof buildNumber !== 'number' || !Number.isInteger(buildNumber) || buildNumber <= 0) return null;
     return {
       type: 'apply-update',
-      buildNumber,
+      buildNumber: /** @type {number} */ (buildNumber),
     };
   }
-  if (action.type === 'open-daily') {
-    const dailyId = normalizeString(action.dailyId);
+  if (normalizedAction.type === 'open-daily') {
+    const dailyId = normalizeString(normalizedAction.dailyId);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(dailyId)) return null;
     return {
       type: 'open-daily',
@@ -925,23 +1134,32 @@ const normalizeHistoryAction = (action = null) => {
   return null;
 };
 
+/**
+ * @param {HistoryEntryInput | Partial<HistoryEntry>} [entry]
+ * @returns {HistoryEntry}
+ */
 const normalizeHistoryEntry = (entry = {}) => {
   const source = entry.source === 'system' ? 'system' : 'toast';
+  const createdAtUtcMs = normalizeInt(entry.createdAtUtcMs, Date.now());
   return {
     id: normalizeString(entry.id, `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`),
     source,
     kind: normalizeString(entry.kind, source === 'system' ? 'unsolved-warning' : 'toast'),
     title: normalizeString(entry.title),
     body: normalizeString(entry.body),
-    createdAtUtcMs: normalizeInt(entry.createdAtUtcMs, Date.now()),
+    createdAtUtcMs: typeof createdAtUtcMs === 'number' ? createdAtUtcMs : Date.now(),
     marker: normalizeHistoryMarker(entry.marker),
     action: normalizeHistoryAction(entry.action),
   };
 };
 
+/**
+ * @param {HistoryStatePayload | Partial<HistoryState>} [payload]
+ * @returns {HistoryState}
+ */
 const normalizeHistoryState = (payload = {}) => {
   const historyVersionParsed = normalizeInt(payload.historyVersion, HISTORY_VERSION_START);
-  const historyVersion = Number.isInteger(historyVersionParsed) && historyVersionParsed >= HISTORY_VERSION_START
+  const historyVersion = typeof historyVersionParsed === 'number' && historyVersionParsed >= HISTORY_VERSION_START
     ? historyVersionParsed
     : HISTORY_VERSION_START;
 
@@ -957,23 +1175,33 @@ const normalizeHistoryState = (payload = {}) => {
   };
 };
 
+/** @returns {Promise<HistoryState>} */
 const readHistoryState = async () => {
-  const stored = await readMetaRecord(META_RECORD_KEYS.HISTORY_STATE);
+  const stored = /** @type {HistoryStatePayload | null} */ (await readMetaRecord(META_RECORD_KEYS.HISTORY_STATE));
   const payload = stored && typeof stored === 'object' ? stored : {};
   return normalizeHistoryState(payload);
 };
 
+/**
+ * @param {HistoryState | HistoryStatePayload} state
+ * @returns {Promise<HistoryState>}
+ */
 const writeHistoryState = async (state) => {
   const normalized = normalizeHistoryState(state);
   await writeMetaRecord(META_RECORD_KEYS.HISTORY_STATE, normalized);
   return normalized;
 };
 
+/** @param {HistoryState} state */
 const buildHistoryPayload = (state) => ({
   historyVersion: state.historyVersion,
   entries: state.entries.map((entry) => ({ ...entry })),
 });
 
+/**
+ * @param {Client | WindowClient | MessagePort | ServiceWorker | null} client
+ * @param {HistoryState} state
+ */
 const postHistoryPayloadToClient = (client, state) => {
   if (!client || typeof client.postMessage !== 'function') return;
   client.postMessage({
@@ -982,8 +1210,12 @@ const postHistoryPayloadToClient = (client, state) => {
   });
 };
 
+/**
+ * @param {HistoryState} state
+ * @returns {Promise<void>}
+ */
 const broadcastHistoryPayload = async (state) => {
-  const clients = await self.clients.matchAll({
+  const clients = await sw.clients.matchAll({
     type: 'window',
     includeUncontrolled: true,
   });
@@ -992,31 +1224,53 @@ const broadcastHistoryPayload = async (state) => {
   }
 };
 
+/** @type {Promise<unknown>} */
 let dailyTaskChain = Promise.resolve();
+/** @type {Promise<unknown>} */
 let historyTaskChain = Promise.resolve();
+/** @type {Promise<unknown>} */
 let updatePolicyTaskChain = Promise.resolve();
 
+/**
+ * @template T
+ * @param {() => Promise<T> | T} task
+ * @returns {Promise<T>}
+ */
 const enqueueDailyTask = (task) => {
   dailyTaskChain = dailyTaskChain
     .catch(() => undefined)
-    .then(task);
-  return dailyTaskChain;
+    .then(() => task());
+  return /** @type {Promise<T>} */ (dailyTaskChain);
 };
 
+/**
+ * @template T
+ * @param {() => Promise<T> | T} task
+ * @returns {Promise<T>}
+ */
 const enqueueHistoryTask = (task) => {
   historyTaskChain = historyTaskChain
     .catch(() => undefined)
-    .then(task);
-  return historyTaskChain;
+    .then(() => task());
+  return /** @type {Promise<T>} */ (historyTaskChain);
 };
 
+/**
+ * @template T
+ * @param {() => Promise<T> | T} task
+ * @returns {Promise<T>}
+ */
 const enqueueUpdatePolicyTask = (task) => {
   updatePolicyTaskChain = updatePolicyTaskChain
     .catch(() => undefined)
-    .then(task);
-  return updatePolicyTaskChain;
+    .then(() => task());
+  return /** @type {Promise<T>} */ (updatePolicyTaskChain);
 };
 
+/**
+ * @param {UpdatePolicyPayload} [payload]
+ * @returns {Promise<UpdatePolicyState>}
+ */
 const syncUpdatePolicyFromApp = async (payload = {}) => {
   return enqueueUpdatePolicyTask(async () => {
     const current = await ensureUpdatePolicyState();
@@ -1025,6 +1279,10 @@ const syncUpdatePolicyFromApp = async (payload = {}) => {
   });
 };
 
+/**
+ * @param {unknown} buildNumber
+ * @returns {Promise<UpdatePolicyState | null>}
+ */
 const confirmUpdatePolicyBuild = async (buildNumber) => {
   return enqueueUpdatePolicyTask(async () => {
     return confirmPinnedBuildUpdate(buildNumber);
@@ -1052,6 +1310,10 @@ const readUpdatePolicyReplyPayload = async () => {
   };
 };
 
+/**
+ * @param {HistoryEntryInput | Partial<HistoryEntry>} entryInput
+ * @returns {Promise<HistoryState>}
+ */
 const appendHistoryEntry = async (entryInput) => {
   return enqueueHistoryTask(async () => {
     const nextEntry = normalizeHistoryEntry(entryInput);
@@ -1066,6 +1328,14 @@ const appendHistoryEntry = async (entryInput) => {
   });
 };
 
+/**
+ * @param {string} kind
+ * @param {string} title
+ * @param {string} body
+ * @param {string} dailyId
+ * @param {HistoryAction} [action]
+ * @returns {Promise<HistoryState>}
+ */
 const appendSystemHistoryEntry = async (kind, title, body, dailyId, action = null) => {
   return appendHistoryEntry({
     source: 'system',
@@ -1079,6 +1349,12 @@ const appendSystemHistoryEntry = async (kind, title, body, dailyId, action = nul
   });
 };
 
+/**
+ * @param {string} title
+ * @param {string} body
+ * @param {string} [kind]
+ * @returns {Promise<HistoryState>}
+ */
 const appendToastHistoryEntry = async (title, body, kind = 'toast') => {
   return appendHistoryEntry({
     source: 'toast',
@@ -1090,6 +1366,7 @@ const appendToastHistoryEntry = async (title, body, kind = 'toast') => {
   });
 };
 
+/** @returns {Promise<HistoryState>} */
 const clearHistoryEntries = async () => {
   return enqueueHistoryTask(async () => {
     const current = await readHistoryState();
@@ -1108,14 +1385,18 @@ const clearHistoryEntries = async () => {
 };
 
 const closeVisibleNotifications = async () => {
-  if (!self.registration || typeof self.registration.getNotifications !== 'function') return 0;
-  const notifications = await self.registration.getNotifications();
+  if (!sw.registration || typeof sw.registration.getNotifications !== 'function') return 0;
+  const notifications = await sw.registration.getNotifications();
   for (const notification of notifications) {
     notification.close();
   }
   return notifications.length;
 };
 
+/**
+ * @param {{ historyVersion: number | null, entryIds: unknown[] }} params
+ * @returns {Promise<HistoryState>}
+ */
 const markHistoryRead = async ({ historyVersion, entryIds }) => {
   return enqueueHistoryTask(async () => {
     const current = await readHistoryState();
@@ -1169,17 +1450,22 @@ const markHistoryRead = async ({ historyVersion, entryIds }) => {
   });
 };
 
+/**
+ * @param {{ buildNumber: number | null }} params
+ * @returns {Promise<HistoryState>}
+ */
 const clearUpdateHistoryActions = async ({ buildNumber }) => {
   return enqueueHistoryTask(async () => {
     const targetBuildNumber = normalizeInt(buildNumber, null);
-    if (!Number.isInteger(targetBuildNumber) || targetBuildNumber <= 0) return readHistoryState();
+    if (typeof targetBuildNumber !== 'number' || !Number.isInteger(targetBuildNumber) || targetBuildNumber <= 0) return readHistoryState();
+    const normalizedTargetBuildNumber = /** @type {number} */ (targetBuildNumber);
 
     const current = await readHistoryState();
     let changed = false;
     const nextEntries = current.entries.map((entry) => {
       if (entry?.kind !== 'new-version-available') return entry;
       if (entry.action?.type !== 'apply-update') return entry;
-      if (!Number.isInteger(entry.action.buildNumber) || entry.action.buildNumber > targetBuildNumber) return entry;
+      if (!Number.isInteger(entry.action.buildNumber) || entry.action.buildNumber > normalizedTargetBuildNumber) return entry;
       changed = true;
       return {
         ...entry,
@@ -1198,6 +1484,10 @@ const clearUpdateHistoryActions = async ({ buildNumber }) => {
   });
 };
 
+/**
+ * @param {Client | WindowClient | MessagePort | ServiceWorker | null} [sourceClient]
+ * @returns {Promise<HistoryState>}
+ */
 const sendHistoryToSourceOrBroadcast = async (sourceClient = null) => {
   const state = await readHistoryState();
   if (sourceClient && typeof sourceClient.postMessage === 'function') {
@@ -1209,16 +1499,25 @@ const sendHistoryToSourceOrBroadcast = async (sourceClient = null) => {
 };
 
 const hasFocusedWindowClient = async () => {
-  const clients = await self.clients.matchAll({
+  const clients = await sw.clients.matchAll({
     type: 'window',
     includeUncontrolled: true,
   });
   return clients.some((client) => client?.focused === true);
 };
 
+/**
+ * @param {unknown} kindRaw
+ * @returns {'new-level' | 'unsolved-warning'}
+ */
 const normalizeSystemNotificationKind = (kindRaw) =>
   kindRaw === 'new-level' ? 'new-level' : 'unsolved-warning';
 
+/**
+ * @param {DailyState} state
+ * @param {unknown} kind
+ * @returns {Promise<boolean>}
+ */
 const emitSystemNotification = async (state, kind) => {
   const dailyId = normalizeString(state?.dailyId);
   if (!dailyId) return false;
@@ -1264,23 +1563,31 @@ const emitSystemNotification = async (state, kind) => {
   return true;
 };
 
+/**
+ * @param {string} title
+ * @param {NotificationOptions & { renotify?: boolean }} options
+ * @returns {Promise<boolean>}
+ */
 const showNotification = async (title, options) => {
-  if (!self.registration || typeof self.registration.showNotification !== 'function') return false;
+  if (!sw.registration || typeof sw.registration.showNotification !== 'function') return false;
   if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return false;
-  await self.registration.showNotification(title, options);
+  await sw.registration.showNotification(title, options);
   return true;
 };
 
+/** @returns {Promise<DailyState | undefined>} */
 const runDailyCheck = async () => {
   let state = await readDailyState();
   if (!state.notificationsEnabled) return;
-  if (!state.dailyId || !Number.isInteger(state.hardInvalidateAtUtcMs) || state.hardInvalidateAtUtcMs <= 0) {
+  const hardInvalidateAtUtcMs = state.hardInvalidateAtUtcMs;
+  if (!state.dailyId || typeof hardInvalidateAtUtcMs !== 'number' || !Number.isInteger(hardInvalidateAtUtcMs) || hardInvalidateAtUtcMs <= 0) {
     return;
   }
+  const hardInvalidateAt = /** @type {number} */ (hardInvalidateAtUtcMs);
 
   const now = Date.now();
   const warningLeadMs = state.warningHours * 60 * 60 * 1000;
-  const warningStartMs = state.hardInvalidateAtUtcMs - warningLeadMs;
+  const warningStartMs = hardInvalidateAt - warningLeadMs;
   const unsolved = state.dailySolvedDate !== state.dailyId;
 
   if (await hasFocusedWindowClient()) {
@@ -1292,7 +1599,7 @@ const runDailyCheck = async () => {
   if (
     unsolved
     && now >= warningStartMs
-    && now < state.hardInvalidateAtUtcMs
+    && now < hardInvalidateAt
     && state.warnedDailyId !== state.dailyId
   ) {
     const notified = await emitSystemNotification(state, 'unsolved-warning');
@@ -1302,7 +1609,7 @@ const runDailyCheck = async () => {
     }
   }
 
-  if (now >= state.hardInvalidateAtUtcMs && state.newLevelDailyId !== state.dailyId) {
+  if (now >= hardInvalidateAt && state.newLevelDailyId !== state.dailyId) {
     const notified = await emitSystemNotification(state, 'new-level');
     if (notified) {
       state.newLevelDailyId = state.dailyId;
@@ -1318,15 +1625,19 @@ const runDailyCheck = async () => {
 };
 
 const registerPendingDailySync = async () => {
-  if (typeof self.registration?.sync?.register === 'function') {
+  const syncManager = /** @type {{ register?: (tag: string) => Promise<void> } | undefined} */ (
+    /** @type {any} */ (sw.registration)?.sync
+  );
+  if (typeof syncManager?.register === 'function') {
     try {
-      await self.registration.sync.register(DAILY_CHECK_TAG);
+      await syncManager.register(DAILY_CHECK_TAG);
     } catch {
       // Sync registration is best effort.
     }
   }
 };
 
+/** @type {SwPluginApi} */
 const SW_PLUGIN_API = Object.freeze({
   isLocalhostHostname,
   normalizeString,
@@ -1337,12 +1648,12 @@ const SW_PLUGIN_API = Object.freeze({
   clearHistoryEntries,
   closeVisibleNotifications,
 });
-self.__tetherSwPluginApi = SW_PLUGIN_API;
+(/** @type {any} */ (sw)).__tetherSwPluginApi = SW_PLUGIN_API;
 
 const loadSwPlugins = () => {
   const pluginScriptUrl = (() => {
     try {
-      const swUrl = new URL(self.location.href);
+      const swUrl = new URL(sw.location.href);
       return normalizeString(swUrl.searchParams.get(SW_PLUGIN_QUERY_PARAM));
     } catch {
       return '';
@@ -1359,12 +1670,18 @@ const loadSwPlugins = () => {
   }
 };
 
+/**
+ * @param {ExtendableMessageEvent} event
+ * @param {SwMessageData} data
+ */
 const dispatchPluginMessage = (event, data) => {
   const messageType = normalizeString(data?.type);
   const pluginHandler = swPluginMessageHandlers.get(messageType);
   if (typeof pluginHandler !== 'function') return false;
 
-  const payload = data.payload && typeof data.payload === 'object' ? data.payload : {};
+  const payload = /** @type {SwPayload} */ (
+    data.payload && typeof data.payload === 'object' ? data.payload : {}
+  );
   event.waitUntil(Promise.resolve(pluginHandler({
     event,
     data,
@@ -1376,20 +1693,20 @@ const dispatchPluginMessage = (event, data) => {
 
 loadSwPlugins();
 
-self.addEventListener('periodicsync', (event) => {
+sw.addEventListener('periodicsync', /** @param {any} event */ (event) => {
   if (event.tag !== DAILY_CHECK_TAG) return;
   event.waitUntil(enqueueDailyTask(() => runDailyCheck()));
 });
 
-self.addEventListener('sync', (event) => {
+sw.addEventListener('sync', /** @param {any} event */ (event) => {
   if (event.tag !== DAILY_CHECK_TAG) return;
   event.waitUntil(enqueueDailyTask(() => runDailyCheck()));
 });
 
-self.addEventListener('notificationclick', (event) => {
+sw.addEventListener('notificationclick', /** @param {any} event */ (event) => {
   event.notification.close();
   event.waitUntil((async () => {
-    const allClients = await self.clients.matchAll({
+    const allClients = await sw.clients.matchAll({
       type: 'window',
       includeUncontrolled: true,
     });
@@ -1398,18 +1715,19 @@ self.addEventListener('notificationclick', (event) => {
       await client.focus();
       return;
     }
-    await self.clients.openWindow(self.registration.scope);
+    await sw.clients.openWindow(sw.registration.scope);
   })());
 });
 
+/** @type {Record<string, SwSystemMessageHandler>} */
 const systemMessageHandlers = {
   SW_SKIP_WAITING: (event, payload) => {
     const approvedBuildNumber = normalizeInt(payload.approvedBuildNumber, null);
     event.waitUntil((async () => {
-      if (Number.isInteger(approvedBuildNumber) && approvedBuildNumber > 0) {
+      if (typeof approvedBuildNumber === 'number' && approvedBuildNumber > 0) {
         await confirmUpdatePolicyBuild(approvedBuildNumber);
       }
-      await self.skipWaiting();
+      await sw.skipWaiting();
     })());
   },
   SW_SYNC_UPDATE_POLICY: (event, payload) => {
@@ -1437,11 +1755,12 @@ const systemMessageHandlers = {
     event.waitUntil((async () => {
       try {
         const updated = await confirmUpdatePolicyBuild(buildNumber);
+        const pinnedBuildNumber = updated && Number.isInteger(updated.pinnedBuildNumber)
+          ? updated.pinnedBuildNumber
+          : null;
         replyToMessagePort(event, {
           ok: Boolean(updated),
-          pinnedBuildNumber: Number.isInteger(updated?.pinnedBuildNumber)
-            ? updated.pinnedBuildNumber
-            : null,
+          pinnedBuildNumber,
         });
       } catch {
         replyToMessagePort(event, {
@@ -1504,15 +1823,18 @@ const systemMessageHandlers = {
   },
 };
 
-self.addEventListener('message', (event) => {
-  if (event.origin !== self.location.origin) return;
+sw.addEventListener('message', /** @param {ExtendableMessageEvent} event */ (event) => {
+  if (event.origin !== sw.location.origin) return;
 
-  const data = event.data;
+  const data = /** @type {SwMessageData} */ (event.data);
   if (!data || typeof data !== 'object') return;
 
-  const handler = systemMessageHandlers[data.type];
+  const messageType = normalizeString(data.type);
+  const handler = systemMessageHandlers[messageType];
   if (handler) {
-    const payload = data.payload && typeof data.payload === 'object' ? data.payload : {};
+    const payload = /** @type {SwPayload} */ (
+      data.payload && typeof data.payload === 'object' ? data.payload : {}
+    );
     handler(event, payload);
     return;
   }

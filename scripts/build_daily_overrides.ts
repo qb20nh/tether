@@ -17,15 +17,53 @@ import {
   computePoolDigest,
   selectDailyCandidateForSlot,
   writeDailyOverridesGzipFile,
-} from './daily_pool_tools.js';
+} from './daily_pool_tools.ts';
 import {
   parseNonNegativeInt,
   parsePositiveInt,
   readRequiredArgValue,
   writeJsonFile,
-} from './lib/cli_utils.js';
+} from './lib/cli_utils.ts';
 
-const DEFAULTS = {
+interface BuildDailyOverridesOptions {
+  maxSlots: number;
+  maxVariantProbe: number;
+  difficultyVariantWindow: number;
+  outBinFile: string;
+  outManifestFile: string;
+  generatedAtUtcMs: number;
+  poolVersion: string;
+  epochUtcDate: string;
+  json: boolean;
+}
+
+interface DailyPoolManifest {
+  schemaVersion: number;
+  poolVersion: string;
+  epochUtcDate: string;
+  maxSlots: number;
+  baseVariantId: number;
+  slotMapping: string;
+  maxVariantProbe: number;
+  difficultyVariantWindow: number;
+  maxVariantUsed: number;
+  poolDigest: string;
+  generatedAtUtcMs: number;
+  checks: {
+    infiniteDisjointCount: number;
+    dailyUniqueCount: number;
+    witnessValidatedCount: number;
+  };
+  artifacts: {
+    dailyOverridesFile: string;
+    overrideCount: number;
+    variantBits: number;
+    packedBytes: number;
+    gzipBytes: number;
+  };
+}
+
+const DEFAULTS: BuildDailyOverridesOptions = {
   maxSlots: DAILY_POOL_MAX_SLOTS,
   maxVariantProbe: DAILY_POOL_MAX_VARIANT_PROBE,
   difficultyVariantWindow: DAILY_POOL_DIFFICULTY_VARIANT_WINDOW,
@@ -37,14 +75,14 @@ const DEFAULTS = {
   json: false,
 };
 
-const parseArgs = (argv) => {
-  const opts = { ...DEFAULTS };
+const parseArgs = (argv: readonly string[]): BuildDailyOverridesOptions => {
+  const opts: BuildDailyOverridesOptions = { ...DEFAULTS };
 
   let index = 0;
   while (index < argv.length) {
     const arg = argv[index];
     let nextArgIndex = index + 1;
-    const nextValue = () => {
+    const nextValue = (): string => {
       const result = readRequiredArgValue(argv, index, arg);
       nextArgIndex = result.nextIndex + 1;
       return result.value;
@@ -84,7 +122,7 @@ const parseArgs = (argv) => {
         console.log(
           [
             'Usage:',
-            '  node scripts/build_daily_overrides.js [options]',
+            '  node scripts/build_daily_overrides.ts [options]',
             '',
             'Options:',
             `  --max-slots <n>           Daily pool slots to build (default: ${DEFAULTS.maxSlots})`,
@@ -123,7 +161,7 @@ const parseArgs = (argv) => {
   return opts;
 };
 
-function main() {
+function main(): void {
   const opts = parseArgs(process.argv.slice(2));
 
   const infiniteCanonicalSet = buildInfiniteCanonicalKeySet(INFINITE_MAX_LEVELS);
@@ -133,13 +171,13 @@ function main() {
     );
   }
 
-  const dailyCanonicalKeys = new Set();
-  const overrides = new Map();
-  const digestRecords = [];
+  const dailyCanonicalKeys = new Set<string>();
+  const overrides = new Map<number, number>();
+  const digestRecords: string[] = [];
   let maxVariantUsed = DAILY_POOL_BASE_VARIANT_ID;
   let difficultyScoreTotal = 0;
 
-  for (let slot = 0; slot < opts.maxSlots; slot++) {
+  for (let slot = 0; slot < opts.maxSlots; slot += 1) {
     const candidate = selectDailyCandidateForSlot(slot, {
       infiniteCanonicalKeys: infiniteCanonicalSet,
       dailyCanonicalKeys,
@@ -153,7 +191,7 @@ function main() {
       overrides.set(slot, candidate.variantId);
     }
     if (candidate.variantId > maxVariantUsed) maxVariantUsed = candidate.variantId;
-    if (Number.isFinite(candidate.difficultyScore)) difficultyScoreTotal += candidate.difficultyScore;
+    difficultyScoreTotal += candidate.difficultyScore;
 
     digestRecords.push(`${slot}:${candidate.variantId}:${candidate.canonicalKey}`);
 
@@ -165,7 +203,7 @@ function main() {
   const encoded = writeDailyOverridesGzipFile(opts.outBinFile, overrides, maxVariantUsed);
 
   const poolDigest = computePoolDigest(digestRecords);
-  const manifest = {
+  const manifest: DailyPoolManifest = {
     schemaVersion: DAILY_POOL_SCHEMA_VERSION,
     poolVersion: opts.poolVersion,
     epochUtcDate: opts.epochUtcDate,
@@ -212,7 +250,7 @@ function main() {
   if (opts.json) {
     console.log(JSON.stringify(summary, null, 2));
   } else {
-    console.log(`Generated daily pool artifacts:`);
+    console.log('Generated daily pool artifacts:');
     console.log(`  overrides: ${opts.outBinFile}`);
     console.log(`  manifest: ${opts.outManifestFile}`);
     console.log(

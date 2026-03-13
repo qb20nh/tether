@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-export const TEXT_EXTENSIONS = new Set([
+export const TEXT_EXTENSIONS = new Set<string>([
   '.html',
   '.js',
   '.css',
@@ -12,7 +12,12 @@ export const TEXT_EXTENSIONS = new Set([
   '.map',
 ]);
 
-export const BLOCKED_PATTERNS = [
+interface BlockedPattern {
+  label: string;
+  regex: RegExp;
+}
+
+export const BLOCKED_PATTERNS: readonly BlockedPattern[] = [
   { label: 'local debug panel id', regex: /tetherLocalDebugPanel/ },
   { label: 'runtime debug plugin module', regex: /runtime_debug_plugin/ },
   { label: 'local debug panel module', regex: /local_debug_panel/ },
@@ -36,8 +41,8 @@ export const BLOCKED_PATTERNS = [
 
 const DEFAULT_DIST_DIR = path.join(process.cwd(), 'dist');
 
-const listFilesRecursively = (dirPath) => {
-  const out = [];
+const listFilesRecursively = (dirPath: string): string[] => {
+  const out: string[] = [];
   const entries = fs.readdirSync(dirPath, { withFileTypes: true });
   for (const entry of entries) {
     const absPath = path.join(dirPath, entry.name);
@@ -50,7 +55,18 @@ const listFilesRecursively = (dirPath) => {
   return out;
 };
 
-export const verifyReleaseNoDebugArtifacts = ({ distDir = DEFAULT_DIST_DIR } = {}) => {
+interface VerifyReleaseNoDebugArtifactsOptions {
+  distDir?: string;
+}
+
+interface VerifyReleaseNoDebugArtifactsResult {
+  distDir: string;
+  fileCount: number;
+}
+
+export const verifyReleaseNoDebugArtifacts = (
+  { distDir = DEFAULT_DIST_DIR }: VerifyReleaseNoDebugArtifactsOptions = {},
+): VerifyReleaseNoDebugArtifactsResult => {
   if (!fs.existsSync(distDir)) {
     throw new Error(`Missing dist directory: ${distDir}`);
   }
@@ -61,7 +77,7 @@ export const verifyReleaseNoDebugArtifacts = ({ distDir = DEFAULT_DIST_DIR } = {
     throw new Error(`No text build artifacts found in ${path.relative(process.cwd(), distDir) || 'dist/'}`);
   }
 
-  const violations = [];
+  const violations: Array<{ filePath: string; label: string }> = [];
   for (const filePath of files) {
     const content = fs.readFileSync(filePath, 'utf8');
     for (const pattern of BLOCKED_PATTERNS) {

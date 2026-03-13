@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": true,
+    "lib": ["DOM", "DOM.Iterable", "ES2023"],
+    "noImplicitAny": false,
+    "types": ["node", "vite/client"]
+  },
+  "include": ["tests/**/*.js", "tests/**/*.ts", "src/**/*.d.ts"]
+}

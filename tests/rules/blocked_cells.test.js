@@ -12,7 +12,7 @@ const CHAMBER_LEVEL = {
     '##.##',
     '##.##',
   ],
-  stitches: [[3, 3]],
+  stitches: /** @type {[number, number][]} */ ([[3, 3]]),
   cornerCounts: [],
 };
 

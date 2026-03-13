@@ -7,7 +7,7 @@ import test from 'node:test';
 import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
-const compareScript = path.resolve(process.cwd(), 'scripts', 'render_drag_benchmark_compare.js');
+const compareScript = path.resolve(process.cwd(), 'scripts', 'render_drag_benchmark_compare.ts');
 
 test('e2e: render drag benchmark compare smoke run produces a valid report', async (t) => {
   try {
@@ -23,6 +23,8 @@ test('e2e: render drag benchmark compare smoke run produces a valid report', asy
   });
 
   const { stdout, stderr } = await execFileAsync(process.execPath, [
+    '--import',
+    'tsx',
     compareScript,
     '--prev',
     'HEAD',

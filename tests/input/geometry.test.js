@@ -47,20 +47,21 @@ const createComputedStyle = ({
 });
 
 const installGeometryDomGlobals = (t) => {
+  const globalObject = /** @type {{ document?: any, Element?: any, getComputedStyle?: any }} */ (globalThis);
   const originalDocument = globalThis.document;
   const originalElement = globalThis.Element;
   const originalGetComputedStyle = globalThis.getComputedStyle;
   const computedStyles = new WeakMap();
   const documentElement = new FakeElement({ id: 'document-root' });
 
-  globalThis.Element = FakeElement;
-  globalThis.document = { documentElement };
-  globalThis.getComputedStyle = (el) => computedStyles.get(el) || createComputedStyle();
+  globalObject.Element = FakeElement;
+  globalObject.document = { documentElement };
+  globalObject.getComputedStyle = (el) => computedStyles.get(el) || createComputedStyle();
 
   t.after(() => {
-    globalThis.document = originalDocument;
-    globalThis.Element = originalElement;
-    globalThis.getComputedStyle = originalGetComputedStyle;
+    globalObject.document = originalDocument;
+    globalObject.Element = originalElement;
+    globalObject.getComputedStyle = originalGetComputedStyle;
   });
 
   return {
@@ -79,7 +80,7 @@ test('getCellSize prefers a nested grid cell CSS variable over the source cell v
   source.appendChild(grid);
   setComputedStyle(grid, { cell: '48' });
 
-  assert.equal(getCellSize(source), 48);
+  assert.equal(getCellSize(/** @type {any} */ (source)), 48);
 });
 
 test('getCellSize infers the grid cell size from width, columns, gap, and padding', (t) => {
@@ -91,7 +92,7 @@ test('getCellSize infers the grid cell size from width, columns, gap, and paddin
     pad: '10',
   });
 
-  assert.equal(getCellSize(grid), 24);
+  assert.equal(getCellSize(/** @type {any} */ (grid)), 24);
 });
 
 test('getCellSize falls back to the document cell variable and then the default size', (t) => {

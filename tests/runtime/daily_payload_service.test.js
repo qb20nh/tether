@@ -8,6 +8,10 @@ import {
 
 const DAILY_URL = 'https://example.com/daily/today.json';
 
+/**
+ * @param {{ ok?: boolean, json?: any }} [options]
+ * @returns {{ ok: boolean, json: () => Promise<any> }}
+ */
 const createResponse = ({ ok = true, json = null } = {}) => ({
   ok,
   async json() {
@@ -29,14 +33,15 @@ const createDailyPayload = ({
   level: {
     name: `Daily ${dailyId}`,
     grid: ['..', '..'],
-    stitches: [[0, 0]],
-    cornerCounts: [[0, 0, 2]],
+    stitches: /** @type {[number, number][]} */ ([[0, 0]]),
+    cornerCounts: /** @type {Array<[number, number, number]>} */ ([[0, 0, 2]]),
   },
 });
 
 test('normalizeDailyPayload accepts valid payload and rejects malformed payloads', () => {
   const valid = createDailyPayload();
   const normalized = normalizeDailyPayload(valid);
+  assert.ok(normalized);
   assert.equal(normalized.dailyId, '2026-03-07');
   assert.equal(Array.isArray(normalized.level.grid), true);
   assert.equal(normalized.level.grid.length, 2);
@@ -109,7 +114,9 @@ test('resolveDailyBootPayload performs stale bypass fetch when grace window elap
   assert.equal(urls[1].includes('_dailycb='), true);
   assert.equal(out.dailyId, '2026-03-07');
   assert.equal(out.stalePayload, null);
-  assert.deepEqual(out.dailyLevel, normalizeDailyPayload(fresh).level);
+  const normalizedFresh = normalizeDailyPayload(fresh);
+  assert.ok(normalizedFresh);
+  assert.deepEqual(out.dailyLevel, normalizedFresh.level);
 });
 
 test('resolveDailyBootPayload keeps stale payload when still not today after bypass', async () => {
@@ -166,7 +173,7 @@ test('setupDailyHardInvalidationWatcher refetches on visibilitychange once thres
       return createResponse({ json: payloadToday });
     },
     windowObj,
-    documentObj,
+    documentObj: /** @type {any} */ (documentObj),
   });
 
   service.setupDailyHardInvalidationWatcher({

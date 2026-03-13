@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import test from 'node:test';
-import { resolveBuildIdentity } from '../../scripts/resolve_build_identity.js';
+import { resolveBuildIdentity } from '../../scripts/resolve_build_identity.ts';
 import {
   BUILD_IDENTITY_IGNORED_REPO_FILES,
   DAILY_OVERRIDES_REPO_FILE,

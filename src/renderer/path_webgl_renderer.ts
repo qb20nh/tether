@@ -1,5 +1,5 @@
-// @ts-nocheck
 import { applyCanvasElementSize, resolveCanvasSize } from './canvas_size_utils.ts';
+import type { RuntimeData } from '../contracts/ports.ts';
 
 const TAU = Math.PI * 2;
 const FLOW_STOP_EPSILON = 1e-4;
@@ -9,7 +9,303 @@ const BRACKET_PULSE_CYCLES = 3;
 const FLOAT_BYTES = Float32Array.BYTES_PER_ELEMENT;
 const UINT16_BYTES = Uint16Array.BYTES_PER_ELEMENT;
 
-const clampUnit = (value) => Math.max(0, Math.min(1, value));
+export interface PointLike {
+  x: number;
+  y: number;
+}
+
+interface DirectionLike {
+  ux: number;
+  uy: number;
+}
+
+interface TravelRange {
+  start: number;
+  end: number;
+}
+
+interface CornerVertexMeta {
+  flag: number;
+  cx: number;
+  cy: number;
+  angleIn: number;
+  sweep: number;
+  travelStart: number;
+  travelSpan: number;
+}
+
+interface CornerTurn {
+  tangentOffset: number;
+  arcLength: number;
+  tangentInX: number;
+  tangentInY: number;
+  tangentOutX: number;
+  tangentOutY: number;
+  inUx: number;
+  inUy: number;
+  outUx: number;
+  outUy: number;
+  turnSigned: number;
+  cx: number;
+  cy: number;
+  centerAngleIn: number;
+  centerSweep: number;
+  absTurn: number;
+}
+
+interface LinearFlowPrimitive {
+  segmentIndex: number;
+  localStart: number;
+  localEnd: number;
+  travelStart: number;
+  travelEnd: number;
+}
+
+interface CornerFlowPrimitive {
+  cornerIndex: number;
+  travelStart: number;
+  travelEnd: number;
+}
+
+interface FlowPrimitives {
+  linearPrimitives: LinearFlowPrimitive[];
+  cornerPrimitives: CornerFlowPrimitive[];
+  mainTravel: number;
+}
+
+interface PathMeshStorage {
+  positions: Float32Array;
+  travels: Float32Array;
+  cornerFlags: Float32Array;
+  cornerCenters: Float32Array;
+  cornerAngles: Float32Array;
+  cornerTravels: Float32Array;
+  indices: Uint16Array;
+  vertexCount: number;
+  indexCount: number;
+  mainTravel: number;
+}
+
+interface TutorialBracketMeshStorage {
+  centers: Float32Array;
+  corners: Float32Array;
+  indices: Uint16Array;
+  vertexCount: number;
+  indexCount: number;
+}
+
+interface UnifiedPathMeshOptions {
+  width?: number;
+  startRadius?: number;
+  arrowLength?: number;
+  endHalfWidth?: number;
+  startFlowDirX?: number;
+  startFlowDirY?: number;
+  endArrowDirX?: number;
+  endArrowDirY?: number;
+  reverseHeadArrowLength?: number;
+  reverseHeadArrowHalfWidth?: number;
+  reverseTailCircleRadius?: number;
+  renderStartCap?: boolean;
+  renderEndCap?: boolean;
+  maxPathPoints?: number;
+}
+
+interface UnifiedPathMeshBuildState {
+  safePoints: PointLike[];
+  halfWidth: number;
+  startRadius: number;
+  arrowLength: number;
+  endHalfWidth: number;
+  startFlowDirX: number;
+  startFlowDirY: number;
+  hasStartFlowOverride: boolean;
+  endArrowDirX: number;
+  endArrowDirY: number;
+  hasEndArrowOverride: boolean;
+  reverseHeadArrowLength: number;
+  reverseHeadArrowHalfWidth: number;
+  reverseTailCircleRadius: number;
+  renderStartCap: boolean;
+  renderEndCap: boolean;
+  firstSegmentIndex: number;
+  lastSegmentIndex: number;
+  segmentUx: number[];
+  segmentUy: number[];
+  cornerTurns: Array<CornerTurn | null>;
+  flow: FlowPrimitives;
+}
+
+interface MeshCountSummary {
+  vertexCount: number;
+  indexCount: number;
+}
+
+interface MeshCountWriter {
+  addVertex: () => number;
+  addTriangle: () => void;
+  finish: () => MeshCountSummary;
+}
+
+interface MeshFillWriter {
+  addVertex: (x: number, y: number, travel: number, cornerMeta?: CornerVertexMeta) => number;
+  addTriangle: (a: number, b: number, c: number) => void;
+  finish: (mainTravel: number) => PathMeshStorage;
+}
+
+type MeshWriter = Pick<MeshFillWriter, 'addVertex' | 'addTriangle'> | Pick<MeshCountWriter, 'addVertex' | 'addTriangle'>;
+type TravelResolver = number | ((x: number, y: number) => number);
+
+interface UniformRgb {
+  r: number;
+  g: number;
+  b: number;
+}
+
+export interface ColorRgbLike {
+  r: number;
+  g: number;
+  b: number;
+}
+
+interface DirectionOverride {
+  hasOverride: boolean;
+  x: number;
+  y: number;
+}
+
+interface PathGeometryOptions extends UnifiedPathMeshOptions {
+  width: number;
+  startRadius: number;
+  startFlowDirX: number;
+  startFlowDirY: number;
+  hasStartFlowOverride: boolean;
+  arrowLength: number;
+  endHalfWidth: number;
+  endArrowDirX: number;
+  endArrowDirY: number;
+  hasEndArrowOverride: boolean;
+  reverseHeadArrowLength: number;
+  reverseHeadArrowHalfWidth: number;
+  reverseTailCircleRadius: number;
+  maxPathPoints: number;
+}
+
+export interface PathFramePayload extends RuntimeData {
+  points?: PointLike[];
+  retainedStartArcPoints?: PointLike[];
+  retainedEndArcPoints?: PointLike[];
+  tutorialBracketCenters?: PointLike[];
+  tutorialBracketCellSize: number;
+  drawTutorialBracketsInPathLayer: boolean;
+  tutorialBracketGeometryToken: number;
+  tutorialBracketPulseEnabled: boolean;
+  tutorialBracketColorRgb?: ColorRgbLike | null;
+  geometryToken: number;
+  retainedStartArcGeometryToken: number;
+  retainedEndArcGeometryToken: number;
+  width: number;
+  baseStartRadius: number;
+  baseArrowLength: number;
+  baseEndHalfWidth: number;
+  startRadius: number;
+  startFlowDirX: number;
+  startFlowDirY: number;
+  arrowLength: number;
+  endHalfWidth: number;
+  endArrowDirX: number;
+  endArrowDirY: number;
+  reverseHeadArrowLength: number;
+  reverseHeadArrowHalfWidth: number;
+  reverseTailCircleRadius: number;
+  maxPathPoints?: number;
+  flowBaseSpeed: number;
+  flowCycle: number;
+  flowPulse: number;
+  flowSpeed: number;
+  flowOffset: number;
+  flowEnabled: boolean;
+  flowMix: number;
+  flowRise: number;
+  flowDrop: number;
+  reverseColorBlend: number;
+  reverseFromFlowOffset: number;
+  reverseTravelSpan: number;
+  retainedStartArcWidth: number;
+  retainedEndArcWidth: number;
+  completionProgress: number;
+  isCompletionSolved: boolean;
+  mainColorRgb?: ColorRgbLike | null;
+  completeColorRgb?: ColorRgbLike | null;
+}
+
+interface PathFrameState {
+  frame: PathFramePayload;
+  points: unknown[];
+  retainedStartArcPoints: unknown[];
+  retainedEndArcPoints: unknown[];
+  bracketCenters: unknown[];
+  bracketCellSize: number;
+  hasPathPoints: boolean;
+  hasRetainedStartArc: boolean;
+  hasRetainedEndArc: boolean;
+  hasTutorialBrackets: boolean;
+  geometryToken: number;
+  retainedStartArcGeometryToken: number;
+  retainedEndArcGeometryToken: number;
+  tutorialBracketGeometryToken: number;
+  flowCycle: number;
+  flowPulse: number;
+  flowOffset: number;
+  flowEnabled: number;
+  flowMix: number;
+  flowRise: number;
+  flowDrop: number;
+  reverseColorBlend: number;
+  reverseFromFlowOffset: number;
+  reverseTravelSpanFromFrame: number;
+  pathGeometry: PathGeometryOptions;
+  retainedStartArcWidth: number;
+  retainedEndArcWidth: number;
+}
+
+interface PathDrawState {
+  completionProgress: number;
+  completionEnabled: number;
+  completionFeather: number;
+  mainColor: UniformRgb;
+  completeColor: UniformRgb;
+}
+
+export interface PathRenderer {
+  antialiasEnabled: boolean;
+  resize: (cssWidth: number, cssHeight: number, dpr?: number) => void;
+  clear: () => void;
+  drawPathFrame: (frame?: PathFramePayload) => number;
+  destroy: (options?: RuntimeData) => void;
+  isContextLost: () => boolean;
+}
+
+type FinitePointVisitor = (x: number, y: number, safeIndex: number) => void;
+type GpuCapacityKind =
+  | 'position'
+  | 'travel'
+  | 'cornerFlag'
+  | 'cornerCenter'
+  | 'cornerAngle'
+  | 'cornerTravel'
+  | 'index'
+  | 'bracketCenter'
+  | 'bracketCorner'
+  | 'bracketIndex';
+
+interface DrawPathMeshOptions {
+  disableFlow?: boolean;
+  disableReverse?: boolean;
+  flowOffsetOverride?: number;
+}
+
+const clampUnit = (value: number): number => Math.max(0, Math.min(1, value));
 const EMPTY_CORNER_VERTEX_META = Object.freeze({
   flag: 0,
   cx: 0,
@@ -20,7 +316,7 @@ const EMPTY_CORNER_VERTEX_META = Object.freeze({
   travelSpan: 0,
 });
 
-const createMeshStorage = () => ({
+const createMeshStorage = (): PathMeshStorage => ({
   positions: new Float32Array(0),
   travels: new Float32Array(0),
   cornerFlags: new Float32Array(0),
@@ -33,7 +329,7 @@ const createMeshStorage = () => ({
   mainTravel: 0,
 });
 
-const createBracketStorage = () => ({
+const createBracketStorage = (): TutorialBracketMeshStorage => ({
   centers: new Float32Array(0),
   corners: new Float32Array(0),
   indices: new Uint16Array(0),
@@ -41,27 +337,72 @@ const createBracketStorage = () => ({
   indexCount: 0,
 });
 
-const normalizeAngle = (angle) => {
+const normalizeAngle = (angle: number): number => {
   const normalized = angle % TAU;
   return normalized >= 0 ? normalized : normalized + TAU;
 };
 
-const angleDeltaSigned = (from, to) => {
+const angleDeltaSigned = (from: number, to: number): number => {
   const delta = normalizeAngle(to - from);
   return delta > Math.PI ? delta - TAU : delta;
 };
 
-const toFinitePoint = (point) => {
-  const x = Number(point?.x);
-  const y = Number(point?.y);
+const toFinitePoint = (point: unknown): PointLike | null => {
+  const maybePoint = point && typeof point === 'object'
+    ? point as Partial<PointLike>
+    : null;
+  const x = Number(maybePoint?.x);
+  const y = Number(maybePoint?.y);
   if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
   return { x, y };
 };
 
 const createEmptyMesh = createMeshStorage;
 const createEmptyBracketMesh = createBracketStorage;
+const EMPTY_PATH_FRAME_PAYLOAD: PathFramePayload = {
+  tutorialBracketCellSize: 0,
+  drawTutorialBracketsInPathLayer: false,
+  tutorialBracketGeometryToken: Number.NaN,
+  tutorialBracketPulseEnabled: false,
+  tutorialBracketColorRgb: null,
+  geometryToken: Number.NaN,
+  retainedStartArcGeometryToken: Number.NaN,
+  retainedEndArcGeometryToken: Number.NaN,
+  width: 0,
+  baseStartRadius: 0,
+  baseArrowLength: 0,
+  baseEndHalfWidth: 0,
+  startRadius: 0,
+  startFlowDirX: Number.NaN,
+  startFlowDirY: Number.NaN,
+  arrowLength: 0,
+  endHalfWidth: 0,
+  endArrowDirX: Number.NaN,
+  endArrowDirY: Number.NaN,
+  reverseHeadArrowLength: 0,
+  reverseHeadArrowHalfWidth: 0,
+  reverseTailCircleRadius: 0,
+  flowBaseSpeed: 0,
+  flowCycle: 0,
+  flowPulse: 0,
+  flowSpeed: 0,
+  flowOffset: 0,
+  flowEnabled: false,
+  flowMix: 0,
+  flowRise: 0,
+  flowDrop: 0,
+  reverseColorBlend: 0,
+  reverseFromFlowOffset: 0,
+  reverseTravelSpan: 0,
+  retainedStartArcWidth: 0,
+  retainedEndArcWidth: 0,
+  completionProgress: 0,
+  isCompletionSolved: false,
+  mainColorRgb: null,
+  completeColorRgb: null,
+};
 
-const createCornerVertexMeta = (cornerMeta) => {
+const createCornerVertexMeta = (cornerMeta?: Partial<CornerVertexMeta> | null): CornerVertexMeta => {
   if (!cornerMeta) return EMPTY_CORNER_VERTEX_META;
   return {
     flag: 1,
@@ -75,13 +416,13 @@ const createCornerVertexMeta = (cornerMeta) => {
 };
 
 const buildCornerTurn = (
-  points,
-  segmentLengths,
-  segmentUx,
-  segmentUy,
-  cornerRadius,
-  cornerIndex,
-) => {
+  points: readonly PointLike[],
+  segmentLengths: readonly number[],
+  segmentUx: readonly number[],
+  segmentUy: readonly number[],
+  cornerRadius: number,
+  cornerIndex: number,
+): CornerTurn | null => {
   const angleTolerance = 1e-4;
   const corner = points[cornerIndex];
   const inLen = segmentLengths[cornerIndex - 1];
@@ -142,13 +483,13 @@ const buildCornerTurn = (
 };
 
 const buildCornerTurns = (
-  points,
-  segmentLengths,
-  segmentUx,
-  segmentUy,
-  cornerRadius,
-) => {
-  const cornerTurns = new Array(points.length).fill(null);
+  points: readonly PointLike[],
+  segmentLengths: readonly number[],
+  segmentUx: readonly number[],
+  segmentUy: readonly number[],
+  cornerRadius: number,
+): Array<CornerTurn | null> => {
+  const cornerTurns: Array<CornerTurn | null> = new Array(points.length).fill(null);
 
   for (let i = 1; i < points.length - 1; i++) {
     cornerTurns[i] = buildCornerTurn(
@@ -164,9 +505,13 @@ const buildCornerTurns = (
   return cornerTurns;
 };
 
-const buildFlowPrimitives = (points, segmentLengths, cornerTurns) => {
-  const linearPrimitives = [];
-  const cornerPrimitives = [];
+const buildFlowPrimitives = (
+  points: readonly PointLike[],
+  segmentLengths: readonly number[],
+  cornerTurns: ReadonlyArray<CornerTurn | null>,
+): FlowPrimitives => {
+  const linearPrimitives: LinearFlowPrimitive[] = [];
+  const cornerPrimitives: CornerFlowPrimitive[] = [];
   let flowTravel = 0;
 
   for (let i = 0; i < segmentLengths.length; i++) {
@@ -209,16 +554,19 @@ const buildFlowPrimitives = (points, segmentLengths, cornerTurns) => {
   };
 };
 
-const createUnifiedPathMeshBuildState = (points, options = {}) => {
+const createUnifiedPathMeshBuildState = (
+  points: unknown,
+  options: UnifiedPathMeshOptions = {},
+): UnifiedPathMeshBuildState | null => {
   if (!Array.isArray(points) || points.length === 0) return null;
 
-  const maxPathPoints = Number.isInteger(options.maxPathPoints) && options.maxPathPoints > 0
-    ? options.maxPathPoints
+  const maxPathPoints = Number.isInteger(options.maxPathPoints) && Number(options.maxPathPoints) > 0
+    ? Number(options.maxPathPoints)
     : DEFAULT_MAX_PATH_POINTS;
   const safePoints = points
     .slice(0, maxPathPoints)
     .map(toFinitePoint)
-    .filter(Boolean);
+    .filter((point): point is PointLike => point !== null);
   if (safePoints.length === 0) return null;
 
   const width = Math.max(1, Number(options.width) || 1);
@@ -298,7 +646,14 @@ const createUnifiedPathMeshBuildState = (points, options = {}) => {
   };
 };
 
-const appendQuad = (writer, startPoint, endPoint, radius, travelRange, cornerMeta = null) => {
+const appendQuad = (
+  writer: MeshWriter,
+  startPoint: PointLike,
+  endPoint: PointLike,
+  radius: number,
+  travelRange: TravelRange,
+  cornerMeta: Partial<CornerVertexMeta> | null = null,
+): void => {
   const { addVertex, addTriangle } = writer;
   const dx = endPoint.x - startPoint.x;
   const dy = endPoint.y - startPoint.y;
@@ -318,7 +673,13 @@ const appendQuad = (writer, startPoint, endPoint, radius, travelRange, cornerMet
   addTriangle(v2, v1, v3);
 };
 
-const appendCircle = (writer, center, radius, segments, travelValueOrFn) => {
+const appendCircle = (
+  writer: MeshWriter,
+  center: PointLike,
+  radius: number,
+  segments: number,
+  travelValueOrFn: TravelResolver,
+): void => {
   const { addVertex, addTriangle } = writer;
   if (radius <= 0) return;
 
@@ -340,7 +701,14 @@ const appendCircle = (writer, center, radius, segments, travelValueOrFn) => {
   }
 };
 
-const appendArrowHead = (writer, anchorPoint, direction, length, halfWidth, travelRange) => {
+const appendArrowHead = (
+  writer: MeshWriter,
+  anchorPoint: PointLike,
+  direction: DirectionLike,
+  length: number,
+  halfWidth: number,
+  travelRange: TravelRange,
+): void => {
   const { addVertex, addTriangle } = writer;
   const perpX = -direction.uy;
   const perpY = direction.ux;
@@ -366,13 +734,13 @@ const appendArrowHead = (writer, anchorPoint, direction, length, halfWidth, trav
 };
 
 const appendCornerPrimitiveGeometry = (
-  writer,
-  safePoints,
-  cornerTurns,
-  halfWidth,
-  cornerIndex,
-  cornerPrimitive,
-) => {
+  writer: MeshWriter,
+  safePoints: readonly PointLike[],
+  cornerTurns: ReadonlyArray<CornerTurn | null>,
+  halfWidth: number,
+  cornerIndex: number,
+  cornerPrimitive: CornerFlowPrimitive,
+): void => {
   const { addVertex, addTriangle } = writer;
   const corner = cornerTurns[cornerIndex];
   const base = safePoints[cornerIndex];
@@ -433,19 +801,32 @@ const appendCornerPrimitiveGeometry = (
   }
 };
 
-const resolveDirection = (fallbackUx, fallbackUy, hasOverride, overrideX, overrideY) => {
+const resolveDirection = (
+  fallbackUx: number,
+  fallbackUy: number,
+  hasOverride: boolean,
+  overrideX: number,
+  overrideY: number,
+): DirectionLike => {
   if (!hasOverride) return { ux: fallbackUx, uy: fallbackUy };
   const norm = Math.hypot(overrideX, overrideY);
   return { ux: overrideX / norm, uy: overrideY / norm };
 };
 
-const createTravelProjector = (origin, direction, baseTravel = 0) => (x, y) => (
+const createTravelProjector = (
+  origin: PointLike,
+  direction: DirectionLike,
+  baseTravel = 0,
+): ((x: number, y: number) => number) => (x, y) => (
   baseTravel
   + ((x - origin.x) * direction.ux)
   + ((y - origin.y) * direction.uy)
 );
 
-const buildUnifiedPathMeshGeometry = (build, writer) => {
+const buildUnifiedPathMeshGeometry = (
+  build: UnifiedPathMeshBuildState,
+  writer: MeshWriter,
+): void => {
   const {
     safePoints,
     halfWidth,
@@ -564,7 +945,7 @@ const buildUnifiedPathMeshGeometry = (build, writer) => {
   }
 };
 
-const createMeshCountWriter = () => {
+const createMeshCountWriter = (): MeshCountWriter => {
   let vertexCount = 0;
   let indexCount = 0;
   return {
@@ -582,7 +963,7 @@ const createMeshCountWriter = () => {
   };
 };
 
-const createFixedMeshStorage = (vertexCount, indexCount) => ({
+const createFixedMeshStorage = (vertexCount: number, indexCount: number): PathMeshStorage => ({
   positions: new Float32Array(vertexCount * 2),
   travels: new Float32Array(vertexCount),
   cornerFlags: new Float32Array(vertexCount),
@@ -595,7 +976,7 @@ const createFixedMeshStorage = (vertexCount, indexCount) => ({
   mainTravel: 0,
 });
 
-const createMeshFillWriter = (target) => {
+const createMeshFillWriter = (target: PathMeshStorage): MeshFillWriter => {
   let vertexCount = 0;
   let indexCount = 0;
   return {
@@ -630,19 +1011,19 @@ const createMeshFillWriter = (target) => {
   };
 };
 
-const countUnifiedPathMeshGeometry = (build) => {
+const countUnifiedPathMeshGeometry = (build: UnifiedPathMeshBuildState): MeshCountSummary => {
   const writer = createMeshCountWriter();
   buildUnifiedPathMeshGeometry(build, writer);
   return writer.finish();
 };
 
-const fillUnifiedPathMeshStorage = (build, target) => {
+const fillUnifiedPathMeshStorage = (build: UnifiedPathMeshBuildState, target: PathMeshStorage): PathMeshStorage => {
   const writer = createMeshFillWriter(target);
   buildUnifiedPathMeshGeometry(build, writer);
   return writer.finish(build.flow.mainTravel);
 };
 
-export function buildUnifiedPathMesh(points, options = {}) {
+export function buildUnifiedPathMesh(points: unknown, options: UnifiedPathMeshOptions = {}): PathMeshStorage {
   const build = createUnifiedPathMeshBuildState(points, options);
   if (!build) return createEmptyMesh();
   const counts = countUnifiedPathMeshGeometry(build);
@@ -652,26 +1033,26 @@ export function buildUnifiedPathMesh(points, options = {}) {
   );
 }
 
-const nextPowerOfTwo = (value) => {
+const nextPowerOfTwo = (value: number): number => {
   let size = 1;
   const target = Math.max(1, Math.trunc(value));
   while (size < target) size <<= 1;
   return size;
 };
 
-const ensureFloatCapacity = (array, minLength) => {
+const ensureFloatCapacity = (array: Float32Array, minLength: number): Float32Array => {
   if (array.length >= minLength) return array;
   return new Float32Array(nextPowerOfTwo(minLength));
 };
 
-const ensureIndexCapacity = (array, minLength) => {
+const ensureIndexCapacity = (array: Uint16Array, minLength: number): Uint16Array => {
   if (array.length >= minLength) return array;
   return new Uint16Array(nextPowerOfTwo(minLength));
 };
 
 const createMutableMeshStorage = createMeshStorage;
 
-const resetMutableMeshStorage = (out) => {
+const resetMutableMeshStorage = (out: PathMeshStorage | null | undefined): PathMeshStorage => {
   const target = out || createMutableMeshStorage();
   target.vertexCount = 0;
   target.indexCount = 0;
@@ -679,7 +1060,11 @@ const resetMutableMeshStorage = (out) => {
   return target;
 };
 
-const buildUnifiedPathMeshInto = (points, options, out = null) => {
+const buildUnifiedPathMeshInto = (
+  points: unknown,
+  options: UnifiedPathMeshOptions | null | undefined,
+  out: PathMeshStorage | null = null,
+): PathMeshStorage => {
   const build = createUnifiedPathMeshBuildState(points, options || {});
   if (!build) return resetMutableMeshStorage(out);
   const counts = countUnifiedPathMeshGeometry(build);
@@ -697,21 +1082,24 @@ const buildUnifiedPathMeshInto = (points, options, out = null) => {
 const toFiniteCenter = toFinitePoint;
 const createMutableBracketStorage = createBracketStorage;
 
-const resetMutableBracketStorage = (out) => {
+const resetMutableBracketStorage = (out: TutorialBracketMeshStorage | null | undefined): TutorialBracketMeshStorage => {
   const target = out || createMutableBracketStorage();
   target.vertexCount = 0;
   target.indexCount = 0;
   return target;
 };
 
-const getSafeBracketCenters = (centers) => {
+const getSafeBracketCenters = (centers: unknown): PointLike[] => {
   if (!Array.isArray(centers) || centers.length === 0) return [];
   return centers
     .map(toFiniteCenter)
-    .filter(Boolean);
+    .filter((center): center is PointLike => center !== null);
 };
 
-const fillTutorialBracketMeshStorage = (safeCenters, target) => {
+const fillTutorialBracketMeshStorage = (
+  safeCenters: readonly PointLike[],
+  target: TutorialBracketMeshStorage,
+): TutorialBracketMeshStorage => {
   const maxBracketCount = Math.floor(65535 / 4);
   const bracketCount = Math.min(safeCenters.length, maxBracketCount);
   let vertexBase = 0;
@@ -753,7 +1141,7 @@ const fillTutorialBracketMeshStorage = (safeCenters, target) => {
   return target;
 };
 
-export const buildTutorialBracketMesh = (centers) => {
+export const buildTutorialBracketMesh = (centers: unknown): TutorialBracketMeshStorage => {
   const safeCenters = getSafeBracketCenters(centers);
   if (safeCenters.length === 0) return createEmptyBracketMesh();
   const bracketCount = Math.min(safeCenters.length, Math.floor(65535 / 4));
@@ -766,7 +1154,10 @@ export const buildTutorialBracketMesh = (centers) => {
   });
 };
 
-const buildTutorialBracketMeshInto = (centers, out) => {
+const buildTutorialBracketMeshInto = (
+  centers: unknown,
+  out: TutorialBracketMeshStorage | null | undefined,
+): TutorialBracketMeshStorage => {
   const safeCenters = getSafeBracketCenters(centers);
   if (safeCenters.length === 0) return resetMutableBracketStorage(out);
   const bracketCount = Math.min(safeCenters.length, Math.floor(65535 / 4));
@@ -777,7 +1168,11 @@ const buildTutorialBracketMeshInto = (centers, out) => {
   return fillTutorialBracketMeshStorage(safeCenters, target);
 };
 
-const createShader = (gl, type, source) => {
+const createShader = (
+  gl: WebGL2RenderingContext,
+  type: number,
+  source: string,
+): WebGLShader => {
   const shader = gl.createShader(type);
   if (!shader) throw new Error('Failed to allocate shader');
   gl.shaderSource(shader, source);
@@ -788,7 +1183,11 @@ const createShader = (gl, type, source) => {
   throw new Error(`Shader compile failed: ${info}`);
 };
 
-const createProgram = (gl, vertexSource, fragmentSource) => {
+const createProgram = (
+  gl: WebGL2RenderingContext,
+  vertexSource: string,
+  fragmentSource: string,
+): WebGLProgram => {
   const vertex = createShader(gl, gl.VERTEX_SHADER, vertexSource);
   const fragment = createShader(gl, gl.FRAGMENT_SHADER, fragmentSource);
   const program = gl.createProgram();
@@ -1022,7 +1421,7 @@ void main() {
 }
 `;
 
-const getUniforms = (gl, program) => ({
+const getUniforms = (gl: WebGL2RenderingContext, program: WebGLProgram) => ({
   canvasSizePx: gl.getUniformLocation(program, 'uCanvasSizePx'),
   deviceScale: gl.getUniformLocation(program, 'uDeviceScale'),
   mainColor: gl.getUniformLocation(program, 'uMainColor'),
@@ -1044,7 +1443,7 @@ const getUniforms = (gl, program) => ({
   reverseTravelSpan: gl.getUniformLocation(program, 'uReverseTravelSpan'),
 });
 
-const getBracketUniforms = (gl, program) => ({
+const getBracketUniforms = (gl: WebGL2RenderingContext, program: WebGLProgram) => ({
   canvasSizePx: gl.getUniformLocation(program, 'uCanvasSizePx'),
   deviceScale: gl.getUniformLocation(program, 'uDeviceScale'),
   halfSize: gl.getUniformLocation(program, 'uHalfSize'),
@@ -1055,14 +1454,17 @@ const getBracketUniforms = (gl, program) => ({
   pulse: gl.getUniformLocation(program, 'uPulse'),
 });
 
-const toRgb01Into = (color, out) => {
+const toRgb01Into = (color: ColorRgbLike | null | undefined, out: UniformRgb): UniformRgb => {
   out.r = clampUnit((Number(color?.r) || 0) / 255);
   out.g = clampUnit((Number(color?.g) || 0) / 255);
   out.b = clampUnit((Number(color?.b) || 0) / 255);
   return out;
 };
 
-export function createPathWebglRenderer(canvas, options = {}) {
+export function createPathWebglRenderer(
+  canvas: HTMLCanvasElement,
+  options: { antialias?: boolean } = {},
+): PathRenderer {
   if (!canvas) throw new Error('Path canvas is required');
   const antialiasEnabled = options.antialias !== false;
   const gl = canvas.getContext('webgl2', {
@@ -1194,7 +1596,7 @@ export function createPathWebglRenderer(canvas, options = {}) {
   let cachedBracketPointCount = 0;
   let cachedBracketGeometryToken = Number.NaN;
   let cachedBracketPoints = new Float32Array(0);
-  const gpuCapacities = {
+  const gpuCapacities: Record<GpuCapacityKind, number> = {
     position: 0,
     travel: 0,
     cornerFlag: 0,
@@ -1206,7 +1608,7 @@ export function createPathWebglRenderer(canvas, options = {}) {
     bracketCorner: 0,
     bracketIndex: 0,
   };
-  const uniformCache = {
+  const uniformCache: Record<string, number> = {
     canvasWidth: Number.NaN,
     canvasHeight: Number.NaN,
     deviceScale: Number.NaN,
@@ -1240,24 +1642,38 @@ export function createPathWebglRenderer(canvas, options = {}) {
     bracketColorG: Number.NaN,
     bracketColorB: Number.NaN,
   };
-  const mainColorScratch = { r: 1, g: 1, b: 1 };
-  const completeColorScratch = { r: 1, g: 1, b: 1 };
-  const bracketColorScratch = { r: 1, g: 1, b: 1 };
+  const mainColorScratch: UniformRgb = { r: 1, g: 1, b: 1 };
+  const completeColorScratch: UniformRgb = { r: 1, g: 1, b: 1 };
+  const bracketColorScratch: UniformRgb = { r: 1, g: 1, b: 1 };
 
-  const setUniform1fCached = (location, key, value) => {
+  const setUniform1fCached = (location: WebGLUniformLocation | null, key: string, value: number): void => {
     if (Object.is(uniformCache[key], value)) return;
-    gl.uniform1f(location, value);
+    if (location) gl.uniform1f(location, value);
     uniformCache[key] = value;
   };
 
-  const setUniform2fCached = (location, keyX, keyY, x, y) => {
+  const setUniform2fCached = (
+    location: WebGLUniformLocation | null,
+    keyX: string,
+    keyY: string,
+    x: number,
+    y: number,
+  ): void => {
     if (Object.is(uniformCache[keyX], x) && Object.is(uniformCache[keyY], y)) return;
-    gl.uniform2f(location, x, y);
+    if (location) gl.uniform2f(location, x, y);
     uniformCache[keyX] = x;
     uniformCache[keyY] = y;
   };
 
-  const setUniform3fCached = (location, keyX, keyY, keyZ, x, y, z) => {
+  const setUniform3fCached = (
+    location: WebGLUniformLocation | null,
+    keyX: string,
+    keyY: string,
+    keyZ: string,
+    x: number,
+    y: number,
+    z: number,
+  ): void => {
     if (
       Object.is(uniformCache[keyX], x)
       && Object.is(uniformCache[keyY], y)
@@ -1265,18 +1681,25 @@ export function createPathWebglRenderer(canvas, options = {}) {
     ) {
       return;
     }
-    gl.uniform3f(location, x, y, z);
+    if (location) gl.uniform3f(location, x, y, z);
     uniformCache[keyX] = x;
     uniformCache[keyY] = y;
     uniformCache[keyZ] = z;
   };
 
-  const scanFinitePoints = (points, maxPointCount, visitor = null) => {
+  const scanFinitePoints = (
+    points: readonly unknown[],
+    maxPointCount: number,
+    visitor: FinitePointVisitor | null = null,
+  ): number => {
     const limit = Math.min(points.length, maxPointCount);
     let safeIndex = 0;
     for (let i = 0; i < limit; i++) {
-      const x = Number(points[i]?.x);
-      const y = Number(points[i]?.y);
+      const point = points[i] && typeof points[i] === 'object'
+        ? points[i] as Partial<PointLike>
+        : null;
+      const x = Number(point?.x);
+      const y = Number(point?.y);
       if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
       if (visitor) visitor(x, y, safeIndex);
       safeIndex += 1;
@@ -1284,7 +1707,11 @@ export function createPathWebglRenderer(canvas, options = {}) {
     return safeIndex;
   };
 
-  const copyPointSignature = (points, maxPointCount, target) => {
+  const copyPointSignature = (
+    points: readonly unknown[],
+    maxPointCount: number,
+    target: Float32Array,
+  ): void => {
     scanFinitePoints(points, maxPointCount, (x, y, safeIndex) => {
       const base = safeIndex * 2;
       target[base] = x;
@@ -1292,7 +1719,11 @@ export function createPathWebglRenderer(canvas, options = {}) {
     });
   };
 
-  const pointSignatureChanged = (points, maxPointCount, signature) => {
+  const pointSignatureChanged = (
+    points: readonly unknown[],
+    maxPointCount: number,
+    signature: Float32Array,
+  ): boolean => {
     let changed = false;
     scanFinitePoints(points, maxPointCount, (x, y, safeIndex) => {
       const base = safeIndex * 2;
@@ -1301,15 +1732,16 @@ export function createPathWebglRenderer(canvas, options = {}) {
     return changed;
   };
 
-  const ensurePointSignatureCapacity = (pointCount) => {
+  const ensurePointSignatureCapacity = (pointCount: number): void => {
     const minLength = pointCount * 2;
     if (cachedPoints.length >= minLength) return;
     cachedPoints = new Float32Array(nextPowerOfTwo(minLength));
   };
 
-  const computeSafePointCount = (points, maxPathPoints) => scanFinitePoints(points, maxPathPoints);
+  const computeSafePointCount = (points: readonly unknown[], maxPathPoints: number): number =>
+    scanFinitePoints(points, maxPathPoints);
 
-  const hasGeometryChange = (points, geometry) => {
+  const hasGeometryChange = (points: readonly unknown[], geometry: PathGeometryOptions): boolean => {
     const pointCount = computeSafePointCount(points, geometry.maxPathPoints);
     const geometrySignatureChanged = (
       !geometryCached
@@ -1331,7 +1763,7 @@ export function createPathWebglRenderer(canvas, options = {}) {
     return pointSignatureChanged(points, geometry.maxPathPoints, cachedPoints);
   };
 
-  const updateGeometrySignature = (points, geometry) => {
+  const updateGeometrySignature = (points: readonly unknown[], geometry: PathGeometryOptions): void => {
     const pointCount = computeSafePointCount(points, geometry.maxPathPoints);
     ensurePointSignatureCapacity(pointCount);
     copyPointSignature(points, geometry.maxPathPoints, cachedPoints);
@@ -1351,22 +1783,22 @@ export function createPathWebglRenderer(canvas, options = {}) {
     geometryCached = true;
   };
 
-  const ensureBracketPointSignatureCapacity = (pointCount) => {
+  const ensureBracketPointSignatureCapacity = (pointCount: number): void => {
     const minLength = pointCount * 2;
     if (cachedBracketPoints.length >= minLength) return;
     cachedBracketPoints = new Float32Array(nextPowerOfTwo(minLength));
   };
 
-  const computeSafeBracketPointCount = (points) => scanFinitePoints(points, points.length);
+  const computeSafeBracketPointCount = (points: readonly unknown[]): number => scanFinitePoints(points, points.length);
 
-  const hasBracketGeometryChange = (points) => {
+  const hasBracketGeometryChange = (points: readonly unknown[]): boolean => {
     const pointCount = computeSafeBracketPointCount(points);
     if (!bracketGeometryCached) return true;
     if (cachedBracketPointCount !== pointCount) return true;
     return pointSignatureChanged(points, points.length, cachedBracketPoints);
   };
 
-  const updateBracketGeometrySignature = (points) => {
+  const updateBracketGeometrySignature = (points: readonly unknown[]): void => {
     const pointCount = computeSafeBracketPointCount(points);
     ensureBracketPointSignatureCapacity(pointCount);
     copyPointSignature(points, points.length, cachedBracketPoints);
@@ -1374,7 +1806,7 @@ export function createPathWebglRenderer(canvas, options = {}) {
     bracketGeometryCached = true;
   };
 
-  const resolveDirectionOverride = (xValue, yValue) => {
+  const resolveDirectionOverride = (xValue: unknown, yValue: unknown): DirectionOverride => {
     const x = Number(xValue);
     const y = Number(yValue);
     const hasOverride = Number.isFinite(x)
@@ -1387,7 +1819,7 @@ export function createPathWebglRenderer(canvas, options = {}) {
     };
   };
 
-  const createPathGeometryOptions = (frame) => {
+  const createPathGeometryOptions = (frame: PathFramePayload): PathGeometryOptions => {
     const width = Math.max(1, Number(frame.width) || 1);
     const startFlowOverride = resolveDirectionOverride(frame.startFlowDirX, frame.startFlowDirY);
     const endArrowOverride = resolveDirectionOverride(frame.endArrowDirX, frame.endArrowDirY);
@@ -1405,13 +1837,13 @@ export function createPathWebglRenderer(canvas, options = {}) {
       reverseHeadArrowLength: Math.max(0, Number(frame.reverseHeadArrowLength) || 0),
       reverseHeadArrowHalfWidth: Math.max(0, Number(frame.reverseHeadArrowHalfWidth) || 0),
       reverseTailCircleRadius: Math.max(0, Number(frame.reverseTailCircleRadius) || 0),
-      maxPathPoints: Number.isInteger(frame.maxPathPoints) && frame.maxPathPoints > 0
-        ? frame.maxPathPoints
+      maxPathPoints: Number.isInteger(frame.maxPathPoints) && Number(frame.maxPathPoints) > 0
+        ? Number(frame.maxPathPoints)
         : DEFAULT_MAX_PATH_POINTS,
     };
   };
 
-  const createPathFrameState = (frame) => {
+  const createPathFrameState = (frame: PathFramePayload): PathFrameState => {
     const points = Array.isArray(frame.points) ? frame.points : [];
     const retainedStartArcPoints = Array.isArray(frame.retainedStartArcPoints)
       ? frame.retainedStartArcPoints
@@ -1427,6 +1859,8 @@ export function createPathWebglRenderer(canvas, options = {}) {
     const flowCycle = Math.max(1, Number(frame.flowCycle) || 1);
     const flowPulse = Math.max(1, Math.min(Number(frame.flowPulse) || 1, flowCycle));
     const flowMixRaw = Number(frame.flowMix);
+    const flowRiseRaw = Number(frame.flowRise);
+    const flowDropRaw = Number(frame.flowDrop);
     const reverseColorBlendRaw = Number(frame.reverseColorBlend);
     return {
       frame,
@@ -1450,8 +1884,8 @@ export function createPathWebglRenderer(canvas, options = {}) {
       flowOffset: Number(frame.flowOffset) || 0,
       flowEnabled: frame.flowEnabled ? 1 : 0,
       flowMix: clampUnit(Number.isFinite(flowMixRaw) ? flowMixRaw : 1),
-      flowRise: Number.isFinite(frame.flowRise) ? frame.flowRise : 0.82,
-      flowDrop: Number.isFinite(frame.flowDrop) ? frame.flowDrop : 0.83,
+      flowRise: Number.isFinite(flowRiseRaw) ? flowRiseRaw : 0.82,
+      flowDrop: Number.isFinite(flowDropRaw) ? flowDropRaw : 0.83,
       reverseColorBlend: clampUnit(
         Number.isFinite(reverseColorBlendRaw) ? reverseColorBlendRaw : 1,
       ),
@@ -1469,13 +1903,13 @@ export function createPathWebglRenderer(canvas, options = {}) {
     };
   };
 
-  const clearPathMesh = (mesh) => {
+  const clearPathMesh = (mesh: PathMeshStorage): void => {
     mesh.vertexCount = 0;
     mesh.indexCount = 0;
     mesh.mainTravel = 0;
   };
 
-  const clearBracketMesh = (mesh) => {
+  const clearBracketMesh = (mesh: TutorialBracketMeshStorage): void => {
     mesh.vertexCount = 0;
     mesh.indexCount = 0;
   };
@@ -1508,7 +1942,7 @@ export function createPathWebglRenderer(canvas, options = {}) {
     cachedBracketGeometryToken = Number.NaN;
   };
 
-  const updateMainPathGeometry = (frameState) => {
+  const updateMainPathGeometry = (frameState: PathFrameState): boolean => {
     if (!frameState.hasPathPoints) {
       resetMainPathGeometryCache();
       return false;
@@ -1526,7 +1960,7 @@ export function createPathWebglRenderer(canvas, options = {}) {
     return true;
   };
 
-  const updateRetainedStartArcGeometry = (frameState) => {
+  const updateRetainedStartArcGeometry = (frameState: PathFrameState): boolean => {
     if (!frameState.hasRetainedStartArc) {
       resetRetainedStartArcGeometryCache();
       return false;
@@ -1567,7 +2001,7 @@ export function createPathWebglRenderer(canvas, options = {}) {
     return true;
   };
 
-  const updateRetainedEndArcGeometry = (frameState) => {
+  const updateRetainedEndArcGeometry = (frameState: PathFrameState): boolean => {
     if (!frameState.hasRetainedEndArc) {
       resetRetainedEndArcGeometryCache();
       return false;
@@ -1608,7 +2042,7 @@ export function createPathWebglRenderer(canvas, options = {}) {
     return true;
   };
 
-  const updateTutorialBracketGeometry = (frameState) => {
+  const updateTutorialBracketGeometry = (frameState: PathFrameState): boolean => {
     if (!frameState.hasTutorialBrackets) {
       resetBracketGeometryCache();
       return false;
@@ -1628,7 +2062,7 @@ export function createPathWebglRenderer(canvas, options = {}) {
     return true;
   };
 
-  const ensureGpuCapacity = (kind, target, requiredBytes) => {
+  const ensureGpuCapacity = (kind: GpuCapacityKind, target: number, requiredBytes: number): void => {
     const required = Math.max(0, Math.trunc(requiredBytes));
     if (required <= gpuCapacities[kind]) return;
     const nextCapacity = nextPowerOfTwo(required);
@@ -1636,7 +2070,7 @@ export function createPathWebglRenderer(canvas, options = {}) {
     gpuCapacities[kind] = nextCapacity;
   };
 
-  const uploadMeshToGpu = (mesh) => {
+  const uploadMeshToGpu = (mesh: PathMeshStorage): void => {
     const vertexCount = mesh.vertexCount;
     const indexCount = mesh.indexCount;
     const positionsLength = vertexCount * 2;
@@ -1687,7 +2121,7 @@ export function createPathWebglRenderer(canvas, options = {}) {
     }
   };
 
-  const uploadTutorialBracketMeshToGpu = (mesh) => {
+  const uploadTutorialBracketMeshToGpu = (mesh: TutorialBracketMeshStorage): void => {
     const vertexCount = mesh.vertexCount;
     const indexCount = mesh.indexCount;
     const centersLength = vertexCount * 2;
@@ -1712,12 +2146,12 @@ export function createPathWebglRenderer(canvas, options = {}) {
     }
   };
 
-  const clear = () => {
+  const clear = (): void => {
     if (isContextLost()) return;
     gl.clear(gl.COLOR_BUFFER_BIT);
   };
 
-  const resize = (cssWidth, cssHeight, dpr = 1) => {
+  const resize = (cssWidth: number, cssHeight: number, dpr = 1): void => {
     if (isContextLost()) return;
     const {
       safeDpr,
@@ -1728,13 +2162,13 @@ export function createPathWebglRenderer(canvas, options = {}) {
     } = resolveCanvasSize(cssWidth, cssHeight, dpr);
     deviceScale = safeDpr;
 
-    applyCanvasElementSize(canvas, safeCssWidth, safeCssHeight, pixelWidth, pixelHeight);
+    applyCanvasElementSize(canvas as unknown as Parameters<typeof applyCanvasElementSize>[0], safeCssWidth, safeCssHeight, pixelWidth, pixelHeight);
 
     gl.viewport(0, 0, pixelWidth, pixelHeight);
     clear();
   };
 
-  const createPathDrawState = (frameState) => ({
+  const createPathDrawState = (frameState: PathFrameState): PathDrawState => ({
     completionProgress: clampUnit(Number(frameState.frame.completionProgress) || 0),
     completionEnabled: frameState.frame.isCompletionSolved ? 1 : 0,
     completionFeather: Math.max(frameState.pathGeometry.width * 2.2, 14),
@@ -1757,13 +2191,23 @@ export function createPathWebglRenderer(canvas, options = {}) {
     tailExtension = 0,
     useFrameReverseSpan = false,
     options = null,
-  }) => {
+  }: {
+    mesh: PathMeshStorage;
+    shouldUpload: boolean;
+    meshTag: string;
+    frameState: PathFrameState;
+    drawState: PathDrawState;
+    tailExtension?: number;
+    useFrameReverseSpan?: boolean;
+    options?: DrawPathMeshOptions | null;
+  }): void => {
     if (mesh.indexCount <= 0 || mesh.vertexCount <= 0) return;
 
     const flowEnabledForMesh = options?.disableFlow ? 0 : frameState.flowEnabled;
     const flowMixForMesh = options?.disableFlow ? 0 : frameState.flowMix;
-    const flowOffsetForMesh = Number.isFinite(options?.flowOffsetOverride)
-      ? options.flowOffsetOverride
+    const flowOffsetOverride = options?.flowOffsetOverride;
+    const flowOffsetForMesh = Number.isFinite(flowOffsetOverride)
+      ? Number(flowOffsetOverride)
       : frameState.flowOffset;
     const reverseColorBlendForMesh = options?.disableReverse ? 1 : frameState.reverseColorBlend;
     const reverseFromFlowOffsetForMesh = options?.disableReverse ? 0 : frameState.reverseFromFlowOffset;
@@ -1826,7 +2270,16 @@ export function createPathWebglRenderer(canvas, options = {}) {
     gl.bindVertexArray(null);
   };
 
-  const drawPathMeshes = (frameState, drawState, geometryChanges) => {
+  const drawPathMeshes = (
+    frameState: PathFrameState,
+    drawState: PathDrawState,
+    geometryChanges: {
+      path: boolean;
+      retainedStartArc: boolean;
+      retainedEndArc: boolean;
+      bracket: boolean;
+    },
+  ): void => {
     if (frameState.hasRetainedStartArc) {
       drawPathMesh({
         mesh: reusableRetainedStartArcMesh,
@@ -1863,7 +2316,7 @@ export function createPathWebglRenderer(canvas, options = {}) {
     }
   };
 
-  const drawTutorialBrackets = (frameState, bracketGeometryChanged) => {
+  const drawTutorialBrackets = (frameState: PathFrameState, bracketGeometryChanged: boolean): void => {
     if (
       !frameState.hasTutorialBrackets
       || reusableBracketMesh.indexCount <= 0
@@ -1922,7 +2375,7 @@ export function createPathWebglRenderer(canvas, options = {}) {
     gl.bindVertexArray(null);
   };
 
-  const drawPathFrame = (frame = {}) => {
+  const drawPathFrame = (frame: PathFramePayload = EMPTY_PATH_FRAME_PAYLOAD): number => {
     if (isContextLost()) return 0;
 
     const frameState = createPathFrameState(frame);
@@ -1950,7 +2403,7 @@ export function createPathWebglRenderer(canvas, options = {}) {
     return reusableMesh.mainTravel;
   };
 
-  const destroy = (options = {}) => {
+  const destroy = (options: RuntimeData = {}): void => {
     const releaseContext = options.releaseContext !== false;
     gl.deleteBuffer(positionBuffer);
     gl.deleteBuffer(travelBuffer);

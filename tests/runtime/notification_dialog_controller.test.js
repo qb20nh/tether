@@ -22,8 +22,8 @@ const createHarness = (translateNow = (key) => key) => {
   const controller = createNotificationDialogController({
     elementIds: ELEMENT_IDS,
     translateNow,
-    windowObj,
-    documentObj,
+    windowObj: /** @type {any} */ (windowObj),
+    documentObj: /** @type {any} */ (documentObj),
   });
 
   return {

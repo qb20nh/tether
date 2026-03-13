@@ -38,11 +38,25 @@ const createSessionStorageMock = () => {
   };
 };
 
+/** @returns {any} */
 const createWindowMock = () => {
   let reloadCount = 0;
   return {
     setTimeout: globalThis.setTimeout.bind(globalThis),
     clearTimeout: globalThis.clearTimeout.bind(globalThis),
+    confirm: () => true,
+    clearInterval() { },
+    setInterval() {
+      return 1;
+    },
+    requestAnimationFrame(callback) {
+      callback(0);
+      return 1;
+    },
+    cancelAnimationFrame() { },
+    getComputedStyle() {
+      return {};
+    },
     sessionStorage: createSessionStorageMock(),
     location: {
       reload() {
@@ -50,17 +64,29 @@ const createWindowMock = () => {
       },
     },
     addEventListener() { },
+    removeEventListener() { },
     getReloadCount() {
       return reloadCount;
     },
   };
 };
 
+/** @returns {any} */
 const createDocumentMock = () => ({
   visibilityState: 'visible',
+  body: null,
+  activeElement: null,
   addEventListener() { },
+  removeEventListener() { },
+  getElementById() {
+    return null;
+  },
+  createElement() {
+    return {};
+  },
 });
 
+/** @returns {any} */
 const createNavigatorMock = () => ({
   onLine: true,
   serviceWorker: {
@@ -70,6 +96,7 @@ const createNavigatorMock = () => ({
   },
 });
 
+/** @param {any} [overrides] */
 const createMessengerStub = (overrides = {}) => {
   let registration = overrides.registration || null;
   const postedMessages = [];
@@ -99,6 +126,7 @@ const createMessengerStub = (overrides = {}) => {
   };
 };
 
+/** @param {{ ok?: boolean, json?: unknown, text?: string }} [options] */
 const createResponse = ({ ok = true, json = null, text = '' } = {}) => ({
   ok,
   async json() {
@@ -109,6 +137,7 @@ const createResponse = ({ ok = true, json = null, text = '' } = {}) => ({
   },
 });
 
+/** @param {any} [options] */
 const createOrchestrator = ({
   messenger,
   navigatorObj = createNavigatorMock(),
@@ -120,7 +149,7 @@ const createOrchestrator = ({
   setUpdateProgressOverlayActive = () => { },
   showInAppToast = () => { },
   readNotificationEnabledPreference = () => false,
-  notificationPermission = 'default',
+  notificationPermission = /** @type {import('../../src/contracts/ports.ts').NotificationPermissionState} */ ('default'),
   now = () => Date.now(),
   updateApplyReloadFallbackMs = 25,
 } = {}) => createSwUpdateOrchestrator({
@@ -248,7 +277,7 @@ test('applyUpdateForBuild waits for a worker discovered through updatefound', as
       waitingWorkerMessages.push(message);
     },
   };
-  const registration = {
+  const registration = /** @type {any} */ ({
     waiting: null,
     installing: null,
     active: null,
@@ -267,7 +296,7 @@ test('applyUpdateForBuild waits for a worker discovered through updatefound', as
         updateFoundListener = null;
       }
     },
-  };
+  });
   const messengerHarness = createMessengerStub({ registration });
   const orchestrator = createOrchestrator({
     messenger: messengerHarness.messenger,

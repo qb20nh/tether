@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { mountLocalDebugPanel } from '../../src/debug/local_debug_panel.ts';
 
+const globalObject = /** @type {any} */ (globalThis);
+
 class FakeClassList {
   constructor(owner) {
     this.owner = owner;
@@ -32,7 +34,7 @@ class FakeClassList {
 class FakeElement {
   constructor(tagName, ownerDocument = null) {
     this.tagName = String(tagName).toUpperCase();
-    this.ownerDocument = ownerDocument;
+    this.ownerDocument = /** @type {any} */ (ownerDocument);
     this.parentNode = null;
     this.children = [];
     this.listeners = new Map();
@@ -102,12 +104,12 @@ class FakeElement {
     const originalPreventDefault = typeof event.preventDefault === 'function'
       ? event.preventDefault.bind(event)
       : null;
-    const payload = {
+    const payload = /** @type {any} */ ({
       ...event,
       currentTarget: this,
       target: event.target || this,
       defaultPrevented: false,
-    };
+    });
     payload.preventDefault = () => {
       payload.defaultPrevented = true;
       originalPreventDefault?.();
@@ -158,7 +160,7 @@ const createDocumentHarness = (animations = []) => {
     body,
     activeElement: body,
     createElement(tagName) {
-      return new FakeElement(tagName, documentObj);
+      return new FakeElement(tagName, /** @type {any} */ (documentObj));
     },
     getElementById(id) {
       return findById(head, id) || findById(body, id);
@@ -194,23 +196,23 @@ test('local debug panel mounts with tabs and animation controls', () => {
   const documentObj = createDocumentHarness([animation]);
   const rafCallbacks = [];
   const canceledRafIds = [];
-  const originalWindow = globalThis.window;
-  const originalDocument = globalThis.document;
-  const originalRaf = globalThis.requestAnimationFrame;
-  const originalCancelRaf = globalThis.cancelAnimationFrame;
+  const originalWindow = globalObject.window;
+  const originalDocument = globalObject.document;
+  const originalRaf = globalObject.requestAnimationFrame;
+  const originalCancelRaf = globalObject.cancelAnimationFrame;
 
-  globalThis.window = {
+  globalObject.window = /** @type {any} */ ({
     matchMedia: () => ({ matches: false, media: '(prefers-reduced-motion: reduce)' }),
     location: {
       reload() { },
     },
-  };
-  globalThis.document = documentObj;
-  globalThis.requestAnimationFrame = (callback) => {
+  });
+  globalObject.document = /** @type {any} */ (documentObj);
+  globalObject.requestAnimationFrame = (callback) => {
     rafCallbacks.push(callback);
     return rafCallbacks.length;
   };
-  globalThis.cancelAnimationFrame = (id) => {
+  globalObject.cancelAnimationFrame = (id) => {
     canceledRafIds.push(id);
   };
 
@@ -253,18 +255,18 @@ test('local debug panel mounts with tabs and animation controls', () => {
     const slowerButton = findButtonByText(animationPanel, 'Speed: 0.25x (4x slower)');
     const normalSpeedButton = findButtonByText(animationPanel, 'Speed: 1x');
     slowerButton.click();
-    assert.equal(globalThis.window.TETHER_DEBUG_ANIM_SPEED, 4);
+    assert.equal(globalObject.window.TETHER_DEBUG_ANIM_SPEED, 4);
     assert.equal(animation.playbackRate, 0.25);
     assert.equal(rafCallbacks.length, 1);
 
     normalSpeedButton.click();
-    assert.equal(globalThis.window.TETHER_DEBUG_ANIM_SPEED, 1);
+    assert.equal(globalObject.window.TETHER_DEBUG_ANIM_SPEED, 1);
     assert.equal(animation.playbackRate, 1);
     assert.deepEqual(canceledRafIds, [1]);
   } finally {
-    globalThis.window = originalWindow;
-    globalThis.document = originalDocument;
-    globalThis.requestAnimationFrame = originalRaf;
-    globalThis.cancelAnimationFrame = originalCancelRaf;
+    globalObject.window = originalWindow;
+    globalObject.document = originalDocument;
+    globalObject.requestAnimationFrame = originalRaf;
+    globalObject.cancelAnimationFrame = originalCancelRaf;
   }
 });

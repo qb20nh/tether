@@ -23,17 +23,20 @@ const createFakeStorage = () => {
   };
 };
 
+const createFakeWindow = (storage) => ({
+  localStorage: storage,
+  matchMedia: () => ({ matches: false }),
+  crypto: {
+    getRandomValues(bytes) {
+      for (let i = 0; i < bytes.length; i++) bytes[i] = i + 1;
+      return bytes;
+    },
+  },
+});
+
 test('localStorage persistence round-trips and validates session signature', () => {
   const storage = createFakeStorage();
-  const fakeWindow = {
-    localStorage: storage,
-    matchMedia: () => ({ matches: false }),
-    crypto: {
-      getRandomValues(bytes) {
-        for (let i = 0; i < bytes.length; i++) bytes[i] = i + 1;
-      },
-    },
-  };
+  const fakeWindow = createFakeWindow(storage);
 
   const persistence = createLocalStoragePersistence({
     windowObj: fakeWindow,
@@ -97,6 +100,7 @@ test('localStorage persistence round-trips and validates session signature', () 
       '2026-02-27': ['sig-x'],
     },
   });
+  assert.ok(boot.sessionBoard);
   assert.deepEqual(boot.sessionBoard.path, [[0, 0], [0, 1], [1, 1]]);
 
   const raw = storage.getItem(STORAGE_KEYS.SESSION_SAVE_KEY);
@@ -111,15 +115,7 @@ test('localStorage persistence round-trips and validates session signature', () 
 
 test('low power mode falls back to disabled when stored value is invalid', () => {
   const storage = createFakeStorage();
-  const fakeWindow = {
-    localStorage: storage,
-    matchMedia: () => ({ matches: false }),
-    crypto: {
-      getRandomValues(bytes) {
-        for (let i = 0; i < bytes.length; i++) bytes[i] = i + 1;
-      },
-    },
-  };
+  const fakeWindow = createFakeWindow(storage);
 
   storage.setItem(STORAGE_KEYS.LOW_POWER_MODE_KEY, 'maybe');
 
@@ -136,15 +132,7 @@ test('low power mode falls back to disabled when stored value is invalid', () =>
 
 test('keyboard / gamepad controls fall back to disabled when stored value is invalid', () => {
   const storage = createFakeStorage();
-  const fakeWindow = {
-    localStorage: storage,
-    matchMedia: () => ({ matches: false }),
-    crypto: {
-      getRandomValues(bytes) {
-        for (let i = 0; i < bytes.length; i++) bytes[i] = i + 1;
-      },
-    },
-  };
+  const fakeWindow = createFakeWindow(storage);
 
   storage.setItem(STORAGE_KEYS.KEYBOARD_GAMEPAD_CONTROLS_KEY, 'maybe');
 
@@ -160,15 +148,7 @@ test('keyboard / gamepad controls fall back to disabled when stored value is inv
 
 test('score state falls back to defaults when payload is malformed', () => {
   const storage = createFakeStorage();
-  const fakeWindow = {
-    localStorage: storage,
-    matchMedia: () => ({ matches: false }),
-    crypto: {
-      getRandomValues(bytes) {
-        for (let i = 0; i < bytes.length; i++) bytes[i] = i + 1;
-      },
-    },
-  };
+  const fakeWindow = createFakeWindow(storage);
 
   storage.setItem(STORAGE_KEYS.SCORE_STATE_KEY, JSON.stringify({
     version: 999,
@@ -195,15 +175,7 @@ test('score state falls back to defaults when payload is malformed', () => {
 
 test('campaign progress accepts legacy payloads without version', () => {
   const storage = createFakeStorage();
-  const fakeWindow = {
-    localStorage: storage,
-    matchMedia: () => ({ matches: false }),
-    crypto: {
-      getRandomValues(bytes) {
-        for (let i = 0; i < bytes.length; i++) bytes[i] = i + 1;
-      },
-    },
-  };
+  const fakeWindow = createFakeWindow(storage);
 
   storage.setItem(STORAGE_KEYS.LEVEL_PROGRESS_KEY, JSON.stringify({
     latestLevel: 7,
@@ -221,15 +193,7 @@ test('campaign progress accepts legacy payloads without version', () => {
 
 test('campaign progress resets to default on version mismatch', () => {
   const storage = createFakeStorage();
-  const fakeWindow = {
-    localStorage: storage,
-    matchMedia: () => ({ matches: false }),
-    crypto: {
-      getRandomValues(bytes) {
-        for (let i = 0; i < bytes.length; i++) bytes[i] = i + 1;
-      },
-    },
-  };
+  const fakeWindow = createFakeWindow(storage);
 
   storage.setItem(STORAGE_KEYS.LEVEL_PROGRESS_KEY, JSON.stringify({
     version: 999,
@@ -248,15 +212,7 @@ test('campaign progress resets to default on version mismatch', () => {
 
 test('infinite progress resets to default on version mismatch', () => {
   const storage = createFakeStorage();
-  const fakeWindow = {
-    localStorage: storage,
-    matchMedia: () => ({ matches: false }),
-    crypto: {
-      getRandomValues(bytes) {
-        for (let i = 0; i < bytes.length; i++) bytes[i] = i + 1;
-      },
-    },
-  };
+  const fakeWindow = createFakeWindow(storage);
 
   storage.setItem(STORAGE_KEYS.INFINITE_PROGRESS_KEY, JSON.stringify({
     version: 999,
@@ -275,15 +231,7 @@ test('infinite progress resets to default on version mismatch', () => {
 
 test('daily session save is rejected when saved dailyId does not match active daily', () => {
   const storage = createFakeStorage();
-  const fakeWindow = {
-    localStorage: storage,
-    matchMedia: () => ({ matches: false }),
-    crypto: {
-      getRandomValues(bytes) {
-        for (let i = 0; i < bytes.length; i++) bytes[i] = i + 1;
-      },
-    },
-  };
+  const fakeWindow = createFakeWindow(storage);
 
   const dailyAbsIndex = 30;
 
@@ -316,15 +264,7 @@ test('daily session save is rejected when saved dailyId does not match active da
 
 test('infinite session save restores even before campaign completion', () => {
   const storage = createFakeStorage();
-  const fakeWindow = {
-    localStorage: storage,
-    matchMedia: () => ({ matches: false }),
-    crypto: {
-      getRandomValues(bytes) {
-        for (let i = 0; i < bytes.length; i++) bytes[i] = i + 1;
-      },
-    },
-  };
+  const fakeWindow = createFakeWindow(storage);
 
   const campaignLevelCount = 10;
   const persistence = createLocalStoragePersistence({
@@ -352,15 +292,7 @@ test('infinite session save restores even before campaign completion', () => {
 
 test('session save round-trips with empty path to preserve current level', () => {
   const storage = createFakeStorage();
-  const fakeWindow = {
-    localStorage: storage,
-    matchMedia: () => ({ matches: false }),
-    crypto: {
-      getRandomValues(bytes) {
-        for (let i = 0; i < bytes.length; i++) bytes[i] = i + 1;
-      },
-    },
-  };
+  const fakeWindow = createFakeWindow(storage);
 
   const persistence = createLocalStoragePersistence({
     windowObj: fakeWindow,
@@ -386,15 +318,7 @@ test('session save round-trips with empty path to preserve current level', () =>
 
 test('session save canonicalizes zero-segment path while preserving opened level', () => {
   const storage = createFakeStorage();
-  const fakeWindow = {
-    localStorage: storage,
-    matchMedia: () => ({ matches: false }),
-    crypto: {
-      getRandomValues(bytes) {
-        for (let i = 0; i < bytes.length; i++) bytes[i] = i + 1;
-      },
-    },
-  };
+  const fakeWindow = createFakeWindow(storage);
 
   const persistence = createLocalStoragePersistence({
     windowObj: fakeWindow,

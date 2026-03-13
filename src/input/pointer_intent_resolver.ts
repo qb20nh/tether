@@ -1,4 +1,8 @@
-// @ts-nocheck
+import type {
+  GameSnapshot,
+  GridPoint,
+} from '../contracts/ports.ts';
+
 const STITCH_BRIDGE_MIN_HALF_LEN_PX = 2;
 const STITCH_BRIDGE_HALF_LEN_CELL_RATIO = 0.18;
 const STITCH_BRIDGE_MIN_RADIUS_PX = 1;
@@ -6,7 +10,7 @@ const STITCH_BRIDGE_MIN_WIDTH_PX = 1;
 const STITCH_BRIDGE_WIDTH_CELL_RATIO = 0.06;
 const DEFAULT_CELL_SIZE_PX = 56;
 const EPSILON = 1e-6;
-const NEIGHBOR_OFFSETS = [
+const NEIGHBOR_OFFSETS: readonly [number, number][] = [
   [-1, -1],
   [-1, 0],
   [-1, 1],
@@ -17,16 +21,123 @@ const NEIGHBOR_OFFSETS = [
   [1, 1],
 ];
 
-const sameCell = (a, b) =>
+interface PointerPoint {
+  x: number;
+  y: number;
+}
+
+interface PathDragCandidate extends GridPoint {
+  isBacktrack: boolean;
+}
+
+interface SlipperyPathDragCandidate extends PathDragCandidate {
+  center: PointerPoint;
+  distance: number;
+  dr: number;
+  dc: number;
+  isDiagonal: boolean;
+  isPointerCell: boolean;
+}
+
+interface StitchBridgeSegment {
+  startX: number;
+  startY: number;
+  endX: number;
+  endY: number;
+}
+
+interface StitchBridgeDecision {
+  shouldHold: boolean;
+  step: GridPoint | null;
+}
+
+type PointerInteractionSnapshot = Pick<GameSnapshot, 'rows' | 'cols' | 'gridData' | 'visited'> & {
+  stitchSet?: GameSnapshot['stitchSet'];
+};
+
+type CellPredicate = (snapshot: PointerInteractionSnapshot, r: number, c: number) => boolean;
+type AdjacentMovePredicate = (
+  snapshot: PointerInteractionSnapshot,
+  from: GridPoint,
+  to: GridPoint,
+) => boolean;
+type CellCenterResolver = (r: number, c: number) => PointerPoint;
+type VisitedCellPredicate = (r: number, c: number) => boolean;
+
+interface BuildReachableCandidateArgs {
+  snapshot: PointerInteractionSnapshot;
+  headNode: GridPoint;
+  backtrackNode?: GridPoint | null;
+  isUsableCell: CellPredicate;
+  isAdjacentMove: AdjacentMovePredicate;
+  isVisitedCell: VisitedCellPredicate;
+  r: number;
+  c: number;
+}
+
+interface BuildSlipperyCandidateArgs extends BuildReachableCandidateArgs {
+  pointer: PointerPoint;
+  pointerCell?: GridPoint | null;
+  cellCenter: CellCenterResolver;
+  dr: number;
+  dc: number;
+}
+
+interface ResolveStitchBridgeMetrics {
+  halfLen: number;
+  symbolRadius: number;
+}
+
+interface ResolveStitchBridgeDecisionArgs {
+  snapshot: PointerInteractionSnapshot;
+  headNode: GridPoint;
+  headCenter: PointerPoint;
+  candidate: SlipperyPathDragCandidate;
+  bridgePointer: PointerPoint;
+  halfLen: number;
+  symbolRadius: number;
+}
+
+interface BuildPathDragCandidatesArgs {
+  snapshot?: PointerInteractionSnapshot | null;
+  headNode?: GridPoint | null;
+  backtrackNode?: GridPoint | null;
+  isUsableCell: CellPredicate;
+  isAdjacentMove: AdjacentMovePredicate;
+}
+
+interface ChoosePathDragCellArgs {
+  headNode?: GridPoint | null;
+  candidates?: readonly PathDragCandidate[] | null;
+  pointer: PointerPoint;
+  holdCell?: GridPoint | null;
+  cellCenter: CellCenterResolver;
+  size: number;
+}
+
+interface ChooseSlipperyPathDragStepArgs {
+  snapshot?: PointerInteractionSnapshot | null;
+  headNode?: GridPoint | null;
+  backtrackNode?: GridPoint | null;
+  pointer?: PointerPoint | null;
+  rawPointer?: PointerPoint | null;
+  pointerCell?: GridPoint | null;
+  isUsableCell: CellPredicate;
+  isAdjacentMove: AdjacentMovePredicate;
+  cellCenter: CellCenterResolver;
+  cellSize?: number | null;
+}
+
+const sameCell = (a?: GridPoint | null, b?: GridPoint | null): boolean =>
   Boolean(a && b && a.r === b.r && a.c === b.c);
 
-const isInBounds = (snapshot, r, c) =>
+const isInBounds = (snapshot: PointerInteractionSnapshot, r: number, c: number): boolean =>
   r >= 0 && r < snapshot.rows && c >= 0 && c < snapshot.cols;
 
-const isBacktrackCell = (backtrackNode, r, c) =>
-  Boolean(backtrackNode) && r === backtrackNode.r && c === backtrackNode.c;
+const isBacktrackCell = (backtrackNode: GridPoint | null | undefined, r: number, c: number): boolean =>
+  Boolean(backtrackNode && r === backtrackNode.r && c === backtrackNode.c);
 
-const resolveCellSize = (cellSize) => {
+const resolveCellSize = (cellSize: unknown): number => {
   const value = Number(cellSize);
   if (Number.isFinite(value) && value > 0) return value;
   return DEFAULT_CELL_SIZE_PX;
@@ -41,7 +152,7 @@ const buildReachableCandidate = ({
   isVisitedCell,
   r,
   c,
-}) => {
+}: BuildReachableCandidateArgs): PathDragCandidate | null => {
   const candidate = { r, c };
   if (!isAdjacentMove(snapshot, headNode, candidate)) return null;
   if (!isUsableCell(snapshot, r, c)) return null;
@@ -65,7 +176,7 @@ const buildSlipperyCandidate = ({
   c,
   dr,
   dc,
-}) => {
+}: BuildSlipperyCandidateArgs): SlipperyPathDragCandidate | null => {
   const candidate = buildReachableCandidate({
     snapshot,
     headNode,
@@ -90,7 +201,7 @@ const buildSlipperyCandidate = ({
   };
 };
 
-const resolveStitchBridgeMetrics = (cellSize) => {
+const resolveStitchBridgeMetrics = (cellSize: unknown): ResolveStitchBridgeMetrics => {
   const resolvedCellSize = resolveCellSize(cellSize);
   const halfLen = Math.max(
     STITCH_BRIDGE_MIN_HALF_LEN_PX,
@@ -109,30 +220,37 @@ const resolveStitchBridgeMetrics = (cellSize) => {
   };
 };
 
-const resolveBridgePointer = (rawPointer, pointer) => (
-  Number.isFinite(rawPointer?.x) && Number.isFinite(rawPointer?.y)
-    ? rawPointer
-    : pointer
-);
+const resolveBridgePointer = (
+  rawPointer: PointerPoint | null | undefined,
+  pointer: PointerPoint,
+): PointerPoint => {
+  if (Number.isFinite(rawPointer?.x) && Number.isFinite(rawPointer?.y) && rawPointer) {
+    return rawPointer;
+  }
+  return pointer;
+};
 
-const stitchKeyFor = (a, b) =>
+const stitchKeyFor = (a: GridPoint, b: GridPoint): string =>
   `${Math.max(a.r, b.r)},${Math.max(a.c, b.c)}`;
 
-const hasStitchedDiagonal = (snapshot, headNode, candidate) =>
-  Boolean(
-    candidate.isDiagonal
-      && snapshot?.stitchSet?.size > 0
-      && snapshot.stitchSet.has(stitchKeyFor(headNode, candidate)),
-  );
+const hasStitchedDiagonal = (
+  snapshot: PointerInteractionSnapshot,
+  headNode: GridPoint,
+  candidate: SlipperyPathDragCandidate,
+): boolean => Boolean(
+  candidate.isDiagonal
+    && snapshot.stitchSet?.size
+    && snapshot.stitchSet.has(stitchKeyFor(headNode, candidate)),
+);
 
-const buildBridgeSegment = (center, halfLen, usesDiagA) => ({
+const buildBridgeSegment = (center: PointerPoint, halfLen: number, usesDiagA: boolean): StitchBridgeSegment => ({
   startX: usesDiagA ? (center.x + halfLen) : (center.x - halfLen),
   startY: center.y - halfLen,
   endX: usesDiagA ? (center.x - halfLen) : (center.x + halfLen),
   endY: center.y + halfLen,
 });
 
-const pointSideOfBridge = (point, segment) => (
+const pointSideOfBridge = (point: PointerPoint, segment: StitchBridgeSegment): number => (
   (point.x - segment.startX) * (segment.endY - segment.startY)
   - (point.y - segment.startY) * (segment.endX - segment.startX)
 );
@@ -145,7 +263,7 @@ const resolveStitchBridgeDecision = ({
   bridgePointer,
   halfLen,
   symbolRadius,
-}) => {
+}: ResolveStitchBridgeDecisionArgs): StitchBridgeDecision | null => {
   if (!hasStitchedDiagonal(snapshot, headNode, candidate)) return null;
 
   const bridgeCenter = {
@@ -167,7 +285,10 @@ const resolveStitchBridgeDecision = ({
   return { shouldHold: true, step: null };
 };
 
-const shouldPreferCandidate = (candidate, bestCandidate) => {
+const shouldPreferCandidate = (
+  candidate: SlipperyPathDragCandidate,
+  bestCandidate: SlipperyPathDragCandidate | null,
+): boolean => {
   if (!bestCandidate) return true;
   if (candidate.distance < bestCandidate.distance - EPSILON) return true;
 
@@ -175,7 +296,11 @@ const shouldPreferCandidate = (candidate, bestCandidate) => {
   return equalDistance && candidate.isPointerCell && !bestCandidate.isPointerCell;
 };
 
-const shouldAdvanceFromHold = (bestCandidate, holdDistance, holdIsPointerCell) => {
+const shouldAdvanceFromHold = (
+  bestCandidate: SlipperyPathDragCandidate | null,
+  holdDistance: number,
+  holdIsPointerCell: boolean,
+): boolean => {
   if (!bestCandidate) return false;
   if (bestCandidate.distance < holdDistance - EPSILON) return true;
 
@@ -189,10 +314,10 @@ export function buildPathDragCandidates({
   backtrackNode,
   isUsableCell,
   isAdjacentMove,
-}) {
+}: BuildPathDragCandidatesArgs): PathDragCandidate[] {
   if (!snapshot || !headNode) return [];
 
-  const candidates = [];
+  const candidates: PathDragCandidate[] = [];
   for (const [dr, dc] of NEIGHBOR_OFFSETS) {
     const nr = headNode.r + dr;
     const nc = headNode.c + dc;
@@ -221,15 +346,15 @@ export function choosePathDragCell({
   holdCell,
   cellCenter,
   size,
-}) {
+}: ChoosePathDragCellArgs): GridPoint | null {
   if (!headNode || !holdCell || !Array.isArray(candidates) || candidates.length === 0) {
-    return holdCell;
+    return holdCell || null;
   }
 
   const holdCenter = cellCenter(holdCell.r, holdCell.c);
   const holdDist = Math.hypot(pointer.x - holdCenter.x, pointer.y - holdCenter.y);
 
-  let bestMoveCell = null;
+  let bestMoveCell: PathDragCandidate | null = null;
   let bestMoveDist = Infinity;
 
   for (const cand of candidates) {
@@ -264,8 +389,8 @@ export function chooseSlipperyPathDragStep({
   isAdjacentMove,
   cellCenter,
   cellSize,
-}) {
-  if (!snapshot || !headNode || !pointer || typeof cellCenter !== 'function') return null;
+}: ChooseSlipperyPathDragStepArgs): GridPoint | null {
+  if (!snapshot || !headNode || !pointer) return null;
 
   const headCenter = cellCenter(headNode.r, headNode.c);
   const holdDistance = Math.hypot(pointer.x - headCenter.x, pointer.y - headCenter.y);
@@ -273,7 +398,7 @@ export function chooseSlipperyPathDragStep({
   const { halfLen, symbolRadius } = resolveStitchBridgeMetrics(cellSize);
   const bridgePointer = resolveBridgePointer(rawPointer, pointer);
   let shouldHold = false;
-  let bestCandidate = null;
+  let bestCandidate: SlipperyPathDragCandidate | null = null;
 
   for (const [dr, dc] of NEIGHBOR_OFFSETS) {
     const nr = headNode.r + dr;
@@ -288,7 +413,7 @@ export function chooseSlipperyPathDragStep({
       pointerCell,
       isUsableCell,
       isAdjacentMove,
-      isVisitedCell: (r, c) => Boolean(snapshot.visited?.has?.(`${r},${c}`)),
+      isVisitedCell: (r, c) => snapshot.visited.has(`${r},${c}`),
       cellCenter,
       r: nr,
       c: nc,
@@ -319,5 +444,6 @@ export function chooseSlipperyPathDragStep({
   if (shouldHold || !shouldAdvanceFromHold(bestCandidate, holdDistance, holdIsPointerCell)) {
     return null;
   }
+  if (!bestCandidate) return null;
   return { r: bestCandidate.r, c: bestCandidate.c };
 }

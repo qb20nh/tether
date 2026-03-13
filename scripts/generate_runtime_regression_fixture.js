@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { buildRuntimeRegressionCorpus } from '../tests/runtime/refactor_regression_corpus.js';
+import { buildRuntimeRegressionCorpus } from '../tests/runtime/refactor_regression_corpus.ts';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const outPath = path.resolve(__dirname, '..', 'tests', 'runtime', 'fixtures', 'refactor_regression.fixture.json');

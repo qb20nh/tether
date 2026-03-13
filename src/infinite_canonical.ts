@@ -1,10 +1,15 @@
-// @ts-nocheck
+import type {
+  GridTuple,
+  LevelDefinition,
+} from './contracts/ports.ts';
+
 const HINT_CODES = new Set(['t', 'r', 'l', 's', 'h', 'v']);
 const RPS_ROTATE = Object.freeze({
   g: 'b',
   b: 'p',
   p: 'g',
 });
+type RpsCode = keyof typeof RPS_ROTATE;
 
 const TRANSFORMS = Object.freeze([
   { swapAxes: false, mirrorsOrientation: false },
@@ -23,14 +28,14 @@ const FNV_PRIME_64 = 0x100000001b3n;
 const FINGERPRINT_SEED_A = 0x6a09e667f3bcc909n;
 const FINGERPRINT_SEED_B = 0xbb67ae8584caa73bn;
 
-const transformedDimensions = (rows, cols, transformIndex) => {
+const transformedDimensions = (rows: number, cols: number, transformIndex: number): { rows: number; cols: number } => {
   const transform = TRANSFORMS[transformIndex];
   if (!transform) throw new Error(`Unknown transform index: ${transformIndex}`);
   if (transform.swapAxes) return { rows: cols, cols: rows };
   return { rows, cols };
 };
 
-const mapCellCoord = (r, c, rows, cols, transformIndex) => {
+const mapCellCoord = (r: number, c: number, rows: number, cols: number, transformIndex: number): { r: number; c: number } => {
   switch (transformIndex) {
     case 0:
       return { r, c };
@@ -53,7 +58,7 @@ const mapCellCoord = (r, c, rows, cols, transformIndex) => {
   }
 };
 
-const mapPointCoord = (pr, pc, rows, cols, transformIndex) => {
+const mapPointCoord = (pr: number, pc: number, rows: number, cols: number, transformIndex: number): { r: number; c: number } => {
   switch (transformIndex) {
     case 0:
       return { r: pr, c: pc };
@@ -76,7 +81,7 @@ const mapPointCoord = (pr, pc, rows, cols, transformIndex) => {
   }
 };
 
-const mapHintCodeForTransform = (ch, transformIndex) => {
+const mapHintCodeForTransform = (ch: string, transformIndex: number): string => {
   const transform = TRANSFORMS[transformIndex];
   if (!transform) return ch;
 
@@ -94,32 +99,37 @@ const mapHintCodeForTransform = (ch, transformIndex) => {
   return out;
 };
 
-const sortPairs = (pairs) =>
+const sortPairs = (pairs: readonly GridTuple[]): GridTuple[] =>
   pairs
     .slice()
     .sort((a, b) => (a[0] - b[0]) || (a[1] - b[1]));
 
-const sortCornerCounts = (entries) =>
+const sortCornerCounts = (entries: readonly [number, number, number][]): [number, number, number][] =>
   entries
     .slice()
     .sort((a, b) => (a[0] - b[0]) || (a[1] - b[1]) || (a[2] - b[2]));
 
-const applyRpsShift = (ch, shift) => {
+const applyRpsShift = (ch: string, shift: number): string => {
   let out = ch;
   for (let i = 0; i < shift; i++) {
-    if (!RPS_ROTATE[out]) break;
+    if (!isRpsCode(out)) break;
     out = RPS_ROTATE[out];
   }
   return out;
 };
 
-const serializeShape = (gridRows, stitches, cornerCounts, movableCount) => {
+const serializeShape = (
+  gridRows: readonly string[],
+  stitches: readonly GridTuple[],
+  cornerCounts: readonly [number, number, number][],
+  movableCount: number,
+): string => {
   const stitchesKey = stitches.map(([vr, vc]) => `${vr},${vc}`).join(';');
   const cornersKey = cornerCounts.map(([vr, vc, count]) => `${vr},${vc},${count}`).join(';');
   return `${gridRows.join('/')}|s:${stitchesKey}|c:${cornersKey}|m:${movableCount}`;
 };
 
-const shapeSignatureWithTransform = (level, transformIndex, rpsShift) => {
+const shapeSignatureWithTransform = (level: LevelDefinition, transformIndex: number, rpsShift: number): string => {
   const rows = level.grid.length;
   const cols = rows > 0 ? level.grid[0].length : 0;
   const dims = transformedDimensions(rows, cols, transformIndex);
@@ -142,13 +152,13 @@ const shapeSignatureWithTransform = (level, transformIndex, rpsShift) => {
   }
 
   const stitches = sortPairs(
-    (level.stitches || []).map(([vr, vc]) => {
+    (level.stitches || []).map(([vr, vc]): GridTuple => {
       const mapped = mapPointCoord(vr, vc, rows, cols, transformIndex);
       return [mapped.r, mapped.c];
     }),
   );
   const cornerCounts = sortCornerCounts(
-    (level.cornerCounts || []).map(([vr, vc, count]) => {
+    (level.cornerCounts || []).map(([vr, vc, count]): [number, number, number] => {
       const mapped = mapPointCoord(vr, vc, rows, cols, transformIndex);
       return [mapped.r, mapped.c, count];
     }),
@@ -162,7 +172,7 @@ const shapeSignatureWithTransform = (level, transformIndex, rpsShift) => {
   );
 };
 
-export const canonicalConstraintSignature = (level) => {
+export const canonicalConstraintSignature = (level: LevelDefinition): string => {
   const rows = level.grid || [];
   let hasRps = false;
   for (let r = 0; r < rows.length && !hasRps; r++) {
@@ -175,7 +185,7 @@ export const canonicalConstraintSignature = (level) => {
     }
   }
 
-  let best = null;
+  let best: string | null = null;
   const shiftLimit = hasRps ? 3 : 1;
   for (let transformIndex = 0; transformIndex < TRANSFORMS.length; transformIndex++) {
     for (let shift = 0; shift < shiftLimit; shift++) {
@@ -186,10 +196,11 @@ export const canonicalConstraintSignature = (level) => {
   return best || '';
 };
 
-const fnv1a64 = (input, seed) => {
+const fnv1a64 = (input: string, seed: bigint): bigint => {
   let hash = (FNV_OFFSET_BASIS_64 ^ (seed & MASK_64)) & MASK_64;
   for (let i = 0; i < input.length; i++) {
     const code = input.codePointAt(i);
+    if (code == null) continue;
     hash ^= BigInt(code & 0xff);
     hash = (hash * FNV_PRIME_64) & MASK_64;
     hash ^= BigInt((code >>> 8) & 0xff);
@@ -198,9 +209,9 @@ const fnv1a64 = (input, seed) => {
   return hash & MASK_64;
 };
 
-const toHex64 = (value) => value.toString(16).padStart(16, '0');
+const toHex64 = (value: bigint): string => value.toString(16).padStart(16, '0');
 
-export const canonicalConstraintFingerprint = (level) => {
+export const canonicalConstraintFingerprint = (level: LevelDefinition) => {
   const signature = canonicalConstraintSignature(level);
   const laneA = fnv1a64(signature, FINGERPRINT_SEED_A);
   const laneB = fnv1a64(signature, FINGERPRINT_SEED_B);
@@ -214,6 +225,8 @@ export const canonicalConstraintFingerprint = (level) => {
   };
 };
 
-export const canonicalConstraintKey = (level) => canonicalConstraintFingerprint(level).key;
+export const canonicalConstraintKey = (level: LevelDefinition): string =>
+  canonicalConstraintFingerprint(level).key;
 
-export const isHintCode = (ch) => HINT_CODES.has(ch);
+export const isHintCode = (ch: string): boolean => HINT_CODES.has(ch);
+const isRpsCode = (ch: string): ch is RpsCode => ch === 'g' || ch === 'b' || ch === 'p';

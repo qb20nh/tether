@@ -54,6 +54,7 @@ test('headless runtime executes commands and updates progress', () => {
   runtime.dispatch('path/start-or-step', { r: 1, c: 0 });
   const out = runtime.dispatch('path/finalize-after-pointer', {});
 
+  assert.ok(out.completion);
   assert.equal(out.completion.kind, 'good');
   assert.equal(runtime.getProgress().campaignProgress, 1);
 });
@@ -94,6 +95,7 @@ test('headless runtime clears daily level without touching campaign or infinite 
 
   assert.equal(out.completion, null);
   const final = runtime.dispatch('path/finalize-after-pointer', {});
+  assert.ok(final.completion);
   assert.equal(final.completion.kind, 'good');
   assert.deepEqual(runtime.getProgress(), {
     campaignProgress: 0,
@@ -131,19 +133,24 @@ test('headless runtime scores unique infinite solutions and ignores equivalent d
   ];
 
   const first = playPath(runtime, pathA);
+  assert.ok(first.completion);
   assert.equal(first.completion.kind, 'good');
-  assert.equal(persistence.readBootState().scoreState.infiniteTotal, 1);
+  const firstScoreState = /** @type {any} */ (persistence.readBootState().scoreState);
+  assert.equal(firstScoreState.infiniteTotal, 1);
 
   runtime.dispatch('path/reset', {});
   const duplicate = playPath(runtime, [...pathA].reverse());
+  assert.ok(duplicate.completion);
   assert.equal(duplicate.completion.kind, 'good');
-  assert.equal(persistence.readBootState().scoreState.infiniteTotal, 1);
+  const duplicateScoreState = /** @type {any} */ (persistence.readBootState().scoreState);
+  assert.equal(duplicateScoreState.infiniteTotal, 1);
 
   runtime.dispatch('path/reset', {});
   const secondUnique = playPath(runtime, pathB);
+  assert.ok(secondUnique.completion);
   assert.equal(secondUnique.completion.kind, 'good');
 
-  const scoreState = persistence.readBootState().scoreState;
+  const scoreState = /** @type {any} */ (persistence.readBootState().scoreState);
   assert.equal(scoreState.infiniteTotal, 3);
   assert.equal(scoreState.dailyTotal, 0);
   assert.equal(Array.isArray(scoreState.infiniteByLevel['0']), true);

@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { runCommand, waitForServer } from './lib/process_utils.js';
+import { runCommand, waitForServer } from './lib/process_utils.ts';
 
 const HOST = process.env.E2E_HOST || '127.0.0.1';
 const PORT = Number.parseInt(process.env.E2E_PORT || '4173', 10);
@@ -52,6 +52,7 @@ const runE2e = async () => {
 try {
   await runE2e();
 } catch (error) {
-  process.stderr.write(`${error?.stack || error}\n`);
+  const errorMessage = error instanceof Error ? (error.stack || error.message) : String(error);
+  process.stderr.write(`${errorMessage}\n`);
   process.exitCode = 1;
 }

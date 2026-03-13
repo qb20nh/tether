@@ -1,14 +1,14 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-const readRequiredFile = (filePath) => {
+const readRequiredFile = (filePath: string): string => {
   if (!fs.existsSync(filePath)) {
     throw new Error(`Missing required build artifact: ${filePath}`);
   }
   return fs.readFileSync(filePath, 'utf8');
 };
 
-const ensureRelativePath = (value, label) => {
+const ensureRelativePath = (value: unknown, label: string): void => {
   if (typeof value !== 'string' || value.trim().length === 0) {
     throw new Error(`Invalid ${label}: expected non-empty string`);
   }
@@ -34,7 +34,18 @@ if (!/rel="manifest"\s+href="\.\/manifest\.webmanifest"/.test(indexHtml)) {
   throw new Error('dist/index.html must reference ./manifest.webmanifest');
 }
 
-const manifest = JSON.parse(readRequiredFile(manifestPath));
+interface ManifestIcon {
+  src?: unknown;
+}
+
+interface PwaManifest {
+  id?: unknown;
+  start_url?: unknown;
+  scope?: unknown;
+  icons?: unknown;
+}
+
+const manifest = JSON.parse(readRequiredFile(manifestPath)) as PwaManifest;
 if (manifest.id !== './') {
   throw new Error(`manifest.id must be "./" (got "${manifest.id}")`);
 }
@@ -45,7 +56,7 @@ if (manifest.scope !== './') {
   throw new Error(`manifest.scope must be "./" (got "${manifest.scope}")`);
 }
 
-const icons = Array.isArray(manifest.icons) ? manifest.icons : [];
+const icons: ManifestIcon[] = Array.isArray(manifest.icons) ? manifest.icons : [];
 if (icons.length === 0) {
   throw new Error('manifest.icons must contain at least one icon');
 }

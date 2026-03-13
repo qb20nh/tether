@@ -19,7 +19,7 @@ import {
   toDailyPayloadLevel,
   utcDateIdFromMs,
   utcStartMsFromDateId,
-} from './daily_pool_tools.js';
+} from './daily_pool_tools.ts';
 import {
   DAILY_HISTORY_SCHEMA_VERSION,
   DAILY_PAYLOAD_SCHEMA_VERSION,
@@ -33,9 +33,42 @@ import {
   readJsonFile,
   readRequiredArgValue,
   writeJsonFile,
-} from './lib/cli_utils.js';
+} from './lib/cli_utils.ts';
 
-const DEFAULTS = {
+type DailyHistory = ReturnType<typeof normalizeDailyHistory>;
+type DailyHistoryEntry = DailyHistory['entries'][number];
+type DailyPayloadHeader = NonNullable<ReturnType<typeof normalizeDailyPayloadHeader>>;
+
+interface PublishDailyLevelOptions {
+  manifestFile: string;
+  overridesFile: string;
+  historyFile: string;
+  todayFile: string;
+  nowMs: number | null;
+  dailySecret: string | null;
+  json: boolean;
+}
+
+interface DailyPoolManifest {
+  poolVersion?: string;
+  epochUtcDate?: string;
+  maxSlots?: number;
+  baseVariantId?: number;
+}
+
+export interface PublishDailyLevelSummary {
+  ok: true;
+  preservedExistingDaily: boolean;
+  dailyId: string;
+  dailySlot: number;
+  canonicalKey: string;
+  ordinal: number | null;
+  wroteTodayFile: string | null;
+  wroteHistoryFile: string | null;
+  historyLength: number;
+}
+
+const DEFAULTS: PublishDailyLevelOptions = {
   manifestFile: path.resolve(process.cwd(), DAILY_POOL_MANIFEST_REPO_FILE),
   overridesFile: path.resolve(process.cwd(), DAILY_OVERRIDES_REPO_FILE),
   historyFile: path.resolve(process.cwd(), PUBLIC_DAILY_HISTORY_REPO_FILE),
@@ -45,14 +78,14 @@ const DEFAULTS = {
   json: false,
 };
 
-const parseArgs = (argv) => {
-  const opts = { ...DEFAULTS };
+const parseArgs = (argv: readonly string[]): PublishDailyLevelOptions => {
+  const opts: PublishDailyLevelOptions = { ...DEFAULTS };
 
   let index = 0;
   while (index < argv.length) {
     const arg = argv[index];
     let nextArgIndex = index + 1;
-    const nextValue = () => {
+    const nextValue = (): string => {
       const result = readRequiredArgValue(argv, index, arg);
       nextArgIndex = result.nextIndex + 1;
       return result.value;
@@ -70,7 +103,7 @@ const parseArgs = (argv) => {
       console.log(
         [
           'Usage:',
-          '  node scripts/publish_daily_level.js [options]',
+          '  node scripts/publish_daily_level.ts [options]',
           '',
           'Options:',
           `  --manifest <path>       Daily pool manifest path (default: ${DEFAULTS.manifestFile})`,
@@ -93,29 +126,39 @@ const parseArgs = (argv) => {
   return opts;
 };
 
-const sortHistoryEntriesByDailyId = (entries = []) =>
+const sortHistoryEntriesByDailyId = (entries: readonly DailyHistoryEntry[] = []): DailyHistoryEntry[] =>
   [...entries].sort((a, b) => a.dailyId.localeCompare(b.dailyId));
 
-const trimHistoryEntries = (entries = [], maxEntries = DAILY_POOL_MAX_SLOTS) => {
+const trimHistoryEntries = (
+  entries: readonly DailyHistoryEntry[] = [],
+  maxEntries = DAILY_POOL_MAX_SLOTS,
+): DailyHistoryEntry[] => {
   if (!Number.isInteger(maxEntries) || maxEntries <= 0) return [];
-  if (entries.length <= maxEntries) return entries;
+  if (entries.length <= maxEntries) return [...entries];
   return entries.slice(entries.length - maxEntries);
 };
 
-const pruneHistoryForAppend = (entries = [], {
-  maxEntries = DAILY_POOL_MAX_SLOTS,
-  dailyId = '',
-  dailySlot = -1,
-  canonicalKey = '',
-} = {}) => {
+const pruneHistoryForAppend = (
+  entries: readonly DailyHistoryEntry[] = [],
+  {
+    maxEntries = DAILY_POOL_MAX_SLOTS,
+    dailyId = '',
+    dailySlot = -1,
+    canonicalKey = '',
+  }: {
+    maxEntries?: number;
+    dailyId?: string;
+    dailySlot?: number;
+    canonicalKey?: string;
+  } = {},
+): DailyHistoryEntry[] => {
   if (!Number.isInteger(maxEntries) || maxEntries <= 0) return [];
   const out = [...entries];
-  const hasCollision = () => out.some((entry) => (
+  const hasCollision = (): boolean => out.some((entry) => (
     entry.dailyId !== dailyId
     && (entry.dailySlot === dailySlot || entry.canonicalKey === canonicalKey)
   ));
 
-  // Bounded prune loop: at most the original entry count, so it cannot spin forever.
   for (let i = 0, limit = out.length; i < limit; i += 1) {
     if (out.length === 0) break;
     if (out.length < maxEntries && !hasCollision()) break;
@@ -130,7 +173,12 @@ const readPreservedExistingDailySummary = ({
   todayFile,
   dailyId,
   historyLength,
-}) => {
+}: {
+  todayEntry: DailyHistoryEntry | undefined;
+  todayFile: string;
+  dailyId: string;
+  historyLength: number;
+}): PublishDailyLevelSummary | null => {
   if (!todayEntry) return null;
 
   const existingTodayPayload = normalizeDailyPayloadHeader(readJsonFile(todayFile, null));
@@ -162,7 +210,13 @@ const resolveStableGeneratedAtUtcMs = ({
   dailySlot,
   canonicalKey,
   nowMs,
-}) => (
+}: {
+  existingTodayPayload: DailyPayloadHeader | null;
+  dailyId: string;
+  dailySlot: number;
+  canonicalKey: string;
+  nowMs: number;
+}): number => (
   existingTodayPayload?.dailyId === dailyId
     && existingTodayPayload.dailySlot === dailySlot
     && existingTodayPayload.canonicalKey === canonicalKey
@@ -171,17 +225,19 @@ const resolveStableGeneratedAtUtcMs = ({
     : nowMs
 );
 
-export const publishDailyLevel = (rawOptions = {}) => {
-  const opts = { ...DEFAULTS, ...rawOptions };
+export const publishDailyLevel = (
+  rawOptions: Partial<PublishDailyLevelOptions> = {},
+): PublishDailyLevelSummary => {
+  const opts: PublishDailyLevelOptions = { ...DEFAULTS, ...rawOptions };
 
-  const nowMs = Number.isInteger(opts.nowMs) ? opts.nowMs : Date.now();
+  const nowMs = typeof opts.nowMs === 'number' && Number.isInteger(opts.nowMs) ? opts.nowMs : Date.now();
   const dailyId = utcDateIdFromMs(nowMs);
-  const manifest = readJsonFile(opts.manifestFile);
-  const maxSlots = Number.isInteger(manifest?.maxSlots) ? manifest.maxSlots : DAILY_POOL_MAX_SLOTS;
+  const manifest = readJsonFile<DailyPoolManifest>(opts.manifestFile);
+  const maxSlots = typeof manifest.maxSlots === 'number' ? manifest.maxSlots : DAILY_POOL_MAX_SLOTS;
   if (!Number.isInteger(maxSlots) || maxSlots <= 0) {
-    throw new Error(`Invalid maxSlots in manifest: ${manifest?.maxSlots}`);
+    throw new Error(`Invalid maxSlots in manifest: ${manifest.maxSlots}`);
   }
-  const baseVariantId = Number.isInteger(manifest?.baseVariantId)
+  const baseVariantId = typeof manifest.baseVariantId === 'number'
     ? manifest.baseVariantId
     : DAILY_POOL_BASE_VARIANT_ID;
   const history = normalizeDailyHistory(
@@ -208,7 +264,7 @@ export const publishDailyLevel = (rawOptions = {}) => {
     throw new Error('DAILY_SECRET is required');
   }
 
-  const ordinal = computeDayOrdinal(dailyId, manifest.epochUtcDate);
+  const ordinal = computeDayOrdinal(dailyId, manifest.epochUtcDate ?? '');
 
   if (ordinal < 0) {
     throw new Error(`Current date ${dailyId} is before pool epoch ${manifest.epochUtcDate}`);
@@ -218,7 +274,7 @@ export const publishDailyLevel = (rawOptions = {}) => {
   const permutation = buildSecretPermutation(
     dailySecret,
     maxSlots,
-    `tether|daily|perm|${manifest.poolVersion}|${manifest.epochUtcDate}`,
+    `tether|daily|perm|${manifest.poolVersion ?? ''}|${manifest.epochUtcDate ?? ''}`,
   );
   const dailySlot = permutation[slotOrdinal];
 
@@ -292,11 +348,11 @@ export const publishDailyLevel = (rawOptions = {}) => {
   };
 };
 
-const runCli = () => {
+const runCli = (): void => {
   const opts = parseArgs(process.argv.slice(2));
   const summary = publishDailyLevel({
     ...opts,
-    dailySecret: process.env.DAILY_SECRET,
+    dailySecret: process.env.DAILY_SECRET ?? null,
   });
 
   if (opts.json) {

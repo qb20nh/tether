@@ -6,6 +6,12 @@ import {
   createPathWebglRenderer,
 } from '../../src/renderer/path_webgl_renderer.ts';
 
+const globalObject = /** @type {any} */ (globalThis);
+const createRenderer = (canvas, options) => /** @type {any} */ (
+  createPathWebglRenderer(/** @type {any} */ (canvas), options)
+);
+const drawPathFrame = (renderer, frame) => renderer.drawPathFrame(/** @type {any} */ (frame));
+
 const assertIndexBounds = (mesh) => {
   for (const index of mesh.indices) {
     assert.equal(Number.isInteger(index), true);
@@ -317,6 +323,7 @@ test('buildUnifiedPathMesh honors end arrow direction override', () => {
       }
     }
     const tail = points.at(-1);
+    assert.ok(tail);
     const x = mesh.positions[apexIndex * 2];
     const y = mesh.positions[(apexIndex * 2) + 1];
     const dx = x - tail.x;
@@ -448,13 +455,13 @@ test('createPathWebglRenderer throws when WebGL2 is unavailable', () => {
   };
 
   assert.throws(() => {
-    createPathWebglRenderer(fakeCanvas);
+    createRenderer(fakeCanvas);
   }, /WebGL2 is required for path rendering/);
 });
 
 test('createPathWebglRenderer forwards the antialias option to WebGL2 context creation', () => {
-  const originalWindow = globalThis.window;
-  globalThis.window = { devicePixelRatio: 1 };
+  const originalWindow = globalObject.window;
+  globalObject.window = { devicePixelRatio: 1 };
   try {
     const fake = createFakeWebgl2();
     const contextOptions = [];
@@ -473,18 +480,18 @@ test('createPathWebglRenderer forwards the antialias option to WebGL2 context cr
       },
     };
 
-    const renderer = createPathWebglRenderer(fakeCanvas, { antialias: false });
+    const renderer = createRenderer(fakeCanvas, { antialias: false });
     assert.equal(contextOptions.at(-1)?.antialias, false);
     assert.equal(renderer.antialiasEnabled, false);
     renderer.destroy();
   } finally {
-    globalThis.window = originalWindow;
+    globalObject.window = originalWindow;
   }
 });
 
 test('createPathWebglRenderer destroy can skip explicit WebGL context loss', () => {
-  const originalWindow = globalThis.window;
-  globalThis.window = { devicePixelRatio: 1 };
+  const originalWindow = globalObject.window;
+  globalObject.window = { devicePixelRatio: 1 };
   try {
     const fake = createFakeWebgl2();
     const fakeCanvas = {
@@ -499,17 +506,17 @@ test('createPathWebglRenderer destroy can skip explicit WebGL context loss', () 
       },
     };
 
-    const renderer = createPathWebglRenderer(fakeCanvas);
+    const renderer = createRenderer(fakeCanvas);
     renderer.destroy({ releaseContext: false });
     assert.equal(fake.counters.loseContext, 0);
   } finally {
-    globalThis.window = originalWindow;
+    globalObject.window = originalWindow;
   }
 });
 
 test('createPathWebglRenderer skips geometry uploads when geometry is unchanged', () => {
-  const originalWindow = globalThis.window;
-  globalThis.window = { devicePixelRatio: 1 };
+  const originalWindow = globalObject.window;
+  globalObject.window = { devicePixelRatio: 1 };
   try {
     const fake = createFakeWebgl2();
     const fakeCanvas = {
@@ -524,7 +531,7 @@ test('createPathWebglRenderer skips geometry uploads when geometry is unchanged'
       },
     };
 
-    const renderer = createPathWebglRenderer(fakeCanvas);
+    const renderer = createRenderer(fakeCanvas);
     const frame = {
       points: [
         { x: 0, y: 0 },
@@ -543,13 +550,13 @@ test('createPathWebglRenderer skips geometry uploads when geometry is unchanged'
       flowPulse: 64,
     };
 
-    renderer.drawPathFrame(frame);
+    drawPathFrame(renderer, frame);
     const uploadCountAfterFirst = fake.counters.bufferSubData;
-    renderer.drawPathFrame(frame);
+    drawPathFrame(renderer, frame);
     const uploadCountAfterSecond = fake.counters.bufferSubData;
     assert.equal(uploadCountAfterSecond, uploadCountAfterFirst);
 
-    renderer.drawPathFrame({
+    drawPathFrame(renderer, {
       ...frame,
       points: [
         { x: 0, y: 0 },
@@ -560,13 +567,13 @@ test('createPathWebglRenderer skips geometry uploads when geometry is unchanged'
     assert.equal(fake.counters.bufferSubData > uploadCountAfterSecond, true);
     renderer.destroy();
   } finally {
-    globalThis.window = originalWindow;
+    globalObject.window = originalWindow;
   }
 });
 
 test('createPathWebglRenderer does not reupload geometry when only flowMix changes', () => {
-  const originalWindow = globalThis.window;
-  globalThis.window = { devicePixelRatio: 1 };
+  const originalWindow = globalObject.window;
+  globalObject.window = { devicePixelRatio: 1 };
   try {
     const fake = createFakeWebgl2();
     const fakeCanvas = {
@@ -581,7 +588,7 @@ test('createPathWebglRenderer does not reupload geometry when only flowMix chang
       },
     };
 
-    const renderer = createPathWebglRenderer(fakeCanvas);
+    const renderer = createRenderer(fakeCanvas);
     const frame = {
       points: [
         { x: 0, y: 0 },
@@ -601,9 +608,9 @@ test('createPathWebglRenderer does not reupload geometry when only flowMix chang
       flowPulse: 64,
     };
 
-    renderer.drawPathFrame(frame);
+    drawPathFrame(renderer, frame);
     const uploadCountAfterFirst = fake.counters.bufferSubData;
-    renderer.drawPathFrame({
+    drawPathFrame(renderer, {
       ...frame,
       flowMix: 0.25,
     });
@@ -612,13 +619,13 @@ test('createPathWebglRenderer does not reupload geometry when only flowMix chang
     assert.equal(uploadCountAfterSecond, uploadCountAfterFirst);
     renderer.destroy();
   } finally {
-    globalThis.window = originalWindow;
+    globalObject.window = originalWindow;
   }
 });
 
 test('createPathWebglRenderer draws and reuses retained arc geometry with stable token', () => {
-  const originalWindow = globalThis.window;
-  globalThis.window = { devicePixelRatio: 1 };
+  const originalWindow = globalObject.window;
+  globalObject.window = { devicePixelRatio: 1 };
   try {
     const fake = createFakeWebgl2();
     const fakeCanvas = {
@@ -633,7 +640,7 @@ test('createPathWebglRenderer draws and reuses retained arc geometry with stable
       },
     };
 
-    const renderer = createPathWebglRenderer(fakeCanvas);
+    const renderer = createRenderer(fakeCanvas);
     const frame = {
       points: [],
       retainedStartArcPoints: [
@@ -655,12 +662,12 @@ test('createPathWebglRenderer draws and reuses retained arc geometry with stable
       flowPulse: 64,
     };
 
-    renderer.drawPathFrame(frame);
+    drawPathFrame(renderer, frame);
     const drawCountAfterFirst = fake.counters.drawElements;
     const uploadCountAfterFirst = fake.counters.bufferSubData;
     assert.equal(drawCountAfterFirst > 0, true);
 
-    renderer.drawPathFrame(frame);
+    drawPathFrame(renderer, frame);
     const drawCountAfterSecond = fake.counters.drawElements;
     const uploadCountAfterSecond = fake.counters.bufferSubData;
     assert.equal(drawCountAfterSecond > drawCountAfterFirst, true);
@@ -668,13 +675,13 @@ test('createPathWebglRenderer draws and reuses retained arc geometry with stable
 
     renderer.destroy();
   } finally {
-    globalThis.window = originalWindow;
+    globalObject.window = originalWindow;
   }
 });
 
 test('createPathWebglRenderer uploads one-point geometry when startRadius changes with NaN token', () => {
-  const originalWindow = globalThis.window;
-  globalThis.window = { devicePixelRatio: 1 };
+  const originalWindow = globalObject.window;
+  globalObject.window = { devicePixelRatio: 1 };
   try {
     const fake = createFakeWebgl2();
     const fakeCanvas = {
@@ -689,7 +696,7 @@ test('createPathWebglRenderer uploads one-point geometry when startRadius change
       },
     };
 
-    const renderer = createPathWebglRenderer(fakeCanvas);
+    const renderer = createRenderer(fakeCanvas);
     const frame = {
       points: [{ x: 16, y: 16 }],
       geometryToken: Number.NaN,
@@ -705,9 +712,9 @@ test('createPathWebglRenderer uploads one-point geometry when startRadius change
       flowPulse: 64,
     };
 
-    renderer.drawPathFrame(frame);
+    drawPathFrame(renderer, frame);
     const uploadCountAfterFirst = fake.counters.bufferSubData;
-    renderer.drawPathFrame({
+    drawPathFrame(renderer, {
       ...frame,
       startRadius: 10,
     });
@@ -716,13 +723,13 @@ test('createPathWebglRenderer uploads one-point geometry when startRadius change
     assert.equal(uploadCountAfterSecond > uploadCountAfterFirst, true);
     renderer.destroy();
   } finally {
-    globalThis.window = originalWindow;
+    globalObject.window = originalWindow;
   }
 });
 
 test('createPathWebglRenderer draws tutorial brackets without a path and reuses bracket geometry', () => {
-  const originalWindow = globalThis.window;
-  globalThis.window = { devicePixelRatio: 1 };
+  const originalWindow = globalObject.window;
+  globalObject.window = { devicePixelRatio: 1 };
   try {
     const fake = createFakeWebgl2();
     const fakeCanvas = {
@@ -737,7 +744,7 @@ test('createPathWebglRenderer draws tutorial brackets without a path and reuses 
       },
     };
 
-    const renderer = createPathWebglRenderer(fakeCanvas);
+    const renderer = createRenderer(fakeCanvas);
     const frame = {
       points: [],
       drawTutorialBracketsInPathLayer: true,
@@ -754,12 +761,12 @@ test('createPathWebglRenderer draws tutorial brackets without a path and reuses 
       flowCycle: 128,
     };
 
-    renderer.drawPathFrame(frame);
+    drawPathFrame(renderer, frame);
     const drawCountAfterFirst = fake.counters.drawElements;
     const uploadCountAfterFirst = fake.counters.bufferSubData;
     assert.equal(drawCountAfterFirst > 0, true);
 
-    renderer.drawPathFrame(frame);
+    drawPathFrame(renderer, frame);
     const drawCountAfterSecond = fake.counters.drawElements;
     const uploadCountAfterSecond = fake.counters.bufferSubData;
     assert.equal(drawCountAfterSecond > drawCountAfterFirst, true);
@@ -767,6 +774,6 @@ test('createPathWebglRenderer draws tutorial brackets without a path and reuses 
 
     renderer.destroy();
   } finally {
-    globalThis.window = originalWindow;
+    globalObject.window = originalWindow;
   }
 });

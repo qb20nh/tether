@@ -20,7 +20,7 @@ const STITCHED_LEVEL = {
     '...',
     '...',
   ],
-  stitches: [[1, 1]],
+  stitches: /** @type {[number, number][]} */ ([[1, 1]]),
   cornerCounts: [],
 };
 
@@ -84,6 +84,7 @@ test('game state store restores saved movable wall positions and path', () => {
   store.dispatch({ type: 'level/load', payload: { levelIndex: 0 } });
 
   const restored = store.restoreMutableState({
+    levelIndex: 0,
     movableWalls: [[0, 0]],
     path: [[2, 0], [2, 1]],
   });
@@ -98,14 +99,14 @@ test('game state store restores legacy grid saves', () => {
   const store = createGameStateStore(() => LEVEL);
   store.dispatch({ type: 'level/load', payload: { levelIndex: 0 } });
 
-  const restored = store.restoreMutableState({
+  const restored = store.restoreMutableState(/** @type {any} */ ({
     grid: [
       'm..',
       '...',
       '...',
     ],
     path: [{ r: 2, c: 0 }, { r: 2, c: 1 }],
-  });
+  }));
 
   assert.equal(restored, true);
   assert.deepEqual(store.getSnapshot().path, [{ r: 2, c: 0 }, { r: 2, c: 1 }]);

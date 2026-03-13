@@ -1,9 +1,29 @@
-// @ts-nocheck
-function makeIcon(body, options = '') {
+export type IconCode =
+  | 't'
+  | 'r'
+  | 'l'
+  | 's'
+  | 'h'
+  | 'v'
+  | 'g'
+  | 'b'
+  | 'p'
+  | 'm'
+  | 'x'
+  | 'cornerCount';
+
+export interface BadgeDefinition {
+  badgeId: string;
+  iconCode: IconCode;
+  htmlKey: string;
+  badgeText?: string;
+}
+
+function makeIcon(body: string, options = ''): string {
   return `<svg viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg" role="img" aria-hidden="true"><g ${options}><g fill="none" stroke="currentColor" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round">${body}</g></g></svg>`;
 }
 
-export const ICONS = {
+export const ICONS: Record<Exclude<IconCode, 'x' | 'cornerCount'>, string> = {
   t: makeIcon(`
     <path d="M10 14 H24 V34 H38"/>
     <path d="M16 8 L10 14 L16 20"/>
@@ -70,7 +90,7 @@ export const ICON_X = makeIcon(
   `,
 );
 
-export const BADGE_DEFINITIONS = [
+export const BADGE_DEFINITIONS: readonly BadgeDefinition[] = [
   {
     badgeId: 'bTurn',
     iconCode: 't',
@@ -132,4 +152,4 @@ export const BADGE_DEFINITIONS = [
     iconCode: 'm',
     htmlKey: 'legend.movableWall',
   },
-];
+] as const;

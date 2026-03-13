@@ -1,7 +1,29 @@
-// @ts-nocheck
 import { buildCanonicalSolutionSignature, SCORE_MODES } from './score_manager.ts';
+import type {
+  CorePort,
+  GameSnapshot,
+  GridTuple,
+  SessionBoardState,
+} from '../contracts/ports.ts';
 
-export const resolveScoreContext = (core, levelIndex) => {
+interface ScoreContext {
+  mode: string;
+  levelKey: string;
+}
+
+interface ScoreManagerLike {
+  registerSolved: (payload: {
+    mode: string;
+    levelKey: string;
+    signature: string;
+  }) => unknown;
+}
+
+const buildCanonicalSolutionSignatureTyped = buildCanonicalSolutionSignature as (
+  snapshot: GameSnapshot,
+) => string | null;
+
+export const resolveScoreContext = (core: CorePort | null | undefined, levelIndex: number): ScoreContext | null => {
   if (!core || !Number.isInteger(levelIndex)) return null;
 
   if (typeof core.isDailyAbsIndex === 'function' && core.isDailyAbsIndex(levelIndex)) {
@@ -27,12 +49,16 @@ export const registerSolvedSnapshot = ({
   snapshot,
   core,
   scoreManager,
+}: {
+  snapshot: GameSnapshot | null | undefined;
+  core: CorePort | null | undefined;
+  scoreManager: ScoreManagerLike | null | undefined;
 }) => {
   if (!snapshot || !core || !scoreManager) return null;
   const context = resolveScoreContext(core, snapshot.levelIndex);
   if (!context) return null;
 
-  const signature = buildCanonicalSolutionSignature(snapshot);
+  const signature = buildCanonicalSolutionSignatureTyped(snapshot);
   if (!signature) return null;
 
   return scoreManager.registerSolved({
@@ -50,6 +76,14 @@ export const markClearedLevel = ({
   onCampaignCleared = () => {},
   onInfiniteCleared = () => {},
   onDailyCleared = () => {},
+}: {
+  levelIndex: number;
+  core: CorePort;
+  activeDailyId?: string | null;
+  dailySolvedDate?: string | null;
+  onCampaignCleared?: (levelIndex: number) => void;
+  onInfiniteCleared?: (infiniteIndex: number) => void;
+  onDailyCleared?: (dailyId: string, changedDailySolvedDate: boolean) => void;
 }) => {
   let nextDailySolvedDate = dailySolvedDate;
   let changedDailySolvedDate = false;
@@ -82,9 +116,9 @@ export const markClearedLevel = ({
   };
 };
 
-export const collectMovableWalls = (gridData, movableWallToken = 'm') => {
+export const collectMovableWalls = (gridData: string[][], movableWallToken = 'm'): GridTuple[] => {
   if (!Array.isArray(gridData)) return [];
-  const walls = [];
+  const walls: GridTuple[] = [];
   for (let r = 0; r < gridData.length; r += 1) {
     const row = gridData[r];
     if (!Array.isArray(row)) continue;
@@ -99,14 +133,19 @@ export const buildSessionBoardFromSnapshot = ({
   snapshot,
   activeDailyId = null,
   isDailyLevelIndex = () => false,
+}: {
+  snapshot: GameSnapshot | null | undefined;
+  activeDailyId?: string | null;
+  isDailyLevelIndex?: (levelIndex: number) => boolean;
 }) => {
   if (!snapshot || !Number.isInteger(snapshot.levelIndex)) return null;
   if (!Array.isArray(snapshot.path) || !Array.isArray(snapshot.gridData)) return null;
 
-  return {
+  const sessionBoard: SessionBoardState = {
     levelIndex: snapshot.levelIndex,
     path: snapshot.path.map((point) => [point.r, point.c]),
     movableWalls: collectMovableWalls(snapshot.gridData),
     dailyId: isDailyLevelIndex(snapshot.levelIndex) ? activeDailyId : null,
   };
+  return sessionBoard;
 };

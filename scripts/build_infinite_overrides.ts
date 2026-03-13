@@ -11,25 +11,32 @@ import {
 import { canonicalConstraintSignature } from '../src/infinite_canonical.ts';
 import { encodePackedOverridePayload } from '../src/shared/packed_override_codec.ts';
 import { INFINITE_OVERRIDES_REPO_FILE } from '../src/shared/paths.ts';
-import { parsePositiveInt, readRequiredArgValue } from './lib/cli_utils.js';
+import { parsePositiveInt, readRequiredArgValue } from './lib/cli_utils.ts';
 
-const FORMAT_MAGIC = 0x49; // 'I'
+const FORMAT_MAGIC = 0x49;
 const FORMAT_VERSION = 1;
 
-const DEFAULTS = {
+interface BuildInfiniteOverridesOptions {
+  maxLevels: number;
+  maxVariantProbe: number;
+  outBinFile: string;
+  json: boolean;
+}
+
+const DEFAULTS: BuildInfiniteOverridesOptions = {
   maxLevels: INFINITE_MAX_LEVELS,
   maxVariantProbe: 255,
   outBinFile: path.resolve(process.cwd(), INFINITE_OVERRIDES_REPO_FILE),
   json: false,
 };
 
-const parseArgs = (argv) => {
-  const opts = { ...DEFAULTS };
+const parseArgs = (argv: readonly string[]): BuildInfiniteOverridesOptions => {
+  const opts: BuildInfiniteOverridesOptions = { ...DEFAULTS };
   let index = 0;
   while (index < argv.length) {
     const arg = argv[index];
     let nextArgIndex = index + 1;
-    const nextValue = () => {
+    const nextValue = (): string => {
       const result = readRequiredArgValue(argv, index, arg);
       nextArgIndex = result.nextIndex + 1;
       return result.value;
@@ -43,7 +50,7 @@ const parseArgs = (argv) => {
       console.log(
         [
           'Usage:',
-          '  node scripts/build_infinite_overrides.js [options]',
+          '  node scripts/build_infinite_overrides.ts [options]',
           '',
           'Options:',
           `  --max-levels <n>        Scan level count (default: ${DEFAULTS.maxLevels})`,
@@ -72,24 +79,27 @@ const parseArgs = (argv) => {
 };
 
 const INFINITE_OVERRIDE_CODEC_MESSAGES = Object.freeze({
-  maxBitsExceeded: (variantBits) => `Variant id width ${variantBits} bits exceeds format limit (8 bits).`,
-  invalidIndex: (index) => `Invalid override index: ${index}`,
-  invalidValue: (variantId, variantBits) => `Variant ${variantId} cannot be encoded with ${variantBits} bits`,
-  nonIncreasing: (index) => `Non-increasing override index sequence near ${index}`,
+  maxBitsExceeded: (variantBits: number) => `Variant id width ${variantBits} bits exceeds format limit (8 bits).`,
+  invalidIndex: (index: number) => `Invalid override index: ${index}`,
+  invalidValue: (variantId: number, variantBits: number) => `Variant ${variantId} cannot be encoded with ${variantBits} bits`,
+  nonIncreasing: (index: number) => `Non-increasing override index sequence near ${index}`,
 });
 
-const encodeOverridesPayload = (overrides, maxVariantUsed) => {
-  return encodePackedOverridePayload({
+const encodeOverridesPayload = (overrides: Map<number, number>, maxVariantUsed: number) =>
+  encodePackedOverridePayload({
     formatMagic: FORMAT_MAGIC,
     formatVersion: FORMAT_VERSION,
     overrides,
     maxVariantUsed,
     messages: INFINITE_OVERRIDE_CODEC_MESSAGES,
   });
-};
 
-function resolveCollision(levelIndex, maxVariantProbe, acceptedBySignature) {
-  for (let probeVariantId = INFINITE_CANDIDATE_VARIANTS; probeVariantId <= maxVariantProbe; probeVariantId++) {
+const resolveCollision = (
+  levelIndex: number,
+  maxVariantProbe: number,
+  acceptedBySignature: ReadonlyMap<string, number>,
+): { variantId: number; signature: string } | null => {
+  for (let probeVariantId = INFINITE_CANDIDATE_VARIANTS; probeVariantId <= maxVariantProbe; probeVariantId += 1) {
     let probeLevel = null;
     try {
       probeLevel = generateInfiniteLevelFromVariant(levelIndex, probeVariantId);
@@ -102,17 +112,17 @@ function resolveCollision(levelIndex, maxVariantProbe, acceptedBySignature) {
     }
   }
   return null;
-}
+};
 
-function main() {
+function main(): void {
   const opts = parseArgs(process.argv.slice(2));
 
-  const acceptedBySignature = new Map();
-  const overrides = new Map();
+  const acceptedBySignature = new Map<string, number>();
+  const overrides = new Map<number, number>();
   let collisionsResolved = 0;
   let maxVariantUsed = INFINITE_CANDIDATE_VARIANTS - 1;
 
-  for (let i = 0; i < opts.maxLevels; i++) {
+  for (let i = 0; i < opts.maxLevels; i += 1) {
     const selected = selectDefaultInfiniteCandidate(i);
 
     let acceptedSignature = selected.canonicalSignature;

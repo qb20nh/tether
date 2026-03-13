@@ -1,4 +1,8 @@
-// @ts-nocheck
+import type {
+  GridPoint,
+  GridTuple,
+  LevelDefinition,
+} from './contracts/ports.ts';
 import { canonicalConstraintFingerprint } from './infinite_canonical.ts';
 import { INFINITE_OVERRIDE_BY_INDEX } from './infinite_overrides.ts';
 import { hashString32, makeMulberry32Rng, mix32 } from './shared/hash32.ts';
@@ -12,61 +16,233 @@ export const INFINITE_FEATURE_CYCLE = Object.freeze([
   'rps',
   'hint',
   'mixed',
-]);
+] as const);
+type RequiredFeature = typeof INFINITE_FEATURE_CYCLE[number];
+
+type Grid = string[][];
+type CornerCount = [number, number, number];
+type RpsCode = 'g' | 'b' | 'p';
+type HintCode = 't' | 'r' | 'l' | 's' | 'h' | 'v';
+type RandomNumberGenerator = () => number;
+type ConstraintLevel = Pick<LevelDefinition, 'grid' | 'stitches' | 'cornerCounts'>;
+
+interface FeaturePlan {
+  hint: boolean;
+  corner: boolean;
+  stitch: boolean;
+  movable: boolean;
+  rps: boolean;
+}
+
+interface PathCandidate extends GridPoint {
+  onward: number;
+  score: number;
+}
+
+interface PathTransition {
+  start: number;
+  stitchVertex: GridTuple;
+}
+
+interface InvalidStep {
+  index: number;
+  from: GridTuple;
+  to: GridTuple;
+}
+
+interface StitchCollection {
+  stitches: GridTuple[];
+  invalidStep: InvalidStep | null;
+}
+
+interface CornerWallStats {
+  wallCount: number;
+  hasDiagonalWalls: boolean;
+  maxPossible: number;
+}
+
+interface FeatureStats {
+  hasHint: boolean;
+  hasRps: boolean;
+  hasMovable: boolean;
+  hintCount: number;
+  rpsCount: number;
+  wallCount: number;
+  cellConstraintCount: number;
+}
+
+interface InfiniteLevelFeatures {
+  stitch: boolean;
+  movable: boolean;
+  corner: boolean;
+  rps: boolean;
+  hint: boolean;
+  hintCount: number;
+  rpsCount: number;
+  featureCount: number;
+  wallCount: number;
+  nonWallCellCount: number;
+  cellConstraintCount: number;
+  constraintTokenCount: number;
+}
+
+interface GeneratedLevel extends LevelDefinition {
+  grid: string[];
+  stitches: GridTuple[];
+  cornerCounts: CornerCount[];
+}
+
+interface CoreMeta {
+  requiredFeature: RequiredFeature;
+  seed: number;
+  profileId: number;
+  variantId: number;
+  witnessPath: GridTuple[];
+  witnessMovableWalls: GridTuple[];
+}
+
+interface CoreLevelResult {
+  level: GeneratedLevel;
+  meta: CoreMeta;
+}
+
+interface InfiniteLevel extends GeneratedLevel {
+  name: string;
+  nameKey: string;
+  infiniteMeta: {
+    isInfinite: boolean;
+    index: number;
+    variantId: number;
+    requiredFeature: RequiredFeature;
+    baseLevelIndex: number;
+    witnessPath: GridTuple[];
+    witnessMovableWalls: GridTuple[];
+  };
+}
+
+interface HintPlacementCandidate {
+  i: number;
+  choices: HintCode[];
+}
+
+interface AddableHintCandidate {
+  p: GridPoint;
+  choices: HintCode[];
+}
+
+interface EnforceMinimumFeatureOptions {
+  minHints?: number;
+  requireRps?: boolean;
+  rpsCount?: number;
+  occupied?: Set<string>;
+}
+
+interface VariantContext {
+  infiniteIndex: number;
+  variantId: number;
+}
+
+interface PathBuildResult {
+  path: GridPoint[];
+  transitions: PathTransition[];
+}
+
+interface ValidatedStitches {
+  stitches: GridTuple[];
+  stitchVertexSet: Set<string>;
+}
+
+interface DensityBandArgs {
+  grid: Grid;
+  path: readonly GridPoint[];
+  stitches: readonly GridTuple[];
+  cornerCounts: CornerCount[];
+  requiredFeature: RequiredFeature;
+  rng: RandomNumberGenerator;
+}
+
+interface CornerBuildContext {
+  rows: number;
+  cols: number;
+  orthEdges: ReadonlySet<string>;
+  stitchVertexSet: ReadonlySet<string>;
+  grid: Grid;
+}
+
+interface GridStyleSummary {
+  rows: number;
+  cols: number;
+  walls: number;
+  movable: number;
+  hints: number;
+  rps: number;
+  stitches: number;
+  corners: number;
+  cornerZero: number;
+}
+
+interface DefaultInfiniteCandidate {
+  variantId: number;
+  level: InfiniteLevel;
+  canonicalSignature: string;
+  canonicalKey: string;
+  score: number;
+  rank: number;
+}
 export const INFINITE_MAX_LEVELS = 30000;
 export const INFINITE_CANDIDATE_VARIANTS = 4;
 export const MIN_CONSTRAINT_DENSITY = 0.15;
 export const MAX_CONSTRAINT_DENSITY = 0.25;
 export const MAX_WALL_DENSITY = 0.25;
 
-const HINT_CODES = new Set(['t', 'r', 'l', 's', 'h', 'v']);
-const RPS_CODES = ['g', 'b', 'p'];
-const ORTH_DIRS = Object.freeze([
+const HINT_CODES: ReadonlySet<string> = new Set(['t', 'r', 'l', 's', 'h', 'v']);
+const RPS_CODES = ['g', 'b', 'p'] as const;
+const ORTH_DIRS: readonly [number, number][] = Object.freeze([
   [-1, 0],
   [1, 0],
   [0, -1],
   [0, 1],
 ]);
 
-const intFromRng = (rng, maxExclusive) => {
+const intFromRng = (rng: RandomNumberGenerator, maxExclusive: number): number => {
   if (maxExclusive <= 0) return 0;
   return Math.floor(rng() * maxExclusive);
 };
 
-const clamp = (value, lo, hi) => Math.max(lo, Math.min(hi, value));
+const clamp = (value: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, value));
 
-const keyOf = (r, c) => `${r},${c}`;
-const isWallToken = (ch) => ch === '#' || ch === 'm';
-const isRpsToken = (ch) => RPS_CODES.includes(ch);
+const keyOf = (r: number, c: number): string => `${r},${c}`;
+const isWallToken = (ch: string): boolean => ch === '#' || ch === 'm';
+const isRpsToken = (ch: string): ch is RpsCode => (RPS_CODES as readonly string[]).includes(ch);
 
-const minimumHintCountForFeature = (requiredFeature) => {
+const minimumHintCountForFeature = (requiredFeature: RequiredFeature): number => {
   if (requiredFeature === 'hint') return 3;
   if (requiredFeature === 'rps') return 2;
   return 1;
 };
 
-const edgeKey = (a, b) => {
-  const ka = a.r * 1000 + a.c;
-  const kb = b.r * 1000 + b.c;
-  return ka < kb ? ka * 1000000 + kb : kb * 1000000 + ka;
+const edgeKey = (a: GridPoint, b: GridPoint): string => {
+  const ka = keyOf(a.r, a.c);
+  const kb = keyOf(b.r, b.c);
+  return ka < kb ? `${ka}|${kb}` : `${kb}|${ka}`;
 };
 
-const sortPairs = (pairs) =>
+const sortPairs = (pairs: readonly GridTuple[]): GridTuple[] =>
   pairs
     .slice()
     .sort((a, b) => (a[0] - b[0]) || (a[1] - b[1]));
 
-const sortCornerCounts = (entries) =>
+const sortCornerCounts = (entries: readonly CornerCount[]): CornerCount[] =>
   entries
     .slice()
     .sort((a, b) => (a[0] - b[0]) || (a[1] - b[1]) || (a[2] - b[2]));
 
-const sortCells = (cells) =>
+const sortCells = (cells: readonly GridPoint[]): GridPoint[] =>
   cells
     .slice()
     .sort((a, b) => (a.r - b.r) || (a.c - b.c));
 
-const assertInfiniteIndex = (infiniteIndex) => {
+const assertInfiniteIndex = (infiniteIndex: number): void => {
   if (!Number.isInteger(infiniteIndex) || infiniteIndex < 0) {
     throw new Error(`infiniteIndex must be a non-negative integer, got: ${infiniteIndex}`);
   }
@@ -75,15 +251,15 @@ const assertInfiniteIndex = (infiniteIndex) => {
   }
 };
 
-const assertVariantId = (variantId) => {
+const assertVariantId = (variantId: number): void => {
   if (!Number.isInteger(variantId) || variantId < 0) {
     throw new Error(`variantId must be a non-negative integer, got: ${variantId}`);
   }
 };
 
-const toGridStrings = (grid) => grid.map((row) => row.join(''));
+const toGridStrings = (grid: Grid): string[] => grid.map((row) => row.join(''));
 
-const pickDistinct = (items, count, rng) => {
+const pickDistinct = <T>(items: readonly T[], count: number, rng: RandomNumberGenerator): T[] => {
   if (!Array.isArray(items) || items.length === 0 || count <= 0) return [];
   const copy = items.slice();
   for (let i = copy.length - 1; i > 0; i--) {
@@ -95,8 +271,8 @@ const pickDistinct = (items, count, rng) => {
   return copy.slice(0, Math.min(count, copy.length));
 };
 
-const buildFeaturePlan = (requiredFeature, rng) => {
-  const plan = {
+const buildFeaturePlan = (requiredFeature: RequiredFeature, rng: RandomNumberGenerator): FeaturePlan => {
+  const plan: FeaturePlan = {
     hint: true,
     corner: true,
     stitch: false,
@@ -111,7 +287,7 @@ const buildFeaturePlan = (requiredFeature, rng) => {
   } else if (requiredFeature === 'rps') {
     plan.rps = true;
   } else if (requiredFeature === 'mixed') {
-    const coreExtra = pickDistinct(['stitch', 'rps'], 1, rng);
+    const coreExtra = pickDistinct<'stitch' | 'rps'>(['stitch', 'rps'], 1, rng);
     for (const key of coreExtra) plan[key] = true;
     if (rng() < 0.25) plan.movable = true;
   }
@@ -125,12 +301,12 @@ const buildFeaturePlan = (requiredFeature, rng) => {
   return plan;
 };
 
-const chooseDimensions = (rng) => ({
+const chooseDimensions = (rng: RandomNumberGenerator): { rows: number; cols: number } => ({
   rows: 5 + intFromRng(rng, 2), // 5..6
   cols: 5 + intFromRng(rng, 2), // 5..6
 });
 
-const countMissingCoverage = (counts) => {
+const countMissingCoverage = (counts: readonly number[]): number => {
   let missing = 0;
   for (const element of counts) {
     if (element <= 0) missing += 1;
@@ -138,15 +314,23 @@ const countMissingCoverage = (counts) => {
   return missing;
 };
 
-const hasFullCoverage = (rowCoverage, colCoverage) =>
+const hasFullCoverage = (rowCoverage: readonly number[], colCoverage: readonly number[]): boolean =>
   countMissingCoverage(rowCoverage) === 0 && countMissingCoverage(colCoverage) === 0;
 
-const isInBounds = (rows, cols, r, c) => r >= 0 && r < rows && c >= 0 && c < cols;
+const isInBounds = (rows: number, cols: number, r: number, c: number): boolean =>
+  r >= 0 && r < rows && c >= 0 && c < cols;
 
-const canCoverRemainingRowsAndCols = (missingRows, missingCols, remaining) =>
+const canCoverRemainingRowsAndCols = (missingRows: number, missingCols: number, remaining: number): boolean =>
   missingRows <= remaining && missingCols <= remaining;
 
-const countOnwardMoves = (rows, cols, r, c, visited, previous) => {
+const countOnwardMoves = (
+  rows: number,
+  cols: number,
+  r: number,
+  c: number,
+  visited: boolean[][],
+  previous: GridPoint,
+): number => {
   let onward = 0;
   for (const [dr, dc] of ORTH_DIRS) {
     const nr = r + dr;
@@ -168,8 +352,19 @@ const collectOrthPathCandidates = ({
   missingCols,
   remaining,
   rng,
-}) => {
-  const candidates = [];
+}: {
+  rows: number;
+  cols: number;
+  cur: GridPoint;
+  visited: boolean[][];
+  rowCoverage: number[];
+  colCoverage: number[];
+  missingRows: number;
+  missingCols: number;
+  remaining: number;
+  rng: RandomNumberGenerator;
+}): PathCandidate[] => {
+  const candidates: PathCandidate[] = [];
   for (const [dr, dc] of ORTH_DIRS) {
     const nr = cur.r + dr;
     const nc = cur.c + dc;
@@ -195,21 +390,39 @@ const collectOrthPathCandidates = ({
   return candidates;
 };
 
-const pushPathCandidate = (path, candidate, visited, rowCoverage, colCoverage) => {
+const pushPathCandidate = (
+  path: GridPoint[],
+  candidate: PathCandidate,
+  visited: boolean[][],
+  rowCoverage: number[],
+  colCoverage: number[],
+): void => {
   visited[candidate.r][candidate.c] = true;
   rowCoverage[candidate.r] += 1;
   colCoverage[candidate.c] += 1;
   path.push({ r: candidate.r, c: candidate.c });
 };
 
-const popPathCandidate = (path, candidate, visited, rowCoverage, colCoverage) => {
+const popPathCandidate = (
+  path: GridPoint[],
+  candidate: PathCandidate,
+  visited: boolean[][],
+  rowCoverage: number[],
+  colCoverage: number[],
+): void => {
   path.pop();
   rowCoverage[candidate.r] -= 1;
   colCoverage[candidate.c] -= 1;
   visited[candidate.r][candidate.c] = false;
 };
 
-const choosePathLength = (rows, cols, requiredFeature, plan, rng) => {
+const choosePathLength = (
+  rows: number,
+  cols: number,
+  requiredFeature: RequiredFeature,
+  plan: FeaturePlan,
+  rng: RandomNumberGenerator,
+): number => {
   const total = rows * cols;
   let minFill = 0.78;
   let maxFill = 0.92;
@@ -255,7 +468,12 @@ const choosePathLength = (rows, cols, requiredFeature, plan, rng) => {
   return minCells + intFromRng(rng, maxCells - minCells + 1);
 };
 
-const buildRandomOrthPath = (rows, cols, targetLen, rng) => {
+const buildRandomOrthPath = (
+  rows: number,
+  cols: number,
+  targetLen: number,
+  rng: RandomNumberGenerator,
+): GridPoint[] | null => {
   const total = rows * cols;
   if (!Number.isInteger(targetLen) || targetLen < rows + cols - 1 || targetLen > total) return null;
 
@@ -317,8 +535,8 @@ const buildRandomOrthPath = (rows, cols, targetLen, rng) => {
   return null;
 };
 
-const buildSnakePath = (top, left, activeRows, activeCols) => {
-  const path = [];
+const buildSnakePath = (top: number, left: number, activeRows: number, activeCols: number): GridPoint[] => {
+  const path: GridPoint[] = [];
   for (let rr = 0; rr < activeRows; rr++) {
     const r = top + rr;
     if (rr % 2 === 0) {
@@ -334,8 +552,8 @@ const buildSnakePath = (top, left, activeRows, activeCols) => {
   return path;
 };
 
-const describeTransitions = (path) => {
-  const transitions = [];
+const describeTransitions = (path: readonly GridPoint[]): PathTransition[] => {
+  const transitions: PathTransition[] = [];
   if (!Array.isArray(path) || path.length < 4) return transitions;
 
   for (let start = 0; start <= path.length - 4; start++) {
@@ -372,10 +590,14 @@ const describeTransitions = (path) => {
   return transitions;
 };
 
-const pickStitchTransitions = (transitions, wantedCount, rng) => {
+const pickStitchTransitions = (
+  transitions: readonly PathTransition[],
+  wantedCount: number,
+  rng: RandomNumberGenerator,
+): PathTransition[] => {
   if (!Array.isArray(transitions) || transitions.length === 0 || wantedCount <= 0) return [];
   const shuffled = pickDistinct(transitions, transitions.length, rng);
-  const selected = [];
+  const selected: PathTransition[] = [];
 
   for (const candidate of shuffled) {
     let overlaps = false;
@@ -394,9 +616,9 @@ const pickStitchTransitions = (transitions, wantedCount, rng) => {
   return selected;
 };
 
-const collectStitchVerticesFromPath = (path) => {
-  const stitchKeys = new Set();
-  const stitches = [];
+const collectStitchVerticesFromPath = (path: readonly GridPoint[]): StitchCollection => {
+  const stitchKeys = new Set<string>();
+  const stitches: GridTuple[] = [];
   for (let i = 1; i < path.length; i++) {
     const a = path[i - 1];
     const b = path[i];
@@ -428,7 +650,10 @@ const collectStitchVerticesFromPath = (path) => {
   };
 };
 
-const applyStitchTransitions = (path, selectedTransitions) => {
+const applyStitchTransitions = (
+  path: GridPoint[],
+  selectedTransitions: readonly PathTransition[] | null | undefined,
+): void => {
   if (!selectedTransitions || selectedTransitions.length === 0) return;
   for (const transition of selectedTransitions) {
     const i = transition.start;
@@ -438,13 +663,13 @@ const applyStitchTransitions = (path, selectedTransitions) => {
   }
 };
 
-const isWallCell = (grid, r, c) => {
+const isWallCell = (grid: Grid | null, r: number, c: number): boolean => {
   if (!Array.isArray(grid) || !Array.isArray(grid[r])) return false;
   const ch = grid[r][c];
   return ch === '#' || ch === 'm';
 };
 
-const cornerWallStats = (grid, vr, vc) => {
+const cornerWallStats = (grid: Grid | null, vr: number, vc: number): CornerWallStats => {
   const nw = isWallCell(grid, vr - 1, vc - 1);
   const ne = isWallCell(grid, vr - 1, vc);
   const sw = isWallCell(grid, vr, vc - 1);
@@ -466,7 +691,7 @@ const cornerWallStats = (grid, vr, vc) => {
   };
 };
 
-const isUnsatisfiableCornerConstraint = (grid, vr, vc, count) => {
+const isUnsatisfiableCornerConstraint = (grid: Grid | null, vr: number, vc: number, count: number): boolean => {
   const stats = cornerWallStats(grid, vr, vc);
   if (stats.wallCount > 3) return true;
   if (count === 0 && stats.hasDiagonalWalls) return true;
@@ -474,7 +699,7 @@ const isUnsatisfiableCornerConstraint = (grid, vr, vc, count) => {
   return false;
 };
 
-const getHintChoicesAtIndex = (path, index) => {
+const getHintChoicesAtIndex = (path: readonly GridPoint[], index: number): HintCode[] => {
   if (index <= 0 || index >= path.length - 1) return [];
 
   const prev = path[index - 1];
@@ -492,7 +717,7 @@ const getHintChoicesAtIndex = (path, index) => {
   const cw = z > 0;
   const ccw = z < 0;
 
-  const out = [];
+  const out: HintCode[] = [];
   if (!straight) out.push('t');
   if (!straight && cw) out.push('r');
   if (!straight && ccw) out.push('l');
@@ -502,13 +727,13 @@ const getHintChoicesAtIndex = (path, index) => {
   return out;
 };
 
-const rotateRps = (start, steps) => {
+const rotateRps = (start: RpsCode, steps: number): RpsCode => {
   const idx = RPS_CODES.indexOf(start);
   if (idx < 0) return 'g';
   return RPS_CODES[(idx + (steps % 3)) % 3];
 };
 
-const createFeatureStats = () => ({
+const createFeatureStats = (): FeatureStats => ({
   hasHint: false,
   hasRps: false,
   hasMovable: false,
@@ -518,7 +743,7 @@ const createFeatureStats = () => ({
   cellConstraintCount: 0,
 });
 
-const recordGridFeatureCell = (stats, ch) => {
+const recordGridFeatureCell = (stats: FeatureStats, ch: string): void => {
   if (isWallToken(ch)) stats.wallCount += 1;
   if (HINT_CODES.has(ch)) {
     stats.hasHint = true;
@@ -533,7 +758,7 @@ const recordGridFeatureCell = (stats, ch) => {
   if (ch === 'm') stats.hasMovable = true;
 };
 
-const scanGridFeatureStats = (grid) => {
+const scanGridFeatureStats = (grid: LevelDefinition['grid']): FeatureStats => {
   const stats = createFeatureStats();
   for (const row of grid) {
     for (const ch of row) {
@@ -543,7 +768,7 @@ const scanGridFeatureStats = (grid) => {
   return stats;
 };
 
-const analyzeFeatures = (level) => {
+const analyzeFeatures = (level: ConstraintLevel): InfiniteLevelFeatures => {
   const {
     hasHint,
     hasRps,
@@ -583,13 +808,13 @@ const analyzeFeatures = (level) => {
   };
 };
 
-const constraintDensity = (level, features = analyzeFeatures(level)) => {
+const constraintDensity = (level: ConstraintLevel, features: InfiniteLevelFeatures = analyzeFeatures(level)): number => {
   const denom = features.nonWallCellCount;
   if (denom <= 0) return 0;
   return features.constraintTokenCount / denom;
 };
 
-const wallDensity = (level, features = analyzeFeatures(level)) => {
+const wallDensity = (level: ConstraintLevel, features: InfiniteLevelFeatures = analyzeFeatures(level)): number => {
   const rows = level.grid.length;
   const cols = rows > 0 ? level.grid[0].length : 0;
   const total = rows * cols;
@@ -597,8 +822,8 @@ const wallDensity = (level, features = analyzeFeatures(level)) => {
   return features.wallCount / total;
 };
 
-const collectAvailablePathIndices = (grid, path, occupied) => {
-  const pathIndices = [];
+const collectAvailablePathIndices = (grid: Grid, path: readonly GridPoint[], occupied: ReadonlySet<string>): number[] => {
+  const pathIndices: number[] = [];
   for (let i = 1; i < path.length - 1; i++) {
     const p = path[i];
     const k = keyOf(p.r, p.c);
@@ -607,14 +832,21 @@ const collectAvailablePathIndices = (grid, path, occupied) => {
   return pathIndices;
 };
 
-const normalizeTargetRps = (requireRps, rpsCount) => {
+const normalizeTargetRps = (requireRps: boolean, rpsCount: number): number => {
   let targetRps = Math.max(0, rpsCount);
   if (requireRps) targetRps = Math.max(2, targetRps);
   if (targetRps === 1) return 2;
   return targetRps;
 };
 
-const placeRpsSequence = (grid, path, pathIndices, targetRps, occupied, rng) => {
+const placeRpsSequence = (
+  grid: Grid,
+  path: readonly GridPoint[],
+  pathIndices: readonly number[],
+  targetRps: number,
+  occupied: Set<string>,
+  rng: RandomNumberGenerator,
+): void => {
   if (targetRps <= 0) return;
   const picks = pickDistinct(pathIndices, Math.min(targetRps, pathIndices.length), rng)
     .sort((a, b) => a - b);
@@ -628,7 +860,7 @@ const placeRpsSequence = (grid, path, pathIndices, targetRps, occupied, rng) => 
   }
 };
 
-const countHintsOnPath = (grid, path) => {
+const countHintsOnPath = (grid: Grid, path: readonly GridPoint[]): number => {
   let hintCount = 0;
   for (let i = 1; i < path.length - 1; i++) {
     const p = path[i];
@@ -637,8 +869,12 @@ const countHintsOnPath = (grid, path) => {
   return hintCount;
 };
 
-const collectHintCandidates = (grid, path, occupied) => {
-  const candidates = [];
+const collectHintCandidates = (
+  grid: Grid,
+  path: readonly GridPoint[],
+  occupied: ReadonlySet<string>,
+): HintPlacementCandidate[] => {
+  const candidates: HintPlacementCandidate[] = [];
   for (let i = 1; i < path.length - 1; i++) {
     const p = path[i];
     const k = keyOf(p.r, p.c);
@@ -651,7 +887,14 @@ const collectHintCandidates = (grid, path, occupied) => {
   return candidates;
 };
 
-const placeHintCandidates = (grid, path, candidates, needed, occupied, rng) => {
+const placeHintCandidates = (
+  grid: Grid,
+  path: readonly GridPoint[],
+  candidates: readonly HintPlacementCandidate[],
+  needed: number,
+  occupied: Set<string>,
+  rng: RandomNumberGenerator,
+): void => {
   const selected = pickDistinct(candidates, Math.min(candidates.length, needed), rng);
   for (const entry of selected) {
     const choice = entry.choices[intFromRng(rng, entry.choices.length)];
@@ -661,7 +904,12 @@ const placeHintCandidates = (grid, path, candidates, needed, occupied, rng) => {
   }
 };
 
-const enforceMinimumFeatures = (grid, path, rng, options = {}) => {
+const enforceMinimumFeatures = (
+  grid: Grid,
+  path: readonly GridPoint[],
+  rng: RandomNumberGenerator,
+  options: EnforceMinimumFeatureOptions = {},
+): void => {
   const {
     minHints = 2,
     requireRps = false,
@@ -680,8 +928,14 @@ const enforceMinimumFeatures = (grid, path, rng, options = {}) => {
   placeHintCandidates(grid, path, candidates, minHints - hintPlaced, occupied, rng);
 };
 
-const collectCornerCandidates = (rows, cols, orthEdges, forbiddenVertices = new Set(), grid = null) => {
-  const candidates = [];
+const collectCornerCandidates = (
+  rows: number,
+  cols: number,
+  orthEdges: ReadonlySet<string>,
+  forbiddenVertices: ReadonlySet<string> = new Set<string>(),
+  grid: Grid | null = null,
+): CornerCount[] => {
+  const candidates: CornerCount[] = [];
   for (let vr = 1; vr < rows; vr++) {
     for (let vc = 1; vc < cols; vc++) {
       const vk = `${vr},${vc}`;
@@ -696,13 +950,17 @@ const collectCornerCandidates = (rows, cols, orthEdges, forbiddenVertices = new 
   return candidates;
 };
 
-const chooseCornerTargetCount = (requiredFeature, candidateCount, rng) => {
+const chooseCornerTargetCount = (
+  requiredFeature: RequiredFeature,
+  candidateCount: number,
+  rng: RandomNumberGenerator,
+): number => {
   let targetCount = 1 + intFromRng(rng, 2);
   if (requiredFeature === 'corner') targetCount = 2 + intFromRng(rng, 2);
   return Math.min(targetCount, 4, candidateCount);
 };
 
-const addUniqueCornerEntries = (picked, used, entries) => {
+const addUniqueCornerEntries = (picked: CornerCount[], used: Set<string>, entries: readonly CornerCount[]): void => {
   for (const entry of entries) {
     const k = `${entry[0]},${entry[1]}`;
     if (used.has(k)) continue;
@@ -711,21 +969,27 @@ const addUniqueCornerEntries = (picked, used, entries) => {
   }
 };
 
-const maybeAddZeroCornerEntry = (picked, used, zeroCandidates, requiredFeature, rng) => {
+const maybeAddZeroCornerEntry = (
+  picked: CornerCount[],
+  used: Set<string>,
+  zeroCandidates: readonly CornerCount[],
+  requiredFeature: RequiredFeature,
+  rng: RandomNumberGenerator,
+): void => {
   if (zeroCandidates.length === 0) return;
   if (requiredFeature !== 'corner' && rng() >= 0.25) return;
   addUniqueCornerEntries(picked, used, [zeroCandidates[intFromRng(rng, zeroCandidates.length)]]);
 };
 
 const buildCornerCounts = (
-  rows,
-  cols,
-  orthEdges,
-  rng,
-  requiredFeature,
-  forbiddenVertices = new Set(),
-  grid = null,
-) => {
+  rows: number,
+  cols: number,
+  orthEdges: ReadonlySet<string>,
+  rng: RandomNumberGenerator,
+  requiredFeature: RequiredFeature,
+  forbiddenVertices: ReadonlySet<string> = new Set<string>(),
+  grid: Grid | null = null,
+): CornerCount[] => {
   const candidates = collectCornerCandidates(rows, cols, orthEdges, forbiddenVertices, grid);
   if (candidates.length === 0) return [];
 
@@ -733,8 +997,8 @@ const buildCornerCounts = (
   const nonZeroCandidates = candidates.filter((entry) => entry[2] !== 0);
   const targetCount = chooseCornerTargetCount(requiredFeature, candidates.length, rng);
 
-  const picked = [];
-  const used = new Set();
+  const picked: CornerCount[] = [];
+  const used = new Set<string>();
   maybeAddZeroCornerEntry(picked, used, zeroCandidates, requiredFeature, rng);
 
   const primaryPool = nonZeroCandidates.length > 0 ? nonZeroCandidates : candidates;
@@ -749,12 +1013,12 @@ const buildCornerCounts = (
 };
 
 const findFallbackCornerCount = (
-  rows,
-  cols,
-  orthEdges,
-  forbiddenVertices = new Set(),
-  grid = null,
-) => {
+  rows: number,
+  cols: number,
+  orthEdges: ReadonlySet<string>,
+  forbiddenVertices: ReadonlySet<string> = new Set<string>(),
+  grid: Grid | null = null,
+): CornerCount | null => {
   for (let vr = 1; vr < rows; vr++) {
     for (let vc = 1; vc < cols; vc++) {
       const vk = `${vr},${vc}`;
@@ -768,13 +1032,13 @@ const findFallbackCornerCount = (
   return null;
 };
 
-const removeArrayAt = (arr, index) => {
+const removeArrayAt = <T>(arr: T[], index: number): boolean => {
   if (!Array.isArray(arr) || index < 0 || index >= arr.length) return false;
   arr.splice(index, 1);
   return true;
 };
 
-const measureConstraintDensity = (grid, stitches, cornerCounts) => {
+const measureConstraintDensity = (grid: Grid, stitches: readonly GridTuple[], cornerCounts: readonly CornerCount[]): number => {
   let hintCount = 0;
   let rpsCount = 0;
   let wallCount = 0;
@@ -792,8 +1056,8 @@ const measureConstraintDensity = (grid, stitches, cornerCounts) => {
   return (hintCount + rpsCount + stitches.length + cornerCounts.length) / nonWall;
 };
 
-const collectHintCellsOnPath = (grid, path) => {
-  const removableHints = [];
+const collectHintCellsOnPath = (grid: Grid, path: readonly GridPoint[]): GridPoint[] => {
+  const removableHints: GridPoint[] = [];
   for (let i = 1; i < path.length - 1; i++) {
     const p = path[i];
     if (HINT_CODES.has(grid[p.r][p.c])) removableHints.push(p);
@@ -801,8 +1065,8 @@ const collectHintCellsOnPath = (grid, path) => {
   return removableHints;
 };
 
-const collectRpsPathIndices = (grid, path) => {
-  const rpsPathIndices = [];
+const collectRpsPathIndices = (grid: Grid, path: readonly GridPoint[]): number[] => {
+  const rpsPathIndices: number[] = [];
   for (let i = 1; i < path.length - 1; i++) {
     const p = path[i];
     if (isRpsToken(grid[p.r][p.c])) rpsPathIndices.push(i);
@@ -810,12 +1074,12 @@ const collectRpsPathIndices = (grid, path) => {
   return rpsPathIndices;
 };
 
-const clearPathCell = (grid, path, index) => {
+const clearPathCell = (grid: Grid, path: readonly GridPoint[], index: number): void => {
   const p = path[index];
   grid[p.r][p.c] = '.';
 };
 
-const tryRemoveRpsDensity = (grid, path, minRps, rng) => {
+const tryRemoveRpsDensity = (grid: Grid, path: readonly GridPoint[], minRps: number, rng: RandomNumberGenerator): boolean => {
   const rpsPathIndices = collectRpsPathIndices(grid, path);
   const rpsCount = rpsPathIndices.length;
   if (rpsCount <= minRps) return false;
@@ -833,7 +1097,15 @@ const tryRemoveRpsDensity = (grid, path, minRps, rng) => {
   return true;
 };
 
-const tryReduceConstraintDensity = (grid, path, cornerCounts, minHints, minCorners, minRps, rng) => {
+const tryReduceConstraintDensity = (
+  grid: Grid,
+  path: readonly GridPoint[],
+  cornerCounts: CornerCount[],
+  minHints: number,
+  minCorners: number,
+  minRps: number,
+  rng: RandomNumberGenerator,
+): boolean => {
   const removableHints = collectHintCellsOnPath(grid, path);
   if (removableHints.length > minHints) {
     const pick = removableHints[intFromRng(rng, removableHints.length)];
@@ -848,8 +1120,8 @@ const tryReduceConstraintDensity = (grid, path, cornerCounts, minHints, minCorne
   return tryRemoveRpsDensity(grid, path, minRps, rng);
 };
 
-const collectAddableHintCandidates = (grid, path) => {
-  const addableHints = [];
+const collectAddableHintCandidates = (grid: Grid, path: readonly GridPoint[]): AddableHintCandidate[] => {
+  const addableHints: AddableHintCandidate[] = [];
   for (let i = 1; i < path.length - 1; i++) {
     const p = path[i];
     if (grid[p.r][p.c] !== '.') continue;
@@ -861,7 +1133,7 @@ const collectAddableHintCandidates = (grid, path) => {
   return addableHints;
 };
 
-const tryIncreaseConstraintDensity = (grid, path, rng) => {
+const tryIncreaseConstraintDensity = (grid: Grid, path: readonly GridPoint[], rng: RandomNumberGenerator): boolean => {
   const addableHints = collectAddableHintCandidates(grid, path);
   if (addableHints.length === 0) return false;
 
@@ -870,7 +1142,14 @@ const tryIncreaseConstraintDensity = (grid, path, rng) => {
   return true;
 };
 
-const enforceConstraintDensityBand = (grid, path, stitches, cornerCounts, requiredFeature, rng) => {
+const enforceConstraintDensityBand = (
+  grid: Grid,
+  path: readonly GridPoint[],
+  stitches: readonly GridTuple[],
+  cornerCounts: CornerCount[],
+  requiredFeature: RequiredFeature,
+  rng: RandomNumberGenerator,
+): boolean => {
   const minHints = minimumHintCountForFeature(requiredFeature);
   const minRps = requiredFeature === 'rps' ? 2 : 0;
   const minCorners = 1;
@@ -890,7 +1169,12 @@ const enforceConstraintDensityBand = (grid, path, stitches, cornerCounts, requir
   return false;
 };
 
-const chooseMovableCount = (requiredFeature, plan, wallCellCount, rng) => {
+const chooseMovableCount = (
+  requiredFeature: RequiredFeature,
+  plan: FeaturePlan,
+  wallCellCount: number,
+  rng: RandomNumberGenerator,
+): number => {
   if (!plan.movable || wallCellCount <= 0) return 0;
   const maxMovable = Math.min(2, wallCellCount);
   if (maxMovable <= 1) return 1;
@@ -898,8 +1182,8 @@ const chooseMovableCount = (requiredFeature, plan, wallCellCount, rng) => {
   return rng() < 0.2 ? 2 : 1;
 };
 
-const collectOpenPathCells = (grid, path, solvedKeySet) => {
-  const openPathCells = [];
+const collectOpenPathCells = (grid: Grid, path: readonly GridPoint[], solvedKeySet: ReadonlySet<string>): GridPoint[] => {
+  const openPathCells: GridPoint[] = [];
   for (const p of path) {
     if (grid[p.r][p.c] !== '.') continue;
     if (solvedKeySet.has(keyOf(p.r, p.c))) continue;
@@ -908,7 +1192,11 @@ const collectOpenPathCells = (grid, path, solvedKeySet) => {
   return openPathCells;
 };
 
-const tryRelocateMovableStart = (grid, sourceOrder, targetOrder) => {
+const tryRelocateMovableStart = (
+  grid: Grid,
+  sourceOrder: readonly GridPoint[],
+  targetOrder: readonly GridPoint[],
+): boolean => {
   for (const source of sourceOrder) {
     if (grid[source.r][source.c] !== 'm') continue;
     for (const target of targetOrder) {
@@ -922,7 +1210,12 @@ const tryRelocateMovableStart = (grid, sourceOrder, targetOrder) => {
   return false;
 };
 
-const scrambleMovableStartPositions = (grid, path, solvedMovableCells, rng) => {
+const scrambleMovableStartPositions = (
+  grid: Grid,
+  path: readonly GridPoint[],
+  solvedMovableCells: readonly GridPoint[],
+  rng: RandomNumberGenerator,
+): boolean => {
   if (!Array.isArray(solvedMovableCells) || solvedMovableCells.length === 0) return false;
 
   const solvedKeySet = new Set(solvedMovableCells.map((cell) => keyOf(cell.r, cell.c)));
@@ -934,7 +1227,13 @@ const scrambleMovableStartPositions = (grid, path, solvedMovableCells, rng) => {
   return tryRelocateMovableStart(grid, sourceOrder, targetOrder);
 };
 
-const buildPathForLevel = (rows, cols, requiredFeature, plan, rng) => {
+const buildPathForLevel = (
+  rows: number,
+  cols: number,
+  requiredFeature: RequiredFeature,
+  plan: FeaturePlan,
+  rng: RandomNumberGenerator,
+): PathBuildResult => {
   const total = rows * cols;
   const minLen = Math.max(rows + cols - 1, 14, Math.ceil(total * (1 - MAX_WALL_DENSITY)));
   const maxLen = total;
@@ -942,8 +1241,8 @@ const buildPathForLevel = (rows, cols, requiredFeature, plan, rng) => {
   const needsStitchTransition = requiredFeature === 'stitch' || plan.stitch;
 
   const jitterSequence = [0, 1, -1, 2, -2, 3, -3, 4, -4];
-  let fallbackPath = null;
-  let fallbackTransitions = [];
+  let fallbackPath: GridPoint[] | null = null;
+  let fallbackTransitions: PathTransition[] = [];
 
   for (let attempt = 0; attempt < jitterSequence.length * 2; attempt++) {
     const jitter = jitterSequence[attempt % jitterSequence.length];
@@ -979,16 +1278,16 @@ const buildPathForLevel = (rows, cols, requiredFeature, plan, rng) => {
   };
 };
 
-const buildGridFromPath = (rows, cols, path) => {
-  const grid = Array.from({ length: rows }, () => new Array(cols).fill('#'));
+const buildGridFromPath = (rows: number, cols: number, path: readonly GridPoint[]): Grid => {
+  const grid: Grid = Array.from({ length: rows }, () => new Array(cols).fill('#'));
   for (const p of path) {
     grid[p.r][p.c] = '.';
   }
   return grid;
 };
 
-const collectWallCells = (grid) => {
-  const wallCells = [];
+const collectWallCells = (grid: Grid): GridPoint[] => {
+  const wallCells: GridPoint[] = [];
   for (let r = 0; r < grid.length; r++) {
     for (let c = 0; c < grid[r].length; c++) {
       if (grid[r][c] === '#') wallCells.push({ r, c });
@@ -997,7 +1296,13 @@ const collectWallCells = (grid) => {
   return wallCells;
 };
 
-const placeSolvedMovableCells = (grid, wallCells, plan, requiredFeature, rng) => {
+const placeSolvedMovableCells = (
+  grid: Grid,
+  wallCells: readonly GridPoint[],
+  plan: FeaturePlan,
+  requiredFeature: RequiredFeature,
+  rng: RandomNumberGenerator,
+): GridPoint[] => {
   if (!plan.movable || wallCells.length === 0) return [];
   const movableCount = chooseMovableCount(requiredFeature, plan, wallCells.length, rng);
   const solvedMovableCells = pickDistinct(wallCells, movableCount, rng);
@@ -1007,7 +1312,12 @@ const placeSolvedMovableCells = (grid, wallCells, plan, requiredFeature, rng) =>
   return solvedMovableCells;
 };
 
-const selectStitchTransitions = (plan, requiredFeature, transitions, rng) => {
+const selectStitchTransitions = (
+  plan: FeaturePlan,
+  requiredFeature: RequiredFeature,
+  transitions: readonly PathTransition[],
+  rng: RandomNumberGenerator,
+): PathTransition[] => {
   if (transitions.length === 0) return [];
   if (plan.stitch) {
     const wanted = 1 + intFromRng(rng, Math.min(2, transitions.length));
@@ -1017,7 +1327,12 @@ const selectStitchTransitions = (plan, requiredFeature, transitions, rng) => {
   return [];
 };
 
-const collectValidatedStitches = (path, stitchTransitions, infiniteIndex, variantId) => {
+const collectValidatedStitches = (
+  path: GridPoint[],
+  stitchTransitions: readonly PathTransition[],
+  infiniteIndex: number,
+  variantId: number,
+): ValidatedStitches => {
   applyStitchTransitions(path, stitchTransitions);
   const stitchCollect = collectStitchVerticesFromPath(path);
   if (stitchCollect.invalidStep) {
@@ -1035,8 +1350,14 @@ const collectValidatedStitches = (path, stitchTransitions, infiniteIndex, varian
   };
 };
 
-const applyMinimumGridFeatures = (grid, path, plan, requiredFeature, rng) => {
-  const occupied = new Set();
+const applyMinimumGridFeatures = (
+  grid: Grid,
+  path: readonly GridPoint[],
+  plan: FeaturePlan,
+  requiredFeature: RequiredFeature,
+  rng: RandomNumberGenerator,
+): void => {
+  const occupied = new Set<string>();
   const requestedRps = plan.rps ? 2 + intFromRng(rng, 2) : 0;
   enforceMinimumFeatures(grid, path, rng, {
     minHints: minimumHintCountForFeature(requiredFeature),
@@ -1046,7 +1367,14 @@ const applyMinimumGridFeatures = (grid, path, plan, requiredFeature, rng) => {
   });
 };
 
-const scrambleMovableStartPositionsOrThrow = (grid, path, solvedMovableCells, infiniteIndex, variantId, rng) => {
+const scrambleMovableStartPositionsOrThrow = (
+  grid: Grid,
+  path: readonly GridPoint[],
+  solvedMovableCells: readonly GridPoint[],
+  infiniteIndex: number,
+  variantId: number,
+  rng: RandomNumberGenerator,
+): void => {
   if (solvedMovableCells.length === 0) return;
   const scrambled = scrambleMovableStartPositions(grid, path, solvedMovableCells, rng);
   if (!scrambled) {
@@ -1057,27 +1385,31 @@ const scrambleMovableStartPositionsOrThrow = (grid, path, solvedMovableCells, in
 };
 
 const enforceConstraintDensityBandOrThrow = (
-  { grid, path, stitches, cornerCounts, requiredFeature, rng },
-  { infiniteIndex, variantId },
-) => {
+  { grid, path, stitches, cornerCounts, requiredFeature, rng }: DensityBandArgs,
+  { infiniteIndex, variantId }: VariantContext,
+): void => {
   if (enforceConstraintDensityBand(grid, path, stitches, cornerCounts, requiredFeature, rng)) return;
   throw new Error(
     `Failed to enforce constraint density band for infinite index ${infiniteIndex} variant ${variantId}`,
   );
 };
 
-const buildGeneratedLevel = (grid, stitches, cornerCounts) => ({
+const buildGeneratedLevel = (
+  grid: Grid,
+  stitches: readonly GridTuple[],
+  cornerCounts: readonly CornerCount[],
+): GeneratedLevel => ({
   grid: toGridStrings(grid),
   stitches: sortPairs(stitches),
   cornerCounts: sortCornerCounts(cornerCounts),
 });
 
 const ensureFallbackCornerCount = (
-  level,
-  features,
-  { rows, cols, orthEdges, stitchVertexSet, grid },
-  { infiniteIndex, variantId },
-) => {
+  level: GeneratedLevel,
+  features: InfiniteLevelFeatures,
+  { rows, cols, orthEdges, stitchVertexSet, grid }: CornerBuildContext,
+  { infiniteIndex, variantId }: VariantContext,
+): void => {
   if (features.corner || level.cornerCounts.length > 0) return;
   const fallback = findFallbackCornerCount(rows, cols, orthEdges, stitchVertexSet, grid);
   if (!fallback) {
@@ -1086,7 +1418,15 @@ const ensureFallbackCornerCount = (
   level.cornerCounts = [fallback];
 };
 
-const validateGeneratedLevel = (level, requiredFeature, features, density, walls, infiniteIndex, variantId) => {
+const validateGeneratedLevel = (
+  level: GeneratedLevel,
+  requiredFeature: RequiredFeature,
+  features: InfiniteLevelFeatures,
+  density: number,
+  walls: number,
+  infiniteIndex: number,
+  variantId: number,
+): void => {
   if (requiredFeature === 'stitch' && level.stitches.length === 0) {
     throw new Error(`Failed to create stitch constraints for infinite index ${infiniteIndex} variant ${variantId}`);
   }
@@ -1117,10 +1457,28 @@ const validateGeneratedLevel = (level, requiredFeature, features, density, walls
   }
 };
 
-const buildCoreMeta = ({ rows, cols, path, stitches, solvedMovableCells, requiredFeature, seed, variantId }) => {
+const buildCoreMeta = ({
+  rows,
+  cols,
+  path,
+  stitches,
+  solvedMovableCells,
+  requiredFeature,
+  seed,
+  variantId,
+}: {
+  rows: number;
+  cols: number;
+  path: readonly GridPoint[];
+  stitches: readonly GridTuple[];
+  solvedMovableCells: readonly GridPoint[];
+  requiredFeature: RequiredFeature;
+  seed: number;
+  variantId: number;
+}): CoreMeta => {
   const profileId = (rows * 10000) + (cols * 1000) + (path.length * 10) + Math.min(9, stitches.length);
-  const witnessPath = path.map((p) => [p.r, p.c]);
-  const witnessMovableWalls = sortCells(solvedMovableCells).map((cell) => [cell.r, cell.c]);
+  const witnessPath = path.map((p): GridTuple => [p.r, p.c]);
+  const witnessMovableWalls = sortCells(solvedMovableCells).map((cell): GridTuple => [cell.r, cell.c]);
 
   return {
     requiredFeature,
@@ -1132,14 +1490,14 @@ const buildCoreMeta = ({ rows, cols, path, stitches, solvedMovableCells, require
   };
 };
 
-const createCoreLevel = (infiniteIndex, variantId) => {
+const createCoreLevel = (infiniteIndex: number, variantId: number): CoreLevelResult => {
   assertInfiniteIndex(infiniteIndex);
   assertVariantId(variantId);
 
   const requiredFeature = INFINITE_FEATURE_CYCLE[infiniteIndex % INFINITE_FEATURE_CYCLE.length];
   const seed = mix32(hashString32(`${INFINITE_GLOBAL_SEED}:${infiniteIndex}:variant:${variantId}`));
   const rng = makeMulberry32Rng(seed);
-  const variantContext = { infiniteIndex, variantId };
+  const variantContext: VariantContext = { infiniteIndex, variantId };
 
   const plan = buildFeaturePlan(requiredFeature, rng);
   const dims = chooseDimensions(rng);
@@ -1173,7 +1531,7 @@ const createCoreLevel = (infiniteIndex, variantId) => {
   };
 };
 
-const decorateInfiniteLevel = (infiniteIndex, core) => {
+const decorateInfiniteLevel = (infiniteIndex: number, core: CoreLevelResult): InfiniteLevel => {
   const displayIndex = infiniteIndex + 1;
   const requiredFeature = core.meta.requiredFeature;
 
@@ -1195,10 +1553,12 @@ const decorateInfiniteLevel = (infiniteIndex, core) => {
   };
 };
 
-export const generateInfiniteLevelFromVariant = (infiniteIndex, variantId) =>
+export const generateInfiniteLevelFromVariant = (infiniteIndex: number, variantId: number): InfiniteLevel =>
   decorateInfiniteLevel(infiniteIndex, createCoreLevel(infiniteIndex, variantId));
 
-const summarizeGridStyle = (grid) => {
+const summarizeGridStyle = (
+  grid: LevelDefinition['grid'],
+): Pick<GridStyleSummary, 'walls' | 'movable' | 'hints' | 'rps'> => {
   const summary = {
     walls: 0,
     movable: 0,
@@ -1218,7 +1578,7 @@ const summarizeGridStyle = (grid) => {
   return summary;
 };
 
-const countZeroCorners = (cornerCounts = []) => {
+const countZeroCorners = (cornerCounts: readonly CornerCount[] = []): number => {
   let cornerZero = 0;
   for (const entry of cornerCounts) {
     if (entry[2] === 0) cornerZero += 1;
@@ -1226,7 +1586,7 @@ const countZeroCorners = (cornerCounts = []) => {
   return cornerZero;
 };
 
-const summarizeStyle = (level) => {
+const summarizeStyle = (level: ConstraintLevel): GridStyleSummary => {
   const rows = level.grid.length;
   const cols = rows > 0 ? level.grid[0].length : 0;
   const gridSummary = summarizeGridStyle(level.grid);
@@ -1244,7 +1604,7 @@ const summarizeStyle = (level) => {
   };
 };
 
-const buildStyleTarget = (infiniteIndex, requiredFeature) => {
+const buildStyleTarget = (infiniteIndex: number, requiredFeature: RequiredFeature): GridStyleSummary => {
   const seed = mix32(hashString32(`${INFINITE_GLOBAL_SEED}:style:${infiniteIndex}:${requiredFeature}`));
   const rows = 5 + ((seed >>> 0) % 2);
   const cols = 5 + ((seed >>> 1) % 2);
@@ -1268,7 +1628,11 @@ const buildStyleTarget = (infiniteIndex, requiredFeature) => {
   };
 };
 
-const styleFitnessScore = (style, target, requiredFeature) => {
+const styleFitnessScore = (
+  style: GridStyleSummary,
+  target: GridStyleSummary,
+  requiredFeature: RequiredFeature,
+): number => {
   let score = 0;
   score -= Math.abs(style.rows - target.rows) * 24;
   score -= Math.abs(style.cols - target.cols) * 24;
@@ -1292,13 +1656,13 @@ const styleFitnessScore = (style, target, requiredFeature) => {
   return score;
 };
 
-export const selectDefaultInfiniteCandidate = (infiniteIndex) => {
+export const selectDefaultInfiniteCandidate = (infiniteIndex: number): DefaultInfiniteCandidate => {
   assertInfiniteIndex(infiniteIndex);
   const requiredFeature = INFINITE_FEATURE_CYCLE[infiniteIndex % INFINITE_FEATURE_CYCLE.length];
   const targetStyle = buildStyleTarget(infiniteIndex, requiredFeature);
 
-  let best = null;
-  let firstError = null;
+  let best: DefaultInfiniteCandidate | null = null;
+  let firstError: unknown = null;
 
   for (let variantId = 0; variantId < INFINITE_CANDIDATE_VARIANTS; variantId++) {
     try {
@@ -1334,46 +1698,48 @@ export const selectDefaultInfiniteCandidate = (infiniteIndex) => {
   return best;
 };
 
-export const selectDefaultInfiniteVariant = (infiniteIndex) =>
+export const selectDefaultInfiniteVariant = (infiniteIndex: number): number =>
   selectDefaultInfiniteCandidate(infiniteIndex).variantId;
 
 const LEVEL_CACHE_LIMIT = 64;
-const generatedLevelCache = new Map();
+const generatedLevelCache = new Map<number, InfiniteLevel>();
 
-const getCachedLevel = (infiniteIndex) => {
+const getCachedLevel = (infiniteIndex: number): InfiniteLevel | null => {
   if (!generatedLevelCache.has(infiniteIndex)) return null;
   const value = generatedLevelCache.get(infiniteIndex);
+  if (!value) return null;
   generatedLevelCache.delete(infiniteIndex);
   generatedLevelCache.set(infiniteIndex, value);
   return value;
 };
 
-const setCachedLevel = (infiniteIndex, level) => {
+const setCachedLevel = (infiniteIndex: number, level: InfiniteLevel): void => {
   if (generatedLevelCache.has(infiniteIndex)) {
     generatedLevelCache.delete(infiniteIndex);
   }
   generatedLevelCache.set(infiniteIndex, level);
   while (generatedLevelCache.size > LEVEL_CACHE_LIMIT) {
     const oldest = generatedLevelCache.keys().next().value;
+    if (oldest === undefined) break;
     generatedLevelCache.delete(oldest);
   }
 };
 
-const resolveOverrideVariantId = (infiniteIndex) => {
+const resolveOverrideVariantId = (infiniteIndex: number): number | null => {
   const override = INFINITE_OVERRIDE_BY_INDEX?.[infiniteIndex];
   if (Number.isInteger(override) && override >= 0) return override;
   return null;
 };
 
-export function generateInfiniteLevel(infiniteIndex) {
+export function generateInfiniteLevel(infiniteIndex: number): InfiniteLevel {
   assertInfiniteIndex(infiniteIndex);
 
   const cached = getCachedLevel(infiniteIndex);
   if (cached) return cached;
 
-  let level = null;
+  let level: InfiniteLevel | null = null;
   const overrideVariantId = resolveOverrideVariantId(infiniteIndex);
-  if (Number.isInteger(overrideVariantId)) {
+  if (overrideVariantId !== null) {
     try {
       level = generateInfiniteLevelFromVariant(infiniteIndex, overrideVariantId);
     } catch {

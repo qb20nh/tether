@@ -23,7 +23,7 @@ test('e2e: renderer recovers after resize stress and context loss', async (t) =>
   try {
     browser = await chromium.launch({ headless: true });
   } catch (error) {
-    t.skip(`playwright could not launch in this environment: ${error?.message || error}`);
+    t.skip(`playwright could not launch in this environment: ${/** @type {any} */ (error)?.message || error}`);
     return;
   }
 
@@ -45,7 +45,7 @@ test('e2e: renderer recovers after resize stress and context loss', async (t) =>
 
     // Force a context loss event when supported so recovery behavior is always exercised.
     await page.evaluate(() => {
-      const canvas = document.getElementById('pathCanvas');
+      const canvas = /** @type {HTMLCanvasElement | null} */ (document.getElementById('pathCanvas'));
       const gl = canvas?.getContext('webgl2');
       if (!gl || typeof gl.getExtension !== 'function') return;
       const ext = gl.getExtension('WEBGL_lose_context');
@@ -61,7 +61,7 @@ test('e2e: renderer recovers after resize stress and context loss', async (t) =>
     await page.waitForTimeout(1700);
 
     const state = await page.evaluate(() => {
-      const canvas = document.getElementById('pathCanvas');
+      const canvas = /** @type {HTMLCanvasElement | null} */ (document.getElementById('pathCanvas'));
       const gl = canvas?.getContext('webgl2');
       return {
         hasCanvas: Boolean(canvas),

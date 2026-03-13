@@ -3,6 +3,8 @@ import test from 'node:test';
 import { createBoardRendererCore } from '../../src/renderer/board_renderer_core.ts';
 import { createDomRenderer } from '../../src/renderer/dom_renderer.ts';
 
+const globalObject = /** @type {any} */ (globalThis);
+
 class FakeStyle {
   constructor() {
     this.values = new Map();
@@ -348,15 +350,15 @@ const installRendererEnv = (t) => {
   documentElement.clientWidth = 1280;
   documentElement.clientHeight = 720;
 
-  globalThis.Element = FakeElement;
-  globalThis.document = {
+  globalObject.Element = FakeElement;
+  globalObject.document = /** @type {any} */ ({
     body: new FakeElement('body'),
     documentElement,
     createElement(tagName) {
       return new FakeElement(tagName);
     },
-  };
-  globalThis.window = {
+  });
+  globalObject.window = /** @type {any} */ ({
     innerWidth: 1280,
     innerHeight: 720,
     devicePixelRatio: 1,
@@ -376,35 +378,35 @@ const installRendererEnv = (t) => {
     matchMedia() {
       return { matches: false };
     },
-  };
-  globalThis.getComputedStyle = (element) => createComputedStyle(element);
-  globalThis.performance = {
+  });
+  globalObject.getComputedStyle = (element) => /** @type {any} */ (createComputedStyle(element));
+  globalObject.performance = /** @type {any} */ ({
     now() {
       return nowMs;
     },
-  };
-  globalThis.requestAnimationFrame = (callback) => {
+  });
+  globalObject.requestAnimationFrame = (callback) => {
     const id = nextRafId;
     nextRafId += 1;
     rafCallbacks.set(id, callback);
     return id;
   };
-  globalThis.cancelAnimationFrame = (id) => {
+  globalObject.cancelAnimationFrame = (id) => {
     rafCallbacks.delete(id);
   };
-  globalThis.setTimeout = globalThis.window.setTimeout;
-  globalThis.clearTimeout = globalThis.window.clearTimeout;
+  globalObject.setTimeout = globalObject.window.setTimeout;
+  globalObject.clearTimeout = globalObject.window.clearTimeout;
 
   t.after(() => {
-    globalThis.Element = originalElement;
-    globalThis.document = originalDocument;
-    globalThis.window = originalWindow;
-    globalThis.getComputedStyle = originalGetComputedStyle;
-    globalThis.performance = originalPerformance;
-    globalThis.requestAnimationFrame = originalRaf;
-    globalThis.cancelAnimationFrame = originalCancelRaf;
-    globalThis.setTimeout = originalSetTimeout;
-    globalThis.clearTimeout = originalClearTimeout;
+    globalObject.Element = originalElement;
+    globalObject.document = originalDocument;
+    globalObject.window = originalWindow;
+    globalObject.getComputedStyle = originalGetComputedStyle;
+    globalObject.performance = originalPerformance;
+    globalObject.requestAnimationFrame = originalRaf;
+    globalObject.cancelAnimationFrame = originalCancelRaf;
+    globalObject.setTimeout = originalSetTimeout;
+    globalObject.clearTimeout = originalClearTimeout;
   });
 
   return {
@@ -499,10 +501,10 @@ const createFakeWebgl2 = () => {
 };
 
 const createFakePathRenderer = () => ({
-  calls: [],
+  calls: /** @type {any[]} */ ([]),
   destroyed: false,
-  destroyCalls: [],
-  resizeCalls: [],
+  destroyCalls: /** @type {any[]} */ ([]),
+  resizeCalls: /** @type {any[]} */ ([]),
   drawPathFrame(payload) {
     this.calls.push({
       flowOffset: payload.flowOffset,
@@ -565,7 +567,7 @@ const createShellRefs = () => {
   symbolCanvas.clientHeight = 240;
   boardWrap.appendChild(symbolCanvas);
 
-  return {
+  return /** @type {any} */ ({
     app,
     boardHost,
     boardWrap,
@@ -576,7 +578,7 @@ const createShellRefs = () => {
     msgEl: new FakeElement('div'),
     legend: new FakeElement('div'),
     pathRenderer: createFakePathRenderer(),
-  };
+  });
 };
 
 const createShellRefsWithWebglCanvas = () => {
@@ -597,7 +599,7 @@ const createShellRefsWithWebglCanvas = () => {
   refs.pathRenderer = null;
   installWebglContext(refs.canvas);
 
-  const documentRef = globalThis.document;
+  const documentRef = /** @type {any} */ (globalObject.document);
   const originalCreateElement = documentRef.createElement;
   documentRef.createElement = (tagName) => {
     const element = originalCreateElement.call(documentRef, tagName);
@@ -616,35 +618,44 @@ const createShellRefsWithWebglCanvas = () => {
   };
 };
 
-const createSnapshot = ({
-  gridData,
-  path = [],
-  levelIndex = 0,
-  stitches = [],
-  cornerCounts = [],
-}) => {
+/** @param {any} options */
+const createSnapshot = (options) => {
+  const {
+    gridData,
+    path = [],
+    levelIndex = 0,
+    stitches = [],
+    cornerCounts = [],
+  } = /** @type {any} */ (options);
   const rows = gridData.length;
   const cols = gridData[0].length;
   const visited = new Set(path.map((point) => `${point.r},${point.c}`));
   const idxByKey = new Map(path.map((point, index) => [`${point.r},${point.c}`, index]));
   const totalUsable = gridData.flat().filter((cell) => cell !== '#' && cell !== 'm').length;
-  return {
+  return /** @type {any} */ ({
+    version: 1,
     levelIndex,
     rows,
     cols,
+    pathKey: path.map((point) => `${point.r},${point.c};`).join(''),
     gridData,
     path,
     visited,
     idxByKey,
     stitches,
     cornerCounts,
+    stitchSet: new Set(stitches.map((stitch) => `${stitch[0]},${stitch[1]}`)),
+    stitchReq: new Map(),
     totalUsable,
-  };
+  });
 };
 
 const recordStrokeSegments = (ctx) => {
-  const segments = [];
-  let currentSegment = { from: null, to: null };
+  const segments = /** @type {any[]} */ ([]);
+  let currentSegment = /** @type {{ from: { x: number; y: number } | null, to: { x: number; y: number } | null }} */ ({
+    from: null,
+    to: null,
+  });
   const originalBeginPath = ctx.beginPath.bind(ctx);
   const originalMoveTo = ctx.moveTo.bind(ctx);
   const originalLineTo = ctx.lineTo.bind(ctx);
@@ -681,6 +692,8 @@ const getBoardNavMarker = (refs) => refs.boardHost.querySelector('.boardNavMarke
 const countBoardNavMarkers = (refs) => (
   refs.boardHost.children.filter((child) => child.classList.contains('boardNavMarker')).length
 );
+const updateInteraction = (renderer, payload) => renderer.updateInteraction(/** @type {any} */ (payload));
+const renderFrame = (renderer, payload) => renderer.renderFrame(/** @type {any} */ (payload));
 
 test('createBoardRendererCore keeps refs, interaction state, and ghosts isolated per instance', (t) => {
   const env = installRendererEnv(t);
@@ -689,8 +702,8 @@ test('createBoardRendererCore keeps refs, interaction state, and ghosts isolated
     ['.', '.'],
   ];
   const snapshot = createSnapshot({ gridData });
-  const first = createBoardRendererCore();
-  const second = createBoardRendererCore();
+  const first = /** @type {any} */ (createBoardRendererCore());
+  const second = /** @type {any} */ (createBoardRendererCore());
   const firstRefs = createShellRefs();
   const secondRefs = createShellRefs();
 
@@ -699,7 +712,7 @@ test('createBoardRendererCore keeps refs, interaction state, and ghosts isolated
   first.rebuildGrid(snapshot);
   second.rebuildGrid(snapshot);
 
-  first.updateInteraction({
+  updateInteraction(first, {
     dropTarget: { r: 1, c: 1 },
     wallGhost: { visible: true, x: 80, y: 96 },
     isPathDragging: true,
@@ -709,7 +722,7 @@ test('createBoardRendererCore keeps refs, interaction state, and ghosts isolated
     boardSelection: { kind: 'path-end', r: 0, c: 0 },
   });
 
-  second.updateInteraction({
+  updateInteraction(second, {
     dropTarget: { r: 0, c: 0 },
     isPathDragging: true,
     pathDragCursor: { r: 1, c: 0 },
@@ -752,7 +765,7 @@ test('createBoardRendererCore keeps refs, interaction state, and ghosts isolated
   assert.equal(secondRefs.boardWrap.querySelector('.wallDragGhost'), null);
 
   const previousSelectionTransform = firstMarker?.style.transform;
-  first.updateInteraction({
+  updateInteraction(first, {
     isBoardNavActive: true,
     boardSelection: { kind: 'path-end', r: 1, c: 1 },
   });
@@ -764,7 +777,7 @@ test('createBoardRendererCore keeps refs, interaction state, and ghosts isolated
 
 test('createBoardRendererCore positions wall ghosts from interaction coordinates', (t) => {
   installRendererEnv(t);
-  const core = createBoardRendererCore();
+  const core = /** @type {any} */ (createBoardRendererCore());
   const refs = createShellRefs();
   const snapshot = createSnapshot({
     gridData: [['.', '.']],
@@ -772,7 +785,7 @@ test('createBoardRendererCore positions wall ghosts from interaction coordinates
 
   core.mount(refs);
   core.rebuildGrid(snapshot);
-  core.updateInteraction({
+  updateInteraction(core, {
     wallGhost: { visible: true, x: 50, y: 80 },
   });
 
@@ -784,7 +797,7 @@ test('createBoardRendererCore positions wall ghosts from interaction coordinates
 
 test('createBoardRendererCore draws stitched diagonals with stable shadow and status passes', (t) => {
   const env = installRendererEnv(t);
-  const core = createBoardRendererCore();
+  const core = /** @type {any} */ (createBoardRendererCore());
   const refs = createShellRefs();
   const strokeSegments = recordStrokeSegments(refs.symbolCtx);
   const snapshot = createSnapshot({
@@ -797,7 +810,7 @@ test('createBoardRendererCore draws stitched diagonals with stable shadow and st
 
   core.mount(refs);
   core.rebuildGrid(snapshot);
-  core.renderFrame({
+  renderFrame(core, {
     snapshot,
     evaluation: {
       stitchStatus: {
@@ -846,7 +859,7 @@ test('createBoardRendererCore draws stitched diagonals with stable shadow and st
 
 test('createBoardRendererCore moves the nav marker with wall preview cursor while keeping the wall selected', (t) => {
   const env = installRendererEnv(t);
-  const core = createBoardRendererCore();
+  const core = /** @type {any} */ (createBoardRendererCore());
   const refs = createShellRefs();
   const snapshot = createSnapshot({
     gridData: [['.', 'm', '.']],
@@ -854,7 +867,7 @@ test('createBoardRendererCore moves the nav marker with wall preview cursor whil
 
   core.mount(refs);
   core.rebuildGrid(snapshot);
-  core.updateInteraction({
+  updateInteraction(core, {
     isBoardNavActive: true,
     boardCursor: { r: 0, c: 1 },
     boardSelection: { kind: 'wall', r: 0, c: 1 },
@@ -867,7 +880,7 @@ test('createBoardRendererCore moves the nav marker with wall preview cursor whil
   assert.equal(marker?.classList.contains('isSelected'), true);
   assert.equal(marker?.classList.contains('isCursor'), false);
 
-  core.updateInteraction({
+  updateInteraction(core, {
     isBoardNavActive: true,
     boardCursor: { r: 0, c: 2 },
     boardSelection: { kind: 'wall', r: 0, c: 1 },
@@ -886,7 +899,7 @@ test('createBoardRendererCore hides the nav marker when inactive or daily locked
   const snapshot = createSnapshot({
     gridData: [['.', '.']],
   });
-  const core = createBoardRendererCore();
+  const core = /** @type {any} */ (createBoardRendererCore());
   const refs = createShellRefs();
 
   core.mount(refs);
@@ -897,7 +910,7 @@ test('createBoardRendererCore hides the nav marker when inactive or daily locked
   assert.equal(countBoardNavMarkers(refs), 1);
   assert.equal(marker?.classList.contains('isActive'), false);
 
-  core.updateInteraction({
+  updateInteraction(core, {
     isBoardNavActive: true,
     boardCursor: { r: 0, c: 1 },
   });
@@ -905,14 +918,14 @@ test('createBoardRendererCore hides the nav marker when inactive or daily locked
   assert.equal(marker?.classList.contains('isActive'), true);
   assert.equal(marker?.classList.contains('isCursor'), true);
 
-  core.updateInteraction({
+  updateInteraction(core, {
     isBoardNavActive: false,
     boardCursor: { r: 0, c: 1 },
   });
   flushNextRaf(env, 32);
   assert.equal(marker?.classList.contains('isActive'), false);
 
-  core.updateInteraction({
+  updateInteraction(core, {
     isBoardNavActive: true,
     isDailyLocked: true,
     boardCursor: { r: 0, c: 0 },
@@ -931,12 +944,12 @@ test('createBoardRendererCore applies mouse-drag press styling to keyboard-held 
       { r: 0, c: 1 },
     ],
   });
-  const core = createBoardRendererCore();
+  const core = /** @type {any} */ (createBoardRendererCore());
   const refs = createShellRefs();
 
   core.mount(refs);
   core.rebuildGrid(snapshot);
-  core.renderFrame({
+  renderFrame(core, {
     snapshot,
     evaluation: {},
     completion: null,
@@ -950,7 +963,7 @@ test('createBoardRendererCore applies mouse-drag press styling to keyboard-held 
   assert.equal(firstCell.classList.contains('pathTipDragHover'), false);
   assert.equal(secondCell.classList.contains('pathTipDragHover'), false);
 
-  core.updateInteraction({
+  updateInteraction(core, {
     isBoardNavActive: true,
     isBoardNavPressing: true,
     boardCursor: { r: 0, c: 0 },
@@ -959,7 +972,7 @@ test('createBoardRendererCore applies mouse-drag press styling to keyboard-held 
   assert.equal(firstCell.classList.contains('pathTipDragHover'), false);
   assert.equal(secondCell.classList.contains('pathTipDragHover'), false);
 
-  core.updateInteraction({
+  updateInteraction(core, {
     isBoardNavActive: true,
     isBoardNavPressing: false,
     boardCursor: { r: 0, c: 0 },
@@ -971,7 +984,7 @@ test('createBoardRendererCore applies mouse-drag press styling to keyboard-held 
   assert.equal(firstCell.classList.contains('pathTipDragSelected'), false);
   assert.equal(secondCell.classList.contains('pathTipDragSelected'), true);
 
-  core.updateInteraction({
+  updateInteraction(core, {
     isBoardNavActive: true,
     isBoardNavPressing: true,
     boardCursor: { r: 0, c: 0 },
@@ -981,7 +994,7 @@ test('createBoardRendererCore applies mouse-drag press styling to keyboard-held 
   assert.equal(secondCell.classList.contains('pathTipDragSelected'), true);
   assert.equal(secondCell.classList.contains('pathTipDragHover'), false);
 
-  core.updateInteraction({
+  updateInteraction(core, {
     isPathDragging: true,
     pathDragSide: 'end',
     pathDragCursor: { r: 0, c: 0 },
@@ -990,7 +1003,7 @@ test('createBoardRendererCore applies mouse-drag press styling to keyboard-held 
   assert.equal(secondCell.classList.contains('pathTipDragSelected'), true);
   assert.equal(firstCell.classList.contains('pathTipDragHover'), true);
 
-  core.updateInteraction({
+  updateInteraction(core, {
     isPathDragging: false,
     isBoardNavActive: true,
     isBoardNavPressing: false,
@@ -1001,7 +1014,7 @@ test('createBoardRendererCore applies mouse-drag press styling to keyboard-held 
   assert.equal(secondCell.classList.contains('pathTipDragSelected'), true);
   assert.equal(firstCell.classList.contains('pathTipDragHover'), false);
 
-  core.updateInteraction({
+  updateInteraction(core, {
     isBoardNavActive: true,
     isBoardNavPressing: false,
     boardCursor: { r: 0, c: 0 },
@@ -1023,12 +1036,12 @@ test('createBoardRendererCore keeps selected interactive cells pressed and non-i
       { r: 0, c: 2 },
     ],
   });
-  const core = createBoardRendererCore();
+  const core = /** @type {any} */ (createBoardRendererCore());
   const refs = createShellRefs();
 
   core.mount(refs);
   core.rebuildGrid(snapshot);
-  core.renderFrame({
+  renderFrame(core, {
     snapshot,
     evaluation: {},
     completion: null,
@@ -1041,7 +1054,7 @@ test('createBoardRendererCore keeps selected interactive cells pressed and non-i
   const wallCell = getGridCell(refs, 0, 1, 3);
   const endCell = getGridCell(refs, 0, 2, 3);
 
-  core.updateInteraction({
+  updateInteraction(core, {
     isBoardNavActive: true,
     isBoardNavPressing: false,
     boardCursor: { r: 0, c: 2 },
@@ -1051,7 +1064,7 @@ test('createBoardRendererCore keeps selected interactive cells pressed and non-i
   flushNextRaf(env, 16);
   assert.equal(endCell.classList.contains('pathTipDragSelected'), true);
 
-  core.updateInteraction({
+  updateInteraction(core, {
     isBoardNavActive: true,
     isBoardNavPressing: false,
     boardCursor: { r: 0, c: 1 },
@@ -1062,7 +1075,7 @@ test('createBoardRendererCore keeps selected interactive cells pressed and non-i
   assert.equal(endCell.classList.contains('pathTipDragSelected'), false);
   assert.equal(wallCell.classList.contains('pathTipDragSelected'), true);
 
-  core.updateInteraction({
+  updateInteraction(core, {
     isBoardNavActive: true,
     isBoardNavPressing: false,
     boardCursor: { r: 0, c: 1 },
@@ -1074,7 +1087,7 @@ test('createBoardRendererCore keeps selected interactive cells pressed and non-i
   assert.equal(startCell.classList.contains('pathTipDragSelected'), false);
   assert.equal(endCell.classList.contains('pathTipDragSelected'), false);
 
-  core.updateInteraction({
+  updateInteraction(core, {
     isBoardNavActive: true,
     isBoardNavPressing: true,
     boardCursor: { r: 0, c: 1 },
@@ -1090,13 +1103,13 @@ test('createBoardRendererCore nudges the nav marker toward invalid preview direc
   const snapshot = createSnapshot({
     gridData: [['.', '.']],
   });
-  const core = createBoardRendererCore();
+  const core = /** @type {any} */ (createBoardRendererCore());
   const refs = createShellRefs();
 
   core.mount(refs);
   core.rebuildGrid(snapshot);
 
-  core.updateInteraction({
+  updateInteraction(core, {
     isBoardNavActive: true,
     boardCursor: { r: 0, c: 0 },
   });
@@ -1105,7 +1118,7 @@ test('createBoardRendererCore nudges the nav marker toward invalid preview direc
   const marker = getBoardNavMarker(refs);
   const restingTransform = marker?.style.transform || '';
 
-  core.updateInteraction({
+  updateInteraction(core, {
     isBoardNavActive: true,
     boardCursor: { r: 0, c: 0 },
     boardNavPreviewDelta: { r: 0, c: -1 },
@@ -1115,7 +1128,7 @@ test('createBoardRendererCore nudges the nav marker toward invalid preview direc
 
   assert.notEqual(nudgedTransform, restingTransform);
 
-  core.updateInteraction({
+  updateInteraction(core, {
     isBoardNavActive: true,
     boardCursor: { r: 0, c: 0 },
     boardNavPreviewDelta: null,
@@ -1134,12 +1147,12 @@ test('createBoardRendererCore marks non-interactive selected nav positions as in
       { r: 0, c: 2 },
     ],
   });
-  const core = createBoardRendererCore();
+  const core = /** @type {any} */ (createBoardRendererCore());
   const refs = createShellRefs();
 
   core.mount(refs);
   core.rebuildGrid(snapshot);
-  core.renderFrame({
+  renderFrame(core, {
     snapshot,
     evaluation: {},
     completion: null,
@@ -1149,7 +1162,7 @@ test('createBoardRendererCore marks non-interactive selected nav positions as in
   flushNextRaf(env, 16);
 
   const marker = getBoardNavMarker(refs);
-  core.updateInteraction({
+  updateInteraction(core, {
     isBoardNavActive: true,
     boardCursor: { r: 0, c: 1 },
     boardSelection: { kind: 'path-end', r: 0, c: 1 },
@@ -1158,7 +1171,7 @@ test('createBoardRendererCore marks non-interactive selected nav positions as in
   assert.equal(marker?.classList.contains('isSelected'), true);
   assert.equal(marker?.classList.contains('isInvalidSelection'), true);
 
-  core.updateInteraction({
+  updateInteraction(core, {
     isBoardNavActive: true,
     boardCursor: { r: 0, c: 1 },
     boardSelection: { kind: 'path-end', r: 0, c: 1 },
@@ -1168,7 +1181,7 @@ test('createBoardRendererCore marks non-interactive selected nav positions as in
   assert.equal(marker?.classList.contains('isSelected'), true);
   assert.equal(marker?.classList.contains('isInvalidSelection'), false);
 
-  core.updateInteraction({
+  updateInteraction(core, {
     isBoardNavActive: true,
     boardCursor: { r: 0, c: 2 },
     boardSelection: { kind: 'path-end', r: 0, c: 2 },
@@ -1197,8 +1210,8 @@ test('createBoardRendererCore does not share transition compensation state acros
       { r: 0, c: 3 },
     ],
   });
-  const first = createBoardRendererCore();
-  const second = createBoardRendererCore();
+  const first = /** @type {any} */ (createBoardRendererCore());
+  const second = /** @type {any} */ (createBoardRendererCore());
   const firstRefs = createShellRefs();
   const secondRefs = createShellRefs();
 
@@ -1208,14 +1221,14 @@ test('createBoardRendererCore does not share transition compensation state acros
   second.rebuildGrid(previousSnapshot);
 
   first.recordPathTransition(previousSnapshot, nextSnapshot);
-  first.renderFrame({
+  renderFrame(first, {
     snapshot: nextSnapshot,
     evaluation: {},
     completion: null,
     uiModel: {},
     interactionModel: {},
   });
-  second.renderFrame({
+  renderFrame(second, {
     snapshot: nextSnapshot,
     evaluation: {},
     completion: null,
@@ -1241,19 +1254,19 @@ test('createBoardRendererCore destroy clears animation and remount starts clean'
       { r: 0, c: 1 },
     ],
   });
-  const core = createBoardRendererCore();
+  const core = /** @type {any} */ (createBoardRendererCore());
   const firstRefs = createShellRefs();
 
   core.mount(firstRefs);
   core.rebuildGrid(snapshot);
-  core.renderFrame({
+  renderFrame(core, {
     snapshot,
     evaluation: {},
     completion: null,
     uiModel: {},
     interactionModel: {},
   });
-  core.updateInteraction({
+  updateInteraction(core, {
     dropTarget: { r: 0, c: 1 },
     wallGhost: { visible: true, x: 30, y: 42 },
     isPathDragging: true,
@@ -1280,7 +1293,7 @@ test('createBoardRendererCore destroy clears animation and remount starts clean'
   const secondRefs = createShellRefs();
   core.mount(secondRefs);
   core.rebuildGrid(snapshot);
-  core.updateInteraction({});
+  updateInteraction(core, {});
 
   assert.equal(core.getRefs(), secondRefs);
   assert.equal(countBoardNavMarkers(secondRefs), 1);
@@ -1291,7 +1304,7 @@ test('createBoardRendererCore destroy clears animation and remount starts clean'
 });
 
 test('createBoardRendererCore destroy forwards the WebGL release option', () => {
-  const core = createBoardRendererCore();
+  const core = /** @type {any} */ (createBoardRendererCore());
   const refs = createShellRefs();
 
   core.mount(refs);
@@ -1302,9 +1315,9 @@ test('createBoardRendererCore destroy forwards the WebGL release option', () => 
 
 test('createBoardRendererCore applies incremental path patches for end/start batches and mixed endpoint turns', (t) => {
   const env = installRendererEnv(t);
-  const counters = {};
+  const counters = /** @type {Record<string, number>} */ ({});
   const gridData = [['.', '.', '.', '.'], ['.', '.', '.', '.']];
-  const core = createBoardRendererCore({ debugCounters: counters });
+  const core = /** @type {any} */ (createBoardRendererCore({ debugCounters: counters }));
   const refs = createShellRefs();
   const baseSnapshot = createSnapshot({
     gridData,
@@ -1365,7 +1378,7 @@ test('createBoardRendererCore applies incremental path patches for end/start bat
 
   core.mount(refs);
   core.rebuildGrid(baseSnapshot);
-  core.renderFrame({
+  renderFrame(core, {
     snapshot: baseSnapshot,
     evaluation: {},
     completion: null,
@@ -1381,7 +1394,7 @@ test('createBoardRendererCore applies incremental path patches for end/start bat
   const initialFullRebuilds = counters.fullCellRebuilds || 0;
   assert.equal(initialFullRebuilds > 0, true);
 
-  core.renderFrame({
+  renderFrame(core, {
     snapshot: endExtendedSnapshot,
     evaluation: {},
     completion: null,
@@ -1399,7 +1412,7 @@ test('createBoardRendererCore applies incremental path patches for end/start bat
   assert.equal(getGridCell(refs, 0, 3, 4).classList.contains('pathEnd'), true);
   assert.equal(getGridCell(refs, 0, 3, 4).firstElementChild.textContent, '3');
 
-  core.renderFrame({
+  renderFrame(core, {
     snapshot: startExtendedSnapshot,
     evaluation: {},
     completion: null,
@@ -1418,7 +1431,7 @@ test('createBoardRendererCore applies incremental path patches for end/start bat
   assert.equal(getGridCell(refs, 0, 3, 4).classList.contains('pathEnd'), true);
   assert.equal(getGridCell(refs, 0, 1, 4).firstElementChild.textContent, '2');
 
-  core.renderFrame({
+  renderFrame(core, {
     snapshot: endTurnedSnapshot,
     evaluation: {},
     completion: null,
@@ -1433,7 +1446,7 @@ test('createBoardRendererCore applies incremental path patches for end/start bat
 
   const mixedFullRebuilds = counters.fullCellRebuilds;
 
-  core.renderFrame({
+  renderFrame(core, {
     snapshot: endUnturnedTurnedSnapshot,
     evaluation: {},
     completion: null,
@@ -1450,7 +1463,7 @@ test('createBoardRendererCore applies incremental path patches for end/start bat
   assert.equal((counters.incrementalCellPatches || 0) >= 3, true);
   assert.equal(getGridCell(refs, 0, 2, 4).classList.contains('pathEnd'), true);
 
-  core.renderFrame({
+  renderFrame(core, {
     snapshot: startTurnedSnapshot,
     evaluation: {},
     completion: null,
@@ -1465,7 +1478,7 @@ test('createBoardRendererCore applies incremental path patches for end/start bat
 
   const mixedStartFullRebuilds = counters.fullCellRebuilds;
 
-  core.renderFrame({
+  renderFrame(core, {
     snapshot: startUnturnedTurnedSnapshot,
     evaluation: {},
     completion: null,
@@ -1485,7 +1498,7 @@ test('createBoardRendererCore applies incremental path patches for end/start bat
 
 test('createBoardRendererCore performs one heavy render per RAF and skips symbol redraws on animation-only frames', (t) => {
   const env = installRendererEnv(t);
-  const counters = {};
+  const counters = /** @type {Record<string, number>} */ ({});
   const gridData = [['.', '.']];
   const snapshot = createSnapshot({
     gridData,
@@ -1494,26 +1507,26 @@ test('createBoardRendererCore performs one heavy render per RAF and skips symbol
       { r: 0, c: 1 },
     ],
   });
-  const core = createBoardRendererCore({ debugCounters: counters });
+  const core = /** @type {any} */ (createBoardRendererCore({ debugCounters: counters }));
   const refs = createShellRefs();
 
   core.mount(refs);
   core.rebuildGrid(snapshot);
-  core.renderFrame({
+  renderFrame(core, {
     snapshot,
     evaluation: {},
     completion: null,
     uiModel: {},
     interactionModel: {},
   });
-  core.renderFrame({
+  renderFrame(core, {
     snapshot,
     evaluation: {},
     completion: null,
     uiModel: {},
     interactionModel: {},
   });
-  core.renderFrame({
+  renderFrame(core, {
     snapshot,
     evaluation: {},
     completion: null,
@@ -1538,7 +1551,7 @@ test('createBoardRendererCore low power mode halves effective DPR, suppresses an
   env.setNowMs(0);
   globalThis.window.devicePixelRatio = 3;
 
-  const counters = {};
+  const counters = /** @type {Record<string, number>} */ ({});
   const gridData = [['.', '.', '.']];
   const firstSnapshot = createSnapshot({
     gridData,
@@ -1555,7 +1568,7 @@ test('createBoardRendererCore low power mode halves effective DPR, suppresses an
       { r: 0, c: 2 },
     ],
   });
-  const core = createBoardRendererCore({ debugCounters: counters });
+  const core = /** @type {any} */ (createBoardRendererCore({ debugCounters: counters }));
   const refs = createShellRefs();
 
   core.mount(refs);
@@ -1566,7 +1579,7 @@ test('createBoardRendererCore low power mode halves effective DPR, suppresses an
   core.setLowPowerMode(true);
   assert.equal(refs.pathRenderer.resizeCalls.at(-1)?.dpr, 1.5);
 
-  core.renderFrame({
+  renderFrame(core, {
     snapshot: firstSnapshot,
     evaluation: {},
     completion: null,
@@ -1577,14 +1590,14 @@ test('createBoardRendererCore low power mode halves effective DPR, suppresses an
   assert.equal(env.rafCallbacks.size, 0);
 
   env.setNowMs(20);
-  core.renderFrame({
+  renderFrame(core, {
     snapshot: firstSnapshot,
     evaluation: {},
     completion: null,
     uiModel: {},
     interactionModel: {},
   });
-  core.renderFrame({
+  renderFrame(core, {
     snapshot: secondSnapshot,
     evaluation: {},
     completion: null,
@@ -1613,14 +1626,14 @@ test('createBoardRendererCore recreates the WebGL path renderer without antialia
       { r: 0, c: 1 },
     ],
   });
-  const core = createBoardRendererCore();
+  const core = /** @type {any} */ (createBoardRendererCore());
   const { refs, contextOptions, restore } = createShellRefsWithWebglCanvas();
   t.after(restore);
 
   core.mount(refs);
   core.rebuildGrid(snapshot);
   core.resize();
-  core.renderFrame({
+  renderFrame(core, {
     snapshot,
     evaluation: {},
     completion: null,
@@ -1652,14 +1665,14 @@ test('createBoardRendererCore redraws the current path immediately when toggling
       { r: 0, c: 2 },
     ],
   });
-  const core = createBoardRendererCore();
+  const core = /** @type {any} */ (createBoardRendererCore());
   const { refs, contextOptions, restore } = createShellRefsWithWebglCanvas();
   t.after(restore);
 
   core.mount(refs);
   core.rebuildGrid(snapshot);
   core.resize();
-  core.renderFrame({
+  renderFrame(core, {
     snapshot,
     evaluation: {},
     completion: null,
@@ -1669,7 +1682,7 @@ test('createBoardRendererCore redraws the current path immediately when toggling
   flushNextRaf(env, 1016);
   assert.equal(contextOptions.at(-1)?.stats?.drawCalls, 1);
 
-  core.updateInteraction({
+  updateInteraction(core, {
     isBoardNavActive: true,
     boardSelection: { kind: 'path-end', r: 0, c: 2 },
   });
@@ -1700,14 +1713,14 @@ test('createBoardRendererCore redraws the current path immediately during resize
       { r: 0, c: 2 },
     ],
   });
-  const core = createBoardRendererCore();
+  const core = /** @type {any} */ (createBoardRendererCore());
   const { refs, contextOptions, restore } = createShellRefsWithWebglCanvas();
   t.after(restore);
 
   core.mount(refs);
   core.rebuildGrid(snapshot);
   core.resize();
-  core.renderFrame({
+  renderFrame(core, {
     snapshot,
     evaluation: {},
     completion: null,
@@ -1746,12 +1759,12 @@ test('createBoardRendererCore previews the old drag endpoint immediately in low 
       { r: 0, c: 2 },
     ],
   });
-  const core = createBoardRendererCore();
+  const core = /** @type {any} */ (createBoardRendererCore());
   const refs = createShellRefs();
 
   core.mount(refs);
   core.rebuildGrid(previousSnapshot);
-  core.renderFrame({
+  renderFrame(core, {
     snapshot: previousSnapshot,
     evaluation: {},
     completion: null,
@@ -1791,9 +1804,13 @@ test('createBoardRendererCore does not rewrite message DOM when message content 
       { r: 0, c: 1 },
     ],
   });
-  const core = createBoardRendererCore();
+  const core = /** @type {any} */ (createBoardRendererCore());
   const refs = createShellRefs();
   const innerHtmlDescriptor = Object.getOwnPropertyDescriptor(FakeElement.prototype, 'innerHTML');
+  assert.ok(innerHtmlDescriptor?.get);
+  assert.ok(innerHtmlDescriptor?.set);
+  const readInnerHtml = innerHtmlDescriptor.get;
+  const writeInnerHtml = innerHtmlDescriptor.set;
   let messageHtmlWrites = 0;
   let messageClassAdds = 0;
   let messageClassRemoves = 0;
@@ -1802,11 +1819,11 @@ test('createBoardRendererCore does not rewrite message DOM when message content 
     configurable: true,
     enumerable: true,
     get() {
-      return innerHtmlDescriptor.get.call(this);
+      return readInnerHtml.call(this);
     },
     set(value) {
       messageHtmlWrites += 1;
-      innerHtmlDescriptor.set.call(this, value);
+      writeInnerHtml.call(this, value);
     },
   });
   const originalAdd = refs.msgEl.classList.add.bind(refs.msgEl.classList);
@@ -1822,7 +1839,7 @@ test('createBoardRendererCore does not rewrite message DOM when message content 
 
   core.mount(refs);
   core.rebuildGrid(snapshot);
-  core.renderFrame({
+  renderFrame(core, {
     snapshot,
     evaluation: {},
     completion: null,
@@ -1838,7 +1855,7 @@ test('createBoardRendererCore does not rewrite message DOM when message content 
   assert.equal(messageClassAdds, 1);
   assert.equal(messageClassRemoves, 0);
 
-  core.renderFrame({
+  renderFrame(core, {
     snapshot,
     evaluation: {},
     completion: null,
@@ -1865,13 +1882,13 @@ test('createBoardRendererCore keeps path flow moving across consecutive state re
       { r: 0, c: 1 },
     ],
   });
-  const core = createBoardRendererCore();
+  const core = /** @type {any} */ (createBoardRendererCore());
   const refs = createShellRefs();
 
   core.mount(refs);
   core.rebuildGrid(snapshot);
 
-  core.renderFrame({
+  renderFrame(core, {
     snapshot,
     evaluation: {},
     completion: null,
@@ -1885,7 +1902,7 @@ test('createBoardRendererCore keeps path flow moving across consecutive state re
   flushNextRaf(env, 16);
   const firstFlowOffset = refs.pathRenderer.calls.at(-1)?.flowOffset ?? 0;
 
-  core.renderFrame({
+  renderFrame(core, {
     snapshot,
     evaluation: {},
     completion: null,
@@ -1912,13 +1929,13 @@ test('createBoardRendererCore parses rgba theme colors with signed decimal alpha
       { r: 0, c: 1 },
     ],
   });
-  const core = createBoardRendererCore();
+  const core = /** @type {any} */ (createBoardRendererCore());
   const refs = createShellRefs();
   refs.boardWrap.style.setProperty('--good', 'rgba(10, 20, 30, .5)');
 
   core.mount(refs);
   core.rebuildGrid(snapshot);
-  core.renderFrame({
+  renderFrame(core, {
     snapshot,
     evaluation: {},
     completion: null,
@@ -1939,7 +1956,7 @@ test('createDomRenderer defers solved completion classes while a keyboard path t
       { r: 0, c: 1 },
     ],
   });
-  const renderer = createDomRenderer();
+  const renderer = /** @type {any} */ (createDomRenderer());
   const refs = createShellRefs();
   const solvedEvaluation = {
     hintStatus: { total: 0, good: 0, bad: 0 },
@@ -1954,7 +1971,7 @@ test('createDomRenderer defers solved completion classes while a keyboard path t
   renderer.mount(refs);
   renderer.rebuildGrid(snapshot);
 
-  renderer.renderFrame({
+  renderFrame(renderer, {
     snapshot,
     evaluation: solvedEvaluation,
     completion: null,
@@ -1969,7 +1986,7 @@ test('createDomRenderer defers solved completion classes while a keyboard path t
   assert.equal(refs.boardWrap.classList.contains('isComplete'), false);
   assert.equal(refs.boardWrap.classList.contains('isCompleting'), false);
 
-  renderer.renderFrame({
+  renderFrame(renderer, {
     snapshot,
     evaluation: solvedEvaluation,
     completion: null,
@@ -1992,12 +2009,12 @@ test('createDomRenderer does not apply pointer wall-drag body styling for keyboa
   const snapshot = createSnapshot({
     gridData: [['.', 'm', '.']],
   });
-  const renderer = createDomRenderer();
+  const renderer = /** @type {any} */ (createDomRenderer());
   const refs = createShellRefs();
 
   renderer.mount(refs);
   renderer.rebuildGrid(snapshot);
-  renderer.renderFrame({
+  renderFrame(renderer, {
     snapshot,
     evaluation: {},
     completion: null,
@@ -2018,7 +2035,7 @@ test('createDomRenderer does not apply pointer wall-drag body styling for keyboa
   assert.equal(refs.boardWrap.querySelector('.wallDragGhost') !== null, true);
   assert.equal(getGridCell(refs, 0, 2, 3).classList.contains('dropTarget'), true);
 
-  renderer.renderFrame({
+  renderFrame(renderer, {
     snapshot,
     evaluation: {},
     completion: null,

@@ -9,11 +9,26 @@ import {
   flushMicrotasks,
 } from './notification_test_harness.js';
 
+/** @typedef {import('../../src/contracts/ports.ts').NotificationHistoryEntry} NotificationHistoryEntry */
+/** @typedef {import('../../src/contracts/ports.ts').NotificationHistoryPayload} NotificationHistoryPayload */
+
 const SW_MESSAGE_TYPES = Object.freeze({
   GET_HISTORY: 'SW_GET_NOTIFICATION_HISTORY',
   MARK_HISTORY_READ: 'SW_MARK_NOTIFICATION_HISTORY_READ',
 });
 
+/**
+ * @param {ReturnType<typeof createNotificationHistoryController>} controller
+ * @param {number} historyVersion
+ * @param {NotificationHistoryEntry[]} entries
+ */
+const applyHistory = (controller, historyVersion, entries) => {
+  /** @type {NotificationHistoryPayload} */
+  const payload = { historyVersion, entries };
+  controller.applyHistoryPayload(payload);
+};
+
+/** @param {any} [overrides] */
 const createHarness = (overrides = {}) => {
   const documentObj = createDocumentMock();
   const windowObj = createWindowMock();
@@ -26,11 +41,15 @@ const createHarness = (overrides = {}) => {
   const badgeEl = documentObj.register(ELEMENT_IDS.NOTIFICATION_HISTORY_BADGE, new FakeElement('span'));
   documentObj.register(ELEMENT_IDS.SETTINGS_TOGGLE, new FakeElement('button'));
 
-  const calls = {
+  const calls = /** @type {{
+    postMessages: Array<{ message: { type: string; payload?: unknown }; options: unknown }>;
+    applyRequests: Array<{ buildNumber: number; requestUpdateApplyConfirmation: (buildNumber: number) => Promise<boolean>; closeHistoryPanel: () => void }>;
+    openRequests: Array<{ dailyId: string; kind: string; requestMoveDailyConfirmation: () => Promise<boolean>; closeHistoryPanel: () => void }>;
+  }} */ ({
     postMessages: [],
     applyRequests: [],
     openRequests: [],
-  };
+  });
 
   const controller = createNotificationHistoryController({
     elementIds: ELEMENT_IDS,
@@ -51,8 +70,8 @@ const createHarness = (overrides = {}) => {
     requestUpdateApplyConfirmation: overrides.requestUpdateApplyConfirmation || (async () => true),
     requestMoveDailyConfirmation: overrides.requestMoveDailyConfirmation || (async () => true),
     containsOpenDialogTarget: overrides.containsOpenDialogTarget || (() => false),
-    windowObj,
-    documentObj,
+    windowObj: /** @type {any} */ (windowObj),
+    documentObj: /** @type {any} */ (documentObj),
   });
 
   return {
@@ -70,7 +89,7 @@ const createHarness = (overrides = {}) => {
 test('history controller normalizes payload and truncates entries to max limit', () => {
   const { controller } = createHarness();
 
-  const entries = [];
+  const entries = /** @type {NotificationHistoryEntry[]} */ ([]);
   for (let i = 0; i < 12; i += 1) {
     entries.push({
       id: `id-${i}`,
@@ -84,7 +103,7 @@ test('history controller normalizes payload and truncates entries to max limit',
     });
   }
 
-  controller.applyHistoryPayload({ historyVersion: 4, entries });
+  applyHistory(controller, 4, entries);
   assert.equal(controller.getEntries().length, 10);
   assert.equal(controller.getEntries()[0].id, 'id-0');
   assert.equal(controller.getEntries()[9].id, 'id-9');
@@ -94,9 +113,7 @@ test('history controller refreshes unread badge state from system unread entries
   const { controller, badgeEl, toggleEl } = createHarness();
   controller.bind();
 
-  controller.applyHistoryPayload({
-    historyVersion: 2,
-    entries: [
+  applyHistory(controller, 2, [
       {
         id: 'sys-unread',
         source: 'system',
@@ -106,8 +123,7 @@ test('history controller refreshes unread badge state from system unread entries
         createdAtUtcMs: Date.UTC(2026, 2, 7, 1, 0, 0),
         marker: 'unread',
       },
-    ],
-  });
+    ]);
   controller.refreshUi();
 
   assert.equal(badgeEl.hidden, false);
@@ -125,9 +141,7 @@ test('history controller renders localized entry text for mapped notification ki
   });
   controller.bind();
 
-  controller.applyHistoryPayload({
-    historyVersion: 2,
-    entries: [
+  applyHistory(controller, 2, [
       {
         id: 'localized-1',
         source: 'system',
@@ -146,8 +160,7 @@ test('history controller renders localized entry text for mapped notification ki
         createdAtUtcMs: Date.UTC(2026, 2, 7, 1, 1, 0),
         marker: 'older',
       },
-    ],
-  });
+    ]);
   controller.refreshUi();
 
   const rows = listEl.querySelectorAll('.notificationHistoryItem');
@@ -161,9 +174,7 @@ test('history controller dispatches apply-update and open-daily row actions', as
   const { controller, listEl, calls } = createHarness();
   controller.bind();
 
-  controller.applyHistoryPayload({
-    historyVersion: 3,
-    entries: [
+  applyHistory(controller, 3, [
       {
         id: 'apply-1',
         source: 'system',
@@ -184,8 +195,7 @@ test('history controller dispatches apply-update and open-daily row actions', as
         marker: 'older',
         action: { type: 'open-daily', dailyId: '2026-03-07' },
       },
-    ],
-  });
+    ]);
   controller.refreshUi();
 
   const rows = listEl.querySelectorAll('.notificationHistoryItem');
@@ -208,9 +218,7 @@ test('history controller makes actionable rows keyboard focusable and keyboard a
   const { controller, listEl, calls } = createHarness();
   controller.bind();
 
-  controller.applyHistoryPayload({
-    historyVersion: 4,
-    entries: [
+  applyHistory(controller, 4, [
       {
         id: 'apply-2',
         source: 'system',
@@ -240,8 +248,7 @@ test('history controller makes actionable rows keyboard focusable and keyboard a
         createdAtUtcMs: Date.UTC(2026, 2, 7, 2, 4, 0),
         marker: 'older',
       },
-    ],
-  });
+    ]);
   controller.refreshUi();
 
   const rows = listEl.querySelectorAll('.notificationHistoryItem');
@@ -287,9 +294,7 @@ test('history controller leaves blocked open-daily rows non-actionable', () => {
   });
   controller.bind();
 
-  controller.applyHistoryPayload({
-    historyVersion: 5,
-    entries: [
+  applyHistory(controller, 5, [
       {
         id: 'daily-blocked-1',
         source: 'system',
@@ -300,8 +305,7 @@ test('history controller leaves blocked open-daily rows non-actionable', () => {
         marker: 'older',
         action: { type: 'open-daily', dailyId: '2026-03-09' },
       },
-    ],
-  });
+    ]);
   controller.refreshUi();
 
   const row = listEl.querySelector('.notificationHistoryItem');
@@ -317,7 +321,7 @@ test('history controller read-ack posts once per history version and skips dupli
   const { controller, toggleEl, calls } = createHarness();
   controller.bind();
 
-  const unreadEntries = [
+  const unreadEntries = /** @type {NotificationHistoryEntry[]} */ ([
     {
       id: 'sys-ack-1',
       source: 'system',
@@ -327,9 +331,9 @@ test('history controller read-ack posts once per history version and skips dupli
       createdAtUtcMs: Date.UTC(2026, 2, 7, 3, 0, 0),
       marker: 'unread',
     },
-  ];
+  ]);
 
-  controller.applyHistoryPayload({ historyVersion: 10, entries: unreadEntries });
+  applyHistory(controller, 10, unreadEntries);
   toggleEl.dispatchEvent({ type: 'click' });
   await flushMicrotasks();
 
@@ -346,7 +350,7 @@ test('history controller read-ack posts once per history version and skips dupli
   );
   assert.equal(markCallsAfterRefresh.length, 1);
 
-  controller.applyHistoryPayload({ historyVersion: 11, entries: unreadEntries });
+  applyHistory(controller, 11, unreadEntries);
   controller.refreshUi();
   await flushMicrotasks();
 
@@ -360,9 +364,7 @@ test('history controller read-ack waits until unread rows are visibly rendered',
   const { controller, toggleEl, calls, windowObj } = createHarness();
   controller.bind();
 
-  controller.applyHistoryPayload({
-    historyVersion: 12,
-    entries: [
+  applyHistory(controller, 12, [
       {
         id: 'sys-ack-hidden-1',
         source: 'system',
@@ -372,8 +374,7 @@ test('history controller read-ack waits until unread rows are visibly rendered',
         createdAtUtcMs: Date.UTC(2026, 2, 7, 3, 1, 0),
         marker: 'unread',
       },
-    ],
-  });
+    ]);
 
   windowObj.getComputedStyle = (node) => {
     if (node.dataset.entryId === 'sys-ack-hidden-1') {

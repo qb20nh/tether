@@ -17,7 +17,7 @@ const extractBootstrapScript = () => {
 const executeBootstrapScript = ({
   storedTheme = null,
   mediaMatches = {},
-} = {}) => {
+} = /** @type {{ storedTheme?: string | null, mediaMatches?: Record<string, boolean> }} */ ({})) => {
   const classTokens = new Set();
   const documentElement = {
     dataset: {},
@@ -51,7 +51,7 @@ const executeBootstrapScript = ({
   vm.runInNewContext(extractBootstrapScript(), context);
 
   return {
-    theme: documentElement.dataset.theme,
+    theme: typeof documentElement.dataset.theme === 'string' ? documentElement.dataset.theme : null,
     isLightTheme: classTokens.has('theme-light'),
   };
 };

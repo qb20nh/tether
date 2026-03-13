@@ -1,6 +1,14 @@
 import { createHash } from 'node:crypto';
 
-import { encodeDailyOverridesPayload, decodeDailyOverridesPayload } from '../../src/daily_pool_codec.ts';
+import type {
+  GameSnapshot,
+  GridPoint,
+  GridTuple,
+  StateCommand,
+  StateTransition,
+} from '../../src/contracts/ports.ts';
+import { normalizeDailyPayload } from '../../src/app/daily_payload_service.ts';
+import { decodeDailyOverridesPayload, encodeDailyOverridesPayload } from '../../src/daily_pool_codec.ts';
 import { generateInfiniteLevel, selectDefaultInfiniteVariant } from '../../src/infinite.ts';
 import {
   getPathTipFromPath,
@@ -22,14 +30,39 @@ import {
   evaluateStitches,
 } from '../../src/rules.ts';
 import { buildCanonicalSolutionSignature } from '../../src/runtime/score_manager.ts';
-import { createGameStateStore } from '../../src/state/game_state_store.ts';
-import { normalizeDailyPayload } from '../../src/app/daily_payload_service.ts';
 import { utcStartMsFromDateId } from '../../src/runtime/daily_timer.ts';
+import { createGameStateStore } from '../../src/state/game_state_store.ts';
+
+type InfiniteLevel = ReturnType<typeof generateInfiniteLevel>;
+type NormalizedScalar = string | number | boolean | null | undefined;
+type NormalizedValue = NormalizedScalar | NormalizedValue[] | { [key: string]: NormalizedValue };
+
+interface PathTransitionCase {
+  name: string;
+  prevPath: GridPoint[];
+  nextPath: GridPoint[];
+}
+
+interface DailyPayloadCase {
+  dailyId?: unknown;
+  hardInvalidateAtUtcMs?: unknown;
+  dailySlot?: unknown;
+  generatedAtUtcMs?: unknown;
+  canonicalKey?: unknown;
+  schemaVersion?: unknown;
+  poolVersion?: unknown;
+  level?: unknown;
+}
+
+interface MovableWallMove {
+  from: GridPoint;
+  to: GridPoint;
+}
 
 const INFINITE_LEVEL_INDICES = Object.freeze([0, 1, 2, 3, 4, 5, 17, 63, 127, 255]);
 const SCENARIO_INDICES = Object.freeze([0, 5, 17, 63]);
 const SCENARIO_COMMAND_COUNT = 18;
-const PATH_TRANSITION_CASES = Object.freeze([
+const PATH_TRANSITION_CASES: readonly PathTransitionCase[] = Object.freeze([
   {
     name: 'end-retract',
     prevPath: [{ r: 0, c: 0 }, { r: 0, c: 1 }, { r: 0, c: 2 }],
@@ -56,14 +89,14 @@ const PATH_TRANSITION_CASES = Object.freeze([
     nextPath: [{ r: 1, c: 1 }, { r: 0, c: 1 }, { r: 0, c: 0 }],
   },
 ]);
-const DAILY_OVERRIDE_CASES = Object.freeze([
+const DAILY_OVERRIDE_CASES: ReadonlyArray<Record<string, number>> = Object.freeze([
   Object.freeze({}),
   Object.freeze({ 0: 0 }),
   Object.freeze({ 1: 1, 3: 2, 8: 0 }),
   Object.freeze({ 2: 3, 9: 1, 15: 2, 31: 3 }),
   Object.freeze({ 5: 7, 18: 6, 33: 5, 65: 4 }),
 ]);
-const DAILY_PAYLOAD_CASES = Object.freeze([
+const DAILY_PAYLOAD_CASES: readonly (DailyPayloadCase | null)[] = Object.freeze([
   null,
   Object.freeze({}),
   Object.freeze({ dailyId: 'bad' }),
@@ -104,13 +137,13 @@ const UTC_DATE_CASES = Object.freeze([
   '',
   '2026-13-01',
 ]);
-const DIRS_4 = Object.freeze([
+const DIRS_4: readonly GridTuple[] = Object.freeze([
   [-1, 0],
   [1, 0],
   [0, -1],
   [0, 1],
 ]);
-const DIRS_8 = Object.freeze([
+const DIRS_8: readonly GridTuple[] = Object.freeze([
   ...DIRS_4,
   [-1, -1],
   [-1, 1],
@@ -118,9 +151,9 @@ const DIRS_8 = Object.freeze([
   [1, 1],
 ]);
 
-const keyOf = (r, c) => `${r},${c}`;
+const keyOf = (r: number, c: number): string => `${r},${c}`;
 
-const createRng = (seed = 0x51f15e) => {
+const createRng = (seed = 0x51f15e): (() => number) => {
   let state = seed >>> 0;
   return () => {
     state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
@@ -128,52 +161,56 @@ const createRng = (seed = 0x51f15e) => {
   };
 };
 
-const normalizeValue = (value) => {
-  if (value instanceof Set) return [...value].sort();
+const normalizeValue = (value: unknown): NormalizedValue => {
+  if (value instanceof Set) {
+    return [...value].map((entry) => normalizeValue(entry)).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
+  }
   if (value instanceof Map) {
     return [...value.entries()]
-      .map(([key, entryValue]) => [key, normalizeValue(entryValue)])
-      .sort(([a], [b]) => String(a).localeCompare(String(b)));
+      .map(([key, entryValue]) => [key, normalizeValue(entryValue)] as const)
+      .sort(([a], [b]) => String(a).localeCompare(String(b)))
+      .map(([key, entryValue]) => [key, entryValue] as unknown as NormalizedValue);
   }
   if (Array.isArray(value)) return value.map((entry) => normalizeValue(entry));
   if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>;
     return Object.fromEntries(
-      Object.keys(value)
+      Object.keys(record)
         .sort()
-        .map((key) => [key, normalizeValue(value[key])]),
+        .map((key) => [key, normalizeValue(record[key])]),
     );
   }
-  return value;
+  return value as NormalizedScalar;
 };
 
-const stableDigest = (value) => createHash('sha256')
+const stableDigest = (value: unknown): string => createHash('sha256')
   .update(JSON.stringify(normalizeValue(value)))
   .digest('hex');
 
-const normalizeSnapshot = (snapshot) => ({
+const normalizeSnapshot = (snapshot: GameSnapshot): Record<string, NormalizedValue> => ({
   rows: snapshot.rows,
   cols: snapshot.cols,
   totalUsable: snapshot.totalUsable,
   levelIndex: snapshot.levelIndex,
   pathKey: snapshot.pathKey,
-  gridData: snapshot.gridData,
-  path: snapshot.path,
-  stitches: snapshot.stitches,
-  cornerCounts: snapshot.cornerCounts,
-  visited: [...snapshot.visited].sort(),
-  idxByKey: [...snapshot.idxByKey.entries()].sort(([a], [b]) => a.localeCompare(b)),
-  stitchSet: [...snapshot.stitchSet].sort(),
-  stitchReq: [...snapshot.stitchReq.entries()].sort(([a], [b]) => a.localeCompare(b)),
+  gridData: normalizeValue(snapshot.gridData),
+  path: normalizeValue(snapshot.path),
+  stitches: normalizeValue(snapshot.stitches),
+  cornerCounts: normalizeValue(snapshot.cornerCounts),
+  visited: normalizeValue([...snapshot.visited].sort()),
+  idxByKey: normalizeValue([...snapshot.idxByKey.entries()].sort(([a], [b]) => a.localeCompare(b))),
+  stitchSet: normalizeValue([...snapshot.stitchSet].sort()),
+  stitchReq: normalizeValue([...snapshot.stitchReq.entries()].sort(([a], [b]) => a.localeCompare(b))),
 });
 
-const normalizeTransition = (transition) => ({
+const normalizeTransition = (transition: StateTransition): Record<string, NormalizedValue> => ({
   changed: Boolean(transition.changed),
   rebuildGrid: Boolean(transition.rebuildGrid),
   validate: Boolean(transition.validate),
   meta: normalizeValue(transition.meta),
 });
 
-const normalizeEvaluation = (snapshot) => {
+const normalizeEvaluation = (snapshot: GameSnapshot): Record<string, NormalizedValue> => {
   const hintStatus = evaluateHints(snapshot);
   const stitchStatus = evaluateStitches(snapshot);
   const rpsStatus = evaluateRPS(snapshot);
@@ -188,12 +225,13 @@ const normalizeEvaluation = (snapshot) => {
       hintStatus,
       stitchStatus,
       rpsStatus,
+      blockedStatus,
     })),
-  canonicalSignature: buildCanonicalSolutionSignature(snapshot),
+    canonicalSignature: normalizeValue(buildCanonicalSolutionSignature(snapshot)),
   };
 };
 
-const summarizeLevel = (level) => ({
+const summarizeLevel = (level: InfiniteLevel): Record<string, NormalizedValue> => ({
   name: level.name,
   rows: level.grid.length,
   cols: level.grid[0]?.length || 0,
@@ -204,7 +242,7 @@ const summarizeLevel = (level) => ({
   witnessMovableWallCount: level.infiniteMeta.witnessMovableWalls.length,
 });
 
-const summarizeSnapshot = (snapshot) => ({
+const summarizeSnapshot = (snapshot: GameSnapshot): Record<string, NormalizedValue> => ({
   levelIndex: snapshot.levelIndex,
   rows: snapshot.rows,
   cols: snapshot.cols,
@@ -212,12 +250,12 @@ const summarizeSnapshot = (snapshot) => ({
   pathLength: snapshot.path.length,
   pathKey: snapshot.pathKey,
   visitedCount: snapshot.visited.size,
-  movableWalls: snapshot.gridData.flatMap((row, r) => (
-    [...row].flatMap((cell, c) => (cell === 'm' ? [[r, c]] : []))
-  )),
+  movableWalls: normalizeValue(snapshot.gridData.flatMap((row, r) => (
+    row.flatMap((cell, c) => (cell === 'm' ? [[r, c] as GridTuple] : []))
+  ))),
 });
 
-const isUsableCell = (snapshot, r, c) => (
+const isUsableCell = (snapshot: GameSnapshot, r: number, c: number): boolean => (
   r >= 0
   && c >= 0
   && r < snapshot.rows
@@ -226,7 +264,7 @@ const isUsableCell = (snapshot, r, c) => (
   && snapshot.gridData[r][c] !== 'm'
 );
 
-const findPlayableStart = (snapshot) => {
+const findPlayableStart = (snapshot: GameSnapshot): GridPoint | null => {
   for (let r = 0; r < snapshot.rows; r += 1) {
     for (let c = 0; c < snapshot.cols; c += 1) {
       if (!isUsableCell(snapshot, r, c)) continue;
@@ -238,8 +276,8 @@ const findPlayableStart = (snapshot) => {
   return null;
 };
 
-const listMovableWallMoves = (snapshot) => {
-  const moves = [];
+const listMovableWallMoves = (snapshot: GameSnapshot): MovableWallMove[] => {
+  const moves: MovableWallMove[] = [];
   for (let r = 0; r < snapshot.rows; r += 1) {
     for (let c = 0; c < snapshot.cols; c += 1) {
       if (snapshot.gridData[r][c] !== 'm') continue;
@@ -254,19 +292,25 @@ const listMovableWallMoves = (snapshot) => {
   return moves;
 };
 
-const listScenarioCommands = (snapshot) => {
-  const commands = [];
+const listScenarioCommands = (snapshot: GameSnapshot): StateCommand[] => {
+  const commands: StateCommand[] = [];
   if (snapshot.path.length === 0) {
     const start = findPlayableStart(snapshot);
-    if (start) commands.push({ type: 'path/start-or-step', payload: start });
+    if (start) commands.push({ type: 'path/start-or-step', payload: start as unknown as Record<string, unknown> });
     return commands;
   }
 
   const head = snapshot.path[0];
   const tail = snapshot.path[snapshot.path.length - 1];
   for (const [dr, dc] of DIRS_8) {
-    commands.push({ type: 'path/start-or-step', payload: { r: tail.r + dr, c: tail.c + dc } });
-    commands.push({ type: 'path/start-or-step-from-start', payload: { r: head.r + dr, c: head.c + dc } });
+    commands.push({
+      type: 'path/start-or-step',
+      payload: { r: tail.r + dr, c: tail.c + dc } as unknown as Record<string, unknown>,
+    });
+    commands.push({
+      type: 'path/start-or-step-from-start',
+      payload: { r: head.r + dr, c: head.c + dc } as unknown as Record<string, unknown>,
+    });
   }
 
   commands.push({ type: 'path/reverse', payload: {} });
@@ -274,30 +318,33 @@ const listScenarioCommands = (snapshot) => {
   commands.push({ type: 'path/finalize-after-pointer', payload: {} });
 
   for (const move of listMovableWallMoves(snapshot).slice(0, 4)) {
-    commands.push({ type: 'wall/move-attempt', payload: move });
+    commands.push({ type: 'wall/move-attempt', payload: move as unknown as Record<string, unknown> });
   }
 
   return commands;
 };
 
-const buildScenarioCommands = (infiniteIndex, rng) => {
+const normalizeCommand = (command: StateCommand): StateCommand =>
+  normalizeValue(command) as unknown as StateCommand;
+
+const buildScenarioCommands = (infiniteIndex: number, rng: () => number): StateCommand[] => {
   const level = generateInfiniteLevel(infiniteIndex);
   const store = createGameStateStore(() => level);
   store.loadLevel(0);
 
-  const commands = [];
+  const commands: StateCommand[] = [];
   for (let step = 0; step < SCENARIO_COMMAND_COUNT; step += 1) {
     const candidates = listScenarioCommands(store.getSnapshot());
     if (candidates.length === 0) break;
     const command = candidates[Math.floor(rng() * candidates.length)];
-    commands.push(normalizeValue(command));
+    commands.push(normalizeCommand(command));
     store.dispatch(command);
   }
 
   return commands;
 };
 
-const buildScenario = (infiniteIndex, commands) => {
+const buildScenario = (infiniteIndex: number, commands: readonly StateCommand[]): Record<string, NormalizedValue> => {
   const level = generateInfiniteLevel(infiniteIndex);
   const store = createGameStateStore(() => level);
   store.loadLevel(0);
@@ -307,7 +354,7 @@ const buildScenario = (infiniteIndex, commands) => {
     const snapshot = store.getSnapshot();
     const evaluation = normalizeEvaluation(snapshot);
     return {
-      command,
+      command: normalizeValue(command),
       transition: normalizeTransition(transition),
       snapshot: summarizeSnapshot(snapshot),
       evaluation: {
@@ -323,18 +370,18 @@ const buildScenario = (infiniteIndex, commands) => {
 
   return {
     infiniteIndex,
-    commands,
-    frames,
+    commands: normalizeValue(commands),
+    frames: normalizeValue(frames),
   };
 };
 
-const buildPathTransitionCases = () => PATH_TRANSITION_CASES.map((testCase) => ({
+const buildPathTransitionCases = (): NormalizedValue => PATH_TRANSITION_CASES.map((testCase) => ({
   name: testCase.name,
-  prevPath: testCase.prevPath,
-  nextPath: testCase.nextPath,
+  prevPath: normalizeValue(testCase.prevPath),
+  nextPath: normalizeValue(testCase.nextPath),
   result: {
-    endTip: getPathTipFromPath(testCase.nextPath, 'end'),
-    startTip: getPathTipFromPath(testCase.nextPath, 'start'),
+    endTip: normalizeValue(getPathTipFromPath(testCase.nextPath, 'end')),
+    startTip: normalizeValue(getPathTipFromPath(testCase.nextPath, 'start')),
     pathsMatch: pathsMatch(testCase.prevPath, testCase.nextPath),
     isPathReversed: isPathReversed(testCase.nextPath, testCase.prevPath),
     normalizeFlowOffset: normalizeFlowOffset(-17.5, 128),
@@ -359,30 +406,30 @@ const buildPathTransitionCases = () => PATH_TRANSITION_CASES.map((testCase) => (
   },
 }));
 
-const buildDailyOverrideCases = () => DAILY_OVERRIDE_CASES.map((overrides) => {
+const buildDailyOverrideCases = (): NormalizedValue => DAILY_OVERRIDE_CASES.map((overrides) => {
   const encoded = encodeDailyOverridesPayload(overrides, 7);
   return {
-    overrides,
+    overrides: normalizeValue(overrides),
     encoded: {
       variantBits: encoded.variantBits,
       entryCount: encoded.entryCount,
-      payload: [...encoded.payload],
+      payload: normalizeValue([...encoded.payload]),
     },
     decoded: normalizeValue(decodeDailyOverridesPayload(encoded.payload)),
   };
 });
 
-const buildDailyPayloadCases = () => DAILY_PAYLOAD_CASES.map((input) => ({
-  input,
+const buildDailyPayloadCases = (): NormalizedValue => DAILY_PAYLOAD_CASES.map((input) => ({
+  input: normalizeValue(input),
   output: normalizeValue(normalizeDailyPayload(input)),
 }));
 
-const buildUtcDateCases = () => UTC_DATE_CASES.map((dateId) => ({
+const buildUtcDateCases = (): NormalizedValue => UTC_DATE_CASES.map((dateId) => ({
   dateId,
   utcStartMs: utcStartMsFromDateId(dateId),
 }));
 
-export const buildRuntimeRegressionCorpus = () => {
+export const buildRuntimeRegressionCorpus = (): NormalizedValue => {
   const rng = createRng();
 
   const scenarios = SCENARIO_INDICES.map((infiniteIndex) => (

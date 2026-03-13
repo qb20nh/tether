@@ -17,7 +17,7 @@ const createClassList = (initial = []) => {
   };
 };
 
-const createCell = (classes = []) => ({
+const createCell = (classes = []) => /** @type {any} */ ({
   classList: createClassList(classes),
 });
 

@@ -18,6 +18,8 @@ const LEVEL = {
   cornerCounts: [],
 };
 
+const globalObject = /** @type {any} */ (globalThis);
+
 const createRuntimeHarness = (renderer) => {
   const levelProvider = createLevelProvider({
     levels: [LEVEL],
@@ -30,38 +32,41 @@ const createRuntimeHarness = (renderer) => {
   state.dispatch({ type: GAME_COMMANDS.LOAD_LEVEL, payload: { levelIndex: 0 } });
 
   return createRuntime({
-    appEl: {},
+    appEl: /** @type {any} */ ({}),
     core,
     state,
     persistence,
     renderer,
     input: {
       bind: () => { },
+      setKeyboardGamepadControlsEnabled: () => { },
+      setBoardControlSuppressed: () => { },
+      syncSnapshot: () => { },
       unbind: () => { },
     },
-    i18n: {
+    i18n: /** @type {any} */ ({
       resolveLocale: () => 'en',
       createTranslator: () => (key) => key,
       getLocale: () => 'en',
-      setLocale: () => 'en',
+      setLocale: async () => 'en',
       getLocaleOptions: () => [{ value: 'en', label: 'English' }],
-    },
-    ui: {},
+    }),
+    ui: /** @type {any} */ ({}),
   });
 };
 
 const installRafQueue = (t) => {
   const queue = [];
   const previousRaf = globalThis.requestAnimationFrame;
-  globalThis.requestAnimationFrame = (callback) => {
+  globalObject.requestAnimationFrame = (callback) => {
     queue.push(callback);
     return queue.length;
   };
   t.after(() => {
     if (typeof previousRaf === 'function') {
-      globalThis.requestAnimationFrame = previousRaf;
+      globalObject.requestAnimationFrame = previousRaf;
     } else {
-      delete globalThis.requestAnimationFrame;
+      Reflect.deleteProperty(globalObject, 'requestAnimationFrame');
     }
   });
   return queue;

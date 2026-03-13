@@ -1,7 +1,24 @@
-// @ts-nocheck
 import { normalizeScoreState } from '../runtime/score_manager.ts';
+import type {
+  BootState,
+  PersistencePort,
+  RuntimeData,
+  SessionBoardState,
+} from '../contracts/ports.ts';
 
-export function createMemoryPersistence(initialState = {}, options = {}) {
+const normalizeScoreStateTyped = normalizeScoreState as (value: unknown) => RuntimeData;
+const readInteger = (value: unknown, fallback = 0): number =>
+  Number.isInteger(value) ? value as number : fallback;
+
+interface CreateMemoryPersistenceOptions {
+  dailyAbsIndex?: number | null;
+  activeDailyId?: string | null;
+}
+
+export function createMemoryPersistence(
+  initialState: Partial<BootState> = {},
+  options: CreateMemoryPersistenceOptions = {},
+): PersistencePort {
   const dailyAbsIndex = Number.isInteger(options.dailyAbsIndex) ? options.dailyAbsIndex : null;
   const activeDailyId = typeof options.activeDailyId === 'string' && options.activeDailyId.length > 0
     ? options.activeDailyId
@@ -15,11 +32,11 @@ export function createMemoryPersistence(initialState = {}, options = {}) {
       guide: Boolean(initialState.hiddenPanels?.guide),
       legend: initialState.hiddenPanels?.legend ?? true,
     },
-    campaignProgress: Number.isInteger(initialState.campaignProgress) ? initialState.campaignProgress : 0,
-    infiniteProgress: Number.isInteger(initialState.infiniteProgress) ? initialState.infiniteProgress : 0,
+    campaignProgress: readInteger(initialState.campaignProgress),
+    infiniteProgress: readInteger(initialState.infiniteProgress),
     dailySolvedDate: typeof initialState.dailySolvedDate === 'string' ? initialState.dailySolvedDate : null,
-    scoreState: normalizeScoreState(initialState.scoreState),
-    sessionBoard: initialState.sessionBoard || null,
+    scoreState: normalizeScoreStateTyped(initialState.scoreState),
+    sessionBoard: (initialState.sessionBoard || null) as SessionBoardState | null,
   };
 
   return {
@@ -35,7 +52,7 @@ export function createMemoryPersistence(initialState = {}, options = {}) {
         campaignProgress: state.campaignProgress,
         infiniteProgress: state.infiniteProgress,
         dailySolvedDate: state.dailySolvedDate,
-        scoreState: normalizeScoreState(state.scoreState),
+        scoreState: normalizeScoreStateTyped(state.scoreState),
         sessionBoard: state.sessionBoard
           ? {
             levelIndex: state.sessionBoard.levelIndex,
@@ -79,7 +96,7 @@ export function createMemoryPersistence(initialState = {}, options = {}) {
     },
 
     writeScoreState(scoreState) {
-      state.scoreState = normalizeScoreState(scoreState);
+      state.scoreState = normalizeScoreStateTyped(scoreState);
     },
 
     writeSessionBoard(board) {

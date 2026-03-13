@@ -1,4 +1,8 @@
-// @ts-nocheck
+import type {
+  NotificationAutoPromptDecisions,
+  NotificationPermissionState,
+} from '../contracts/ports.ts';
+
 export const NOTIFICATION_AUTO_PROMPT_KEY = 'tetherNotificationAutoPromptDecision';
 export const NOTIFICATION_ENABLED_KEY = 'tetherNotificationsEnabled';
 export const AUTO_UPDATE_ENABLED_KEY = 'tetherAutoUpdateEnabled';
@@ -8,9 +12,30 @@ export const NOTIFICATION_AUTO_PROMPT_DECISIONS = Object.freeze({
   UNSET: 'unset',
   ACCEPTED: 'accepted',
   DECLINED: 'declined',
-});
+} as const) satisfies NotificationAutoPromptDecisions;
 
-export function createNotificationPreferences(options = {}) {
+interface NotificationPreferencesOptions {
+  localStorageObj?: Pick<Storage, 'getItem' | 'setItem'> | null;
+  supportsNotifications?: () => boolean;
+  notificationApi?: { permission?: NotificationPermission } | null;
+}
+
+export interface NotificationPreferences {
+  readAutoPromptDecision: () => string;
+  writeAutoPromptDecision: (decision: string) => void;
+  readNotificationEnabledPreference: () => boolean;
+  writeNotificationEnabledPreference: (enabled: boolean) => void;
+  readAutoUpdateEnabledPreference: () => boolean;
+  writeAutoUpdateEnabledPreference: (enabled: boolean) => void;
+  readLastNotifiedRemoteBuildNumber: () => number | null;
+  writeLastNotifiedRemoteBuildNumber: (buildNumber: number) => void;
+  hasStoredNotificationEnabledPreference: () => boolean;
+  notificationPermissionState: () => NotificationPermissionState;
+}
+
+export function createNotificationPreferences(
+  options: NotificationPreferencesOptions = {},
+): NotificationPreferences {
   const {
     localStorageObj = typeof window === 'undefined' ? null : window.localStorage,
     supportsNotifications = () => false,
@@ -32,7 +57,7 @@ export function createNotificationPreferences(options = {}) {
     return NOTIFICATION_AUTO_PROMPT_DECISIONS.UNSET;
   };
 
-  const writeAutoPromptDecision = (decision) => {
+  const writeAutoPromptDecision = (decision: string): void => {
     if (
       decision !== NOTIFICATION_AUTO_PROMPT_DECISIONS.ACCEPTED
       && decision !== NOTIFICATION_AUTO_PROMPT_DECISIONS.DECLINED
@@ -48,7 +73,7 @@ export function createNotificationPreferences(options = {}) {
 
   const notificationPermissionState = () => {
     if (!supportsNotifications()) return 'unsupported';
-    return notificationApi?.permission;
+    return (notificationApi?.permission || 'default') as NotificationPermissionState;
   };
 
   const readNotificationEnabledPreference = () => {
@@ -62,7 +87,7 @@ export function createNotificationPreferences(options = {}) {
     return notificationPermissionState() === 'granted';
   };
 
-  const writeNotificationEnabledPreference = (enabled) => {
+  const writeNotificationEnabledPreference = (enabled: boolean): void => {
     try {
       localStorageObj?.setItem(NOTIFICATION_ENABLED_KEY, enabled ? 'true' : 'false');
     } catch {
@@ -79,7 +104,7 @@ export function createNotificationPreferences(options = {}) {
     return false;
   };
 
-  const writeAutoUpdateEnabledPreference = (enabled) => {
+  const writeAutoUpdateEnabledPreference = (enabled: boolean): void => {
     try {
       localStorageObj?.setItem(AUTO_UPDATE_ENABLED_KEY, enabled ? 'true' : 'false');
     } catch {
@@ -97,7 +122,7 @@ export function createNotificationPreferences(options = {}) {
     return null;
   };
 
-  const writeLastNotifiedRemoteBuildNumber = (buildNumber) => {
+  const writeLastNotifiedRemoteBuildNumber = (buildNumber: number): void => {
     if (!Number.isInteger(buildNumber) || buildNumber <= 0) return;
     try {
       localStorageObj?.setItem(LAST_NOTIFIED_REMOTE_BUILD_KEY, String(buildNumber));

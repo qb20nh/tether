@@ -5,7 +5,7 @@ import {
   computeDayOrdinal,
   materializeDailyLevelForSlot,
   replayWitnessAndValidate,
-} from '../../scripts/daily_pool_tools.js';
+} from '../../scripts/daily_pool_tools.ts';
 import {
   decodeDailyOverridesPayload,
   encodeDailyOverridesPayload,

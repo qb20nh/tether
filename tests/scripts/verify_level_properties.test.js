@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { solveLevel } from '../../scripts/verify_level_properties.js';
+import { solveLevel } from '../../scripts/verify_level_properties.ts';
 
 test('solveLevel preserves distinct canonical path counts', () => {
   const result = solveLevel({

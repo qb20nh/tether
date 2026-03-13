@@ -1,7 +1,6 @@
-// @ts-nocheck
 export const UINT32_RANGE = 0x100000000;
 
-export const hashString32 = (input) => {
+export const hashString32 = (input: string): number => {
   let hash = 0x811c9dc5;
   for (const char of input) {
     hash ^= char.codePointAt(0) ?? 0;
@@ -10,7 +9,7 @@ export const hashString32 = (input) => {
   return hash >>> 0;
 };
 
-export const mix32 = (input) => {
+export const mix32 = (input: number): number => {
   let value = input >>> 0;
   value ^= value >>> 16;
   value = Math.imul(value, 0x7feb352d) >>> 0;
@@ -20,7 +19,7 @@ export const mix32 = (input) => {
   return value >>> 0;
 };
 
-export const makeMulberry32Rng = (seedInput) => {
+export const makeMulberry32Rng = (seedInput: number): (() => number) => {
   let state = seedInput >>> 0;
   if (state === 0) state = 0x6d2b79f5;
 

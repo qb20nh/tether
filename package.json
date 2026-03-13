@@ -15,7 +15,7 @@
     "build:native": "NATIVE_BUILD=1 vite build",
     "typecheck": "tsc --noEmit",
     "verify:duplication": "jscpd --config .jscpd.json src scripts src-tauri/src vite.config.ts",
-    "verify:release-no-debug": "node --import tsx scripts/verify_release_no_debug_artifacts.js",
+    "verify:release-no-debug": "node --import tsx scripts/verify_release_no_debug_artifacts.ts",
     "preview": "vite preview",
     "tauri": "pnpm run build:native && env NO_STRIP=1 tauri",
     "test": "node --import tsx --test \"tests/contracts/*.test.js\" \"tests/core/*.test.js\" \"tests/input/*.test.js\" \"tests/persistence/*.test.js\" \"tests/renderer/*.test.js\" \"tests/rules/*.test.js\" \"tests/runtime/*.test.js\" \"tests/scripts/*.test.js\" \"tests/state/*.test.js\"",

@@ -9,9 +9,13 @@ import {
   createWindowMock,
 } from './notification_test_harness.js';
 
+/** @typedef {import('../../src/contracts/ports.ts').RuntimeData} RuntimeData */
+/** @typedef {import('../../src/contracts/ports.ts').NotificationPermissionState} NotificationPermissionState */
+
 const NOTIFICATION_KEY = 'notification-enabled-key';
 const AUTO_UPDATE_KEY = 'auto-update-key';
 
+/** @param {any} [overrides] */
 const createHarness = (overrides = {}) => {
   const documentObj = createDocumentMock();
   const windowObj = createWindowMock();
@@ -19,7 +23,16 @@ const createHarness = (overrides = {}) => {
   const notificationsToggleEl = documentObj.register(ELEMENT_IDS.NOTIFICATIONS_TOGGLE, new FakeElement('input'));
   const autoUpdateToggleEl = documentObj.register(ELEMENT_IDS.AUTO_UPDATE_TOGGLE, new FakeElement('input'));
 
-  const calls = {
+  const calls = /** @type {{
+    writeAutoPromptDecision: string[];
+    writeNotificationEnabledPreference: boolean[];
+    writeAutoUpdateEnabledPreference: boolean[];
+    syncDaily: number;
+    syncUpdate: number;
+    registerBackground: number;
+    requestDailyCheck: number;
+    showToast: Array<{ text: string; options: RuntimeData | undefined }>;
+  }} */ ({
     writeAutoPromptDecision: [],
     writeNotificationEnabledPreference: [],
     writeAutoUpdateEnabledPreference: [],
@@ -28,7 +41,7 @@ const createHarness = (overrides = {}) => {
     registerBackground: 0,
     requestDailyCheck: 0,
     showToast: [],
-  };
+  });
 
   const controller = createNotificationToggleController({
     elementIds: ELEMENT_IDS,
@@ -42,18 +55,18 @@ const createHarness = (overrides = {}) => {
     readAutoUpdateEnabledPreference: overrides.readAutoUpdateEnabledPreference || (() => false),
     writeAutoUpdateEnabledPreference: overrides.writeAutoUpdateEnabledPreference || ((value) => calls.writeAutoUpdateEnabledPreference.push(value)),
     hasStoredNotificationEnabledPreference: overrides.hasStoredNotificationEnabledPreference || (() => true),
-    notificationPermissionState: overrides.notificationPermissionState || (() => 'granted'),
+    notificationPermissionState: overrides.notificationPermissionState || (/** @returns {NotificationPermissionState} */ () => 'granted'),
     supportsNotifications: overrides.supportsNotifications || (() => true),
     canUseServiceWorker: overrides.canUseServiceWorker || (() => true),
-    requestNotificationPermission: overrides.requestNotificationPermission || (async () => 'granted'),
+    requestNotificationPermission: overrides.requestNotificationPermission || (/** @returns {Promise<NotificationPermissionState>} */ async () => 'granted'),
     syncDailyStateToServiceWorker: overrides.syncDailyStateToServiceWorker || (async () => { calls.syncDaily += 1; }),
     syncUpdatePolicyToServiceWorker: overrides.syncUpdatePolicyToServiceWorker || (async () => { calls.syncUpdate += 1; }),
     registerBackgroundDailyCheck: overrides.registerBackgroundDailyCheck || (async () => { calls.registerBackground += 1; }),
     requestServiceWorkerDailyCheck: overrides.requestServiceWorkerDailyCheck || (async () => { calls.requestDailyCheck += 1; }),
     translateNow: overrides.translateNow || ((key) => key),
     showInAppToast: overrides.showInAppToast || ((text, options) => { calls.showToast.push({ text, options }); }),
-    windowObj,
-    documentObj,
+    windowObj: /** @type {any} */ (windowObj),
+    documentObj: /** @type {any} */ (documentObj),
   });
 
   return {
@@ -146,6 +159,7 @@ test('toggle controller denied permission path rolls back preference and shows d
   assert.equal(calls.syncDaily, 1);
   assert.equal(calls.showToast.length, 1);
   assert.equal(calls.showToast[0].text, 'Notifications are blocked');
+  assert.ok(calls.showToast[0].options);
   assert.equal(calls.showToast[0].options.recordInHistory, false);
   assert.equal(calls.registerBackground, 0);
   assert.equal(calls.requestDailyCheck, 0);

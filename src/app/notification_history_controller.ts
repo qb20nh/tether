@@ -1,4 +1,3 @@
-// @ts-nocheck
 import {
   HISTORY_DOT_COLORS,
   formatHistoryAbsoluteTime,
@@ -7,12 +6,22 @@ import {
   historyEntryDotColor,
   normalizeHistoryAction,
 } from '../runtime/notification_history.ts';
+import type {
+  DocumentLike,
+  ElementLike,
+  NotificationHistoryAction,
+  NotificationHistoryController,
+  NotificationHistoryControllerOptions,
+  NotificationHistoryEntry,
+  NotificationHistoryPayload,
+  WindowLike,
+} from '../contracts/ports.ts';
 
 const HISTORY_RELATIVE_TIME_REFRESH_MS = 60 * 1000;
 const HISTORY_MAX_ENTRIES = 10;
 const HISTORY_DYING_START_INDEX = 5;
 const HISTORY_EMPTY_PLACEHOLDER_TEXT = 'No notifications yet.';
-const HISTORY_ENTRY_TRANSLATION_KEYS = Object.freeze({
+const HISTORY_ENTRY_TRANSLATION_KEYS: Record<string, { title?: string; body?: string }> = Object.freeze({
   'unsolved-warning': Object.freeze({
     title: 'ui.notificationUnsolvedTitle',
     body: 'ui.notificationUnsolvedBody',
@@ -38,9 +47,32 @@ const HISTORY_ENTRY_TRANSLATION_KEYS = Object.freeze({
     title: 'ui.lowPowerModeHintToast',
   }),
 });
-const isHistoryActionActivationKey = (key) => key === 'Enter' || key === ' ' || key === 'Spacebar';
+const isHistoryActionActivationKey = (key?: string) =>
+  key === 'Enter' || key === ' ' || key === 'Spacebar';
 
-export function createNotificationHistoryController(options = {}) {
+const FALLBACK_WINDOW: WindowLike = {
+  confirm: () => false,
+  clearInterval: () => { },
+  setInterval: () => 0,
+  requestAnimationFrame: () => 0,
+  cancelAnimationFrame: () => { },
+  getComputedStyle: () => ({}),
+  addEventListener: () => { },
+  removeEventListener: () => { },
+};
+const hasUnreadSystemHistoryEntries = hasUnreadSystemHistory as (
+  entries: NotificationHistoryEntry[],
+) => boolean;
+
+interface EventLike {
+  target?: unknown;
+  key?: string;
+  preventDefault?: () => void;
+}
+
+export function createNotificationHistoryController(
+  options: NotificationHistoryControllerOptions,
+): NotificationHistoryController {
   const {
     elementIds,
     swMessageTypes,
@@ -53,9 +85,10 @@ export function createNotificationHistoryController(options = {}) {
     requestUpdateApplyConfirmation = async () => false,
     requestMoveDailyConfirmation = async () => false,
     containsOpenDialogTarget = () => false,
-    windowObj = typeof window === 'undefined' ? undefined : window,
-    documentObj = typeof document === 'undefined' ? undefined : document,
+    windowObj = (typeof window === 'undefined' ? undefined : window) as WindowLike | undefined,
+    documentObj = (typeof document === 'undefined' ? undefined : document) as DocumentLike | undefined,
   } = options;
+  const activeWindow = windowObj || FALLBACK_WINDOW;
 
   if (!elementIds || typeof elementIds !== 'object') {
     throw new Error('createNotificationHistoryController requires elementIds');
@@ -64,28 +97,30 @@ export function createNotificationHistoryController(options = {}) {
     throw new Error('createNotificationHistoryController requires swMessageTypes');
   }
 
-  let notificationHistoryToggleEl = null;
-  let notificationHistoryBadgeEl = null;
-  let notificationHistoryPanelEl = null;
-  let notificationHistoryListEl = null;
+  let notificationHistoryToggleEl: ElementLike | null = null;
+  let notificationHistoryBadgeEl: ElementLike | null = null;
+  let notificationHistoryPanelEl: ElementLike | null = null;
+  let notificationHistoryListEl: ElementLike | null = null;
   let notificationHistoryToggleBound = false;
   let notificationHistoryOpen = false;
   let notificationHistoryRefreshTimer = 0;
   let notificationHistoryReadAckInFlight = false;
-  let notificationHistoryReadAckVersion = null;
+  let notificationHistoryReadAckVersion: number | null = null;
   let notificationHistoryValidationFrame = 0;
 
   const notificationHistoryState = {
     historyVersion: 1,
-    entries: [],
+    entries: [] as NotificationHistoryEntry[],
   };
 
-  const resolveHistoryEntryLocalizedText = (translationKey, fallback) => {
+  const resolveHistoryEntryLocalizedText = (translationKey: string, fallback: string) => {
     const localized = translateNow(translationKey);
     return localized === translationKey ? fallback : localized;
   };
 
-  const resolveNotificationHistoryEntryText = (entry) => {
+  const resolveNotificationHistoryEntryText = (
+    entry?: NotificationHistoryEntry | null,
+  ): { title: string; body: string } => {
     const title = entry?.title || '-';
     const body = entry?.body || '';
 
@@ -106,20 +141,21 @@ export function createNotificationHistoryController(options = {}) {
     };
   };
 
-  const normalizeHistoryEntry = (entry) => {
+  const normalizeHistoryEntry = (entry: unknown): NotificationHistoryEntry | null => {
     if (!entry || typeof entry !== 'object') return null;
-    const id = typeof entry.id === 'string' ? entry.id.trim() : '';
+    const candidate = entry as Record<string, unknown>;
+    const id = typeof candidate.id === 'string' ? candidate.id.trim() : '';
     if (!id) return null;
-    const source = entry.source === 'system' ? 'system' : 'toast';
+    const source = candidate.source === 'system' ? 'system' : 'toast';
     const defaultKind = source === 'system' ? 'unsolved-warning' : 'toast';
-    const kind = typeof entry.kind === 'string' ? entry.kind.trim() : defaultKind;
-    const title = typeof entry.title === 'string' ? entry.title.trim() : '';
-    const body = typeof entry.body === 'string' ? entry.body.trim() : '';
-    const createdAtUtcMs = Number.parseInt(entry.createdAtUtcMs, 10);
-    const marker = entry.marker === 'unread' || entry.marker === 'just-read' || entry.marker === 'older'
-      ? entry.marker
+    const kind = typeof candidate.kind === 'string' ? candidate.kind.trim() : defaultKind;
+    const title = typeof candidate.title === 'string' ? candidate.title.trim() : '';
+    const body = typeof candidate.body === 'string' ? candidate.body.trim() : '';
+    const createdAtUtcMs = Number.parseInt(String(candidate.createdAtUtcMs ?? ''), 10);
+    const marker = candidate.marker === 'unread' || candidate.marker === 'just-read' || candidate.marker === 'older'
+      ? candidate.marker
       : 'older';
-    const action = normalizeHistoryAction(entry.action);
+    const action = normalizeHistoryAction(candidate.action) as NotificationHistoryAction | null;
     return {
       id,
       source,
@@ -132,11 +168,14 @@ export function createNotificationHistoryController(options = {}) {
     };
   };
 
-  const applyHistoryPayload = (payload) => {
+  const applyHistoryPayload = (payload: NotificationHistoryPayload | null | undefined) => {
     const prevVersion = notificationHistoryState.historyVersion;
-    const historyVersion = Number.parseInt(payload?.historyVersion, 10);
+    const historyVersion = Number.parseInt(String(payload?.historyVersion ?? ''), 10);
     const entries = Array.isArray(payload?.entries)
-      ? payload.entries.map((entry) => normalizeHistoryEntry(entry)).filter(Boolean).slice(0, HISTORY_MAX_ENTRIES)
+      ? payload.entries
+        .map((entry) => normalizeHistoryEntry(entry))
+        .filter((entry): entry is NotificationHistoryEntry => entry !== null)
+        .slice(0, HISTORY_MAX_ENTRIES)
       : [];
     notificationHistoryState.historyVersion = Number.isInteger(historyVersion) ? historyVersion : 1;
     notificationHistoryState.entries = entries;
@@ -148,7 +187,7 @@ export function createNotificationHistoryController(options = {}) {
 
   const refreshNotificationHistoryBadgeUi = () => {
     if (!notificationHistoryToggleEl || !notificationHistoryBadgeEl) return;
-    const hasUnreadSystem = hasUnreadSystemHistory(notificationHistoryState.entries);
+    const hasUnreadSystem = hasUnreadSystemHistoryEntries(notificationHistoryState.entries);
     notificationHistoryBadgeEl.hidden = !hasUnreadSystem;
     notificationHistoryToggleEl.classList.toggle('hasUnread', hasUnreadSystem);
   };
@@ -158,9 +197,10 @@ export function createNotificationHistoryController(options = {}) {
     const locale = getLocale();
     const rows = notificationHistoryListEl.querySelectorAll('.notificationHistoryItem');
     for (const row of rows) {
-      const tsRaw = row.dataset.createdAt;
+      const rowEl = row as ElementLike;
+      const tsRaw = rowEl.dataset.createdAt;
       const createdAtUtcMs = Number.parseInt(tsRaw || '', 10);
-      const timeEl = row.querySelector('.notificationHistoryItem__time');
+      const timeEl = rowEl.querySelector('.notificationHistoryItem__time') as ElementLike | null;
       if (!timeEl || !Number.isInteger(createdAtUtcMs)) continue;
       timeEl.textContent = formatHistoryRelativeTime(createdAtUtcMs, locale);
       timeEl.setAttribute('title', formatHistoryAbsoluteTime(createdAtUtcMs, locale));
@@ -168,21 +208,22 @@ export function createNotificationHistoryController(options = {}) {
   };
 
   const renderEmptyNotificationHistoryList = () => {
-    const placeholder = documentObj.createElement('div');
+    if (!documentObj || !notificationHistoryListEl) return;
+    const placeholder = documentObj.createElement('div') as ElementLike & Node;
     placeholder.className = 'notificationHistoryEmpty';
     const localized = translateNow('ui.notificationHistoryEmpty');
     placeholder.textContent = localized === 'ui.notificationHistoryEmpty'
       ? HISTORY_EMPTY_PLACEHOLDER_TEXT
       : localized;
-    notificationHistoryListEl.appendChild(placeholder);
+    notificationHistoryListEl.appendChild(placeholder as unknown as Node);
   };
 
-  const resolveActionableNotificationHistoryEntry = (entry) => {
+  const resolveActionableNotificationHistoryEntry = (entry: NotificationHistoryEntry) => {
     if (entry.action?.type !== 'open-daily') return entry.action;
     return isOpenDailyHistoryActionable(entry) ? entry.action : null;
   };
 
-  const applyNotificationHistoryRowAction = (row, entry) => {
+  const applyNotificationHistoryRowAction = (row: ElementLike, entry: NotificationHistoryEntry) => {
     const actionableEntry = resolveActionableNotificationHistoryEntry(entry);
     if (!actionableEntry) return;
 
@@ -201,14 +242,19 @@ export function createNotificationHistoryController(options = {}) {
     }
   };
 
-  const applyNotificationHistoryRowDeathRank = (row, entryIndex, entryCount) => {
+  const applyNotificationHistoryRowDeathRank = (
+    row: ElementLike,
+    entryIndex: number,
+    entryCount: number,
+  ) => {
     if (entryCount <= HISTORY_DYING_START_INDEX || entryIndex < HISTORY_DYING_START_INDEX) return;
     row.classList.add('isDying');
     row.style.setProperty('--death-rank', String(entryIndex - HISTORY_DYING_START_INDEX));
   };
 
-  const createNotificationHistoryDot = (entry) => {
-    const dot = documentObj.createElement('span');
+  const createNotificationHistoryDot = (entry: NotificationHistoryEntry) => {
+    const doc = documentObj as DocumentLike;
+    const dot = doc.createElement('span') as ElementLike & Node;
     dot.className = 'notificationHistoryItem__dot';
 
     const dotColor = historyEntryDotColor(entry);
@@ -225,33 +271,40 @@ export function createNotificationHistoryController(options = {}) {
     return dot;
   };
 
-  const createNotificationHistoryContent = (entry, locale) => {
-    const content = documentObj.createElement('div');
+  const createNotificationHistoryContent = (entry: NotificationHistoryEntry, locale: string) => {
+    const doc = documentObj as DocumentLike;
+    const content = doc.createElement('div') as ElementLike & Node;
     content.className = 'notificationHistoryItem__content';
 
     const localizedEntry = resolveNotificationHistoryEntryText(entry);
 
-    const title = documentObj.createElement('div');
+    const title = doc.createElement('div') as ElementLike & Node;
     title.className = 'notificationHistoryItem__title';
     title.textContent = localizedEntry.title;
 
-    const body = documentObj.createElement('div');
+    const body = doc.createElement('div') as ElementLike & Node;
     body.className = 'notificationHistoryItem__body';
     body.textContent = localizedEntry.body;
 
-    const time = documentObj.createElement('div');
+    const time = doc.createElement('div') as ElementLike & Node;
     time.className = 'notificationHistoryItem__time';
     time.textContent = formatHistoryRelativeTime(entry.createdAtUtcMs, locale);
     time.setAttribute('title', formatHistoryAbsoluteTime(entry.createdAtUtcMs, locale));
 
-    content.appendChild(title);
-    content.appendChild(body);
-    content.appendChild(time);
+    content.appendChild(title as unknown as Node);
+    content.appendChild(body as unknown as Node);
+    content.appendChild(time as unknown as Node);
     return content;
   };
 
-  const createNotificationHistoryRow = (entry, entryIndex, entryCount, locale) => {
-    const row = documentObj.createElement('div');
+  const createNotificationHistoryRow = (
+    entry: NotificationHistoryEntry,
+    entryIndex: number,
+    entryCount: number,
+    locale: string,
+  ) => {
+    const doc = documentObj as DocumentLike;
+    const row = doc.createElement('div') as ElementLike & Node;
     row.className = 'notificationHistoryItem';
     row.dataset.entryId = entry.id;
     row.dataset.entryKind = entry.kind;
@@ -259,8 +312,8 @@ export function createNotificationHistoryController(options = {}) {
 
     applyNotificationHistoryRowAction(row, entry);
     applyNotificationHistoryRowDeathRank(row, entryIndex, entryCount);
-    row.appendChild(createNotificationHistoryDot(entry));
-    row.appendChild(createNotificationHistoryContent(entry, locale));
+    row.appendChild(createNotificationHistoryDot(entry) as unknown as Node);
+    row.appendChild(createNotificationHistoryContent(entry, locale) as unknown as Node);
     return row;
   };
 
@@ -276,7 +329,9 @@ export function createNotificationHistoryController(options = {}) {
 
     const locale = getLocale();
     for (let i = 0; i < entries.length; i += 1) {
-      notificationHistoryListEl.appendChild(createNotificationHistoryRow(entries[i], i, entries.length, locale));
+      notificationHistoryListEl.appendChild(
+        createNotificationHistoryRow(entries[i], i, entries.length, locale) as unknown as Node,
+      );
     }
   };
 
@@ -287,18 +342,28 @@ export function createNotificationHistoryController(options = {}) {
   };
 
   const createNotificationHistoryRowIndex = () => {
+    if (!notificationHistoryListEl) return new Map<string, ElementLike>();
     const rows = notificationHistoryListEl.querySelectorAll('.notificationHistoryItem');
-    return new Map(Array.from(rows, (row) => [row.dataset.entryId, row]));
+    const rowsByEntryId = new Map<string, ElementLike>();
+    for (const row of rows) {
+      const rowEl = row as ElementLike;
+      const entryId = rowEl.dataset.entryId;
+      if (entryId) rowsByEntryId.set(entryId, rowEl);
+    }
+    return rowsByEntryId;
   };
 
-  const isNotificationHistoryRowVisible = (row) => {
-    const style = windowObj.getComputedStyle(row);
+  const isNotificationHistoryRowVisible = (row: ElementLike) => {
+    const style = activeWindow.getComputedStyle(row);
     return style.display !== 'none'
       && style.visibility !== 'hidden'
       && Number.parseFloat(style.opacity || '1') !== 0;
   };
 
-  const isNotificationHistoryRowReadyForReadAck = (row, entry) => {
+  const isNotificationHistoryRowReadyForReadAck = (
+    row: ElementLike | null | undefined,
+    entry: NotificationHistoryEntry,
+  ) => {
     if (!row?.isConnected) return false;
 
     const titleEl = row.querySelector('.notificationHistoryItem__title');
@@ -314,9 +379,9 @@ export function createNotificationHistoryController(options = {}) {
     return isNotificationHistoryRowVisible(row);
   };
 
-  const collectNotificationHistoryReadAckEntryIds = (entries) => {
+  const collectNotificationHistoryReadAckEntryIds = (entries: NotificationHistoryEntry[]) => {
     const rowsByEntryId = createNotificationHistoryRowIndex();
-    const entryIds = [];
+    const entryIds: string[] = [];
     for (const entry of entries) {
       const row = rowsByEntryId.get(entry.id);
       if (!isNotificationHistoryRowReadyForReadAck(row, entry)) return null;
@@ -354,7 +419,7 @@ export function createNotificationHistoryController(options = {}) {
   const startNotificationHistoryRefreshTimer = () => {
     if (!windowObj) return;
     stopNotificationHistoryRefreshTimer();
-    notificationHistoryRefreshTimer = windowObj.setInterval(() => {
+    notificationHistoryRefreshTimer = activeWindow.setInterval(() => {
       if (!notificationHistoryOpen) return;
       renderNotificationHistoryRelativeTimes();
       void validateAndMarkNotificationHistoryRead();
@@ -393,15 +458,15 @@ export function createNotificationHistoryController(options = {}) {
   };
 
   const scheduleNotificationHistoryReadValidation = () => {
-    if (!windowObj || typeof windowObj.requestAnimationFrame !== 'function') {
+    if (!windowObj) {
       void validateAndMarkNotificationHistoryRead();
       return;
     }
     if (notificationHistoryValidationFrame) {
-      windowObj.cancelAnimationFrame(notificationHistoryValidationFrame);
+      activeWindow.cancelAnimationFrame(notificationHistoryValidationFrame);
       notificationHistoryValidationFrame = 0;
     }
-    notificationHistoryValidationFrame = windowObj.requestAnimationFrame(() => {
+    notificationHistoryValidationFrame = activeWindow.requestAnimationFrame(() => {
       notificationHistoryValidationFrame = 0;
       void validateAndMarkNotificationHistoryRead();
     });
@@ -416,11 +481,11 @@ export function createNotificationHistoryController(options = {}) {
     }
   };
 
-  const handleNotificationHistoryItemAction = (event) => {
-    const target = event?.target;
+  const handleNotificationHistoryItemAction = (event: EventLike) => {
+    const target = event?.target as ElementLike | undefined;
     if (!target || typeof target.closest !== 'function') return;
-    const row = target.closest('.notificationHistoryItem');
-    if (!row || !notificationHistoryListEl?.contains(row)) return;
+    const row = target.closest('.notificationHistoryItem') as ElementLike | null;
+    if (!row || !notificationHistoryListEl?.contains(row as unknown as Node)) return;
     const actionType = row.dataset.actionType || '';
     if (actionType === 'apply-update') {
       const buildNumber = Number.parseInt(row.dataset.actionBuildNumber || '', 10);
@@ -450,22 +515,22 @@ export function createNotificationHistoryController(options = {}) {
     }
   };
 
-  const handleNotificationHistoryItemKeydown = (event) => {
+  const handleNotificationHistoryItemKeydown = (event: EventLike) => {
     if (!isHistoryActionActivationKey(event?.key)) return;
-    const target = event?.target;
+    const target = event?.target as ElementLike | undefined;
     if (!target || typeof target.closest !== 'function') return;
-    const row = target.closest('.notificationHistoryItem');
-    if (!row || !notificationHistoryListEl?.contains(row)) return;
+    const row = target.closest('.notificationHistoryItem') as ElementLike | null;
+    if (!row || !notificationHistoryListEl?.contains(row as unknown as Node)) return;
     if (!row.dataset.actionType) return;
     event.preventDefault?.();
     handleNotificationHistoryItemAction(event);
   };
 
-  const shouldIgnoreOutsideCloseTarget = (target) => {
+  const shouldIgnoreOutsideCloseTarget = (target: unknown) => {
     if (!target) return false;
     if (containsOpenDialogTarget(target)) return true;
-    if (notificationHistoryToggleEl?.contains(target)) return true;
-    return Boolean(notificationHistoryPanelEl?.contains(target));
+    if (notificationHistoryToggleEl?.contains(target as Node | null)) return true;
+    return Boolean(notificationHistoryPanelEl?.contains(target as Node | null));
   };
 
   const bind = () => {
@@ -494,21 +559,21 @@ export function createNotificationHistoryController(options = {}) {
       });
     }
 
-    documentObj.addEventListener('pointerdown', (event) => {
+    documentObj.addEventListener('pointerdown', (event: EventLike) => {
       if (!notificationHistoryOpen) return;
       const target = event?.target;
       if (shouldIgnoreOutsideCloseTarget(target)) return;
       closePanel();
     });
 
-    documentObj.addEventListener('click', (event) => {
+    documentObj.addEventListener('click', (event: EventLike) => {
       if (!notificationHistoryOpen) return;
       const target = event?.target;
       if (shouldIgnoreOutsideCloseTarget(target)) return;
       closePanel();
     });
 
-    documentObj.addEventListener('keydown', (event) => {
+    documentObj.addEventListener('keydown', (event: EventLike) => {
       if (!notificationHistoryOpen) return;
       if (event.key === 'Escape') {
         closePanel();

@@ -1,10 +1,20 @@
-// @ts-nocheck
 const SW_PLUGIN_QUERY_PARAM = 'plugin';
 const DEV_SW_PLUGIN_SCRIPT = '/src/debug/sw_debug_plugin.ts';
 
-const hasWindow = () => typeof window !== 'undefined';
+interface RuntimePluginHost {
+  isLocalhostHostname?: (hostname: string) => boolean;
+  [key: string]: unknown;
+}
 
-export const resolveServiceWorkerRegistrationUrl = (isLocalhostHostname) => {
+interface DebugRuntimePluginModule {
+  mountDebugRuntimePlugin?: (host: RuntimePluginHost) => void;
+}
+
+const hasWindow = (): boolean => typeof window !== 'undefined';
+
+export const resolveServiceWorkerRegistrationUrl = (
+  isLocalhostHostname?: (hostname: string) => boolean,
+): URL => {
   const baseUrl = hasWindow() ? window.location.href : 'http://localhost/';
   const swUrl = new URL('sw.js', baseUrl);
   if (
@@ -18,14 +28,14 @@ export const resolveServiceWorkerRegistrationUrl = (isLocalhostHostname) => {
   return swUrl;
 };
 
-const mountDevRuntimePlugins = async (host = {}) => {
+const mountDevRuntimePlugins = async (host: RuntimePluginHost = {}): Promise<void> => {
   if (!import.meta?.env?.DEV) return;
   if (!hasWindow()) return;
   if (typeof host.isLocalhostHostname !== 'function') return;
   if (!host.isLocalhostHostname(window.location.hostname)) return;
 
   try {
-    const debugPlugin = await import('../debug/runtime_debug_plugin.ts');
+    const debugPlugin = await import('../debug/runtime_debug_plugin.ts') as DebugRuntimePluginModule;
     if (!debugPlugin || typeof debugPlugin.mountDebugRuntimePlugin !== 'function') return;
     debugPlugin.mountDebugRuntimePlugin(host);
   } catch {
@@ -35,4 +45,4 @@ const mountDevRuntimePlugins = async (host = {}) => {
 
 export const mountRuntimePlugins = (import.meta?.env?.DEV)
   ? mountDevRuntimePlugins
-  : async () => { };
+  : async (): Promise<void> => { };

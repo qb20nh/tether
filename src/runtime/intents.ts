@@ -1,11 +1,20 @@
-// @ts-nocheck
+import type {
+  RuntimeData,
+  RuntimeGameCommandIntent,
+  RuntimeInteractionIntent,
+  RuntimeUiActionIntent,
+} from '../contracts/ports.ts';
+
 export const INTENT_TYPES = Object.freeze({
   GAME_COMMAND: 'game.command',
   UI_ACTION: 'ui.action',
   INTERACTION_UPDATE: 'interaction.update',
-});
+} as const);
 
-export const gameCommandIntent = (commandType, payload = {}) => ({
+export const gameCommandIntent = (
+  commandType: string,
+  payload: RuntimeData = {},
+): RuntimeGameCommandIntent => ({
   type: INTENT_TYPES.GAME_COMMAND,
   payload: {
     commandType,
@@ -13,7 +22,10 @@ export const gameCommandIntent = (commandType, payload = {}) => ({
   },
 });
 
-export const uiActionIntent = (actionType, payload = {}) => ({
+export const uiActionIntent = (
+  actionType: string,
+  payload: RuntimeData = {},
+): RuntimeUiActionIntent => ({
   type: INTENT_TYPES.UI_ACTION,
   payload: {
     actionType,
@@ -21,7 +33,10 @@ export const uiActionIntent = (actionType, payload = {}) => ({
   },
 });
 
-export const interactionIntent = (updateType, payload = {}) => ({
+export const interactionIntent = (
+  updateType: string,
+  payload: RuntimeData = {},
+): RuntimeInteractionIntent => ({
   type: INTENT_TYPES.INTERACTION_UPDATE,
   payload: {
     updateType,
@@ -63,4 +78,4 @@ export const INTERACTION_UPDATES = Object.freeze({
   WALL_DRAG: 'wall-drag',
   WALL_DROP_TARGET: 'wall-drop-target',
   BOARD_NAV: 'board-nav',
-});
+} as const);

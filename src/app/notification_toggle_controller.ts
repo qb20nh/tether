@@ -1,7 +1,15 @@
-// @ts-nocheck
-import { normalizeNotificationToggleOptions } from './notification_options.ts';
+import type {
+  InputElementLike,
+  NotificationToggleController,
+} from '../contracts/ports.ts';
+import {
+  normalizeNotificationToggleOptions,
+  type NotificationToggleOptionsInput,
+} from './notification_options.ts';
 
-export function createNotificationToggleController(options = {}) {
+export function createNotificationToggleController(
+  options: NotificationToggleOptionsInput = {},
+): NotificationToggleController {
   const notificationOptions = normalizeNotificationToggleOptions(options);
   const { elementIds } = notificationOptions;
 
@@ -9,9 +17,9 @@ export function createNotificationToggleController(options = {}) {
     throw new Error('createNotificationToggleController requires elementIds');
   }
 
-  let notificationsToggleEl = null;
+  let notificationsToggleEl: InputElementLike | null = null;
   let notificationsToggleBound = false;
-  let autoUpdateToggleEl = null;
+  let autoUpdateToggleEl: InputElementLike | null = null;
   let autoUpdateToggleBound = false;
 
   const refreshNotificationsToggleUi = () => {
@@ -57,6 +65,7 @@ export function createNotificationToggleController(options = {}) {
   };
 
   const maybeAutoPromptForNotifications = async () => {
+    if (!notificationOptions.windowObj) return;
     if (!notificationOptions.supportsNotifications() || !notificationOptions.canUseServiceWorker()) return;
     if (
       notificationOptions.hasStoredNotificationEnabledPreference()
@@ -92,14 +101,18 @@ export function createNotificationToggleController(options = {}) {
   };
 
   const bindNotificationsToggle = () => {
-    notificationsToggleEl = notificationOptions.documentObj.getElementById(elementIds.NOTIFICATIONS_TOGGLE);
+    if (!notificationOptions.documentObj) return;
+    notificationsToggleEl = notificationOptions.documentObj.getElementById(
+      elementIds.NOTIFICATIONS_TOGGLE,
+    ) as InputElementLike | null;
 
     if (!notificationsToggleEl || notificationsToggleBound) {
       refreshNotificationsToggleUi();
       return;
     }
-    notificationsToggleEl.addEventListener('change', () => {
-      if (notificationsToggleEl.checked) {
+    const toggleEl = notificationsToggleEl;
+    toggleEl.addEventListener('change', () => {
+      if (toggleEl.checked) {
         void requestAndEnableNotifications();
         return;
       }
@@ -111,15 +124,19 @@ export function createNotificationToggleController(options = {}) {
   };
 
   const bindAutoUpdateToggle = () => {
-    autoUpdateToggleEl = notificationOptions.documentObj.getElementById(elementIds.AUTO_UPDATE_TOGGLE);
+    if (!notificationOptions.documentObj) return;
+    autoUpdateToggleEl = notificationOptions.documentObj.getElementById(
+      elementIds.AUTO_UPDATE_TOGGLE,
+    ) as InputElementLike | null;
 
     if (!autoUpdateToggleEl || autoUpdateToggleBound) {
       refreshAutoUpdateToggleUi();
       return;
     }
 
-    autoUpdateToggleEl.addEventListener('change', () => {
-      notificationOptions.writeAutoUpdateEnabledPreference(autoUpdateToggleEl.checked);
+    const toggleEl = autoUpdateToggleEl;
+    toggleEl.addEventListener('change', () => {
+      notificationOptions.writeAutoUpdateEnabledPreference(Boolean(toggleEl.checked));
       refreshAutoUpdateToggleUi();
       void notificationOptions.syncUpdatePolicyToServiceWorker();
     });
@@ -128,7 +145,7 @@ export function createNotificationToggleController(options = {}) {
     refreshAutoUpdateToggleUi();
   };
 
-  const handleStorageEvent = (storageKey) => {
+  const handleStorageEvent = (storageKey?: string | null) => {
     if (storageKey === notificationOptions.notificationEnabledKey) {
       refreshNotificationsToggleUi();
       void notificationOptions.syncDailyStateToServiceWorker();

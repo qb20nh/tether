@@ -1,10 +1,70 @@
-// @ts-nocheck
 import { isReducedMotionPreferred as readReducedMotionPreference } from '../reduced_motion.ts';
+import type {
+  BoardLayoutMetrics,
+  CompletionResult,
+  EvaluateResult,
+  GameSnapshot,
+  InteractionModel,
+  RendererPort,
+  RendererRefs,
+  RuntimeData,
+  UiRenderModel,
+} from '../contracts/ports.ts';
 import {
   createBoardRendererCore,
 } from './board_renderer_core.ts';
 
-export function createDomRenderer(options = {}) {
+interface DomRendererOptions {
+  icons?: Record<string, string>;
+  iconX?: string;
+}
+
+interface CompletionTiming {
+  totalMs: number;
+  stepMs: number;
+  cellMs: number;
+  pulseMs: number;
+  pulseStepMs: number;
+}
+
+interface CompletionModel {
+  isSolved: true;
+  isCompleting: boolean;
+  startTimeMs: number;
+  durationMs: number;
+}
+
+interface BoardRendererCoreAdapter {
+  mount: (shellRefs?: RendererRefs | null) => void;
+  getRefs: () => RendererRefs;
+  rebuildGrid: (snapshot: GameSnapshot) => void;
+  renderFrame: (payload: {
+    snapshot: GameSnapshot;
+    evaluation: EvaluateResult;
+    completion?: CompletionModel | null;
+    uiModel?: UiRenderModel;
+    interactionModel?: InteractionModel;
+  }) => void;
+  resize: () => void;
+  getLayoutMetrics: () => BoardLayoutMetrics | null;
+  notifyResizeInteraction: () => void;
+  setLowPowerMode: (enabled: boolean) => void;
+  setPathFlowFreezeImmediate: (isFrozen: boolean) => void;
+  recordPathTransition: (
+    previousSnapshot: GameSnapshot,
+    nextSnapshot: GameSnapshot,
+    interactionModel?: InteractionModel | null,
+  ) => void;
+  clearPathTransitionCompensation: () => void;
+  updateInteraction: (interactionModel?: InteractionModel) => void;
+  destroy: (options?: RuntimeData) => void;
+}
+
+interface DebugWindow extends Window {
+  TETHER_DEBUG_ANIM_SPEED?: number;
+}
+
+export function createDomRenderer(options: DomRendererOptions = {}): RendererPort {
   const icons = options.icons || {};
   const iconX = options.iconX || '';
   const COMPLETE_TOTAL_VAR = '--complete-cascade-total-ms';
@@ -14,9 +74,9 @@ export function createDomRenderer(options = {}) {
   const COMPLETE_PULSE_VAR = '--complete-done-pulse-ms';
   const COMPLETE_PULSE_STEP_VAR = '--complete-done-pulse-step-ms';
   const LATE_SOLVE_TRIGGER_GRACE_MS = 160;
-  const boardRendererCore = createBoardRendererCore({ icons, iconX });
+  const boardRendererCore = createBoardRendererCore({ icons, iconX }) as unknown as BoardRendererCoreAdapter;
 
-  let refs = null;
+  let refs: RendererRefs | null = null;
   let lastBodyClassState = {
     isWallDragging: false,
     isPathDragging: false,
@@ -28,14 +88,14 @@ export function createDomRenderer(options = {}) {
     startTimeMs: 0,
     durationMs: 0,
   };
-  let completeFinishTimer = 0;
+  let completeFinishTimer: ReturnType<typeof setTimeout> | 0 = 0;
   let completePulseFrame = 0;
-  let completePulseTimer = 0;
+  let completePulseTimer: ReturnType<typeof setTimeout> | 0 = 0;
   let lateSolveTriggerUntilMs = 0;
   let lowPowerModeEnabled = false;
   let pendingCompletePulseClassClear = false;
 
-  const setDraggingBodyClasses = (state = {}) => {
+  const setDraggingBodyClasses = (state: InteractionModel = {}) => {
     if (typeof document === 'undefined' || !document.body) return;
     const nextWall = Boolean(state.isWallDragging);
     const nextPath = Boolean(state.isPathDragging);
@@ -58,7 +118,7 @@ export function createDomRenderer(options = {}) {
     return Date.now();
   };
 
-  const parseDurationMs = (value) => {
+  const parseDurationMs = (value: unknown): number => {
     if (typeof value !== 'string') return 0;
     const trimmed = value.trim().toLowerCase();
     if (!trimmed) return 0;
@@ -74,7 +134,7 @@ export function createDomRenderer(options = {}) {
     return Number.isFinite(parsed) ? Math.max(0, parsed) : 0;
   };
 
-  const getCompleteTimingMs = () => {
+  const getCompleteTimingMs = (): CompletionTiming => {
     if (!refs?.boardWrap || typeof getComputedStyle !== 'function') {
       return {
         totalMs: 0,
@@ -84,10 +144,11 @@ export function createDomRenderer(options = {}) {
         pulseStepMs: 0,
       };
     }
-    const styles = getComputedStyle(refs.boardWrap);
+    const styles = getComputedStyle(refs.boardWrap as unknown as Element);
+    const debugWindow = (typeof window === 'undefined' ? undefined : window) as DebugWindow | undefined;
 
-    const speedMultiplier = import.meta?.env?.DEV && typeof window.TETHER_DEBUG_ANIM_SPEED === 'number'
-      ? Math.max(0.1, window.TETHER_DEBUG_ANIM_SPEED)
+    const speedMultiplier = import.meta?.env?.DEV && typeof debugWindow?.TETHER_DEBUG_ANIM_SPEED === 'number'
+      ? Math.max(0.1, debugWindow.TETHER_DEBUG_ANIM_SPEED)
       : 1;
 
     const totalMs = parseDurationMs(styles.getPropertyValue(COMPLETE_TOTAL_VAR)) * speedMultiplier;
@@ -112,7 +173,7 @@ export function createDomRenderer(options = {}) {
     completeFinishTimer = 0;
   };
 
-  const clearCompletePulse = (options = {}) => {
+  const clearCompletePulse = (options: { preserveClass?: boolean } = {}) => {
     const preserveClass = Boolean(options.preserveClass);
     if (completePulseFrame) {
       cancelAnimationFrame(completePulseFrame);
@@ -130,7 +191,7 @@ export function createDomRenderer(options = {}) {
     if (refs?.boardWrap) refs.boardWrap.classList.remove('isCompletePulse');
   };
 
-  const triggerCompletePulse = (pulseTotalMs) => {
+  const triggerCompletePulse = (pulseTotalMs: number) => {
     clearCompletePulse();
     if (!refs?.boardWrap || pulseTotalMs <= 0) return;
     pendingCompletePulseClassClear = false;
@@ -145,7 +206,7 @@ export function createDomRenderer(options = {}) {
     });
   };
 
-  const scheduleCompleteFinish = (durationMs, pulseTotalMs) => {
+  const scheduleCompleteFinish = (durationMs: number, pulseTotalMs: number) => {
     clearCompleteFinishTimer();
     if (durationMs <= 0) return;
     completeFinishTimer = setTimeout(() => {
@@ -175,7 +236,10 @@ export function createDomRenderer(options = {}) {
     || readReducedMotionPreference()
   );
 
-  const isSolvedSnapshot = (snapshot, evaluation) => {
+  const isSolvedSnapshot = (
+    snapshot: GameSnapshot | null | undefined,
+    evaluation: EvaluateResult | null | undefined,
+  ) => {
     if (!snapshot || !evaluation) return false;
     const hintStatus = evaluation.hintStatus;
     const stitchStatus = evaluation.stitchStatus;
@@ -193,7 +257,7 @@ export function createDomRenderer(options = {}) {
     return allVisited && hintsOk && stitchesOk && rpsOk;
   };
 
-  const hasPendingPathFinalizeInteraction = (interactionModel = {}) => (
+  const hasPendingPathFinalizeInteraction = (interactionModel: InteractionModel = {}) => (
     interactionModel?.isPathDragging === true
     || (
       interactionModel?.isBoardNavActive === true
@@ -209,6 +273,11 @@ export function createDomRenderer(options = {}) {
     evaluation,
     completion,
     interactionModel,
+  }: {
+    snapshot: GameSnapshot;
+    evaluation: EvaluateResult;
+    completion?: CompletionResult | null;
+    interactionModel?: InteractionModel;
   }) => {
     if (completion?.kind === 'good') return true;
     if (!isSolvedSnapshot(snapshot, evaluation)) return false;
@@ -222,13 +291,17 @@ export function createDomRenderer(options = {}) {
     reducedMotion,
     timing,
     fallbackTotalMs,
+  }: {
+    reducedMotion: boolean;
+    timing: CompletionTiming;
+    fallbackTotalMs: number;
   }) => {
     if (reducedMotion) return 0;
     if (timing.totalMs > 0) return timing.totalMs;
     return fallbackTotalMs;
   };
 
-  const getCompletionTiming = (snapshot) => {
+  const getCompletionTiming = (snapshot: GameSnapshot) => {
     const timing = getCompleteTimingMs();
     const pathLength = Math.max(1, snapshot.path.length);
     const reducedMotion = prefersReducedMotion();
@@ -273,7 +346,7 @@ export function createDomRenderer(options = {}) {
     };
   };
 
-  const syncCompletionTimingStyles = ({ stepMs, cellMs }) => {
+  const syncCompletionTimingStyles = ({ stepMs, cellMs }: { stepMs: number; cellMs: number }) => {
     if (!refs?.boardWrap) return;
     refs.boardWrap.style.setProperty(COMPLETE_STEP_VAR, `${stepMs}ms`);
     refs.boardWrap.style.setProperty(COMPLETE_CELL_VAR, `${cellMs}ms`);
@@ -284,6 +357,11 @@ export function createDomRenderer(options = {}) {
     shouldAnimateSolve,
     totalMs,
     pulseTotalMs,
+  }: {
+    timeNow: number;
+    shouldAnimateSolve: boolean;
+    totalMs: number;
+    pulseTotalMs: number;
   }) => {
     clearCompletePulse();
     completionCascadeState = {
@@ -297,7 +375,15 @@ export function createDomRenderer(options = {}) {
     else clearCompleteFinishTimer();
   };
 
-  const triggerDeferredCompletionCascade = ({ timeNow, totalMs, pulseTotalMs }) => {
+  const triggerDeferredCompletionCascade = ({
+    timeNow,
+    totalMs,
+    pulseTotalMs,
+  }: {
+    timeNow: number;
+    totalMs: number;
+    pulseTotalMs: number;
+  }) => {
     clearCompletePulse();
     completionCascadeState = {
       isSolved: true,
@@ -321,7 +407,13 @@ export function createDomRenderer(options = {}) {
     clearCompletePulse();
   };
 
-  const finishCompletionCascadeIfElapsed = ({ timeNow, pulseTotalMs }) => {
+  const finishCompletionCascadeIfElapsed = ({
+    timeNow,
+    pulseTotalMs,
+  }: {
+    timeNow: number;
+    pulseTotalMs: number;
+  }) => {
     const elapsedMs = timeNow - completionCascadeState.startTimeMs;
     if (elapsedMs < completionCascadeState.durationMs) return;
     clearCompleteFinishTimer();
@@ -335,6 +427,12 @@ export function createDomRenderer(options = {}) {
     timeNow,
     totalMs,
     pulseTotalMs,
+  }: {
+    solved: boolean;
+    shouldAnimateSolve: boolean;
+    timeNow: number;
+    totalMs: number;
+    pulseTotalMs: number;
   }) => {
     if (lateSolveTriggerUntilMs > 0 && timeNow > lateSolveTriggerUntilMs) {
       lateSolveTriggerUntilMs = 0;
@@ -378,7 +476,7 @@ export function createDomRenderer(options = {}) {
     }
   };
 
-  const getCompletionModel = (solved) => {
+  const getCompletionModel = (solved: boolean): CompletionModel | null => {
     if (!solved) return null;
     return {
       isSolved: true,
@@ -389,7 +487,7 @@ export function createDomRenderer(options = {}) {
   };
 
   return {
-    mount(shellRefs = null) {
+    mount(shellRefs: RendererRefs | null = null) {
       boardRendererCore.mount(shellRefs);
       refs = boardRendererCore.getRefs();
       syncBoardWrapClasses();
@@ -399,7 +497,7 @@ export function createDomRenderer(options = {}) {
       return boardRendererCore.getRefs();
     },
 
-    rebuildGrid(snapshot) {
+    rebuildGrid(snapshot: GameSnapshot) {
       boardRendererCore.rebuildGrid(snapshot);
     },
 
@@ -409,6 +507,12 @@ export function createDomRenderer(options = {}) {
       completion = null,
       uiModel = {},
       interactionModel = {},
+    }: {
+      snapshot: GameSnapshot;
+      evaluation: EvaluateResult;
+      completion?: CompletionResult | null;
+      uiModel?: UiRenderModel;
+      interactionModel?: InteractionModel;
     }) {
       if (!refs) return;
       const timeNow = nowMs();
@@ -486,7 +590,11 @@ export function createDomRenderer(options = {}) {
       boardRendererCore.setPathFlowFreezeImmediate(isFrozen);
     },
 
-    recordPathTransition(previousSnapshot, nextSnapshot, interactionModel = null) {
+    recordPathTransition(
+      previousSnapshot: GameSnapshot,
+      nextSnapshot: GameSnapshot,
+      interactionModel: InteractionModel | null = null,
+    ) {
       boardRendererCore.recordPathTransition(previousSnapshot, nextSnapshot, interactionModel);
     },
 
@@ -494,12 +602,12 @@ export function createDomRenderer(options = {}) {
       boardRendererCore.clearPathTransitionCompensation();
     },
 
-    updateInteraction(interactionModel = {}) {
+    updateInteraction(interactionModel: InteractionModel = {}) {
       boardRendererCore.updateInteraction(interactionModel);
       setDraggingBodyClasses(interactionModel);
     },
 
-    unmount(options = {}) {
+    unmount(options: RuntimeData = {}) {
       setDraggingBodyClasses({ isWallDragging: false, isPathDragging: false });
       boardRendererCore.destroy(options);
       if (refs?.boardWrap) {

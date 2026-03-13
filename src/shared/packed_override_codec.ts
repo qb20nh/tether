@@ -1,16 +1,49 @@
-// @ts-nocheck
-const resolveMessage = (message, fallback, ...args) => {
+type CodecMessage = string | ((...args: number[]) => string);
+type CodecMessages = Record<string, CodecMessage | undefined>;
+type OverrideInput = Map<number, number> | Record<string, number> | null | undefined;
+
+interface CursorRef {
+  index: number;
+}
+
+interface EncodePackedOverridePayloadOptions {
+  formatMagic: number;
+  formatVersion: number;
+  overrides: OverrideInput;
+  maxVariantUsed?: number;
+  messages?: CodecMessages;
+}
+
+interface DecodePackedOverridePayloadOptions {
+  formatMagic: number;
+  formatVersion: number;
+  messages?: CodecMessages;
+}
+
+interface EncodedOverridePayload {
+  payload: Uint8Array;
+  variantBits: number;
+  entryCount: number;
+}
+
+type DecodedOverridePayload = Readonly<Record<number, number>>;
+
+const resolveMessage = (
+  message: CodecMessage | undefined,
+  fallback: string,
+  ...args: number[]
+): string => {
   if (typeof message === 'function') return message(...args);
   if (typeof message === 'string' && message.length > 0) return message;
   return fallback;
 };
 
-const bitsRequired = (maxValueInclusive) => {
+const bitsRequired = (maxValueInclusive: number): number => {
   if (maxValueInclusive <= 0) return 1;
   return Math.max(1, Math.ceil(Math.log2(maxValueInclusive + 1)));
 };
 
-const pushVarUint = (bytes, value) => {
+const pushVarUint = (bytes: number[], value: number): void => {
   let next = value >>> 0;
   while (next >= 0x80) {
     bytes.push((next & 0x7f) | 0x80);
@@ -19,7 +52,11 @@ const pushVarUint = (bytes, value) => {
   bytes.push(next & 0x7f);
 };
 
-const readVarUint = (bytes, cursorRef, messages = {}) => {
+const readVarUint = (
+  bytes: Uint8Array,
+  cursorRef: CursorRef,
+  messages: CodecMessages = {},
+): number => {
   let value = 0;
   let shift = 0;
 
@@ -36,7 +73,7 @@ const readVarUint = (bytes, cursorRef, messages = {}) => {
   throw new Error(resolveMessage(messages.truncatedVarint, 'Truncated varint in override payload'));
 };
 
-export const toSortedOverrideEntries = (overrides) => {
+export const toSortedOverrideEntries = (overrides: OverrideInput): Array<[number, number]> => {
   if (!overrides) return [];
 
   if (overrides instanceof Map) {
@@ -44,8 +81,10 @@ export const toSortedOverrideEntries = (overrides) => {
   }
 
   return Object.entries(overrides)
-    .map(([index, variantId]) => [Number.parseInt(index, 10), variantId])
-    .filter(([index, variantId]) => Number.isInteger(index) && Number.isInteger(variantId))
+    .map(([index, variantId]): [number, number] => [Number.parseInt(index, 10), variantId])
+    .filter((entry): entry is [number, number] => (
+      Number.isInteger(entry[0]) && Number.isInteger(entry[1])
+    ))
     .sort((a, b) => a[0] - b[0]);
 };
 
@@ -55,7 +94,7 @@ export const encodePackedOverridePayload = ({
   overrides,
   maxVariantUsed = 0,
   messages = {},
-}) => {
+}: EncodePackedOverridePayloadOptions): EncodedOverridePayload => {
   const entries = toSortedOverrideEntries(overrides);
   const variantBits = bitsRequired(maxVariantUsed);
   if (variantBits > 8) {
@@ -110,13 +149,14 @@ export const encodePackedOverridePayload = ({
 };
 
 export const decodePackedOverridePayload = (
-  bytes,
-  {
+  bytes: Uint8Array,
+  options: DecodePackedOverridePayloadOptions,
+): DecodedOverridePayload => {
+  const {
     formatMagic,
     formatVersion,
     messages = {},
-  },
-) => {
+  } = options;
   if (!bytes || bytes.length === 0) return Object.freeze(Object.create(null));
   if (bytes.length < 3) {
     throw new Error(resolveMessage(messages.invalidHeader, 'Invalid override payload header'));

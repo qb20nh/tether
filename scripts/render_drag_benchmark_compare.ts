@@ -4,11 +4,17 @@ import { cp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
-import { runCommand, waitForServer } from './lib/process_utils.js';
-import { runRenderDragBenchmarkSuite } from './lib/render_drag_browser_runner.js';
-import { createRenderDragWorkload } from './lib/render_drag_workload.js';
-import { buildMetricSummary, formatMetric, median } from './lib/stats.js';
-
+import type { Browser } from 'playwright';
+import { runCommand, waitForServer } from './lib/process_utils.ts';
+import type {
+  BenchmarkMode,
+  RenderDragBenchmarkSuiteResult,
+  RenderDragSuiteAggregate,
+} from './lib/render_drag_browser_runner.ts';
+import { runRenderDragBenchmarkSuite } from './lib/render_drag_browser_runner.ts';
+import { createRenderDragWorkload } from './lib/render_drag_workload.ts';
+import type { RenderDragWorkload } from './lib/render_drag_workload.ts';
+import { buildMetricSummary, formatMetric, median } from './lib/stats.ts';
 
 const DEFAULT_NEXT_REV = 'HEAD';
 const DEFAULT_PREV_REV = 'HEAD~2';
@@ -21,7 +27,7 @@ const DEFAULT_PORTS = Object.freeze({
   baseline: 4273,
   candidate: 4274,
 });
-const DEFAULT_MODES = Object.freeze(['normal', 'low-power']);
+const DEFAULT_MODES: readonly BenchmarkMode[] = Object.freeze(['normal', 'low-power']);
 const WORKLOAD_GUARD_FILES = Object.freeze([
   'src/infinite.ts',
   'src/core/level_provider.ts',
@@ -37,11 +43,90 @@ const WORKTREE_EXCLUDED_NAMES = new Set([
   'dist',
 ]);
 
+type SuiteRole = 'baseline' | 'candidate';
+
+interface ParsedArgs {
+  nextRev: string;
+  prevRev: string;
+  seed: string;
+  boards: number;
+  repeats: number;
+  out: string;
+  keepTemp: boolean;
+  modes: BenchmarkMode[];
+}
+
+interface ResolvedRevision {
+  type: 'worktree' | 'commit';
+  spec: string;
+  full: string;
+  short: string;
+}
+
+interface PreviewServerHandle {
+  baseUrl: string;
+  stop: () => Promise<void>;
+}
+
+interface AggregateRevisionResult {
+  suiteCount: number;
+  caseCount: number;
+  pointerMoveCount: number;
+  pathStepCount: number;
+  syncMsPerPointerMove: ReturnType<typeof buildMetricSummary>;
+  rafMsPerPointerMove: ReturnType<typeof buildMetricSummary>;
+  dragWallClockMs: ReturnType<typeof buildMetricSummary>;
+  totalMsPerPathStep: ReturnType<typeof buildMetricSummary>;
+}
+
+interface ModeComparisonSummary {
+  baseline: AggregateRevisionResult & {
+    revision: string;
+    shortRevision: string;
+  };
+  candidate: AggregateRevisionResult & {
+    revision: string;
+    shortRevision: string;
+  };
+  deltaPercent: {
+    rafMsPerPointerMoveMedian: number;
+    syncMsPerPointerMoveMedian: number;
+    totalMsPerPathStepMedian: number;
+  };
+}
+
+interface ComparisonSuiteResult extends RenderDragBenchmarkSuiteResult {
+  role: SuiteRole;
+  revisionFull: string;
+}
+
+interface ComparisonReport {
+  nextRev: string;
+  prevRev: string;
+  candidateRev: string;
+  baselineRev: string;
+  nextInput: string;
+  prevInput: string;
+  seed: string;
+  modes: BenchmarkMode[];
+  repeats: number;
+  boardCount: number;
+  workload: RenderDragWorkload;
+  results: ComparisonSuiteResult[];
+  comparison: Partial<Record<BenchmarkMode, ModeComparisonSummary>>;
+  failures: string[];
+  buildMode: string;
+  ports: {
+    baseline: number;
+    candidate: number;
+  };
+}
+
 const repoRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const resolvedRepoRoot = path.resolve(repoRoot);
 const viteBinPath = path.resolve(resolvedRepoRoot, 'node_modules', 'vite', 'bin', 'vite.js');
 
-const applyArg = (args, key, value, token) => {
+const applyArg = (args: ParsedArgs, key: string, value: string, token: string): void => {
   switch (key) {
     case '--next':
     case '--candidate-rev':
@@ -64,14 +149,14 @@ const applyArg = (args, key, value, token) => {
       args.out = value;
       break;
     case '--modes':
-      args.modes = value.split(',').map((v) => v.trim()).filter(Boolean);
+      args.modes = value.split(',').map((item) => item.trim()).filter(Boolean) as BenchmarkMode[];
       break;
     default:
       throw new Error(`Unknown argument: ${token}`);
   }
 };
 
-const validateArgs = (args, positionals) => {
+const validateArgs = (args: ParsedArgs, positionals: readonly string[]): void => {
   if (positionals.length > 2) {
     throw new Error(`Expected at most two positional inputs: prev [next], got ${positionals.length}`);
   }
@@ -96,8 +181,8 @@ const validateArgs = (args, positionals) => {
   }
 };
 
-const parseArgs = (argv) => {
-  const args = {
+const parseArgs = (argv: readonly string[]): ParsedArgs => {
+  const args: ParsedArgs = {
     nextRev: DEFAULT_NEXT_REV,
     prevRev: DEFAULT_PREV_REV,
     seed: DEFAULT_SEED,
@@ -105,9 +190,9 @@ const parseArgs = (argv) => {
     repeats: DEFAULT_REPEAT_COUNT,
     out: '',
     keepTemp: false,
-    modes: DEFAULT_MODES.slice(),
+    modes: [...DEFAULT_MODES],
   };
-  const positionals = [];
+  const positionals: string[] = [];
 
   for (let i = 0; i < argv.length; i += 1) {
     const token = argv[i];
@@ -135,7 +220,7 @@ const parseArgs = (argv) => {
   return args;
 };
 
-const resolveRevision = (revSpec) => {
+const resolveRevision = (revSpec: string): ResolvedRevision => {
   if (typeof revSpec !== 'string' || revSpec.length === 0) {
     return {
       type: 'worktree',
@@ -160,7 +245,7 @@ const resolveRevision = (revSpec) => {
   };
 };
 
-const isWorktreeDirty = () => {
+const isWorktreeDirty = (): boolean => {
   const output = execFileSync('git', ['status', '--porcelain'], {
     cwd: resolvedRepoRoot,
     encoding: 'utf8',
@@ -168,7 +253,7 @@ const isWorktreeDirty = () => {
   return output.trim().length > 0;
 };
 
-const isStrictAncestorCommit = (prevRevision, nextRevision) => {
+const isStrictAncestorCommit = (prevRevision: ResolvedRevision, nextRevision: ResolvedRevision): boolean => {
   if (prevRevision.type !== 'commit' || nextRevision.type !== 'commit') return false;
   if (prevRevision.full === nextRevision.full) return false;
   const mergeBase = execFileSync('git', ['merge-base', prevRevision.full, nextRevision.full], {
@@ -178,7 +263,7 @@ const isStrictAncestorCommit = (prevRevision, nextRevision) => {
   return mergeBase === prevRevision.full;
 };
 
-const assertRevisionOrder = (prevRevision, nextRevision) => {
+const assertRevisionOrder = (prevRevision: ResolvedRevision, nextRevision: ResolvedRevision): void => {
   if (prevRevision.type !== 'commit') {
     throw new Error('prev must be a commit hash');
   }
@@ -209,7 +294,7 @@ const assertRevisionOrder = (prevRevision, nextRevision) => {
   }
 };
 
-const resolveFileText = (revision, relativePath) => execFileSync(
+const resolveFileText = (revision: ResolvedRevision, relativePath: string): string => execFileSync(
   'git',
   ['show', `${revision.full}:${relativePath}`],
   {
@@ -218,9 +303,9 @@ const resolveFileText = (revision, relativePath) => execFileSync(
   },
 );
 
-const hashText = (value) => createHash('sha1').update(value).digest('hex');
+const hashText = (value: string): string => createHash('sha1').update(value).digest('hex');
 
-const resolveWorkloadGuardValue = (revision, relativePath) => {
+const resolveWorkloadGuardValue = async (revision: ResolvedRevision, relativePath: string): Promise<string> => {
   const source = revision.type === 'worktree'
     ? readFile(path.resolve(resolvedRepoRoot, relativePath), 'utf8')
     : Promise.resolve(resolveFileText(revision, relativePath));
@@ -238,10 +323,12 @@ const resolveWorkloadGuardValue = (revision, relativePath) => {
   });
 };
 
-const assertSharedWorkloadInputs = async (candidateRevision, baselineRevision) => {
-  const mismatches = [];
-  for (const element of WORKLOAD_GUARD_FILES) {
-    const relativePath = element;
+const assertSharedWorkloadInputs = async (
+  candidateRevision: ResolvedRevision,
+  baselineRevision: ResolvedRevision,
+): Promise<void> => {
+  const mismatches: string[] = [];
+  for (const relativePath of WORKLOAD_GUARD_FILES) {
     const candidateBlob = await resolveWorkloadGuardValue(candidateRevision, relativePath);
     const baselineBlob = await resolveWorkloadGuardValue(baselineRevision, relativePath);
     if (candidateBlob === baselineBlob) continue;
@@ -255,7 +342,7 @@ const assertSharedWorkloadInputs = async (candidateRevision, baselineRevision) =
   }
 };
 
-const pipeArchiveToDirectory = (revision, outputDir) => new Promise((resolve, reject) => {
+const pipeArchiveToDirectory = (revision: ResolvedRevision, outputDir: string): Promise<void> => new Promise((resolve, reject) => {
   const archive = spawn('git', ['archive', '--format=tar', revision.full], {
     cwd: resolvedRepoRoot,
     stdio: ['ignore', 'pipe', 'inherit'],
@@ -271,7 +358,7 @@ const pipeArchiveToDirectory = (revision, outputDir) => new Promise((resolve, re
   let archiveCode = 0;
   let extractCode = 0;
 
-  const finish = (error = null) => {
+  const finish = (error: Error | null = null): void => {
     if (settled) return;
     if (error) {
       settled = true;
@@ -302,13 +389,13 @@ const pipeArchiveToDirectory = (revision, outputDir) => new Promise((resolve, re
   });
 });
 
-const ensureNodeModulesSymlink = async (snapshotDir) => {
+const ensureNodeModulesSymlink = async (snapshotDir: string): Promise<void> => {
   const target = path.resolve(snapshotDir, 'node_modules');
   await rm(target, { recursive: true, force: true });
   await symlink(path.resolve(resolvedRepoRoot, 'node_modules'), target);
 };
 
-const copyWorktreeToDirectory = async (outputDir) => {
+const copyWorktreeToDirectory = async (outputDir: string): Promise<void> => {
   await cp(resolvedRepoRoot, outputDir, {
     recursive: true,
     filter: (source) => {
@@ -318,7 +405,7 @@ const copyWorktreeToDirectory = async (outputDir) => {
   });
 };
 
-const prepareRevisionSnapshot = async (revision, tempRoot) => {
+const prepareRevisionSnapshot = async (revision: ResolvedRevision, tempRoot: string): Promise<string> => {
   const snapshotDir = path.join(tempRoot, revision.short);
   await rm(snapshotDir, { recursive: true, force: true });
   if (revision.type === 'worktree') {
@@ -331,7 +418,7 @@ const prepareRevisionSnapshot = async (revision, tempRoot) => {
   return snapshotDir;
 };
 
-const buildSnapshot = async (snapshotDir, revision) => {
+const buildSnapshot = async (snapshotDir: string, revision: ResolvedRevision): Promise<void> => {
   await runCommand(process.execPath, [viteBinPath, 'build'], {
     cwd: snapshotDir,
     env: {
@@ -343,7 +430,7 @@ const buildSnapshot = async (snapshotDir, revision) => {
   });
 };
 
-const startPreviewServer = async (snapshotDir, port) => {
+const startPreviewServer = async (snapshotDir: string, port: number): Promise<PreviewServerHandle> => {
   const child = spawn(process.execPath, [
     viteBinPath,
     'preview',
@@ -373,18 +460,18 @@ const startPreviewServer = async (snapshotDir, port) => {
 
   return {
     baseUrl,
-    async stop() {
+    async stop(): Promise<void> {
       if (child.killed) return;
       child.kill('SIGTERM');
-      await new Promise((resolve) => {
-        child.once('exit', resolve);
-        setTimeout(resolve, 2000);
+      await new Promise<void>((resolve) => {
+        child.once('exit', () => resolve());
+        setTimeout(() => resolve(), 2000);
       });
     },
   };
 };
 
-const aggregateModeRevisionResults = (suiteResults) => {
+const aggregateModeRevisionResults = (suiteResults: readonly ComparisonSuiteResult[]): AggregateRevisionResult => {
   const allCaseResults = suiteResults.flatMap((suite) => suite.caseResults);
   const syncValues = allCaseResults.map((item) => item.syncMsPerPointerMove);
   const rafValues = allCaseResults.map((item) => item.rafMsPerPointerMove);
@@ -403,7 +490,7 @@ const aggregateModeRevisionResults = (suiteResults) => {
   };
 };
 
-const percentDelta = (baseline, candidate) => {
+const percentDelta = (baseline: number, candidate: number): number => {
   if (!Number.isFinite(baseline) || baseline === 0) return 0;
   return ((candidate - baseline) / baseline) * 100;
 };
@@ -413,10 +500,14 @@ const buildComparison = ({
   modes,
   baselineRevision,
   candidateRevision,
-}) => {
-  const output = {};
-  for (const element of modes) {
-    const mode = element;
+}: {
+  results: readonly ComparisonSuiteResult[];
+  modes: readonly BenchmarkMode[];
+  baselineRevision: ResolvedRevision;
+  candidateRevision: ResolvedRevision;
+}): Partial<Record<BenchmarkMode, ModeComparisonSummary>> => {
+  const output: Partial<Record<BenchmarkMode, ModeComparisonSummary>> = {};
+  for (const mode of modes) {
     const baselineSuites = results.filter(
       (suite) => suite.mode === mode && suite.role === 'baseline',
     );
@@ -455,7 +546,7 @@ const buildComparison = ({
   return output;
 };
 
-const printModeSummary = (mode, summary) => {
+const printModeSummary = (mode: BenchmarkMode, summary: ModeComparisonSummary): void => {
   process.stdout.write(`\nMode: ${mode}\n`);
   process.stdout.write('revision    raf(ms/move)  sync(ms/move)  total(ms/step)  delta\n');
   const baseline = summary.baseline;
@@ -468,16 +559,17 @@ const printModeSummary = (mode, summary) => {
   );
 };
 
-const defaultOutPath = () => path.join(
+const defaultOutPath = (): string => path.join(
   DEFAULT_OUTPUT_DIR,
   `tether-render-drag-benchmark-${Date.now()}.json`,
 );
 
-const maybeReadPlaywright = async () => {
+const maybeReadPlaywright = async (): Promise<typeof import('playwright')> => {
   try {
     return await import('playwright');
   } catch (error) {
-    throw new Error(`Playwright is required for render drag benchmark compare: ${error?.message || error}`);
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    throw new Error(`Playwright is required for render drag benchmark compare: ${errorMessage}`);
   }
 };
 
@@ -489,12 +581,24 @@ const runComparisonSuites = async ({
   baselineSnapshotDir,
   candidateSnapshotDir,
   workload,
-}) => {
-  const results = [];
+}: {
+  args: ParsedArgs;
+  browser: Browser;
+  baselineRevision: ResolvedRevision;
+  candidateRevision: ResolvedRevision;
+  baselineSnapshotDir: string;
+  candidateSnapshotDir: string;
+  workload: RenderDragWorkload;
+}): Promise<ComparisonSuiteResult[]> => {
+  const results: ComparisonSuiteResult[] = [];
   for (let repeatIndex = 0; repeatIndex < args.repeats; repeatIndex += 1) {
-    for (const element of args.modes) {
-      const mode = element;
-      const suiteOrder = [
+    for (const mode of args.modes) {
+      const suiteOrder: Array<{
+        role: SuiteRole;
+        revision: ResolvedRevision;
+        snapshotDir: string;
+        port: number;
+      }> = [
         {
           role: 'baseline',
           revision: baselineRevision,
@@ -509,8 +613,7 @@ const runComparisonSuites = async ({
         },
       ];
 
-      for (const element of suiteOrder) {
-        const suite = element;
+      for (const suite of suiteOrder) {
         const preview = await startPreviewServer(suite.snapshotDir, suite.port);
         try {
           const result = await runRenderDragBenchmarkSuite({
@@ -535,7 +638,12 @@ const runComparisonSuites = async ({
   return results;
 };
 
-export const runRenderDragBenchmarkCompare = async (rawArgs = process.argv.slice(2)) => {
+export const runRenderDragBenchmarkCompare = async (
+  rawArgs: readonly string[] = process.argv.slice(2),
+): Promise<{
+  report: ComparisonReport;
+  outputPath: string;
+}> => {
   const args = parseArgs(rawArgs);
   const candidateRevision = resolveRevision(args.nextRev);
   const baselineRevision = resolveRevision(args.prevRev);
@@ -549,7 +657,7 @@ export const runRenderDragBenchmarkCompare = async (rawArgs = process.argv.slice
   const tempRoot = path.join(os.tmpdir(), 'tether-render-drag-bench');
   const outputPath = args.out ? path.resolve(args.out) : defaultOutPath();
 
-  const report = {
+  const report: ComparisonReport = {
     nextRev: candidateRevision.full,
     prevRev: baselineRevision.full,
     candidateRev: candidateRevision.full,
@@ -571,7 +679,7 @@ export const runRenderDragBenchmarkCompare = async (rawArgs = process.argv.slice
     },
   };
 
-  let browser = null;
+  let browser: Browser | null = null;
   try {
     await mkdir(tempRoot, { recursive: true });
     const baselineSnapshotDir = await prepareRevisionSnapshot(baselineRevision, tempRoot);
@@ -607,9 +715,10 @@ export const runRenderDragBenchmarkCompare = async (rawArgs = process.argv.slice
     await mkdir(path.dirname(outputPath), { recursive: true });
     await writeFile(outputPath, `${JSON.stringify(report, null, 2)}\n`, 'utf8');
 
-    for (const element of args.modes) {
-      const mode = element;
-      printModeSummary(mode, report.comparison[mode]);
+    for (const mode of args.modes) {
+      const summary = report.comparison[mode];
+      if (!summary) continue;
+      printModeSummary(mode, summary);
     }
     process.stdout.write(`\nReport written to ${outputPath}\n`);
     return {
@@ -617,7 +726,8 @@ export const runRenderDragBenchmarkCompare = async (rawArgs = process.argv.slice
       outputPath,
     };
   } catch (error) {
-    report.failures.push(String(error?.stack || error?.message || error));
+    const failureMessage = error instanceof Error ? (error.stack || error.message) : String(error);
+    report.failures.push(failureMessage);
     try {
       await mkdir(path.dirname(outputPath), { recursive: true });
       await writeFile(outputPath, `${JSON.stringify(report, null, 2)}\n`, 'utf8');
@@ -639,7 +749,8 @@ if (process.argv[1] === new URL(import.meta.url).pathname) {
   try {
     await runRenderDragBenchmarkCompare();
   } catch (error) {
-    process.stderr.write(`${error?.stack || error}\n`);
+    const errorMessage = error instanceof Error ? (error.stack || error.message) : String(error);
+    process.stderr.write(`${errorMessage}\n`);
     process.exitCode = 1;
   }
 }

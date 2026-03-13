@@ -1,5 +1,22 @@
-// @ts-nocheck
-export async function resolveLatestUpdateBuildNumber(options = {}) {
+import type { NotificationHistoryEntry } from '../contracts/ports.ts';
+
+type UpdateBuildResolverHistoryEntry = Pick<NotificationHistoryEntry, 'kind' | 'action'>;
+
+interface UpdateBuildResolverOptions {
+  hintBuildNumber?: number | null;
+  readLastNotifiedRemoteBuildNumber?: () => number | null;
+  notificationHistoryEntries?: readonly UpdateBuildResolverHistoryEntry[];
+  fetchRemoteBuildNumber?: () => Promise<number | null>;
+  resolveUpdatableRemoteBuildNumber?: (buildNumber: number) => Promise<number | null>;
+  localBuildNumber?: number;
+}
+
+const readBuildNumber = (value: unknown): number | null =>
+  Number.isInteger(value) ? value as number : null;
+
+export async function resolveLatestUpdateBuildNumber(
+  options: UpdateBuildResolverOptions = {},
+): Promise<number | null> {
   const {
     hintBuildNumber = null,
     readLastNotifiedRemoteBuildNumber = () => null,
@@ -9,10 +26,10 @@ export async function resolveLatestUpdateBuildNumber(options = {}) {
     localBuildNumber = 0,
   } = options;
 
-  let latest = Number.isInteger(hintBuildNumber) ? hintBuildNumber : 0;
+  let latest = readBuildNumber(hintBuildNumber) ?? 0;
 
-  const storedNotifiedBuild = readLastNotifiedRemoteBuildNumber();
-  if (Number.isInteger(storedNotifiedBuild) && storedNotifiedBuild > latest) {
+  const storedNotifiedBuild = readBuildNumber(readLastNotifiedRemoteBuildNumber());
+  if (storedNotifiedBuild !== null && storedNotifiedBuild > latest) {
     latest = storedNotifiedBuild;
   }
 
@@ -20,17 +37,19 @@ export async function resolveLatestUpdateBuildNumber(options = {}) {
     if (entry?.kind !== 'new-version-available') continue;
     const action = entry.action;
     if (action?.type !== 'apply-update') continue;
-    if (Number.isInteger(action.buildNumber) && action.buildNumber > latest) {
-      latest = action.buildNumber;
+    const actionBuildNumber = readBuildNumber(action.buildNumber);
+    if (actionBuildNumber !== null && actionBuildNumber > latest) {
+      latest = actionBuildNumber;
     }
   }
 
-  const remoteBuildNumber = await fetchRemoteBuildNumber();
-  if (Number.isInteger(remoteBuildNumber) && remoteBuildNumber > latest) {
+  const remoteBuildNumber = readBuildNumber(await fetchRemoteBuildNumber());
+  if (remoteBuildNumber !== null && remoteBuildNumber > latest) {
     latest = remoteBuildNumber;
   }
 
   const updatableBuildNumber = await resolveUpdatableRemoteBuildNumber(latest);
-  if (!Number.isInteger(updatableBuildNumber) || updatableBuildNumber <= localBuildNumber) return null;
-  return updatableBuildNumber;
+  const resolvedUpdatableBuildNumber = readBuildNumber(updatableBuildNumber);
+  if (resolvedUpdatableBuildNumber === null || resolvedUpdatableBuildNumber <= localBuildNumber) return null;
+  return resolvedUpdatableBuildNumber;
 }

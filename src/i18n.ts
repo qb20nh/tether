@@ -1,5 +1,18 @@
-// @ts-nocheck
-const LOCALE_LABELS = {
+import type {
+  LocaleOption,
+  TranslateVars,
+  Translator,
+} from './contracts/ports.ts';
+
+type LocaleMessages = Record<string, unknown>;
+type LocaleModule = LocaleMessages | { default?: LocaleMessages };
+type LocaleAvailabilityOptions = { online?: boolean };
+
+interface NavigatorWithUserLanguage extends Navigator {
+  userLanguage?: string;
+}
+
+const LOCALE_LABELS: Record<string, string> = {
   ko: '한국어',
   en: 'English',
   it: 'Italiano',
@@ -27,14 +40,16 @@ export const SUPPORTED_LOCALES = [
   'ko-KR',
   'de-DE',
   'fr-FR',
-];
-export const DEFAULT_LOCALE = 'ko-KR';
-export const FALLBACK_EN_LOCALE = 'en';
+] as const;
+type SupportedLocale = typeof SUPPORTED_LOCALES[number];
+
+export const DEFAULT_LOCALE: SupportedLocale = 'ko-KR';
+export const FALLBACK_EN_LOCALE: SupportedLocale = 'en';
 export const LOCALE_STORAGE_KEY = 'tetherLocale';
 const LOCALE_ORDER_SEED_KEY = 'tetherLocaleOrderSeed';
 const AVAILABLE_LOCALES_STORAGE_KEY = 'tetherAvailableLocales';
 
-const LOCALE_LOADERS = {
+const LOCALE_LOADERS: Record<SupportedLocale, () => Promise<LocaleModule>> = {
   en: () => import('../locales/en.js'),
   it: () => import('../locales/it.js'),
   'zh-Hans': () => import('../locales/zh-Hans.js'),
@@ -48,7 +63,7 @@ const LOCALE_LOADERS = {
   'fr-FR': () => import('../locales/fr-FR.js'),
 };
 
-const LOCALE_ALIASES = {
+const LOCALE_ALIASES: Record<string, SupportedLocale> = {
   en: 'en',
   'en-us': 'en',
   'en-gb': 'en',
@@ -79,7 +94,7 @@ const LOCALE_ALIASES = {
   'fr-fr': 'fr-FR',
 };
 
-const FALLBACK_BY_BASE = {
+const FALLBACK_BY_BASE: Record<string, SupportedLocale> = {
   en: 'en',
   it: 'it',
   zh: 'zh-Hans',
@@ -92,18 +107,18 @@ const FALLBACK_BY_BASE = {
   fr: 'fr-FR',
 };
 
-const loadedLocaleMessages = new Map();
-const localeLoadPromises = new Map();
-let cachedLocaleOrderSeed = null;
-let cachedAvailableLocales = null;
+const loadedLocaleMessages = new Map<SupportedLocale, LocaleMessages>();
+const localeLoadPromises = new Map<SupportedLocale, Promise<LocaleMessages>>();
+let cachedLocaleOrderSeed: number | null = null;
+let cachedAvailableLocales: Set<SupportedLocale> | null = null;
 
-const normalizeSeed = (value) => {
-  const candidate = Number.parseInt(value, 10);
+const normalizeSeed = (value: unknown): number | null => {
+  const candidate = Number.parseInt(String(value ?? ''), 10);
   if (!Number.isFinite(candidate)) return null;
   return candidate >>> 0;
 };
 
-const generateLocaleOrderSeed = () => {
+const generateLocaleOrderSeed = (): number => {
   if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
     const arr = new Uint32Array(1);
     crypto.getRandomValues(arr);
@@ -112,7 +127,7 @@ const generateLocaleOrderSeed = () => {
   return (Math.random() * 0x100000000) >>> 0;
 };
 
-const readLocaleOrderSeed = () => {
+const readLocaleOrderSeed = (): number | null => {
   try {
     return normalizeSeed(window.localStorage.getItem(LOCALE_ORDER_SEED_KEY));
   } catch {
@@ -120,7 +135,7 @@ const readLocaleOrderSeed = () => {
   }
 };
 
-const writeLocaleOrderSeed = (seed) => {
+const writeLocaleOrderSeed = (seed: number): void => {
   try {
     window.localStorage.setItem(LOCALE_ORDER_SEED_KEY, String(seed >>> 0));
   } catch {
@@ -128,7 +143,7 @@ const writeLocaleOrderSeed = (seed) => {
   }
 };
 
-const getLocaleOrderSeed = () => {
+const getLocaleOrderSeed = (): number => {
   if (cachedLocaleOrderSeed !== null) return cachedLocaleOrderSeed;
 
   let seed = readLocaleOrderSeed();
@@ -140,9 +155,9 @@ const getLocaleOrderSeed = () => {
   return cachedLocaleOrderSeed;
 };
 
-const createSeededRng = (seed) => {
+const createSeededRng = (seed: number): (() => number) => {
   let state = seed >>> 0;
-  return () => {
+  return (): number => {
     state = (state + 0x6d2b79f5) >>> 0;
     let t = Math.imul(state ^ (state >>> 15), 1 | state);
     t ^= t + Math.imul(t ^ (t >>> 7), 61 | t);
@@ -150,7 +165,7 @@ const createSeededRng = (seed) => {
   };
 };
 
-const shuffleBySeed = (items, seed) => {
+const shuffleBySeed = <T>(items: readonly T[], seed: number): T[] => {
   const copy = [...items];
   const next = createSeededRng(seed);
   for (let i = copy.length - 1; i > 0; i -= 1) {
@@ -162,12 +177,13 @@ const shuffleBySeed = (items, seed) => {
   return copy;
 };
 
-const resolvePath = (obj, keyPath) => keyPath.split('.').reduce((acc, part) => {
-  if (!acc || typeof acc !== 'object') return undefined;
-  return acc[part];
-}, obj);
+const resolvePath = (obj: unknown, keyPath: string): unknown =>
+  keyPath.split('.').reduce<unknown>((acc, part) => {
+    if (!acc || typeof acc !== 'object') return undefined;
+    return (acc as Record<string, unknown>)[part];
+  }, obj);
 
-const normalizeLocale = (value) => {
+const normalizeLocale = (value: unknown): SupportedLocale | null => {
   if (!value || typeof value !== 'string') return null;
   const candidate = value.trim().toLowerCase().replaceAll('_', '-');
   const exact = SUPPORTED_LOCALES.find((locale) => locale.toLowerCase() === candidate);
@@ -180,7 +196,7 @@ const normalizeLocale = (value) => {
   return FALLBACK_BY_BASE[base] || null;
 };
 
-const readStoredLocale = () => {
+const readStoredLocale = (): SupportedLocale | null => {
   try {
     return normalizeLocale(window.localStorage.getItem(LOCALE_STORAGE_KEY));
   } catch {
@@ -188,33 +204,34 @@ const readStoredLocale = () => {
   }
 };
 
-const detectNavigatorLocale = () => {
+const detectNavigatorLocale = (): SupportedLocale | null => {
   if (typeof navigator === 'undefined') return null;
-  return normalizeLocale(navigator.language || navigator.userLanguage || '');
+  const navigatorWithUserLanguage = navigator as NavigatorWithUserLanguage;
+  return normalizeLocale(navigatorWithUserLanguage.language || navigatorWithUserLanguage.userLanguage || '');
 };
 
-const readAvailableLocales = () => {
+const readAvailableLocales = (): Set<SupportedLocale> => {
   if (cachedAvailableLocales) return new Set(cachedAvailableLocales);
   try {
     const raw = window.localStorage.getItem(AVAILABLE_LOCALES_STORAGE_KEY);
     const parsed = JSON.parse(raw || '[]');
-    const normalized = new Set(
+    const normalized = new Set<SupportedLocale>(
       (Array.isArray(parsed) ? parsed : [])
         .map((entry) => normalizeLocale(entry))
-        .filter(Boolean),
+        .filter((entry): entry is SupportedLocale => entry !== null),
     );
     cachedAvailableLocales = normalized;
   } catch {
-    cachedAvailableLocales = new Set();
+    cachedAvailableLocales = new Set<SupportedLocale>();
   }
   return new Set(cachedAvailableLocales);
 };
 
-const writeAvailableLocales = (locales) => {
-  const normalized = new Set(
+const writeAvailableLocales = (locales: Iterable<unknown>): void => {
+  const normalized = new Set<SupportedLocale>(
     [...locales]
       .map((entry) => normalizeLocale(entry))
-      .filter(Boolean),
+      .filter((entry): entry is SupportedLocale => entry !== null),
   );
   cachedAvailableLocales = normalized;
   try {
@@ -224,42 +241,42 @@ const writeAvailableLocales = (locales) => {
   }
 };
 
-export const isLocaleAvailable = (locale) => {
+export const isLocaleAvailable = (locale: string): boolean => {
   const resolved = resolveLocale(locale);
-  if (!resolved) return false;
   return loadedLocaleMessages.has(resolved) || readAvailableLocales().has(resolved);
 };
 
-export const markLocaleUnavailable = (locale) => {
+export const markLocaleUnavailable = (locale: string): void => {
   const resolved = resolveLocale(locale);
-  if (!resolved) return;
   const next = readAvailableLocales();
   next.delete(resolved);
   writeAvailableLocales(next);
 };
 
-const markLocaleAvailable = (locale) => {
+const markLocaleAvailable = (locale: string): void => {
   const resolved = resolveLocale(locale);
-  if (!resolved) return;
   const next = readAvailableLocales();
   next.add(resolved);
   writeAvailableLocales(next);
 };
 
-export const loadLocaleMessages = async (locale) => {
+const resolveLocaleMessages = (module: LocaleModule): LocaleMessages => {
+  if (module && typeof module === 'object' && 'default' in module) {
+    const defaultExport = (module as { default?: LocaleMessages }).default;
+    if (defaultExport && typeof defaultExport === 'object') return defaultExport;
+  }
+  return (module && typeof module === 'object' ? module : {}) as LocaleMessages;
+};
+
+export const loadLocaleMessages = async (locale: string): Promise<LocaleMessages | null> => {
   const resolved = resolveLocale(locale);
-  if (!resolved) return null;
-  if (loadedLocaleMessages.has(resolved)) return loadedLocaleMessages.get(resolved);
-  if (localeLoadPromises.has(resolved)) return localeLoadPromises.get(resolved);
+  if (loadedLocaleMessages.has(resolved)) return loadedLocaleMessages.get(resolved) || null;
+  if (localeLoadPromises.has(resolved)) return localeLoadPromises.get(resolved) || null;
 
   const load = LOCALE_LOADERS[resolved];
-  if (typeof load !== 'function') {
-    throw new TypeError(`Unsupported locale loader: ${resolved}`);
-  }
-
   const promise = load()
     .then((module) => {
-      const messages = module?.default ?? module;
+      const messages = resolveLocaleMessages(module);
       loadedLocaleMessages.set(resolved, messages);
       markLocaleAvailable(resolved);
       return messages;
@@ -272,11 +289,11 @@ export const loadLocaleMessages = async (locale) => {
   return promise;
 };
 
-export const preloadLocales = async (locales = []) => {
-  const queue = [];
+export const preloadLocales = async (locales: readonly unknown[] = []): Promise<SupportedLocale[]> => {
+  const queue: SupportedLocale[] = [];
   for (const locale of locales) {
-    const resolved = resolveLocale(locale);
-    if (!resolved || queue.includes(resolved)) continue;
+    const resolved = resolveLocale(typeof locale === 'string' ? locale : null);
+    if (queue.includes(resolved)) continue;
     queue.push(resolved);
   }
   for (const locale of queue) {
@@ -285,9 +302,9 @@ export const preloadLocales = async (locales = []) => {
   return queue;
 };
 
-export const preloadAllLocales = async () => preloadLocales(SUPPORTED_LOCALES);
+export const preloadAllLocales = async (): Promise<SupportedLocale[]> => preloadLocales(SUPPORTED_LOCALES);
 
-export const resolveLocale = (locale) => {
+export const resolveLocale = (locale?: string | null): SupportedLocale => {
   const explicit = normalizeLocale(locale);
   if (explicit) return explicit;
 
@@ -300,7 +317,7 @@ export const resolveLocale = (locale) => {
   return DEFAULT_LOCALE;
 };
 
-export const setLocale = async (locale) => {
+export const setLocale = async (locale: string): Promise<SupportedLocale> => {
   const resolved = resolveLocale(locale);
   await loadLocaleMessages(resolved);
   try {
@@ -311,8 +328,8 @@ export const setLocale = async (locale) => {
   return resolved;
 };
 
-const interpolate = (template, vars = {}) => {
-  if (!vars || Object.keys(vars).length === 0) return String(template);
+const interpolate = (template: unknown, vars: TranslateVars = {}): string => {
+  if (Object.keys(vars).length === 0) return String(template);
   return String(template).replaceAll(/\{\{(\w+)\}\}/g, (match, key) => {
     if (Object.hasOwn(vars, key)) {
       return String(vars[key]);
@@ -321,14 +338,16 @@ const interpolate = (template, vars = {}) => {
   });
 };
 
-export const t = (locale) => {
+export const t = (locale?: string | null): Translator => {
   const activeLocale = resolveLocale(locale);
-  const fallback = new Set([activeLocale, DEFAULT_LOCALE, FALLBACK_EN_LOCALE]);
-  const fallbackOrder = Array.from(fallback);
+  const fallbackOrder = Array.from(new Set<SupportedLocale>([
+    activeLocale,
+    DEFAULT_LOCALE,
+    FALLBACK_EN_LOCALE,
+  ]));
 
-  return (key, vars = {}) => {
-    for (const element of fallbackOrder) {
-      const localeKey = element;
+  return (key: string, vars: TranslateVars = {}): string => {
+    for (const localeKey of fallbackOrder) {
       const messages = loadedLocaleMessages.get(localeKey);
       if (!messages) continue;
       const message = resolvePath(messages, key);
@@ -338,20 +357,21 @@ export const t = (locale) => {
   };
 };
 
-export const getLocale = () => resolveLocale();
+export const getLocale = (): SupportedLocale => resolveLocale();
 
-export const getLocaleOptions = (locale, options = {}) => {
+export const getLocaleOptions = (
+  locale?: string | null,
+  options: LocaleAvailabilityOptions = {},
+): LocaleOption[] => {
   const localeList = shuffleBySeed(SUPPORTED_LOCALES, getLocaleOrderSeed());
-  const preferred = resolveLocale(locale) || null;
-  const ordered = preferred ? [...localeList] : localeList;
+  const preferred = resolveLocale(locale);
+  const ordered = [...localeList];
   const online = options.online ?? (typeof navigator === 'undefined' ? true : navigator.onLine !== false);
 
-  if (preferred) {
-    const currentIndex = ordered.indexOf(preferred);
-    if (currentIndex > 0) {
-      ordered.splice(currentIndex, 1);
-      ordered.unshift(preferred);
-    }
+  const currentIndex = ordered.indexOf(preferred);
+  if (currentIndex > 0) {
+    ordered.splice(currentIndex, 1);
+    ordered.unshift(preferred);
   }
 
   return ordered.map((code) => {

@@ -1,4 +1,8 @@
-// @ts-nocheck
+import type {
+  LevelDefinition,
+  Translator,
+} from './contracts/ports.ts';
+
 export const CELL_TYPES = {
   EMPTY: '.',
   WALL: '#',
@@ -12,9 +16,10 @@ export const CELL_TYPES = {
   RPS_SCISSORS: 'g',
   RPS_ROCK: 'b',
   RPS_PAPER: 'p',
-};
+} as const;
 
-export const isObstacle = (ch) => ch === CELL_TYPES.WALL || ch === CELL_TYPES.MOVABLE_WALL;
+export const isObstacle = (ch: string): boolean =>
+  ch === CELL_TYPES.WALL || ch === CELL_TYPES.MOVABLE_WALL;
 
 export const HINT_CODES = new Set([
   CELL_TYPES.HINT_TURN,
@@ -23,19 +28,19 @@ export const HINT_CODES = new Set([
   CELL_TYPES.HINT_STRAIGHT,
   CELL_TYPES.HINT_HORIZONTAL,
   CELL_TYPES.HINT_VERTICAL,
-]);
+]) as ReadonlySet<string>;
 
 export const RPS_CODES = new Set([
   CELL_TYPES.RPS_SCISSORS,
   CELL_TYPES.RPS_ROCK,
   CELL_TYPES.RPS_PAPER,
-]);
+]) as ReadonlySet<string>;
 
 export const RPS_WIN_ORDER = {
   [CELL_TYPES.RPS_SCISSORS]: CELL_TYPES.RPS_ROCK,
   [CELL_TYPES.RPS_ROCK]: CELL_TYPES.RPS_PAPER,
   [CELL_TYPES.RPS_PAPER]: CELL_TYPES.RPS_SCISSORS,
-};
+} as const satisfies Record<string, string>;
 
 export const ELEMENT_IDS = Object.freeze({
   APP: 'app',
@@ -108,9 +113,11 @@ export const ELEMENT_IDS = Object.freeze({
   B_ROCK: 'bRo',
   B_PAPER: 'bPa',
   B_MOVE_WALL: 'bMoveWall',
-});
+} as const);
 
-export function baseGoalText(level, translate = (k) => k) {
+const defaultTranslator: Translator = (key) => key;
+
+export function baseGoalText(level: LevelDefinition | null, translate: Translator = defaultTranslator): string {
   if (!level) return translate('goal.intro');
 
   let desc = level.descKey ? translate(level.descKey) : '';

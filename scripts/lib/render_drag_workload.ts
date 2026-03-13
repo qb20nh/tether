@@ -4,6 +4,7 @@ import { createDefaultCore } from '../../src/core/default_core.ts';
 import { hashString32, makeMulberry32Rng, mix32 } from '../../src/shared/hash32.ts';
 import { createGameStateStore } from '../../src/state/game_state_store.ts';
 import { isUsableCell } from '../../src/state/snapshot_rules.ts';
+import type { GameSnapshot, GridTuple } from '../../src/contracts/ports.ts';
 
 const DEFAULT_SEED = 'render-drag-bench-v1';
 const DEFAULT_POINTER_MOVES_PER_SEGMENT = 4;
@@ -11,25 +12,55 @@ const DEFAULT_MIN_PATH_LENGTH = 14;
 const DEFAULT_MAX_PATH_LENGTH = 22;
 const DEFAULT_MAX_BOARD_ATTEMPTS = 128;
 const DEFAULT_MAX_SAMPLE_ATTEMPTS_FACTOR = 2048;
-const ORTHOGONAL_DIRS = Object.freeze([
+const ORTHOGONAL_DIRS: readonly GridTuple[] = Object.freeze([
   [-1, 0],
   [1, 0],
   [0, -1],
   [0, 1],
 ]);
 
-const keyOf = (r, c) => `${r},${c}`;
+type Rng = () => number;
 
-const createDeterministicRng = (seed) => {
-  return makeMulberry32Rng(mix32(hashString32(String(seed))));
-};
+interface RenderDragWorkloadOptions {
+  seed?: string;
+  boards?: number;
+  pointerMovesPerSegment?: number;
+  minPathLength?: number;
+  maxPathLength?: number;
+  maxBoardAttempts?: number;
+}
 
-const randomInt = (rng, maxExclusive) => {
+export interface RenderDragPathCase {
+  caseId: string;
+  infiniteIndex: number;
+  pathCells: GridTuple[];
+}
+
+export interface RenderDragWorkload {
+  version: 1;
+  seed: string;
+  pointerMovesPerSegment: number;
+  cases: RenderDragPathCase[];
+}
+
+interface BuildPathCaseOptions {
+  minPathLength: number;
+  maxPathLength: number;
+  maxBoardAttempts: number;
+}
+
+const keyOf = (r: number, c: number): string => `${r},${c}`;
+
+const createDeterministicRng = (seed: string): Rng => (
+  makeMulberry32Rng(mix32(hashString32(String(seed))))
+);
+
+const randomInt = (rng: Rng, maxExclusive: number): number => {
   if (!(maxExclusive > 0)) return 0;
   return Math.floor(rng() * maxExclusive);
 };
 
-const shuffleInPlace = (items, rng) => {
+const shuffleInPlace = <T>(items: T[], rng: Rng): T[] => {
   for (let i = items.length - 1; i > 0; i -= 1) {
     const swapIndex = randomInt(rng, i + 1);
     const next = items[i];
@@ -39,8 +70,8 @@ const shuffleInPlace = (items, rng) => {
   return items;
 };
 
-const collectUsableCells = (snapshot) => {
-  const cells = [];
+const collectUsableCells = (snapshot: GameSnapshot): GridTuple[] => {
+  const cells: GridTuple[] = [];
   for (let r = 0; r < snapshot.rows; r += 1) {
     for (let c = 0; c < snapshot.cols; c += 1) {
       if (!isUsableCell(snapshot, r, c)) continue;
@@ -50,23 +81,23 @@ const collectUsableCells = (snapshot) => {
   return cells;
 };
 
-const collectOrthogonalTailNeighbors = (snapshot) => {
-  if (!snapshot || !Array.isArray(snapshot.path) || snapshot.path.length <= 0) return [];
+const collectOrthogonalTailNeighbors = (snapshot: GameSnapshot): GridTuple[] => {
+  if (!Array.isArray(snapshot.path) || snapshot.path.length <= 0) return [];
   const tail = snapshot.path[snapshot.path.length - 1];
   if (!tail) return [];
-  const neighbors = [];
+  const neighbors: GridTuple[] = [];
   for (let i = 0; i < ORTHOGONAL_DIRS.length; i += 1) {
     const [dr, dc] = ORTHOGONAL_DIRS[i];
     const nextR = tail.r + dr;
     const nextC = tail.c + dc;
     if (!isUsableCell(snapshot, nextR, nextC)) continue;
-    if (snapshot.visited?.has?.(keyOf(nextR, nextC))) continue;
+    if (snapshot.visited.has(keyOf(nextR, nextC))) continue;
     neighbors.push([nextR, nextC]);
   }
   return neighbors;
 };
 
-const hasOrthogonalUsableNeighbor = (snapshot, r, c) => {
+const hasOrthogonalUsableNeighbor = (snapshot: GameSnapshot, r: number, c: number): boolean => {
   for (let i = 0; i < ORTHOGONAL_DIRS.length; i += 1) {
     const [dr, dc] = ORTHOGONAL_DIRS[i];
     if (isUsableCell(snapshot, r + dr, c + dc)) return true;
@@ -74,8 +105,13 @@ const hasOrthogonalUsableNeighbor = (snapshot, r, c) => {
   return false;
 };
 
-const chooseTargetPathLength = (snapshot, rng, minPathLength, maxPathLength) => {
-  const usableCount = Number.isInteger(snapshot?.totalUsable) ? snapshot.totalUsable : 0;
+const chooseTargetPathLength = (
+  snapshot: GameSnapshot,
+  rng: Rng,
+  minPathLength: number,
+  maxPathLength: number,
+): number | null => {
+  const usableCount = Number.isInteger(snapshot.totalUsable) ? snapshot.totalUsable : 0;
   const cappedMax = Math.min(maxPathLength, usableCount);
   if (cappedMax < minPathLength) return null;
   return minPathLength + randomInt(rng, (cappedMax - minPathLength) + 1);
@@ -84,19 +120,23 @@ const chooseTargetPathLength = (snapshot, rng, minPathLength, maxPathLength) => 
 const createBoardHarness = () => {
   const levelProvider = createLevelProvider();
   const core = createDefaultCore(levelProvider);
-  const state = createGameStateStore((levelIndex) => core.getLevel(levelIndex));
+  const state = createGameStateStore((levelIndex: number) => core.getLevel(levelIndex));
   return { core, state };
 };
 
+const normalizePositiveInt = (value: number | undefined, fallback: number): number => (
+  typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : fallback
+);
+
 const buildPathCase = (
-  infiniteIndex,
-  rng,
+  infiniteIndex: number,
+  rng: Rng,
   {
     minPathLength,
     maxPathLength,
     maxBoardAttempts,
-  },
-) => {
+  }: BuildPathCaseOptions,
+): Pick<RenderDragPathCase, 'infiniteIndex' | 'pathCells'> | null => {
   const { core, state } = createBoardHarness();
   const absoluteIndex = core.ensureInfiniteAbsIndex(infiniteIndex);
 
@@ -109,7 +149,7 @@ const buildPathCase = (
       minPathLength,
       maxPathLength,
     );
-    if (!Number.isInteger(targetPathLength)) return null;
+    if (targetPathLength === null) continue;
 
     const startCandidates = shuffleInPlace(collectUsableCells(startingSnapshot), rng);
     let didStart = false;
@@ -131,7 +171,7 @@ const buildPathCase = (
       if (!state.startOrTryStep(nextR, nextC)) break;
     }
 
-    const path = state.getSnapshot().path.map((point) => [point.r, point.c]);
+    const path = state.getSnapshot().path.map((point): GridTuple => [point.r, point.c]);
     if (path.length < minPathLength || path.length > maxPathLength) continue;
 
     return {
@@ -143,30 +183,33 @@ const buildPathCase = (
   return null;
 };
 
-export const createRenderDragWorkload = (options = {}) => {
+export const createRenderDragWorkload = (
+  options: RenderDragWorkloadOptions = {},
+): RenderDragWorkload => {
   const seed = typeof options.seed === 'string' && options.seed.length > 0
     ? options.seed
     : DEFAULT_SEED;
-  const boardCount = Number.isInteger(options.boards) && options.boards > 0
-    ? options.boards
-    : 10;
-  const pointerMovesPerSegment = Number.isInteger(options.pointerMovesPerSegment)
-    && options.pointerMovesPerSegment > 0
-    ? options.pointerMovesPerSegment
-    : DEFAULT_POINTER_MOVES_PER_SEGMENT;
-  const minPathLength = Number.isInteger(options.minPathLength) && options.minPathLength > 0
-    ? options.minPathLength
-    : DEFAULT_MIN_PATH_LENGTH;
-  const maxPathLength = Number.isInteger(options.maxPathLength) && options.maxPathLength >= minPathLength
-    ? options.maxPathLength
+  const boardCount = normalizePositiveInt(options.boards, 10);
+  const pointerMovesPerSegment = normalizePositiveInt(
+    options.pointerMovesPerSegment,
+    DEFAULT_POINTER_MOVES_PER_SEGMENT,
+  );
+  const minPathLength = normalizePositiveInt(options.minPathLength, DEFAULT_MIN_PATH_LENGTH);
+  const maxPathLengthCandidate = normalizePositiveInt(
+    options.maxPathLength,
+    DEFAULT_MAX_PATH_LENGTH,
+  );
+  const maxPathLength = maxPathLengthCandidate >= minPathLength
+    ? maxPathLengthCandidate
     : DEFAULT_MAX_PATH_LENGTH;
-  const maxBoardAttempts = Number.isInteger(options.maxBoardAttempts) && options.maxBoardAttempts > 0
-    ? options.maxBoardAttempts
-    : DEFAULT_MAX_BOARD_ATTEMPTS;
+  const maxBoardAttempts = normalizePositiveInt(
+    options.maxBoardAttempts,
+    DEFAULT_MAX_BOARD_ATTEMPTS,
+  );
 
   const rng = createDeterministicRng(seed);
-  const cases = [];
-  const usedInfiniteIndices = new Set();
+  const cases: RenderDragPathCase[] = [];
+  const usedInfiniteIndices = new Set<number>();
   const maxSampleAttempts = Math.max(
     boardCount * DEFAULT_MAX_SAMPLE_ATTEMPTS_FACTOR,
     DEFAULT_MAX_SAMPLE_ATTEMPTS_FACTOR,

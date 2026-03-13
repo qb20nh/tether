@@ -1,9 +1,9 @@
-// @ts-nocheck
 const UTC_DATE_ID_RE = /^\d{4}-\d{2}-\d{2}$/;
 
-export const isUtcDateId = (dateId) => typeof dateId === 'string' && UTC_DATE_ID_RE.test(dateId);
+export const isUtcDateId = (dateId: unknown): dateId is string =>
+  typeof dateId === 'string' && UTC_DATE_ID_RE.test(dateId);
 
-export const utcDateIdFromMs = (ms) => {
+export const utcDateIdFromMs = (ms: number): string => {
   const date = new Date(ms);
   const year = date.getUTCFullYear();
   const month = String(date.getUTCMonth() + 1).padStart(2, '0');
@@ -11,7 +11,7 @@ export const utcDateIdFromMs = (ms) => {
   return `${year}-${month}-${day}`;
 };
 
-export const parseUtcDateIdStartMs = (dateId) => {
+export const parseUtcDateIdStartMs = (dateId: unknown): number | null => {
   if (!isUtcDateId(dateId)) return null;
   const [year, month, day] = dateId.split('-').map((part) => Number.parseInt(part, 10));
   if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) return null;

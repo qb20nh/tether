@@ -1,70 +1,142 @@
-// @ts-nocheck
 import { CELL_TYPES, HINT_CODES, RPS_CODES, RPS_WIN_ORDER } from './config.ts';
+import type {
+  CompletionResult,
+  EvaluateResult,
+  GameSnapshot,
+  GridPoint,
+  RuleStatus,
+  StitchRequirement,
+  Translator,
+} from './contracts/ports.ts';
 import { buildOrthEdgeSet, countCornerOrthConnections } from './shared/stitch_corner_geometry.ts';
 import { inBounds, keyOf } from './utils.ts';
 
-const isHintCode = (ch) => HINT_CODES.has(ch);
-const isRpsCode = (ch) => RPS_CODES.has(ch);
-const isWall = (ch) => ch === CELL_TYPES.WALL || ch === CELL_TYPES.MOVABLE_WALL;
-const ORTHOGONAL_MOVES = [
+type RuleState = 'good' | 'bad' | 'pending';
+type RpsCode = keyof typeof RPS_WIN_ORDER;
+
+interface HintRuleStatus extends RuleStatus {
+  good: number;
+  bad: number;
+  total: number;
+  pending: number;
+  goodKeys: string[];
+  badKeys: string[];
+  cornerVertexStatus: Map<string, RuleState>;
+}
+
+interface CornerHintStatus extends RuleStatus {
+  good: number;
+  bad: number;
+  total: number;
+  pending: number;
+  cornerVertexStatus: Map<string, RuleState>;
+}
+
+interface BlockedCellStatus extends RuleStatus {
+  bad: number;
+  badKeys: string[];
+  summary: string;
+}
+
+interface StitchVertexRuleStatus {
+  diagA: RuleState;
+  diagB: RuleState;
+}
+
+interface StitchRuleStatus extends RuleStatus {
+  good: number;
+  bad: number;
+  total: number;
+  summary: string;
+  vertexStatus: Map<string, StitchVertexRuleStatus>;
+}
+
+interface RpsRuleStatus extends RuleStatus {
+  good: number;
+  bad: number;
+  total: number;
+  summary: string;
+  goodKeys: string[];
+  badKeys: string[];
+}
+
+interface EvaluateHintOptions {
+  suppressEndpointRequirement?: boolean;
+  suppressEndpointKey?: string;
+}
+
+const isHintCode = (ch: string): boolean => HINT_CODES.has(ch);
+const isRpsCode = (ch: string): ch is RpsCode => RPS_CODES.has(ch);
+const isWall = (ch: string): boolean => ch === CELL_TYPES.WALL || ch === CELL_TYPES.MOVABLE_WALL;
+const ORTHOGONAL_MOVES: readonly [number, number][] = [
   [-1, 0],
   [1, 0],
   [0, -1],
   [0, 1],
 ];
-const DIAGONAL_MOVES = [
+const DIAGONAL_MOVES: readonly [number, number][] = [
   [-1, -1],
   [-1, 1],
   [1, -1],
   [1, 1],
 ];
-const edgeKey = (a, b) => {
-  const ka = a.r * 1000 + a.c;
-  const kb = b.r * 1000 + b.c;
-  return ka < kb ? ka * 1000000 + kb : kb * 1000000 + ka;
+const edgeKey = (a: GridPoint, b: GridPoint): string => {
+  const ka = keyOf(a.r, a.c);
+  const kb = keyOf(b.r, b.c);
+  return ka < kb ? `${ka}|${kb}` : `${kb}|${ka}`;
 };
 
-const makeEndpointSet = (path) => {
-  if (path.length === 0) return new Set();
-  return new Set([
+const makeEndpointSet = (path: readonly GridPoint[]): Set<string> => {
+  if (path.length === 0) return new Set<string>();
+  return new Set<string>([
     keyOf(path[0].r, path[0].c),
     keyOf(path[path.length - 1].r, path[path.length - 1].c),
   ]);
 };
 
-const hasCrossStitch = (snapshot, r1, c1, r2, c2) => {
+const hasCrossStitch = (snapshot: GameSnapshot, r1: number, c1: number, r2: number, c2: number): boolean => {
   if (!inBounds(snapshot.rows, snapshot.cols, r2, c2)) return false;
   const vr = Math.max(r1, r2);
   const vc = Math.max(c1, c2);
   return snapshot.stitchSet?.has(keyOf(vr, vc)) ?? false;
 };
 
-const formatProgressSummary = (good, total, bad) => {
+const formatProgressSummary = (good: number, total: number, bad: number): string => {
   if (total === 0) return '—';
   let summary = `${good}/${total}`;
   if (bad > 0) summary += ` (✗${bad})`;
   return summary;
 };
 
-const addStateCount = (result, state, key = '') => {
+const addStateCount = (
+  result: { good: number; bad: number; pending: number; goodKeys?: string[]; badKeys?: string[] },
+  state: RuleState,
+  key = '',
+): void => {
   if (state === 'good') {
     result.good++;
-    if (key) result.goodKeys.push(key);
+    if (key && result.goodKeys) result.goodKeys.push(key);
     return;
   }
 
   if (state === 'bad') {
     result.bad++;
-    if (key) result.badKeys.push(key);
+    if (key && result.badKeys) result.badKeys.push(key);
     return;
   }
 
   result.pending++;
 };
 
-const getHintNeighbor = (path, i) => (i === 0 ? path[1] : path[path.length - 2]);
+const getHintNeighbor = (path: readonly GridPoint[], i: number): GridPoint | undefined =>
+  (i === 0 ? path[1] : path[path.length - 2]);
 
-const evaluateSuppressedEndpointHint = (clue, path, i, suppressEndpointKey) => {
+const evaluateSuppressedEndpointHint = (
+  clue: string,
+  path: readonly GridPoint[],
+  i: number,
+  suppressEndpointKey: string,
+): RuleState => {
   const endpoint = path[i];
   const endpointKey = keyOf(endpoint.r, endpoint.c);
   if (suppressEndpointKey && endpointKey !== suppressEndpointKey) return 'bad';
@@ -81,12 +153,25 @@ const evaluateSuppressedEndpointHint = (clue, path, i, suppressEndpointKey) => {
   return 'pending';
 };
 
-const evaluateEndpointHint = (clue, path, i, suppressEndpointRequirement, suppressEndpointKey) => {
+const evaluateEndpointHint = (
+  clue: string,
+  path: readonly GridPoint[],
+  i: number,
+  suppressEndpointRequirement: boolean,
+  suppressEndpointKey: string,
+): RuleState => {
   if (!suppressEndpointRequirement) return 'bad';
   return evaluateSuppressedEndpointHint(clue, path, i, suppressEndpointKey);
 };
 
-const doesInteriorHintMatch = (clue, straight, isHoriz, isVert, cw, ccw) => {
+const doesInteriorHintMatch = (
+  clue: string,
+  straight: boolean,
+  isHoriz: boolean,
+  isVert: boolean,
+  cw: boolean,
+  ccw: boolean,
+): boolean => {
   switch (clue) {
     case CELL_TYPES.HINT_STRAIGHT:
       return straight;
@@ -105,7 +190,7 @@ const doesInteriorHintMatch = (clue, straight, isHoriz, isVert, cw, ccw) => {
   }
 };
 
-const evaluateInteriorHint = (clue, path, i) => {
+const evaluateInteriorHint = (clue: string, path: readonly GridPoint[], i: number): RuleState => {
   const prev = path[i - 1];
   const cur = path[i];
   const next = path[i + 1];
@@ -124,14 +209,20 @@ const evaluateInteriorHint = (clue, path, i) => {
     : 'bad';
 };
 
-const evalHintAtIndex = (i, clue, path, suppressEndpointRequirement, suppressEndpointKey) => {
+const evalHintAtIndex = (
+  i: number,
+  clue: string,
+  path: readonly GridPoint[],
+  suppressEndpointRequirement: boolean,
+  suppressEndpointKey: string,
+): RuleState => {
   const isEndpoint = i === 0 || i === path.length - 1;
   return isEndpoint
     ? evaluateEndpointHint(clue, path, i, suppressEndpointRequirement, suppressEndpointKey)
     : evaluateInteriorHint(clue, path, i);
 };
 
-const cornerWallStats = (snapshot, vr, vc) => {
+const cornerWallStats = (snapshot: GameSnapshot, vr: number, vc: number) => {
   const nwWall = isWall(snapshot.gridData[vr - 1][vc - 1]);
   const neWall = isWall(snapshot.gridData[vr - 1][vc]);
   const swWall = isWall(snapshot.gridData[vr][vc - 1]);
@@ -152,14 +243,26 @@ const cornerWallStats = (snapshot, vr, vc) => {
   };
 };
 
-const isCornerAdjacentClosed = (snapshot, vr, vc, wallStats) => (
+const isCornerAdjacentClosed = (
+  snapshot: GameSnapshot,
+  vr: number,
+  vc: number,
+  wallStats: ReturnType<typeof cornerWallStats>,
+): boolean => (
   (snapshot.visited.has(keyOf(vr - 1, vc - 1)) || wallStats.nwWall)
   && (snapshot.visited.has(keyOf(vr - 1, vc)) || wallStats.neWall)
   && (snapshot.visited.has(keyOf(vr, vc - 1)) || wallStats.swWall)
   && (snapshot.visited.has(keyOf(vr, vc)) || wallStats.seWall)
 );
 
-const evaluateCornerCount = (snapshot, orthEdges, isComplete, vr, vc, target) => {
+const evaluateCornerCount = (
+  snapshot: GameSnapshot,
+  orthEdges: ReadonlySet<string>,
+  isComplete: boolean,
+  vr: number,
+  vc: number,
+  target: number,
+): RuleState => {
   const actual = countCornerOrthConnections(vr, vc, orthEdges, edgeKey);
   const wallStats = cornerWallStats(snapshot, vr, vc);
   const allAdjacentClosed = isCornerAdjacentClosed(snapshot, vr, vc, wallStats);
@@ -172,14 +275,19 @@ const evaluateCornerCount = (snapshot, orthEdges, isComplete, vr, vc, target) =>
   return 'pending';
 };
 
-const evaluateGridHints = (snapshot, suppressEndpointRequirement, suppressEndpointKey) => {
-  const result = {
+const evaluateGridHints = (
+  snapshot: GameSnapshot,
+  suppressEndpointRequirement: boolean,
+  suppressEndpointKey: string,
+): HintRuleStatus => {
+  const result: HintRuleStatus = {
     good: 0,
     bad: 0,
     total: 0,
     pending: 0,
     goodKeys: [],
     badKeys: [],
+    cornerVertexStatus: new Map<string, RuleState>(),
   };
 
   for (let r = 0; r < snapshot.rows; r++) {
@@ -195,6 +303,7 @@ const evaluateGridHints = (snapshot, suppressEndpointRequirement, suppressEndpoi
       }
 
       const i = snapshot.idxByKey.get(k);
+      if (i === undefined) continue;
       const state = evalHintAtIndex(
         i,
         clue,
@@ -209,17 +318,17 @@ const evaluateGridHints = (snapshot, suppressEndpointRequirement, suppressEndpoi
   return result;
 };
 
-const evaluateCornerHints = (snapshot, isComplete) => {
-  const result = {
+const evaluateCornerHints = (snapshot: GameSnapshot, isComplete: boolean): CornerHintStatus => {
+  const result: CornerHintStatus = {
     good: 0,
     bad: 0,
     total: 0,
     pending: 0,
-    cornerVertexStatus: new Map(),
+    cornerVertexStatus: new Map<string, RuleState>(),
   };
   const orthEdges = buildOrthEdgeSet(snapshot.path, edgeKey);
 
-  for (const [vr, vc, target] of snapshot.cornerCounts ?? []) {
+  for (const [vr, vc, target] of snapshot.cornerCounts) {
     result.total++;
     const vk = keyOf(vr, vc);
     const state = evaluateCornerCount(snapshot, orthEdges, isComplete, vr, vc, target);
@@ -230,7 +339,7 @@ const evaluateCornerHints = (snapshot, isComplete) => {
   return result;
 };
 
-export function evaluateHints(snapshot, options = {}) {
+export function evaluateHints(snapshot: GameSnapshot, options: EvaluateHintOptions = {}): HintRuleStatus {
   const suppressEndpointRequirement = Boolean(options.suppressEndpointRequirement);
   const suppressEndpointKey = typeof options.suppressEndpointKey === 'string'
     ? options.suppressEndpointKey
@@ -256,7 +365,11 @@ export function evaluateHints(snapshot, options = {}) {
   };
 }
 
-const createTraversalGuard = (snapshot, visited, endpointKeys) => (r, c) => {
+const createTraversalGuard = (
+  snapshot: GameSnapshot,
+  visited: ReadonlySet<string>,
+  endpointKeys: ReadonlySet<string>,
+) => (r: number, c: number): boolean => {
   if (!inBounds(snapshot.rows, snapshot.cols, r, c)) return false;
   if (isWall(snapshot.gridData[r][c])) return false;
 
@@ -264,14 +377,19 @@ const createTraversalGuard = (snapshot, visited, endpointKeys) => (r, c) => {
   return !visited.has(k) || endpointKeys.has(k);
 };
 
-const enqueueReachable = (reachable, queue, r, c) => {
+const enqueueReachable = (reachable: Set<string>, queue: GridPoint[], r: number, c: number): void => {
   const k = keyOf(r, c);
   if (reachable.has(k)) return;
   reachable.add(k);
   queue.push({ r, c });
 };
 
-const seedReachable = (path, canTraverse, reachable, queue) => {
+const seedReachable = (
+  path: readonly GridPoint[],
+  canTraverse: (r: number, c: number) => boolean,
+  reachable: Set<string>,
+  queue: GridPoint[],
+): void => {
   const startPoints = [path[0]];
   if (path.length > 1) startPoints.push(path[path.length - 1]);
 
@@ -282,7 +400,15 @@ const seedReachable = (path, canTraverse, reachable, queue) => {
   }
 };
 
-const traverseNeighbors = (snapshot, cur, moves, canTraverse, reachable, queue, requireCrossStitch = false) => {
+const traverseNeighbors = (
+  snapshot: GameSnapshot,
+  cur: GridPoint,
+  moves: readonly [number, number][],
+  canTraverse: (r: number, c: number) => boolean,
+  reachable: Set<string>,
+  queue: GridPoint[],
+  requireCrossStitch = false,
+): void => {
   for (const [dr, dc] of moves) {
     const nr = cur.r + dr;
     const nc = cur.c + dc;
@@ -292,9 +418,13 @@ const traverseNeighbors = (snapshot, cur, moves, canTraverse, reachable, queue, 
   }
 };
 
-const collectReachableCells = (snapshot, path, canTraverse) => {
-  const reachable = new Set();
-  const queue = [];
+const collectReachableCells = (
+  snapshot: GameSnapshot,
+  path: readonly GridPoint[],
+  canTraverse: (r: number, c: number) => boolean,
+): Set<string> => {
+  const reachable = new Set<string>();
+  const queue: GridPoint[] = [];
   let qHead = 0;
 
   seedReachable(path, canTraverse, reachable, queue);
@@ -308,8 +438,12 @@ const collectReachableCells = (snapshot, path, canTraverse) => {
   return reachable;
 };
 
-const collectBlockedKeys = (snapshot, visited, reachable) => {
-  const blockedKeys = [];
+const collectBlockedKeys = (
+  snapshot: GameSnapshot,
+  visited: ReadonlySet<string>,
+  reachable: ReadonlySet<string>,
+): string[] => {
+  const blockedKeys: string[] = [];
 
   for (let r = 0; r < snapshot.rows; r++) {
     for (let c = 0; c < snapshot.cols; c++) {
@@ -322,7 +456,7 @@ const collectBlockedKeys = (snapshot, visited, reachable) => {
   return blockedKeys;
 };
 
-export function evaluateBlockedCells(snapshot) {
+export function evaluateBlockedCells(snapshot: GameSnapshot): BlockedCellStatus {
   const path = snapshot.path;
   const visited = snapshot.visited;
   if (path.length === 0) {
@@ -345,27 +479,48 @@ export function evaluateBlockedCells(snapshot) {
   };
 }
 
-const isUsableSnapshotCell = (snapshot, point) => (
+const isUsableSnapshotCell = (snapshot: GameSnapshot, point: GridPoint): boolean => (
   inBounds(snapshot.rows, snapshot.cols, point.r, point.c)
   && !isWall(snapshot.gridData[point.r][point.c])
 );
 
-const isInternalPathKey = (idxByKey, pathLength, key) => {
+const isInternalPathKey = (idxByKey: ReadonlyMap<string, number>, pathLength: number, key: string): boolean => {
   if (!idxByKey.has(key)) return false;
   const index = idxByKey.get(key);
-  return index > 0 && index < pathLength - 1;
+  return index !== undefined && index > 0 && index < pathLength - 1;
 };
 
-const getStitchDiagonalState = ({ blocked, hasA, hasB, ok, bad }) => {
+const getStitchDiagonalState = ({
+  blocked,
+  hasA,
+  hasB,
+  ok,
+  bad,
+}: {
+  blocked: boolean;
+  hasA: boolean;
+  hasB: boolean;
+  ok: boolean;
+  bad: boolean;
+}): RuleState => {
   if (blocked) return 'bad';
   if (hasA && hasB) return ok ? 'good' : 'bad';
   return bad ? 'bad' : 'pending';
 };
 
-const evaluateStitchDiagonal = (idxByKey, pathLength, complete, blocked, keyA, keyB) => {
+const evaluateStitchDiagonal = (
+  idxByKey: ReadonlyMap<string, number>,
+  pathLength: number,
+  complete: boolean,
+  blocked: boolean,
+  keyA: string,
+  keyB: string,
+) => {
   const hasA = idxByKey.has(keyA);
   const hasB = idxByKey.has(keyB);
-  const ok = !blocked && hasA && hasB && Math.abs(idxByKey.get(keyA) - idxByKey.get(keyB)) === 1;
+  const indexA = idxByKey.get(keyA);
+  const indexB = idxByKey.get(keyB);
+  const ok = !blocked && hasA && hasB && indexA !== undefined && indexB !== undefined && Math.abs(indexA - indexB) === 1;
 
   let bad = blocked;
   if (!blocked && hasA && hasB && !ok) bad = true;
@@ -381,7 +536,12 @@ const evaluateStitchDiagonal = (idxByKey, pathLength, complete, blocked, keyA, k
   };
 };
 
-const evaluateStitchRequirement = (snapshot, idxByKey, req, complete) => {
+const evaluateStitchRequirement = (
+  snapshot: GameSnapshot,
+  idxByKey: ReadonlyMap<string, number>,
+  req: StitchRequirement,
+  complete: boolean,
+) => {
   const pathLength = snapshot.path.length;
   const diagA = evaluateStitchDiagonal(
     idxByKey,
@@ -403,12 +563,12 @@ const evaluateStitchRequirement = (snapshot, idxByKey, req, complete) => {
   return { diagA, diagB };
 };
 
-export function evaluateStitches(snapshot) {
+export function evaluateStitches(snapshot: GameSnapshot): StitchRuleStatus {
   const idxByKey = snapshot.idxByKey;
   let goodPairs = 0;
   let badPairs = 0;
   const totalPairs = snapshot.stitches.length * 2;
-  const vertexStatus = new Map();
+  const vertexStatus = new Map<string, StitchVertexRuleStatus>();
   const complete = snapshot.path.length === snapshot.totalUsable;
 
   for (const [vr, vc] of snapshot.stitches) {
@@ -440,16 +600,16 @@ export function evaluateStitches(snapshot) {
   };
 }
 
-export function evaluateRPS(snapshot) {
-  const seq = [];
+export function evaluateRPS(snapshot: GameSnapshot): RpsRuleStatus {
+  const seq: Array<{ i: number; ch: RpsCode; k: string }> = [];
   for (let i = 0; i < snapshot.path.length; i++) {
     const p = snapshot.path[i];
     const ch = snapshot.gridData[p.r][p.c];
     if (isRpsCode(ch)) seq.push({ i, ch, k: keyOf(p.r, p.c) });
   }
 
-  const badKeys = new Set();
-  const goodKeys = new Set();
+  const badKeys = new Set<string>();
+  const goodKeys = new Set<string>();
   let badPairs = 0;
   const totalPairs = Math.max(0, seq.length - 1);
 
@@ -480,11 +640,20 @@ export function evaluateRPS(snapshot) {
   };
 }
 
-export function checkCompletion(snapshot, forced = {}, translate = (k) => k) {
-  const t = typeof translate === 'function' ? translate : (k) => k;
-  const hintStatus = forced.hintStatus || evaluateHints(snapshot);
-  const stitchStatus = forced.stitchStatus || evaluateStitches(snapshot);
-  const rpsStatus = forced.rpsStatus || evaluateRPS(snapshot);
+export function checkCompletion(
+  snapshot: GameSnapshot,
+  forced: EvaluateResult = {
+    hintStatus: null,
+    stitchStatus: null,
+    rpsStatus: null,
+    blockedStatus: null,
+  },
+  translate: Translator = (k) => k,
+): CompletionResult {
+  const t = typeof translate === 'function' ? translate : ((k: string) => k);
+  const hintStatus = (forced.hintStatus as HintRuleStatus | null | undefined) || evaluateHints(snapshot);
+  const stitchStatus = (forced.stitchStatus as StitchRuleStatus | null | undefined) || evaluateStitches(snapshot);
+  const rpsStatus = (forced.rpsStatus as RpsRuleStatus | null | undefined) || evaluateRPS(snapshot);
 
   const allVisited = snapshot.path.length === snapshot.totalUsable;
 

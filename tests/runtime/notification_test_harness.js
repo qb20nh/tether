@@ -125,6 +125,25 @@ export class FakeElement {
     this.listeners.get(key).push(handler);
   }
 
+  removeEventListener(eventName, handler) {
+    const key = String(eventName);
+    const handlers = this.listeners.get(key);
+    if (!handlers) return;
+    const index = handlers.indexOf(handler);
+    if (index >= 0) handlers.splice(index, 1);
+  }
+
+  getBoundingClientRect() {
+    return {
+      left: 0,
+      top: 0,
+      right: 0,
+      bottom: 0,
+      width: 0,
+      height: 0,
+    };
+  }
+
   focus() {
     if (this.ownerDocument) {
       this.ownerDocument.activeElement = this;
@@ -211,6 +230,13 @@ export const createDocumentMock = () => {
       if (!listeners.has(key)) listeners.set(key, []);
       listeners.get(key).push(handler);
     },
+    removeEventListener(eventName, handler) {
+      const key = String(eventName);
+      const handlers = listeners.get(key);
+      if (!handlers) return;
+      const index = handlers.indexOf(handler);
+      if (index >= 0) handlers.splice(index, 1);
+    },
     dispatchEvent(event) {
       const handlers = listeners.get(event.type) || [];
       for (const handler of handlers) handler(event);
@@ -233,6 +259,7 @@ export const createWindowMock = (overrides = {}) => {
   let confirmValue = overrides.confirmValue ?? true;
   const confirmMessages = [];
   let intervalToken = 1;
+  const listeners = new Map();
 
   return {
     confirm(message) {
@@ -261,6 +288,18 @@ export const createWindowMock = (overrides = {}) => {
         visibility: 'visible',
         opacity: '1',
       };
+    },
+    addEventListener(eventName, handler) {
+      const key = String(eventName);
+      if (!listeners.has(key)) listeners.set(key, []);
+      listeners.get(key).push(handler);
+    },
+    removeEventListener(eventName, handler) {
+      const key = String(eventName);
+      const handlers = listeners.get(key);
+      if (!handlers) return;
+      const index = handlers.indexOf(handler);
+      if (index >= 0) handlers.splice(index, 1);
     },
   };
 };

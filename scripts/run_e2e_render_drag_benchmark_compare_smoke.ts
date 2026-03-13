@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 
-const run = () => new Promise((resolve, reject) => {
+const run = (): Promise<void> => new Promise((resolve, reject) => {
   const child = spawn(process.execPath, [
     '--test',
     'tests/e2e/render_drag_benchmark_compare.smoke.e2e.test.js',
@@ -21,6 +21,7 @@ const run = () => new Promise((resolve, reject) => {
 try {
   await run();
 } catch (error) {
-  process.stderr.write(`${error?.stack || error}\n`);
+  const errorMessage = error instanceof Error ? (error.stack || error.message) : String(error);
+  process.stderr.write(`${errorMessage}\n`);
   process.exitCode = 1;
 }

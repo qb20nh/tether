@@ -7,9 +7,11 @@ import {
 } from '../../src/debug/reduced_motion_debug.ts';
 import { isReducedMotionPreferred } from '../../src/reduced_motion.ts';
 
+const globalObject = /** @type {any} */ (globalThis);
+
 const createClassList = () => {
   const tokens = new Set();
-  return {
+  return /** @type {any} */ ({
     add(value) {
       if (value) tokens.add(String(value));
     },
@@ -26,29 +28,29 @@ const createClassList = () => {
       else tokens.delete(key);
       return next;
     },
-  };
+  });
 };
 
 const installReducedMotionEnv = (t, matches = false) => {
   const originalWindow = globalThis.window;
   const originalDocument = globalThis.document;
 
-  globalThis.document = {
+  globalObject.document = /** @type {any} */ ({
     documentElement: { classList: createClassList() },
     body: { classList: createClassList() },
-  };
-  globalThis.window = {
+  });
+  globalObject.window = /** @type {any} */ ({
     matchMedia(query) {
       return {
         media: String(query),
         matches: Boolean(matches),
       };
     },
-  };
+  });
 
   t.after(() => {
-    globalThis.window = originalWindow;
-    globalThis.document = originalDocument;
+    globalObject.window = originalWindow;
+    globalObject.document = originalDocument;
   });
 };
 

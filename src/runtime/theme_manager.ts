@@ -1,7 +1,14 @@
-// @ts-nocheck
-export const normalizeTheme = (theme) => (theme === 'light' || theme === 'dark' ? theme : 'dark');
+import type {
+  PersistencePort,
+  RendererRefs,
+  RuntimeTheme,
+  Translator,
+} from '../contracts/ports.ts';
 
-export const applyTheme = (theme, persistence) => {
+export const normalizeTheme = (theme: unknown): RuntimeTheme =>
+  (theme === 'light' || theme === 'dark' ? theme : 'dark');
+
+export const applyTheme = (theme: unknown, persistence: PersistencePort): RuntimeTheme => {
     const activeTheme = normalizeTheme(theme);
     if (typeof document !== 'undefined') {
         const root = document.documentElement;
@@ -12,7 +19,11 @@ export const applyTheme = (theme, persistence) => {
     return activeTheme;
 };
 
-export const refreshThemeButton = (activeTheme, refs, translate) => {
+export const refreshThemeButton = (
+    activeTheme: RuntimeTheme,
+    refs: RendererRefs,
+    translate: Translator,
+) => {
     if (!refs?.themeToggle) return;
     const isDark = activeTheme === 'dark';
     const nextLabel = isDark ? translate('ui.themeLight') : translate('ui.themeDark');
@@ -21,7 +32,11 @@ export const refreshThemeButton = (activeTheme, refs, translate) => {
     refs.themeToggle.setAttribute('title', nextLabel);
 };
 
-export const setThemeSwitchPrompt = (nextTheme, refs, translate) => {
+export const setThemeSwitchPrompt = (
+    nextTheme: RuntimeTheme,
+    refs: RendererRefs,
+    translate: Translator,
+) => {
     if (!refs?.themeSwitchMessage) return;
     const targetLabel = nextTheme === 'light' ? translate('ui.themeLight') : translate('ui.themeDark');
     const fallback = targetLabel ? `Switch to ${targetLabel}?` : translate('ui.themeLight');
@@ -29,25 +44,30 @@ export const setThemeSwitchPrompt = (nextTheme, refs, translate) => {
         translate('ui.themeSwitchPrompt', { theme: targetLabel || '' }) || fallback;
 };
 
-export const requestLightThemeConfirmation = (targetTheme, refs, translate) => {
-    if (!refs?.themeSwitchDialog || typeof refs.themeSwitchDialog.showModal !== 'function') {
+export const requestLightThemeConfirmation = (
+    targetTheme: RuntimeTheme,
+    refs: RendererRefs,
+    translate: Translator,
+) => {
+    const dialog = refs?.themeSwitchDialog;
+    if (!dialog || typeof dialog.showModal !== 'function') {
         return false;
     }
-    if (refs.themeSwitchDialog.open) return true;
+    if (dialog.open) return true;
 
-    refs.themeSwitchDialog.dataset.pendingTheme = targetTheme;
+    dialog.dataset.pendingTheme = targetTheme;
     setThemeSwitchPrompt(targetTheme, refs, translate);
 
     try {
-        refs.themeSwitchDialog.showModal();
+        dialog.showModal();
         return true;
     } catch {
-        delete refs.themeSwitchDialog.dataset.pendingTheme;
+        delete dialog.dataset.pendingTheme;
         return false;
     }
 };
 
-export const refreshSettingsToggle = (refs, translate) => {
+export const refreshSettingsToggle = (refs: RendererRefs, translate: Translator) => {
     if (!refs?.settingsToggle) return;
     const label = `${translate('ui.language')} / ${translate('ui.theme')}`;
     refs.settingsToggle.setAttribute('aria-label', label);

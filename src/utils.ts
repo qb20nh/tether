@@ -1,13 +1,30 @@
-// @ts-nocheck
 import { isObstacle } from './config.ts';
+import type {
+  GameSnapshot,
+  GridPoint,
+  GridTuple,
+  LevelDefinition,
+} from './contracts/ports.ts';
 import { buildStitchLookups } from './shared/stitch_corner_geometry.ts';
 
-export const keyOf = (r, c) => `${r},${c}`;
-export const keyV = (vr, vc) => `${vr},${vc}`;
+interface ParsedLevel {
+  g: string[][];
+  rows: number;
+  cols: number;
+  usable: number;
+  stitches: GridTuple[];
+  cornerCounts: Array<[number, number, number]>;
+}
 
-export const inBounds = (rows, cols, r, c) => r >= 0 && r < rows && c >= 0 && c < cols;
+type ParsedLevelInput = Pick<LevelDefinition, 'stitches' | 'cornerCounts'> & { grid: string[] };
 
-export const parseLevel = (level) => {
+export const keyOf = (r: number, c: number): string => `${r},${c}`;
+export const keyV = (vr: number, vc: number): string => `${vr},${vc}`;
+
+export const inBounds = (rows: number, cols: number, r: number, c: number): boolean =>
+  r >= 0 && r < rows && c >= 0 && c < cols;
+
+export const parseLevel = (level: ParsedLevelInput): ParsedLevel => {
   const g = level.grid.map((row) => row.split(''));
   const rows = g.length;
   const cols = g[0].length;
@@ -21,7 +38,7 @@ export const parseLevel = (level) => {
     }
   }
 
-  const stitches = (level.stitches || []).map((p) => [p[0], p[1]]);
+  const stitches = (level.stitches || []).map((p): GridTuple => [p[0], p[1]]);
   const { stitchSet: stitchVertices } = buildStitchLookups(stitches, keyV);
 
   const cornerCountsRaw = level.cornerCounts || [];
@@ -32,7 +49,7 @@ export const parseLevel = (level) => {
     }
 
     const [vr, vc, count] = entry;
-    const isInt = (v) => Number.isInteger(v);
+    const isInt = (v: unknown): v is number => Number.isInteger(v);
     if (!isInt(vr) || !isInt(vc) || !isInt(count)) {
       throw new Error(`cornerCounts[${idx}] must be [int, int, int]`);
     }
@@ -54,7 +71,7 @@ export const parseLevel = (level) => {
     }
     seenCornerVertices.add(vk);
 
-    return [vr, vc, count];
+    return [vr, vc, count] as [number, number, number];
   });
 
   return {
@@ -68,7 +85,11 @@ export const parseLevel = (level) => {
 };
 
 
-export const isAdjacentMove = (snapshot, a, b) => {
+export const isAdjacentMove = (
+  snapshot: Pick<GameSnapshot, 'stitchSet'>,
+  a: GridPoint,
+  b: GridPoint,
+): boolean => {
   const dr = Math.abs(a.r - b.r);
   const dc = Math.abs(a.c - b.c);
   if (dr + dc === 1) return true;

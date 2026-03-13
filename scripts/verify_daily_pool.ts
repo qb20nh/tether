@@ -13,28 +13,48 @@ import {
   materializeDailyLevelForSlot,
   readDailyOverridesGzipFile,
   replayWitnessAndValidate,
-} from './daily_pool_tools.js';
+} from './daily_pool_tools.ts';
 import {
   parsePositiveInt,
   readJsonFile,
   readRequiredArgValue,
-} from './lib/cli_utils.js';
+} from './lib/cli_utils.ts';
 
-const DEFAULTS = {
+interface VerifyDailyPoolOptions {
+  manifestFile: string;
+  overridesFile: string;
+  maxSlots: number | null;
+  json: boolean;
+}
+
+interface DailyPoolManifest {
+  maxSlots?: number;
+  poolDigest?: string;
+  baseVariantId?: number;
+}
+
+interface VerifyDailyPoolSummary {
+  ok: boolean;
+  checkedSlots: number;
+  verifiedUniqueSlots: number;
+  failures: string[];
+}
+
+const DEFAULTS: VerifyDailyPoolOptions = {
   manifestFile: path.resolve(process.cwd(), DAILY_POOL_MANIFEST_REPO_FILE),
   overridesFile: path.resolve(process.cwd(), DAILY_OVERRIDES_REPO_FILE),
   maxSlots: null,
   json: false,
 };
 
-const parseArgs = (argv) => {
-  const opts = { ...DEFAULTS };
+const parseArgs = (argv: readonly string[]): VerifyDailyPoolOptions => {
+  const opts: VerifyDailyPoolOptions = { ...DEFAULTS };
 
   let index = 0;
   while (index < argv.length) {
     const arg = argv[index];
     let nextArgIndex = index + 1;
-    const nextValue = () => {
+    const nextValue = (): string => {
       const result = readRequiredArgValue(argv, index, arg);
       nextArgIndex = result.nextIndex + 1;
       return result.value;
@@ -48,7 +68,7 @@ const parseArgs = (argv) => {
       console.log(
         [
           'Usage:',
-          '  node scripts/verify_daily_pool.js [options]',
+          '  node scripts/verify_daily_pool.ts [options]',
           '',
           'Options:',
           `  --manifest <path>        Pool manifest path (default: ${DEFAULTS.manifestFile})`,
@@ -69,7 +89,15 @@ const parseArgs = (argv) => {
   return opts;
 };
 
-function processSlot(slot, overrides, baseVariantId, infiniteCanonicalSet, dailyCanonicalSet, digestRecords, failures) {
+function processSlot(
+  slot: number,
+  overrides: Readonly<Record<number, number>>,
+  baseVariantId: number,
+  infiniteCanonicalSet: ReadonlySet<string>,
+  dailyCanonicalSet: Set<string>,
+  digestRecords: string[],
+  failures: string[],
+): void {
   let materialized;
   try {
     materialized = materializeDailyLevelForSlot(slot, overrides, baseVariantId);
@@ -100,7 +128,12 @@ function processSlot(slot, overrides, baseVariantId, infiniteCanonicalSet, daily
   digestRecords.push(`${slot}:${variantId}:${canonicalKey}`);
 }
 
-function verifyPoolDigest(maxSlots, manifest, digestRecords, failures) {
+function verifyPoolDigest(
+  maxSlots: number,
+  manifest: DailyPoolManifest,
+  digestRecords: readonly string[],
+  failures: string[],
+): void {
   if (maxSlots === manifest.maxSlots && typeof manifest.poolDigest === 'string') {
     const digest = computePoolDigest(digestRecords);
     if (digest !== manifest.poolDigest) {
@@ -109,7 +142,11 @@ function verifyPoolDigest(maxSlots, manifest, digestRecords, failures) {
   }
 }
 
-function printSummary(opts, summary, failures) {
+function printSummary(
+  opts: VerifyDailyPoolOptions,
+  summary: VerifyDailyPoolSummary,
+  failures: readonly string[],
+): void {
   if (opts.json) {
     console.log(JSON.stringify(summary, null, 2));
   } else {
@@ -127,29 +164,29 @@ function printSummary(opts, summary, failures) {
   }
 }
 
-function main() {
+function main(): void {
   const opts = parseArgs(process.argv.slice(2));
 
-  const manifest = readJsonFile(opts.manifestFile);
-  const defaultMaxSlots = manifest.maxSlots || DAILY_POOL_MAX_SLOTS;
-  const maxSlots = opts.maxSlots || defaultMaxSlots;
-  
+  const manifest = readJsonFile<DailyPoolManifest>(opts.manifestFile);
+  const defaultMaxSlots = typeof manifest.maxSlots === 'number' ? manifest.maxSlots : DAILY_POOL_MAX_SLOTS;
+  const maxSlots = opts.maxSlots ?? defaultMaxSlots;
+
   if (maxSlots > defaultMaxSlots) {
     throw new Error(`--max-slots ${maxSlots} exceeds manifest.maxSlots ${manifest.maxSlots}`);
   }
 
-  const baseVariantId = Number.isInteger(manifest.baseVariantId)
+  const baseVariantId = typeof manifest.baseVariantId === 'number'
     ? manifest.baseVariantId
     : DAILY_POOL_BASE_VARIANT_ID;
 
   const overrides = readDailyOverridesGzipFile(opts.overridesFile);
   const infiniteCanonicalSet = buildInfiniteCanonicalKeySet(INFINITE_MAX_LEVELS);
 
-  const dailyCanonicalSet = new Set();
-  const digestRecords = [];
-  const failures = [];
+  const dailyCanonicalSet = new Set<string>();
+  const digestRecords: string[] = [];
+  const failures: string[] = [];
 
-  for (let slot = 0; slot < maxSlots; slot++) {
+  for (let slot = 0; slot < maxSlots; slot += 1) {
     processSlot(
       slot,
       overrides,
@@ -166,7 +203,7 @@ function main() {
 
   verifyPoolDigest(maxSlots, manifest, digestRecords, failures);
 
-  const summary = {
+  const summary: VerifyDailyPoolSummary = {
     ok: failures.length === 0,
     checkedSlots: maxSlots,
     verifiedUniqueSlots: dailyCanonicalSet.size,

@@ -1,11 +1,30 @@
-// @ts-nocheck
-const createCellState = () => ({
+import type {
+  EvaluateResult,
+  GameSnapshot,
+  GridPoint,
+} from '../contracts/ports.ts';
+
+export interface BoardCellViewState {
+  classes: string[];
+  idx: string;
+  markHtml: string;
+}
+
+type BoardCellMatrix = BoardCellViewState[][];
+type KeyStatus = { badKeys?: readonly string[]; goodKeys?: readonly string[] } | null | undefined;
+type BlockedStatus = { badKeys?: readonly string[] } | null | undefined;
+
+const createCellState = (): BoardCellViewState => ({
   classes: ['cell'],
   idx: '',
   markHtml: '',
 });
 
-const ensureOutputMatrix = (rows, cols, out) => {
+const ensureOutputMatrix = (
+  rows: number,
+  cols: number,
+  out: BoardCellMatrix | null,
+): BoardCellMatrix => {
   const matrix = Array.isArray(out) ? out : [];
   if (matrix.length !== rows) matrix.length = rows;
 
@@ -23,9 +42,9 @@ const ensureOutputMatrix = (rows, cols, out) => {
   return matrix;
 };
 
-const keyScratch = { r: 0, c: 0 };
+const keyScratch: GridPoint = { r: 0, c: 0 };
 
-const parseGridKey = (key, out = keyScratch) => {
+const parseGridKey = (key: unknown, out: GridPoint = keyScratch): GridPoint | null => {
   if (typeof key !== 'string') return null;
   const commaIndex = key.indexOf(',');
   if (commaIndex <= 0 || commaIndex >= key.length - 1) return null;
@@ -37,7 +56,12 @@ const parseGridKey = (key, out = keyScratch) => {
   return out;
 };
 
-const applyClassToKeys = (keys, desired, className, shouldApply = null) => {
+const applyClassToKeys = (
+  keys: readonly string[] | undefined,
+  desired: BoardCellMatrix,
+  className: string,
+  shouldApply: ((cell: BoardCellViewState) => boolean) | null = null,
+): void => {
   keys?.forEach((key) => {
     const parsed = parseGridKey(key);
     const cell = parsed ? desired[parsed.r]?.[parsed.c] : null;
@@ -48,8 +72,15 @@ const applyClassToKeys = (keys, desired, className, shouldApply = null) => {
 /**
  * Build cell classes/index/mark HTML from state + evaluation.
  */
-export function buildBoardCellViewModel(snapshot, results, resolveMarkHtml, out = null) {
-  const { hintStatus, rpsStatus, blockedStatus } = results || {};
+export function buildBoardCellViewModel(
+  snapshot: GameSnapshot,
+  results: EvaluateResult | null | undefined,
+  resolveMarkHtml: ((code: string) => string) | null | undefined,
+  out: BoardCellMatrix | null = null,
+): BoardCellMatrix {
+  const hintStatus = (results?.hintStatus || null) as KeyStatus;
+  const rpsStatus = (results?.rpsStatus || null) as KeyStatus;
+  const blockedStatus = (results?.blockedStatus || null) as BlockedStatus;
   const desired = ensureOutputMatrix(snapshot.rows, snapshot.cols, out);
 
   for (let r = 0; r < snapshot.rows; r++) {

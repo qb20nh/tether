@@ -10,11 +10,26 @@ import {
   flushMicrotasks,
 } from './notification_test_harness.js';
 
+/** @typedef {import('../../src/contracts/ports.ts').NotificationHistoryEntry} NotificationHistoryEntry */
+/** @typedef {import('../../src/contracts/ports.ts').NotificationHistoryPayload} NotificationHistoryPayload */
+
 const SW_MESSAGE_TYPES = Object.freeze({
   GET_HISTORY: 'SW_GET_NOTIFICATION_HISTORY',
   MARK_HISTORY_READ: 'SW_MARK_NOTIFICATION_HISTORY_READ',
 });
 
+/**
+ * @param {ReturnType<typeof createNotificationCenter>} center
+ * @param {number} historyVersion
+ * @param {NotificationHistoryEntry[]} entries
+ */
+const applyHistory = (center, historyVersion, entries) => {
+  /** @type {NotificationHistoryPayload} */
+  const payload = { historyVersion, entries };
+  center.applyHistoryPayload(payload);
+};
+
+/** @param {any} [overrides] */
 const createHarness = (overrides = {}) => {
   const documentObj = createDocumentMock();
   const windowObj = createWindowMock();
@@ -33,8 +48,8 @@ const createHarness = (overrides = {}) => {
   documentObj.register(ELEMENT_IDS.MOVE_DAILY_DIALOG, new FakeElement('dialog'));
   documentObj.register(ELEMENT_IDS.MOVE_DAILY_MESSAGE, new FakeElement('div'));
 
-  let applyCalls = [];
-  let openCalls = [];
+  let applyCalls = /** @type {any[]} */ ([]);
+  let openCalls = /** @type {any[]} */ ([]);
 
   const center = createNotificationCenter({
     elementIds: ELEMENT_IDS,
@@ -70,8 +85,8 @@ const createHarness = (overrides = {}) => {
     onOpenDailyRequested: overrides.onOpenDailyRequested || (async (payload) => {
       openCalls.push(payload);
     }),
-    windowObj,
-    documentObj,
+    windowObj: /** @type {any} */ (windowObj),
+    documentObj: /** @type {any} */ (documentObj),
   });
 
   return {
@@ -90,7 +105,7 @@ const createHarness = (overrides = {}) => {
 test('notification center normalizes and truncates history payloads to max entries', () => {
   const { center } = createHarness();
 
-  const entries = [];
+  const entries = /** @type {NotificationHistoryEntry[]} */ ([]);
   for (let i = 0; i < 12; i += 1) {
     entries.push({
       id: `id-${i}`,
@@ -104,7 +119,7 @@ test('notification center normalizes and truncates history payloads to max entri
     });
   }
 
-  center.applyHistoryPayload({ historyVersion: 4, entries });
+  applyHistory(center, 4, entries);
   assert.equal(center.getHistoryEntries().length, 10);
   assert.equal(center.getHistoryEntries()[0].id, 'id-0');
   assert.equal(center.getHistoryEntries()[9].id, 'id-9');
@@ -114,9 +129,7 @@ test('notification center refresh updates unread badge based on system unread en
   const { center, badgeEl, toggleEl } = createHarness();
   center.bind();
 
-  center.applyHistoryPayload({
-    historyVersion: 2,
-    entries: [
+  applyHistory(center, 2, [
       {
         id: 'sys-1',
         source: 'system',
@@ -126,8 +139,7 @@ test('notification center refresh updates unread badge based on system unread en
         createdAtUtcMs: Date.UTC(2026, 2, 7, 1, 0, 0),
         marker: 'unread',
       },
-    ],
-  });
+    ]);
   center.refreshHistoryUi();
 
   assert.equal(badgeEl.hidden, false);
@@ -135,8 +147,8 @@ test('notification center refresh updates unread badge based on system unread en
 });
 
 test('notification center dispatches history row actions to callbacks', async () => {
-  const applyPayloads = [];
-  const openPayloads = [];
+  const applyPayloads = /** @type {any[]} */ ([]);
+  const openPayloads = /** @type {any[]} */ ([]);
   const { center, listEl } = createHarness({
     onApplyUpdateRequested: async (payload) => {
       applyPayloads.push(payload);
@@ -147,9 +159,7 @@ test('notification center dispatches history row actions to callbacks', async ()
   });
 
   center.bind();
-  center.applyHistoryPayload({
-    historyVersion: 3,
-    entries: [
+  applyHistory(center, 3, [
       {
         id: 'apply-1',
         source: 'system',
@@ -170,8 +180,7 @@ test('notification center dispatches history row actions to callbacks', async ()
         marker: 'older',
         action: { type: 'open-daily', dailyId: '2026-03-07' },
       },
-    ],
-  });
+    ]);
   center.refreshHistoryUi();
 
   const rows = listEl.querySelectorAll('.notificationHistoryItem');
@@ -191,8 +200,8 @@ test('notification center dispatches history row actions to callbacks', async ()
 });
 
 test('notification center dialog helpers fall back to window.confirm when modal APIs are unavailable', async () => {
-  let capturedApply = null;
-  let capturedOpenDaily = null;
+  let capturedApply = /** @type {any} */ (null);
+  let capturedOpenDaily = /** @type {any} */ (null);
 
   const { center, listEl, windowObj } = createHarness({
     onApplyUpdateRequested: async (payload) => {
@@ -204,9 +213,7 @@ test('notification center dialog helpers fall back to window.confirm when modal 
   });
 
   center.bind();
-  center.applyHistoryPayload({
-    historyVersion: 5,
-    entries: [
+  applyHistory(center, 5, [
       {
         id: 'apply-2',
         source: 'system',
@@ -227,8 +234,7 @@ test('notification center dialog helpers fall back to window.confirm when modal 
         marker: 'older',
         action: { type: 'open-daily', dailyId: '2026-03-07' },
       },
-    ],
-  });
+    ]);
   center.refreshHistoryUi();
 
   const rows = listEl.querySelectorAll('.notificationHistoryItem');
@@ -237,6 +243,8 @@ test('notification center dialog helpers fall back to window.confirm when modal 
   await flushMicrotasks();
 
   windowObj.setConfirmValue(true);
+  assert.ok(capturedApply);
+  assert.ok(capturedOpenDaily);
   assert.equal(await capturedApply.requestUpdateApplyConfirmation(222), true);
   assert.equal(await capturedOpenDaily.requestMoveDailyConfirmation(), true);
 
@@ -263,9 +271,7 @@ test('notification center refreshLocalizedUi re-renders history text using activ
   });
 
   center.bind();
-  center.applyHistoryPayload({
-    historyVersion: 6,
-    entries: [
+  applyHistory(center, 6, [
       {
         id: 'sys-locale',
         source: 'system',
@@ -275,8 +281,7 @@ test('notification center refreshLocalizedUi re-renders history text using activ
         createdAtUtcMs: Date.UTC(2026, 2, 7, 4, 0, 0),
         marker: 'older',
       },
-    ],
-  });
+    ]);
 
   center.refreshHistoryUi();
   const titleBefore = listEl.querySelector('.notificationHistoryItem__title');

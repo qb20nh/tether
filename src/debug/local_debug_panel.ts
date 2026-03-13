@@ -1,9 +1,79 @@
-// @ts-nocheck
 import {
   DEBUG_REDUCED_MOTION_CLASS,
   readDebugReducedMotionSimulation,
   setDebugReducedMotionSimulation,
 } from './reduced_motion_debug.ts';
+
+declare global {
+  interface Window {
+    TETHER_DEBUG_ANIM_SPEED?: number;
+  }
+}
+
+type DebugTabKey = 'notification' | 'daily' | 'animation';
+
+interface DailyPayloadSummary {
+  dailyId: string | null;
+  hardInvalidateAtUtcMs: number | null;
+  generatedAtUtcMs: number | null;
+  dailySlot: number | null;
+  levelName: string | null;
+  rows: number;
+  cols: number;
+}
+
+interface DailyPayloadLike {
+  dailyId?: unknown;
+  hardInvalidateAtUtcMs?: unknown;
+  generatedAtUtcMs?: unknown;
+  dailySlot?: unknown;
+  level?: {
+    name?: unknown;
+    grid?: unknown;
+  } | null;
+}
+
+interface FetchDailyPayloadOptions {
+  bypassCache?: boolean;
+}
+
+interface LocalDebugPanelCallbacks {
+  requestNotificationPermission?: () => Promise<string>;
+  showToast?: (...args: unknown[]) => void;
+  triggerSystemNotification?: (options?: { kind?: string }) => Promise<boolean>;
+  clearNotifications?: () => Promise<boolean>;
+  fetchDailyPayload?: (options?: FetchDailyPayloadOptions) => Promise<unknown>;
+  runDailyCheck?: () => Promise<boolean>;
+  readDailyDebugSnapshot?: () => unknown;
+  toggleForceDailyFrozenState?: () => unknown;
+  reloadApp?: () => void;
+}
+
+interface ResolvedPanelCallbacks {
+  requestPermission: () => Promise<string>;
+  showToast: (...args: unknown[]) => void;
+  triggerSystemNotification: (options?: { kind?: string }) => Promise<boolean>;
+  clearNotifications: () => Promise<boolean>;
+  fetchDailyPayload: (options?: FetchDailyPayloadOptions) => Promise<unknown>;
+  runDailyCheck: () => Promise<boolean>;
+  readDailyDebugSnapshot: () => unknown;
+  toggleForceDailyFrozenState: () => unknown;
+  reloadApp: () => void;
+}
+
+interface TabEntry {
+  key: DebugTabKey;
+  button: HTMLButtonElement;
+  panel: HTMLDivElement;
+}
+
+interface TabLayout {
+  tabs: HTMLDivElement;
+  tabEntries: [TabEntry, TabEntry, TabEntry];
+  notificationEntry: TabEntry;
+  dailyEntry: TabEntry;
+  animationEntry: TabEntry;
+}
 
 const PANEL_ID = 'tetherLocalDebugPanel';
 const STYLE_ID = 'tetherLocalDebugPanelStyle';
@@ -14,7 +84,7 @@ const DEBUG_TAB_NOTIFICATION = 'notification';
 const DEBUG_TAB_DAILY = 'daily';
 const DEBUG_TAB_ANIMATION = 'animation';
 
-const ensurePanelStyles = () => {
+const ensurePanelStyles = (): void => {
   if (document.getElementById(STYLE_ID)) return;
   const style = document.createElement('style');
   style.id = STYLE_ID;
@@ -141,27 +211,28 @@ const ensurePanelStyles = () => {
   document.head.appendChild(style);
 };
 
-const buildValue = (value, fallback) => {
+const buildValue = (value: unknown, fallback: string): string => {
   if (typeof value !== 'string') return fallback;
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : fallback;
 };
 
-const summarizeDailyPayload = (payload) => {
+const summarizeDailyPayload = (payload: unknown): DailyPayloadSummary | null => {
   if (!payload || typeof payload !== 'object') return null;
-  const grid = Array.isArray(payload.level?.grid) ? payload.level.grid : [];
+  const source = payload as DailyPayloadLike;
+  const grid = Array.isArray(source.level?.grid) ? source.level.grid : [];
   return {
-    dailyId: typeof payload.dailyId === 'string' ? payload.dailyId : null,
-    hardInvalidateAtUtcMs: Number.parseInt(payload.hardInvalidateAtUtcMs, 10) || null,
-    generatedAtUtcMs: Number.parseInt(payload.generatedAtUtcMs, 10) || null,
-    dailySlot: Number.parseInt(payload.dailySlot, 10) || null,
-    levelName: typeof payload.level?.name === 'string' ? payload.level.name : null,
+    dailyId: typeof source.dailyId === 'string' ? source.dailyId : null,
+    hardInvalidateAtUtcMs: Number.parseInt(String(source.hardInvalidateAtUtcMs ?? ''), 10) || null,
+    generatedAtUtcMs: Number.parseInt(String(source.generatedAtUtcMs ?? ''), 10) || null,
+    dailySlot: Number.parseInt(String(source.dailySlot ?? ''), 10) || null,
+    levelName: typeof source.level?.name === 'string' ? source.level.name : null,
     rows: grid.length,
     cols: grid.length > 0 ? String(grid[0] || '').length : 0,
   };
 };
 
-const formatDebugOutput = (value) => {
+const formatDebugOutput = (value: unknown): string => {
   if (value === null || value === undefined) return '-';
   if (typeof value === 'string') return value;
   try {
@@ -171,21 +242,22 @@ const formatDebugOutput = (value) => {
   }
 };
 
-const setDebugOutput = (outputEl, value) => {
+const setDebugOutput = (outputEl: HTMLElement | null, value: unknown): void => {
   if (!outputEl) return;
   outputEl.textContent = formatDebugOutput(value);
 };
 
-const setPanelVisible = (panelEl, visible) => {
+const setPanelVisible = (panelEl: HTMLElement | null, visible: boolean): void => {
   if (!panelEl) return;
   panelEl.hidden = !visible;
   panelEl.style.display = visible ? 'grid' : 'none';
   panelEl.setAttribute('aria-hidden', visible ? 'false' : 'true');
 };
 
-const bindLogoToggle = (panelEl, onToggle = () => {}) => {
+const bindLogoToggle = (panelEl: HTMLElement | null, onToggle: (visible: boolean) => void = () => {}) => {
   if (!panelEl) return;
-  const logoTextEl = document.querySelector(LOGO_TEXT_SELECTOR) || document.querySelector('.brandTitle');
+  const logoTextEl = document.querySelector<HTMLElement>(LOGO_TEXT_SELECTOR)
+    || document.querySelector<HTMLElement>('.brandTitle');
   if (!logoTextEl) return;
   if (logoTextEl.getAttribute(TOGGLE_BIND_ATTR) === '1') return;
   logoTextEl.setAttribute(TOGGLE_BIND_ATTR, '1');
@@ -207,11 +279,11 @@ const bindLogoToggle = (panelEl, onToggle = () => {}) => {
   });
 };
 
-const resolveFunction = (value, fallback) => (
-  typeof value === 'function' ? value : fallback
+const resolveFunction = <T extends (...args: never[]) => unknown>(value: unknown, fallback: T): T => (
+  typeof value === 'function' ? value as T : fallback
 );
 
-const resolvePanelCallbacks = (callbacks = {}) => ({
+const resolvePanelCallbacks = (callbacks: LocalDebugPanelCallbacks = {}): ResolvedPanelCallbacks => ({
   requestPermission: resolveFunction(callbacks.requestNotificationPermission, async () => 'unsupported'),
   showToast: resolveFunction(callbacks.showToast, () => { }),
   triggerSystemNotification: resolveFunction(callbacks.triggerSystemNotification, async () => false),
@@ -223,7 +295,7 @@ const resolvePanelCallbacks = (callbacks = {}) => ({
   reloadApp: resolveFunction(callbacks.reloadApp, () => window.location.reload()),
 });
 
-const createDebugButton = (label, onClick) => {
+const createDebugButton = (label: string, onClick: () => void | Promise<void>): HTMLButtonElement => {
   const button = document.createElement('button');
   button.type = 'button';
   button.textContent = label;
@@ -231,13 +303,24 @@ const createDebugButton = (label, onClick) => {
   return button;
 };
 
-const appendDebugButtons = (container, buttons) => {
+const appendDebugButtons = (
+  container: HTMLElement,
+  buttons: Array<{ label: string; onClick: () => void | Promise<void> }>,
+): void => {
   buttons.forEach(({ label, onClick }) => {
     container.appendChild(createDebugButton(label, onClick));
   });
 };
 
-const createTabEntry = ({ key, label, suffix }) => {
+const createTabEntry = ({
+  key,
+  label,
+  suffix,
+}: {
+  key: DebugTabKey;
+  label: string;
+  suffix: string;
+}): TabEntry => {
   const button = document.createElement('button');
   button.type = 'button';
   button.className = 'debugTabBtn';
@@ -256,7 +339,7 @@ const createTabEntry = ({ key, label, suffix }) => {
   return { key, button, panel };
 };
 
-const createTabLayout = () => {
+const createTabLayout = (): TabLayout => {
   const tabs = document.createElement('div');
   tabs.className = 'debugTabs';
   tabs.setAttribute('role', 'tablist');
@@ -276,7 +359,7 @@ const createTabLayout = () => {
     label: 'Animations',
     suffix: 'Animation',
   });
-  const tabEntries = [notificationEntry, dailyEntry, animationEntry];
+  const tabEntries: [TabEntry, TabEntry, TabEntry] = [notificationEntry, dailyEntry, animationEntry];
 
   tabEntries.forEach(({ button }) => {
     tabs.appendChild(button);
@@ -291,7 +374,7 @@ const createTabLayout = () => {
   };
 };
 
-const createNotificationTabContent = (panel, callbacks) => {
+const createNotificationTabContent = (panel: HTMLDivElement, callbacks: ResolvedPanelCallbacks): void => {
   const titleRow = document.createElement('div');
   titleRow.className = 'debugRow';
   const titleInput = document.createElement('input');
@@ -352,7 +435,7 @@ const createNotificationTabContent = (panel, callbacks) => {
   panel.appendChild(buttonGrid);
 };
 
-const createDailyTabContent = (panel, callbacks) => {
+const createDailyTabContent = (panel: HTMLDivElement, callbacks: ResolvedPanelCallbacks): void => {
   const dailyOutput = document.createElement('pre');
   dailyOutput.className = 'debugOutput';
   setDebugOutput(dailyOutput, 'Daily debug output');
@@ -425,17 +508,17 @@ const createDailyTabContent = (panel, callbacks) => {
   panel.appendChild(dailyOutput);
 };
 
-const ensureAnimationDebugSpeed = () => {
+const ensureAnimationDebugSpeed = (): void => {
   if (typeof window.TETHER_DEBUG_ANIM_SPEED !== 'number') {
     window.TETHER_DEBUG_ANIM_SPEED = 1;
   }
 };
 
-const resolveAnimationSpeed = () => (
+const resolveAnimationSpeed = (): number => (
   typeof window.TETHER_DEBUG_ANIM_SPEED === 'number' ? window.TETHER_DEBUG_ANIM_SPEED : 1
 );
 
-const createAnimationTabController = (root, panel) => {
+const createAnimationTabController = (root: HTMLElement, panel: HTMLDivElement) => {
   ensureAnimationDebugSpeed();
 
   const animationButtons = document.createElement('div');
@@ -453,13 +536,13 @@ const createAnimationTabController = (root, panel) => {
   let animationRafId = 0;
   let animationTabActive = false;
 
-  const stopAnimationSync = () => {
+  const stopAnimationSync = (): void => {
     if (!animationRafId) return;
     cancelAnimationFrame(animationRafId);
     animationRafId = 0;
   };
 
-  const applyAnimationsSpeed = () => {
+  const applyAnimationsSpeed = (): void => {
     const targetPlaybackRate = 1 / Math.max(0.1, resolveAnimationSpeed());
     document.getAnimations().forEach((anim) => {
       if (anim.playbackRate !== targetPlaybackRate) {
@@ -468,11 +551,11 @@ const createAnimationTabController = (root, panel) => {
     });
   };
 
-  const shouldSyncAnimations = () => (
+  const shouldSyncAnimations = (): boolean => (
     resolveAnimationSpeed() !== 1 || (animationTabActive && !root.hidden)
   );
 
-  const syncAnimationsSpeed = () => {
+  const syncAnimationsSpeed = (): void => {
     applyAnimationsSpeed();
     if (!shouldSyncAnimations()) {
       animationRafId = 0;
@@ -481,7 +564,7 @@ const createAnimationTabController = (root, panel) => {
     animationRafId = requestAnimationFrame(syncAnimationsSpeed);
   };
 
-  const refreshAnimationSync = () => {
+  const refreshAnimationSync = (): void => {
     applyAnimationsSpeed();
     if (shouldSyncAnimations()) {
       if (!animationRafId) {
@@ -526,14 +609,14 @@ const createAnimationTabController = (root, panel) => {
 
   return {
     refreshAnimationSync,
-    setAnimationTabActive(isActive) {
+    setAnimationTabActive(isActive: boolean) {
       animationTabActive = isActive;
       refreshAnimationSync();
     },
   };
 };
 
-const applyActiveTab = (tabEntries, activeTabKey) => {
+const applyActiveTab = (tabEntries: readonly TabEntry[], activeTabKey: DebugTabKey): void => {
   tabEntries.forEach(({ key, button, panel }) => {
     const isActive = key === activeTabKey;
     panel.hidden = !isActive;
@@ -543,7 +626,7 @@ const applyActiveTab = (tabEntries, activeTabKey) => {
   });
 };
 
-const bindTabInteractions = (tabEntries, onTabChange) => {
+const bindTabInteractions = (tabEntries: readonly TabEntry[], onTabChange: (tabKey: DebugTabKey) => void): void => {
   tabEntries.forEach(({ key, button }, index) => {
     button.addEventListener('click', () => onTabChange(key));
     button.addEventListener('keydown', (event) => {
@@ -559,9 +642,9 @@ const bindTabInteractions = (tabEntries, onTabChange) => {
   });
 };
 
-export const mountLocalDebugPanel = (callbacks = {}) => {
+export const mountLocalDebugPanel = (callbacks: LocalDebugPanelCallbacks = {}): void => {
   ensurePanelStyles();
-  const existingRoot = document.getElementById(PANEL_ID);
+  const existingRoot = document.getElementById(PANEL_ID) as HTMLElement | null;
   if (existingRoot) {
     setPanelVisible(existingRoot, false);
     bindLogoToggle(existingRoot);
@@ -589,7 +672,7 @@ export const mountLocalDebugPanel = (callbacks = {}) => {
   createDailyTabContent(dailyEntry.panel, panelCallbacks);
   const animationController = createAnimationTabController(root, animationEntry.panel);
 
-  const setActiveTab = (tabKey) => {
+  const setActiveTab = (tabKey: DebugTabKey): void => {
     applyActiveTab(tabEntries, tabKey);
     animationController.setAnimationTabActive(tabKey === DEBUG_TAB_ANIMATION);
   };

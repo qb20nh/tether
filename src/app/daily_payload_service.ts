@@ -1,10 +1,42 @@
-// @ts-nocheck
 import { normalizeDailyPayload } from '../shared/daily_payload_schema.ts';
 import { utcDateIdFromMs } from '../shared/utc_date.ts';
+import type {
+  DocumentLike,
+  LevelDefinition,
+} from '../contracts/ports.ts';
 
+interface DailyPayload {
+  dailyId: string;
+  hardInvalidateAtUtcMs: number;
+  level: LevelDefinition;
+}
 
+interface BootDailyPayload {
+  dailyLevel: LevelDefinition | null;
+  dailyId: string | null;
+  hardInvalidateAtUtcMs: number | null;
+  stalePayload: DailyPayload | null;
+}
 
-export function createDailyPayloadService(options = {}) {
+interface DailyPayloadServiceOptions {
+  dailyPayloadUrl: string;
+  dailyHardInvalidateGraceMs?: number;
+  fetchImpl?: (input: string, init?: RequestInit) => Promise<{
+    ok: boolean;
+    json: () => Promise<unknown>;
+  }> | null;
+  now?: () => number;
+  windowObj?: {
+    location?: { reload?: () => void };
+    setTimeout: (handler: () => void, timeout?: number) => unknown;
+  } | undefined;
+  documentObj?: (DocumentLike & { visibilityState?: string }) | undefined;
+  reloadApp?: () => void;
+}
+
+const normalizeDailyPayloadTyped = normalizeDailyPayload as (raw: unknown) => DailyPayload | null;
+
+export function createDailyPayloadService(options: DailyPayloadServiceOptions) {
   const {
     dailyPayloadUrl,
     dailyHardInvalidateGraceMs = 60 * 1000,
@@ -23,7 +55,7 @@ export function createDailyPayloadService(options = {}) {
     throw new Error('createDailyPayloadService requires dailyPayloadUrl');
   }
 
-  const resolveDailyPayloadRequestUrl = ({ bypassCache = false } = {}) => {
+  const resolveDailyPayloadRequestUrl = ({ bypassCache = false }: { bypassCache?: boolean } = {}): string => {
     const url = new URL(dailyPayloadUrl);
     url.searchParams.set('_daily', new Date().toISOString().slice(0, 10));
     if (bypassCache) {
@@ -32,7 +64,7 @@ export function createDailyPayloadService(options = {}) {
     return url.toString();
   };
 
-  const fetchDailyPayload = async ({ bypassCache = false } = {}) => {
+  const fetchDailyPayload = async ({ bypassCache = false }: { bypassCache?: boolean } = {}): Promise<DailyPayload | null> => {
     if (typeof fetchImpl !== 'function') return null;
 
     try {
@@ -43,15 +75,16 @@ export function createDailyPayloadService(options = {}) {
         },
       });
 
+      if (!response) return null;
       if (!response.ok) return null;
-      const parsed = normalizeDailyPayload(await response.json());
+      const parsed = normalizeDailyPayloadTyped(await response.json());
       return parsed;
     } catch {
       return null;
     }
   };
 
-  const resolveDailyBootPayload = async () => {
+  const resolveDailyBootPayload = async (): Promise<BootDailyPayload> => {
     const nowMs = now();
     const todayId = utcDateIdFromMs(nowMs);
 
@@ -96,11 +129,18 @@ export function createDailyPayloadService(options = {}) {
     };
   };
 
-  const setupDailyHardInvalidationWatcher = (bootDaily) => {
-    if (!bootDaily || !Number.isInteger(bootDaily.hardInvalidateAtUtcMs)) return;
+  const setupDailyHardInvalidationWatcher = (
+    bootDaily: Pick<BootDailyPayload, 'dailyId' | 'hardInvalidateAtUtcMs'> | null | undefined,
+  ): void => {
+    const hardInvalidateAtUtcMs = (
+      bootDaily && Number.isInteger(bootDaily.hardInvalidateAtUtcMs)
+        ? bootDaily.hardInvalidateAtUtcMs
+        : null
+    );
+    if (!bootDaily || hardInvalidateAtUtcMs === null) return;
     if (!windowObj || !documentObj) return;
 
-    const thresholdMs = bootDaily.hardInvalidateAtUtcMs + dailyHardInvalidateGraceMs;
+    const thresholdMs = hardInvalidateAtUtcMs + dailyHardInvalidateGraceMs;
     const shouldBypassNow = () => now() > thresholdMs;
 
     const maybeRefetch = async () => {
@@ -126,7 +166,7 @@ export function createDailyPayloadService(options = {}) {
     }
 
     documentObj.addEventListener('visibilitychange', () => {
-      if (documentObj.visibilityState !== 'visible') return;
+      if ((documentObj.visibilityState || '') !== 'visible') return;
       void maybeRefetch();
     });
   };

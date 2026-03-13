@@ -1,14 +1,18 @@
-// @ts-nocheck
 import { pointsMatch } from '../math.ts';
+import type {
+  GridPoint,
+} from '../contracts/ports.ts';
 
-export const getPathTipFromPath = (path, side) => {
+type Path = readonly GridPoint[] | null | undefined;
+
+export const getPathTipFromPath = (path: Path, side: string): GridPoint | null => {
   if (!Array.isArray(path) || path.length <= 0) return null;
   if (side === 'start') return path[0] || null;
   if (path.length <= 1) return path[0] || null;
   return path.at(-1) || null;
 };
 
-export const pathsMatch = (aPath, bPath) => {
+export const pathsMatch = (aPath: Path, bPath: Path): boolean => {
   if (!Array.isArray(aPath) || !Array.isArray(bPath)) return false;
   if (aPath.length !== bPath.length) return false;
   for (let i = 0; i < aPath.length; i += 1) {
@@ -17,7 +21,7 @@ export const pathsMatch = (aPath, bPath) => {
   return true;
 };
 
-export const isPathReversed = (nextPath, previousPath) => {
+export const isPathReversed = (nextPath: Path, previousPath: Path): boolean => {
   if (!Array.isArray(nextPath) || !Array.isArray(previousPath)) return false;
   if (nextPath.length !== previousPath.length || nextPath.length < 2) return false;
 
@@ -27,14 +31,14 @@ export const isPathReversed = (nextPath, previousPath) => {
   return true;
 };
 
-export const normalizeFlowOffset = (value, cycle = 128) => {
+export const normalizeFlowOffset = (value: number, cycle = 128): number => {
   if (!Number.isFinite(value)) return 0;
   if (!Number.isFinite(cycle) || cycle <= 0) return 0;
   const mod = value % cycle;
   return mod >= 0 ? mod : mod + cycle;
 };
 
-export const resolvePathSignature = (path) => {
+export const resolvePathSignature = (path: Path): string => {
   if (!Array.isArray(path) || path.length <= 0) return '0|_|_';
   const head = path[0] || null;
   const tail = path.at(-1) || null;
@@ -43,14 +47,23 @@ export const resolvePathSignature = (path) => {
   return `${path.length}|${headSig}|${tailSig}`;
 };
 
-const matchesPathWindow = (sourcePath, targetPath, sourceOffset = 0, targetOffset = 0, length = 0) => {
+const matchesPathWindow = (
+  sourcePath: readonly GridPoint[],
+  targetPath: readonly GridPoint[],
+  sourceOffset = 0,
+  targetOffset = 0,
+  length = 0,
+): boolean => {
   for (let i = 0; i < length; i += 1) {
     if (!pointsMatch(sourcePath[sourceOffset + i], targetPath[targetOffset + i])) return false;
   }
   return true;
 };
 
-const resolveRetractTransitionLengths = (prevPath, nextPath) => {
+const resolveRetractTransitionLengths = (
+  prevPath: Path,
+  nextPath: Path,
+): { nextLen: number; diff: number } | null => {
   if (!Array.isArray(prevPath) || !Array.isArray(nextPath)) return null;
   const nextLen = nextPath.length;
   const diff = prevPath.length - nextLen;
@@ -58,13 +71,14 @@ const resolveRetractTransitionLengths = (prevPath, nextPath) => {
   return { nextLen, diff };
 };
 
-const matchesRetractTransition = (prevPath, nextPath, prevOffset = 0) => {
+const matchesRetractTransition = (prevPath: Path, nextPath: Path, prevOffset = 0): boolean => {
   const lengths = resolveRetractTransitionLengths(prevPath, nextPath);
   if (!lengths) return false;
+  if (!Array.isArray(prevPath) || !Array.isArray(nextPath)) return false;
   return matchesPathWindow(nextPath, prevPath, 0, prevOffset, lengths.nextLen);
 };
 
-const matchesAdvanceTransition = (prevPath, nextPath, nextOffset = 0) => {
+const matchesAdvanceTransition = (prevPath: Path, nextPath: Path, nextOffset = 0): boolean => {
   if (!Array.isArray(prevPath) || !Array.isArray(nextPath)) return false;
   const prevLen = prevPath.length;
   const nextLen = nextPath.length;
@@ -72,27 +86,31 @@ const matchesAdvanceTransition = (prevPath, nextPath, nextOffset = 0) => {
   return matchesPathWindow(nextPath, prevPath, nextOffset, 0, prevLen);
 };
 
-export const isEndRetractTransition = (prevPath, nextPath) => (
+export const isEndRetractTransition = (prevPath: Path, nextPath: Path): boolean => (
   matchesRetractTransition(prevPath, nextPath)
 );
 
-export const isStartRetractTransition = (prevPath, nextPath) => {
+export const isStartRetractTransition = (prevPath: Path, nextPath: Path): boolean => {
   const lengths = resolveRetractTransitionLengths(prevPath, nextPath);
   if (!lengths) return false;
   return matchesRetractTransition(prevPath, nextPath, lengths.diff);
 };
 
-export const isEndAdvanceTransition = (prevPath, nextPath) => (
+export const isEndAdvanceTransition = (prevPath: Path, nextPath: Path): boolean => (
   matchesAdvanceTransition(prevPath, nextPath)
 );
 
-export const isStartAdvanceTransition = (prevPath, nextPath) => {
-  return matchesAdvanceTransition(prevPath, nextPath, 1);
-};
+export const isStartAdvanceTransition = (prevPath: Path, nextPath: Path): boolean =>
+  matchesAdvanceTransition(prevPath, nextPath, 1);
 
-export const isRetractUnturnTransition = (side, retractedTip, nextTip, nextPath) => {
+export const isRetractUnturnTransition = (
+  side: string,
+  retractedTip: GridPoint | null | undefined,
+  nextTip: GridPoint | null | undefined,
+  nextPath: Path,
+): boolean => {
   if (!retractedTip || !nextTip || !Array.isArray(nextPath)) return false;
-  let neighbor = null;
+  let neighbor: GridPoint | null = null;
   if (side === 'start') neighbor = nextPath[1] || null;
   else if (side === 'end') neighbor = nextPath.at(-2) || null;
   if (!neighbor) return false;

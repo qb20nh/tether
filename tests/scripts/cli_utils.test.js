@@ -9,7 +9,7 @@ import {
   readJsonFile,
   readRequiredArgValue,
   writeJsonFile,
-} from '../../scripts/lib/cli_utils.js';
+} from '../../scripts/lib/cli_utils.ts';
 
 test('readRequiredArgValue reads the next argv token and tracks the next index', () => {
   assert.deepEqual(

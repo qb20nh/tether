@@ -1,56 +1,105 @@
-// @ts-nocheck
 import { CELL_TYPES } from '../config.ts';
+import type {
+  GameSnapshot,
+  GridPoint,
+  GridTuple,
+  LevelDefinition,
+  StateCommand,
+  StatePort,
+  StateTransition,
+  StateTransitionMeta,
+  StitchRequirement,
+} from '../contracts/ports.ts';
 import { parseCoordinatePair } from '../shared/coordinate_pair.ts';
 import { buildStitchLookups } from '../shared/stitch_corner_geometry.ts';
 import { inBounds, isAdjacentMove, keyOf, parseLevel } from '../utils.ts';
 import { canDropWall as canDropWallOnSnapshot } from './snapshot_rules.ts';
 
-export function createGameStateStore(levelSource) {
+type LevelSource = ((index: number) => LevelDefinition | null | undefined) | ArrayLike<LevelDefinition>;
+
+interface ResetRestoreCandidate {
+  path: GridPoint[];
+  gridData: string[][];
+}
+
+interface RestoreMutableStatePayload {
+  path?: unknown;
+  movableWalls?: unknown;
+  grid?: unknown;
+}
+
+interface PathStepPayload {
+  r?: unknown;
+  c?: unknown;
+}
+
+interface WallMovePayload {
+  from?: GridPoint | null;
+  to?: GridPoint | null;
+}
+
+interface GameStateStore extends StatePort {
+  loadLevel: (levelIndex: number) => void;
+  resetPath: () => StateTransitionMeta;
+  undo: (deferInvalidate?: boolean) => boolean;
+  startOrTryStep: (r: number, c: number, options?: { deferInvalidate?: boolean }) => boolean;
+  startOrTryStepFromStart: (r: number, c: number, options?: { deferInvalidate?: boolean }) => boolean;
+  applyPathDragSequence: (side: string, steps?: unknown[]) => boolean;
+  finalizePathAfterPointerUp: () => boolean;
+  reversePath: () => boolean;
+  canDropWall: (from: GridPoint | null | undefined, to: GridPoint | null | undefined) => boolean;
+  moveWall: (from: GridPoint | null | undefined, to: GridPoint | null | undefined) => boolean;
+  isUsable: (r: number, c: number) => boolean;
+  getCurrentLevel: () => LevelDefinition | null | undefined;
+}
+
+export function createGameStateStore(levelSource: LevelSource): GameStateStore {
   const getLevelByIndex = typeof levelSource === 'function'
     ? levelSource
-    : (index) => levelSource[index];
+    : (index: number) => levelSource[index];
 
   let levelIndex = 0;
   let rows = 0;
   let cols = 0;
   let totalUsable = 0;
 
-  let path = [];
-  let visited = new Set();
-  let gridData = [];
-  let baseGridData = [];
+  let path: GridPoint[] = [];
+  let visited = new Set<string>();
+  let gridData: string[][] = [];
+  let baseGridData: string[][] = [];
 
-  let stitches = [];
-  let stitchSet = new Set();
-  let stitchReq = new Map();
-  let cornerCounts = [];
-  let resetRestoreCandidate = null;
+  let stitches: GridTuple[] = [];
+  let stitchSet = new Set<string>();
+  let stitchReq = new Map<string, StitchRequirement>();
+  let cornerCounts: Array<[number, number, number]> = [];
+  let resetRestoreCandidate: ResetRestoreCandidate | null = null;
   let stateVersion = 0;
-  let cachedSnapshot = null;
+  let cachedSnapshot: GameSnapshot | null = null;
   let cachedSnapshotVersion = -1;
 
-  const isWall = (r, c) => {
+  const isWall = (r: number, c: number): boolean => {
     const ch = gridData[r][c];
     return ch === CELL_TYPES.WALL || ch === CELL_TYPES.MOVABLE_WALL;
   };
 
-  const isUsable = (r, c) => inBounds(rows, cols, r, c) && !isWall(r, c);
+  const isUsable = (r: number, c: number): boolean => inBounds(rows, cols, r, c) && !isWall(r, c);
 
-  const buildStitches = () => {
+  const buildStitches = (): void => {
     ({ stitchSet, stitchReq } = buildStitchLookups(stitches));
   };
 
-  const invalidateSnapshotCache = () => {
+  const invalidateSnapshotCache = (): void => {
     stateVersion += 1;
     cachedSnapshot = null;
     cachedSnapshotVersion = -1;
   };
 
-  const clonePath = (sourcePath) => sourcePath.map((point) => ({ r: point.r, c: point.c }));
-  const hasPathSegments = (sourcePath) => Array.isArray(sourcePath) && sourcePath.length > 1;
+  const clonePath = (sourcePath: readonly GridPoint[]): GridPoint[] =>
+    sourcePath.map((point) => ({ r: point.r, c: point.c }));
+  const hasPathSegments = (sourcePath: readonly GridPoint[]): boolean => Array.isArray(sourcePath) && sourcePath.length > 1;
 
-  const buildVisitedForPath = (sourcePath) => {
-    const nextVisited = new Set();
+  const buildVisitedForPath = (sourcePath: readonly GridPoint[]): Set<string> => {
+    const nextVisited = new Set<string>();
     for (const element of sourcePath) {
       const point = element;
       nextVisited.add(keyOf(point.r, point.c));
@@ -58,21 +107,21 @@ export function createGameStateStore(levelSource) {
     return nextVisited;
   };
 
-  const clearResetRestoreCandidate = () => {
+  const clearResetRestoreCandidate = (): void => {
     resetRestoreCandidate = null;
   };
 
-  const parsePair = (entry) => {
-    const parsed = parseCoordinatePair(entry);
+  const parsePair = (entry: unknown): GridTuple | null => {
+    const parsed = parseCoordinatePair(
+      entry as [unknown, unknown] | { r?: unknown; c?: unknown } | null | undefined,
+    );
     return parsed ? [parsed.r, parsed.c] : null;
   };
 
-  const isMutableCell = (cell) => {
-    return cell === CELL_TYPES.EMPTY || cell === CELL_TYPES.MOVABLE_WALL;
-  };
+  const isMutableCell = (cell: string): boolean => cell === CELL_TYPES.EMPTY || cell === CELL_TYPES.MOVABLE_WALL;
 
-  const collectBaseMovableWalls = () => {
-    const baseMovableWalls = [];
+  const collectBaseMovableWalls = (): { baseMovableWalls: GridTuple[]; nextGrid: string[][] } => {
+    const baseMovableWalls: GridTuple[] = [];
     const nextGrid = baseGridData.map((row) => row.slice());
 
     for (let r = 0; r < rows; r++) {
@@ -86,18 +135,21 @@ export function createGameStateStore(levelSource) {
     return { baseMovableWalls, nextGrid };
   };
 
-  const resolveMovableWallEntries = (rawMovableWalls, baseMovableWalls) => {
+  const resolveMovableWallEntries = (
+    rawMovableWalls: unknown,
+    baseMovableWalls: GridTuple[],
+  ): GridTuple[] | unknown[] | null => {
     if (rawMovableWalls === null || rawMovableWalls === undefined) {
       return baseMovableWalls;
     }
     return Array.isArray(rawMovableWalls) ? rawMovableWalls : null;
   };
 
-  const normalizeMovableWalls = (movableEntries) => {
+  const normalizeMovableWalls = (movableEntries: GridTuple[] | unknown[] | null): GridTuple[] | null => {
     if (!Array.isArray(movableEntries)) return null;
 
-    const nextMovableWalls = [];
-    const seen = new Set();
+    const nextMovableWalls: GridTuple[] = [];
+    const seen = new Set<string>();
     for (const element of movableEntries) {
       const pair = parsePair(element);
       if (!pair) return null;
@@ -116,7 +168,7 @@ export function createGameStateStore(levelSource) {
     return nextMovableWalls;
   };
 
-  const buildGridFromMovableWalls = (rawMovableWalls = null) => {
+  const buildGridFromMovableWalls = (rawMovableWalls: unknown = null): string[][] | null => {
     const { baseMovableWalls, nextGrid } = collectBaseMovableWalls();
     const movableEntries = resolveMovableWallEntries(rawMovableWalls, baseMovableWalls);
     const nextMovableWalls = normalizeMovableWalls(movableEntries);
@@ -130,12 +182,12 @@ export function createGameStateStore(levelSource) {
     return nextGrid;
   };
 
-  const isLegacyGridCellValid = (baseCell, candidateCell) => {
+  const isLegacyGridCellValid = (baseCell: string, candidateCell: string): boolean => {
     if (!isMutableCell(baseCell)) return candidateCell === baseCell;
     return candidateCell === CELL_TYPES.EMPTY || candidateCell === CELL_TYPES.MOVABLE_WALL;
   };
 
-  const parseLegacyGridRow = (rawRow, r) => {
+  const parseLegacyGridRow = (rawRow: unknown, r: number): { row: string[]; movableCount: number; baseMovableCount: number } | null => {
     if (typeof rawRow !== 'string' || rawRow.length !== cols) return null;
 
     const row = rawRow.split('');
@@ -153,10 +205,10 @@ export function createGameStateStore(levelSource) {
     return { row, movableCount, baseMovableCount };
   };
 
-  const buildGridFromLegacyState = (rawGrid) => {
+  const buildGridFromLegacyState = (rawGrid: unknown): string[][] | null => {
     if (!Array.isArray(rawGrid) || rawGrid.length !== rows) return null;
 
-    const nextGrid = [];
+    const nextGrid: string[][] = [];
     let movableCount = 0;
     let baseMovableCount = 0;
 
@@ -172,7 +224,7 @@ export function createGameStateStore(levelSource) {
     return nextGrid;
   };
 
-  const resolveRestoredGrid = (saved) => {
+  const resolveRestoredGrid = (saved: RestoreMutableStatePayload): string[][] | null => {
     if (Array.isArray(saved.movableWalls)) {
       return buildGridFromMovableWalls(saved.movableWalls);
     }
@@ -182,15 +234,18 @@ export function createGameStateStore(levelSource) {
     return buildGridFromMovableWalls(null);
   };
 
-  const isPathUsableOnGrid = (nextGrid, r, c) => {
+  const isPathUsableOnGrid = (nextGrid: string[][], r: number, c: number): boolean => {
     if (!inBounds(rows, cols, r, c)) return false;
     const ch = nextGrid[r][c];
     return ch !== CELL_TYPES.WALL && ch !== CELL_TYPES.MOVABLE_WALL;
   };
 
-  const buildRestoredPathState = (rawPath, nextGrid) => {
-    const nextPath = [];
-    const nextVisited = new Set();
+  const buildRestoredPathState = (
+    rawPath: unknown[],
+    nextGrid: string[][],
+  ): { path: GridPoint[]; visited: Set<string> } | null => {
+    const nextPath: GridPoint[] = [];
+    const nextVisited = new Set<string>();
 
     for (const element of rawPath) {
       const pair = parsePair(element);
@@ -216,10 +271,10 @@ export function createGameStateStore(levelSource) {
     };
   };
 
-  const loadLevel = (index) => {
+  const loadLevel = (index: number): void => {
     const level = getLevelByIndex(index);
     if (!level) throw new Error(`Missing level at index ${index}`);
-    const parsed = parseLevel(level);
+    const parsed = parseLevel(level as LevelDefinition & { grid: string[] });
     baseGridData = parsed.g.map((row) => row.slice());
     gridData = baseGridData.map((row) => row.slice());
     rows = parsed.rows;
@@ -231,12 +286,12 @@ export function createGameStateStore(levelSource) {
 
     buildStitches();
     path = [];
-    visited = new Set();
+    visited = new Set<string>();
     clearResetRestoreCandidate();
     invalidateSnapshotCache();
   };
 
-  const restoreMutableState = (saved) => {
+  const restoreMutableState = (saved: RestoreMutableStatePayload): boolean => {
     if (!saved || typeof saved !== 'object') return false;
     if (rows <= 0 || cols <= 0) return false;
     const nextGrid = resolveRestoredGrid(saved);
@@ -254,12 +309,12 @@ export function createGameStateStore(levelSource) {
     return true;
   };
 
-  const toSnapshot = () => {
+  const toSnapshot = (): GameSnapshot => {
     if (cachedSnapshot && cachedSnapshotVersion === stateVersion) {
       return cachedSnapshot;
     }
 
-    const idxByKey = new Map();
+    const idxByKey = new Map<string, number>();
     const snapshotPath = path.slice();
     let pathKey = '';
     for (let i = 0; i < snapshotPath.length; i++) {
@@ -289,7 +344,7 @@ export function createGameStateStore(levelSource) {
     return cachedSnapshot;
   };
 
-  const clearPath = (rememberResetCandidate = false) => {
+  const clearPath = (rememberResetCandidate = false): boolean => {
     if (path.length <= 0) return false;
     if (rememberResetCandidate && hasPathSegments(path)) {
       resetRestoreCandidate = {
@@ -298,12 +353,12 @@ export function createGameStateStore(levelSource) {
       };
     }
     path = [];
-    visited = new Set();
+    visited = new Set<string>();
     invalidateSnapshotCache();
     return true;
   };
 
-  const resetPath = () => {
+  const resetPath = (): StateTransitionMeta => {
     const storedResetCandidate = hasPathSegments(path);
     if (clearPath(true)) {
       return {
@@ -332,21 +387,21 @@ export function createGameStateStore(levelSource) {
     };
   };
 
-  const commitPathMutation = () => {
+  const commitPathMutation = (): void => {
     if (hasPathSegments(path)) {
       clearResetRestoreCandidate();
     }
     invalidateSnapshotCache();
   };
 
-  const initializePath = (next, nextKey, deferInvalidate) => {
+  const initializePath = (next: GridPoint, nextKey: string, deferInvalidate: boolean): boolean => {
     path = [next];
     visited = new Set([nextKey]);
     if (!deferInvalidate) commitPathMutation();
     return true;
   };
 
-  const addPathTip = (next, nextKey, side, deferInvalidate) => {
+  const addPathTip = (next: GridPoint, nextKey: string, side: 'start' | 'end', deferInvalidate: boolean): boolean => {
     if (side === 'start') {
       path.unshift(next);
     } else {
@@ -357,29 +412,35 @@ export function createGameStateStore(levelSource) {
     return true;
   };
 
-  const removePathTip = (side, deferInvalidate) => {
+  const removePathTip = (side: 'start' | 'end', deferInvalidate: boolean): boolean => {
     if (path.length === 0) return false;
     const removed = side === 'start' ? path.shift() : path.pop();
+    if (!removed) return false;
     visited.delete(keyOf(removed.r, removed.c));
     if (!deferInvalidate) commitPathMutation();
     return true;
   };
 
-  const undo = (deferInvalidate = false) => removePathTip('end', deferInvalidate);
+  const undo = (deferInvalidate = false): boolean => removePathTip('end', deferInvalidate);
 
-  const pathPointsMatch = (left, right) => (
+  const pathPointsMatch = (left?: GridPoint | null, right?: GridPoint | null): boolean => (
     left?.r === right?.r && left?.c === right?.c
   );
 
-  const getPathTipForSide = (side) => (
-    side === 'start' ? path[0] || null : path.at(-1) || null
+  const getPathTipForSide = (side: 'start' | 'end'): GridPoint | null => (
+    side === 'start' ? path[0] || null : path[path.length - 1] || null
   );
 
-  const getPathRetractNeighborForSide = (side) => (
-    side === 'start' ? path[1] || null : path.at(-2) || null
+  const getPathRetractNeighborForSide = (side: 'start' | 'end'): GridPoint | null => (
+    side === 'start' ? path[1] || null : path[path.length - 2] || null
   );
 
-  const startOrTryStepAtSide = (r, c, side, options = {}) => {
+  const startOrTryStepAtSide = (
+    r: number,
+    c: number,
+    side: 'start' | 'end',
+    options: { deferInvalidate?: boolean } = {},
+  ): boolean => {
     const deferInvalidate = Boolean(options.deferInvalidate);
     if (!isUsable(r, c)) return false;
 
@@ -398,6 +459,7 @@ export function createGameStateStore(levelSource) {
     }
 
     const tip = getPathTipForSide(side);
+    if (!tip) return false;
     const isAdjacent = side === 'start'
       ? isAdjacentMove({ stitchSet }, next, tip)
       : isAdjacentMove({ stitchSet }, tip, next);
@@ -406,12 +468,14 @@ export function createGameStateStore(levelSource) {
     return addPathTip(next, nextKey, side, deferInvalidate);
   };
 
-  const startOrTryStep = (r, c, options = {}) => startOrTryStepAtSide(r, c, 'end', options);
+  const startOrTryStep = (r: number, c: number, options: { deferInvalidate?: boolean } = {}): boolean =>
+    startOrTryStepAtSide(r, c, 'end', options);
 
-  const startOrTryStepFromStart = (r, c, options = {}) => startOrTryStepAtSide(r, c, 'start', options);
+  const startOrTryStepFromStart = (r: number, c: number, options: { deferInvalidate?: boolean } = {}): boolean =>
+    startOrTryStepAtSide(r, c, 'start', options);
 
-  const applyPathDragSequence = (side, steps = []) => {
-    let applyStep = null;
+  const applyPathDragSequence = (side: string, steps: unknown[] = []): boolean => {
+    let applyStep: ((r: number, c: number, options?: { deferInvalidate?: boolean }) => boolean) | null = null;
     if (side === 'start') {
       applyStep = startOrTryStepFromStart;
     } else if (side === 'end') {
@@ -421,9 +485,9 @@ export function createGameStateStore(levelSource) {
 
     let changed = false;
     for (const element of steps) {
-      const step = element;
+      const step = element as PathStepPayload;
       if (!Number.isInteger(step?.r) || !Number.isInteger(step?.c)) break;
-      const didChange = applyStep(step.r, step.c, { deferInvalidate: true });
+      const didChange = applyStep(Number(step.r), Number(step.c), { deferInvalidate: true });
       if (!didChange) break;
       changed = true;
     }
@@ -432,7 +496,7 @@ export function createGameStateStore(levelSource) {
     return changed;
   };
 
-  const finalizePathAfterPointerUp = () => {
+  const finalizePathAfterPointerUp = (): boolean => {
     if (path.length <= 1) {
       if (path.length > 0) {
         clearPath(false);
@@ -443,14 +507,14 @@ export function createGameStateStore(levelSource) {
     return false;
   };
 
-  const reversePath = () => {
+  const reversePath = (): boolean => {
     if (path.length < 2) return false;
     path = [...path].reverse();
     commitPathMutation();
     return true;
   };
 
-  const canDropWall = (from, to) => {
+  const canDropWall = (from: GridPoint | null | undefined, to: GridPoint | null | undefined): boolean => {
     return canDropWallOnSnapshot({
       rows,
       cols,
@@ -459,8 +523,9 @@ export function createGameStateStore(levelSource) {
     }, from, to);
   };
 
-  const moveWall = (from, to) => {
+  const moveWall = (from: GridPoint | null | undefined, to: GridPoint | null | undefined): boolean => {
     if (!canDropWall(from, to)) return false;
+    if (!from || !to) return false;
     const nextGrid = gridData.map((row) => row.slice());
     nextGrid[from.r][from.c] = CELL_TYPES.EMPTY;
     nextGrid[to.r][to.c] = CELL_TYPES.MOVABLE_WALL;
@@ -470,9 +535,15 @@ export function createGameStateStore(levelSource) {
     return true;
   };
 
-  const getCurrentLevel = () => getLevelByIndex(levelIndex);
+  const getCurrentLevel = (): LevelDefinition | null | undefined => getLevelByIndex(levelIndex);
 
-  const makeTransition = (command, changed, rebuildGrid, validate, meta = null) => ({
+  const makeTransition = (
+    command: string,
+    changed: boolean,
+    rebuildGrid: boolean,
+    validate: boolean,
+    meta: StateTransitionMeta | null = null,
+  ): StateTransition => ({
     changed: Boolean(changed),
     rebuildGrid: Boolean(rebuildGrid),
     validate: Boolean(validate),
@@ -481,27 +552,33 @@ export function createGameStateStore(levelSource) {
     snapshot: toSnapshot(),
   });
 
-  const dispatch = (command) => {
+  const dispatch = (command: StateCommand): StateTransition => {
     const type = command?.type || '';
-    const payload = command?.payload || {};
+    const payload = (command?.payload || {}) as Record<string, unknown>;
 
     if (type === 'level/load') {
-      loadLevel(payload.levelIndex);
+      if (!Number.isInteger(payload.levelIndex)) {
+        return makeTransition(type, false, false, false);
+      }
+      loadLevel(Number(payload.levelIndex));
       return makeTransition(type, true, true, false);
     }
 
     if (type === 'path/start-or-step') {
-      const changed = startOrTryStep(payload.r, payload.c);
+      const changed = startOrTryStep(Number(payload.r), Number(payload.c));
       return makeTransition(type, changed, false, false);
     }
 
     if (type === 'path/start-or-step-from-start') {
-      const changed = startOrTryStepFromStart(payload.r, payload.c);
+      const changed = startOrTryStepFromStart(Number(payload.r), Number(payload.c));
       return makeTransition(type, changed, false, false);
     }
 
     if (type === 'path/apply-drag-sequence') {
-      const changed = applyPathDragSequence(payload.side, payload.steps);
+      const changed = applyPathDragSequence(
+        typeof payload.side === 'string' ? payload.side : '',
+        Array.isArray(payload.steps) ? payload.steps : [],
+      );
       return makeTransition(type, changed, false, false);
     }
 
@@ -527,7 +604,8 @@ export function createGameStateStore(levelSource) {
     }
 
     if (type === 'wall/move-attempt') {
-      const changed = moveWall(payload.from, payload.to);
+      const wallMove = payload as Record<string, unknown> & WallMovePayload;
+      const changed = moveWall(wallMove.from, wallMove.to);
       return makeTransition(type, changed, false, changed);
     }
 
@@ -553,6 +631,6 @@ export function createGameStateStore(levelSource) {
   };
 }
 
-export function createGameState(levelSource) {
+export function createGameState(levelSource: LevelSource): GameStateStore {
   return createGameStateStore(levelSource);
 }

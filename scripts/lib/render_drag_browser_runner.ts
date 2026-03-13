@@ -1,4 +1,7 @@
-import { buildMetricSummary, mean, pathsEqual, percentile } from './stats.js';
+import type { Browser, Page } from 'playwright';
+import type { GridTuple } from '../../src/contracts/ports.ts';
+import type { RenderDragPathCase, RenderDragWorkload } from './render_drag_workload.ts';
+import { buildMetricSummary, mean, pathsEqual, percentile } from './stats.ts';
 
 const STORAGE_KEYS = Object.freeze({
   levelProgress: 'tetherLevelProgress',
@@ -14,28 +17,104 @@ const STORAGE_KEYS = Object.freeze({
 
 const LEVEL_PROGRESS_VERSION = 1;
 const INFINITE_PROGRESS_VERSION = 1;
-const VIEWPORT = Object.freeze({
+export const VIEWPORT = Object.freeze({
   width: 1200,
   height: 860,
 });
 
-const MODE_TO_LOW_POWER = Object.freeze({
+export type BenchmarkMode = 'normal' | 'low-power';
+
+const MODE_TO_LOW_POWER: Readonly<Record<BenchmarkMode, boolean>> = Object.freeze({
   normal: false,
   'low-power': true,
 });
 
-const toFixedNumber = (value) => (Number.isFinite(value) ? Number(value) : 0);
+interface PrimeBootStateOptions {
+  infiniteIndex: number;
+  lowPowerEnabled: boolean;
+}
 
-const summarizeCases = (caseResults) => {
-  const syncValues = [];
-  const rafValues = [];
-  const dragValues = [];
-  const stepValues = [];
+interface CasePoint {
+  x: number;
+  y: number;
+}
+
+export interface RenderDragMoveMetric {
+  moveIndex: number;
+  caseId: string;
+  mode: BenchmarkMode;
+  revision: string;
+  syncDispatchMs: number;
+  toNextRafMs: number;
+}
+
+export interface RenderDragCaseResult {
+  caseId: string;
+  infiniteIndex: number;
+  revision: string;
+  mode: BenchmarkMode;
+  pathCells: GridTuple[];
+  actualPathCells: GridTuple[];
+  pointerMoveCount: number;
+  pathStepCount: number;
+  totalSyncDispatchMs: number;
+  totalToNextRafMs: number;
+  syncMsPerPointerMove: number;
+  rafMsPerPointerMove: number;
+  totalMsPerPathStep: number;
+  dragWallClockMs: number;
+  moveMetrics: RenderDragMoveMetric[];
+  hasPathStartClass: boolean;
+  hasPathEndClass: boolean;
+  hasWebgl2: boolean;
+  isContextLost: boolean | null;
+}
+
+export interface RenderDragSuiteAggregate {
+  caseCount: number;
+  totalPointerMoves: number;
+  totalPathSteps: number;
+  syncMsPerPointerMove: ReturnType<typeof buildMetricSummary>;
+  rafMsPerPointerMove: ReturnType<typeof buildMetricSummary>;
+  dragWallClockMs: ReturnType<typeof buildMetricSummary>;
+  totalMsPerPathStep: ReturnType<typeof buildMetricSummary>;
+}
+
+export interface RenderDragBenchmarkSuiteResult {
+  revision: string;
+  mode: BenchmarkMode;
+  repeatIndex: number;
+  viewport: typeof VIEWPORT;
+  caseResults: RenderDragCaseResult[];
+  aggregate: RenderDragSuiteAggregate;
+  pageErrors: string[];
+}
+
+interface BenchmarkDragCaseOptions {
+  workloadCase: RenderDragPathCase;
+  mode: BenchmarkMode;
+  revisionLabel: string;
+  pointerMovesPerSegment: number;
+}
+
+interface RunRenderDragBenchmarkSuiteOptions {
+  browser: Browser;
+  baseUrl: string;
+  workload: RenderDragWorkload;
+  revisionLabel: string;
+  mode: BenchmarkMode;
+  repeatIndex?: number;
+}
+
+const summarizeCases = (caseResults: readonly RenderDragCaseResult[]): RenderDragSuiteAggregate => {
+  const syncValues: number[] = [];
+  const rafValues: number[] = [];
+  const dragValues: number[] = [];
+  const stepValues: number[] = [];
   let totalPointerMoves = 0;
   let totalPathSteps = 0;
 
-  for (let i = 0; i < caseResults.length; i += 1) {
-    const result = caseResults[i];
+  for (const result of caseResults) {
     syncValues.push(result.syncMsPerPointerMove);
     rafValues.push(result.rafMsPerPointerMove);
     dragValues.push(result.dragWallClockMs);
@@ -55,8 +134,8 @@ const summarizeCases = (caseResults) => {
   };
 };
 
-const primeBootState = async (page, { infiniteIndex, lowPowerEnabled }) => {
-  await page.evaluate(({ keys, infiniteIndex, lowPowerEnabled }) => {
+const primeBootState = async (page: Page, { infiniteIndex, lowPowerEnabled }: PrimeBootStateOptions): Promise<void> => {
+  await page.evaluate(({ keys, infiniteIndex: nextInfiniteIndex, lowPowerEnabled: nextLowPowerEnabled }) => {
     localStorage.clear();
     localStorage.setItem(keys.levelProgress, JSON.stringify({
       version: 1,
@@ -64,9 +143,9 @@ const primeBootState = async (page, { infiniteIndex, lowPowerEnabled }) => {
     }));
     localStorage.setItem(keys.infiniteProgress, JSON.stringify({
       version: 1,
-      latestLevel: infiniteIndex,
+      latestLevel: nextInfiniteIndex,
     }));
-    localStorage.setItem(keys.lowPowerMode, lowPowerEnabled ? '1' : '0');
+    localStorage.setItem(keys.lowPowerMode, nextLowPowerEnabled ? '1' : '0');
     localStorage.setItem(keys.theme, 'dark');
     localStorage.setItem(keys.guideHidden, '0');
     localStorage.setItem(keys.legendHidden, '1');
@@ -80,21 +159,23 @@ const primeBootState = async (page, { infiniteIndex, lowPowerEnabled }) => {
   });
 };
 
-const waitForBoardReady = async (page, { infiniteIndex, lowPowerEnabled }) => {
+const waitForBoardReady = async (page: Page, { infiniteIndex, lowPowerEnabled }: PrimeBootStateOptions): Promise<void> => {
   await page.waitForSelector('#pathCanvas', { timeout: 20000 });
   await page.waitForSelector('#grid .cell', { timeout: 20000 });
-  await page.waitForFunction(({ infiniteIndex, lowPowerEnabled }) => {
+  await page.waitForFunction(({ infiniteIndex: nextInfiniteIndex, lowPowerEnabled: nextLowPowerEnabled }) => {
     const infiniteSel = document.getElementById('infiniteSel');
     const lowPowerToggle = document.getElementById('lowPowerToggle');
-    if (!infiniteSel || !(lowPowerToggle instanceof HTMLInputElement)) return false;
-    return String(infiniteSel.value) === String(infiniteIndex)
-      && lowPowerToggle.checked === Boolean(lowPowerEnabled);
+    if (!(infiniteSel instanceof HTMLSelectElement) || !(lowPowerToggle instanceof HTMLInputElement)) {
+      return false;
+    }
+    return String(infiniteSel.value) === String(nextInfiniteIndex)
+      && lowPowerToggle.checked === Boolean(nextLowPowerEnabled);
   }, { infiniteIndex, lowPowerEnabled }, { timeout: 20000 });
 
   const state = await page.evaluate(() => {
     const canvas = document.getElementById('pathCanvas');
     const grid = document.getElementById('grid');
-    const gl = canvas?.getContext?.('webgl2');
+    const gl = canvas instanceof HTMLCanvasElement ? canvas.getContext('webgl2') : null;
     return {
       hasCanvas: Boolean(canvas),
       hasGrid: Boolean(grid),
@@ -116,9 +197,13 @@ const waitForBoardReady = async (page, { infiniteIndex, lowPowerEnabled }) => {
   }
 };
 
-const patchPointerCapture = async (page) => {
+const patchPointerCapture = async (page: Page): Promise<void> => {
   await page.evaluate(() => {
-    const proto = Element.prototype;
+    const proto = Element.prototype as Element & {
+      __tetherRenderDragBenchPatched?: boolean;
+      setPointerCapture?: (pointerId: number) => void;
+      releasePointerCapture?: (pointerId: number) => void;
+    };
     if (proto.__tetherRenderDragBenchPatched) return;
     proto.__tetherRenderDragBenchPatched = true;
     if (typeof proto.setPointerCapture === 'function') {
@@ -130,29 +215,32 @@ const patchPointerCapture = async (page) => {
   });
 };
 
-const benchmarkDragCase = async (page, {
-  workloadCase,
-  mode,
-  revisionLabel,
-  pointerMovesPerSegment,
-}) => page.evaluate(async ({
-  workloadCase,
-  mode,
-  revisionLabel,
-  pointerMovesPerSegment,
+const benchmarkDragCase = async (
+  page: Page,
+  {
+    workloadCase,
+    mode,
+    revisionLabel,
+    pointerMovesPerSegment,
+  }: BenchmarkDragCaseOptions,
+): Promise<RenderDragCaseResult> => page.evaluate<RenderDragCaseResult, BenchmarkDragCaseOptions>(async ({
+  workloadCase: nextWorkloadCase,
+  mode: nextMode,
+  revisionLabel: nextRevisionLabel,
+  pointerMovesPerSegment: nextPointerMovesPerSegment,
 }) => {
-  const fractions = [];
-  for (let i = 1; i <= pointerMovesPerSegment; i += 1) {
-    fractions.push(i / pointerMovesPerSegment);
+  const fractions: number[] = [];
+  for (let i = 1; i <= nextPointerMovesPerSegment; i += 1) {
+    fractions.push(i / nextPointerMovesPerSegment);
   }
 
   const grid = document.getElementById('grid');
-  if (!grid) {
+  if (!(grid instanceof HTMLElement)) {
     throw new Error('Missing #grid element');
   }
 
-  const resolveCellCenter = (r, c) => {
-    const cell = document.querySelector(`#grid .cell[data-r="${r}"][data-c="${c}"]`);
+  const resolveCellCenter = (r: number, c: number): CasePoint => {
+    const cell = document.querySelector<HTMLElement>(`#grid .cell[data-r="${r}"][data-c="${c}"]`);
     if (!cell) {
       throw new Error(`Missing board cell for workload coordinate ${r},${c}`);
     }
@@ -163,13 +251,13 @@ const benchmarkDragCase = async (page, {
     };
   };
 
-  const waitForAnimationFrame = () =>
+  const waitForAnimationFrame = (): Promise<number> =>
     new Promise((resolve) => {
       requestAnimationFrame((timestamp) => resolve(timestamp));
     });
 
-  const readRenderedPath = () =>
-    Array.from(document.querySelectorAll('#grid .cell.visited'))
+  const readRenderedPath = (): GridTuple[] =>
+    Array.from(document.querySelectorAll<HTMLElement>('#grid .cell.visited'))
       .map((cell) => ({
         r: Number.parseInt(cell.dataset.r || '', 10),
         c: Number.parseInt(cell.dataset.c || '', 10),
@@ -177,10 +265,9 @@ const benchmarkDragCase = async (page, {
       }))
       .filter((item) => Number.isInteger(item.idx))
       .sort((a, b) => a.idx - b.idx)
-      .map((item) => [item.r, item.c]);
+      .map((item): GridTuple => [item.r, item.c]);
 
-  const pathsEqual = (expected, actual) => {
-    if (!Array.isArray(expected) || !Array.isArray(actual)) return false;
+  const pathsEqualLocal = (expected: readonly GridTuple[], actual: readonly GridTuple[]): boolean => {
     if (expected.length !== actual.length) return false;
     for (let i = 0; i < expected.length; i += 1) {
       if (expected[i]?.[0] !== actual[i]?.[0] || expected[i]?.[1] !== actual[i]?.[1]) {
@@ -190,7 +277,7 @@ const benchmarkDragCase = async (page, {
     return true;
   };
 
-  const dispatchPointer = (type, point, buttons) => {
+  const dispatchPointer = (type: string, point: CasePoint, buttons: number): void => {
     const event = new PointerEvent(type, {
       bubbles: true,
       cancelable: true,
@@ -208,13 +295,12 @@ const benchmarkDragCase = async (page, {
     grid.dispatchEvent(event);
   };
 
-  const orderedPath = workloadCase.pathCells.map(([r, c]) => resolveCellCenter(r, c));
-  const interpolatedMoves = [];
+  const orderedPath = nextWorkloadCase.pathCells.map(([r, c]) => resolveCellCenter(r, c));
+  const interpolatedMoves: CasePoint[] = [];
   for (let i = 1; i < orderedPath.length; i += 1) {
     const from = orderedPath[i - 1];
     const to = orderedPath[i];
-    for (let j = 0; j < fractions.length; j += 1) {
-      const ratio = fractions[j];
+    for (const ratio of fractions) {
       interpolatedMoves.push({
         x: from.x + ((to.x - from.x) * ratio),
         y: from.y + ((to.y - from.y) * ratio),
@@ -222,7 +308,7 @@ const benchmarkDragCase = async (page, {
     }
   }
 
-  const moveMetrics = [];
+  const moveMetrics: RenderDragMoveMetric[] = [];
   const dragStartMs = performance.now();
   dispatchPointer('pointerdown', orderedPath[0], 1);
 
@@ -235,42 +321,42 @@ const benchmarkDragCase = async (page, {
     const afterRafMs = performance.now();
     moveMetrics.push({
       moveIndex: i,
-      caseId: workloadCase.caseId,
-      mode,
-      revision: revisionLabel,
+      caseId: nextWorkloadCase.caseId,
+      mode: nextMode,
+      revision: nextRevisionLabel,
       syncDispatchMs: afterDispatchMs - startMs,
       toNextRafMs: afterRafMs - startMs,
     });
   }
 
   dispatchPointer('pointerup', orderedPath[orderedPath.length - 1], 0);
-  let renderedPath = [];
+  let renderedPath: GridTuple[] = [];
   for (let i = 0; i < 12; i += 1) {
     await waitForAnimationFrame();
     renderedPath = readRenderedPath();
-    if (pathsEqual(workloadCase.pathCells, renderedPath)) break;
+    if (pathsEqualLocal(nextWorkloadCase.pathCells, renderedPath)) break;
   }
 
-  const startCell = workloadCase.pathCells[0];
-  const endCell = workloadCase.pathCells[workloadCase.pathCells.length - 1];
-  const startEl = document.querySelector(
+  const startCell = nextWorkloadCase.pathCells[0];
+  const endCell = nextWorkloadCase.pathCells[nextWorkloadCase.pathCells.length - 1];
+  const startEl = document.querySelector<HTMLElement>(
     `#grid .cell[data-r="${startCell[0]}"][data-c="${startCell[1]}"]`,
   );
-  const endEl = document.querySelector(
+  const endEl = document.querySelector<HTMLElement>(
     `#grid .cell[data-r="${endCell[0]}"][data-c="${endCell[1]}"]`,
   );
   const canvas = document.getElementById('pathCanvas');
-  const gl = canvas?.getContext?.('webgl2');
+  const gl = canvas instanceof HTMLCanvasElement ? canvas.getContext('webgl2') : null;
   const totalSyncDispatchMs = moveMetrics.reduce((sum, item) => sum + item.syncDispatchMs, 0);
   const totalToNextRafMs = moveMetrics.reduce((sum, item) => sum + item.toNextRafMs, 0);
-  const pathStepCount = Math.max(0, workloadCase.pathCells.length - 1);
+  const pathStepCount = Math.max(0, nextWorkloadCase.pathCells.length - 1);
 
   return {
-    caseId: workloadCase.caseId,
-    infiniteIndex: workloadCase.infiniteIndex,
-    revision: revisionLabel,
-    mode,
-    pathCells: workloadCase.pathCells,
+    caseId: nextWorkloadCase.caseId,
+    infiniteIndex: nextWorkloadCase.infiniteIndex,
+    revision: nextRevisionLabel,
+    mode: nextMode,
+    pathCells: nextWorkloadCase.pathCells,
     actualPathCells: renderedPath,
     pointerMoveCount: moveMetrics.length,
     pathStepCount,
@@ -293,7 +379,7 @@ const benchmarkDragCase = async (page, {
   pointerMovesPerSegment,
 });
 
-const assertCaseBenchmark = (caseResult, expectedPath) => {
+const assertCaseBenchmark = (caseResult: RenderDragCaseResult, expectedPath: readonly GridTuple[]): void => {
   if (!caseResult.hasWebgl2) {
     throw new Error(`Case ${caseResult.caseId} lost WebGL2 availability during benchmark`);
   }
@@ -320,7 +406,7 @@ export const runRenderDragBenchmarkSuite = async ({
   revisionLabel,
   mode,
   repeatIndex = 0,
-}) => {
+}: RunRenderDragBenchmarkSuiteOptions): Promise<RenderDragBenchmarkSuiteResult> => {
   if (!browser) throw new Error('runRenderDragBenchmarkSuite requires a Playwright browser instance');
   if (!Object.prototype.hasOwnProperty.call(MODE_TO_LOW_POWER, mode)) {
     throw new Error(`Unsupported benchmark mode: ${mode}`);
@@ -331,19 +417,18 @@ export const runRenderDragBenchmarkSuite = async ({
     serviceWorkers: 'block',
   });
   const page = await context.newPage();
-  const pageErrors = [];
+  const pageErrors: string[] = [];
   page.on('pageerror', (error) => {
     pageErrors.push(String(error?.stack || error?.message || error));
   });
 
   const lowPowerEnabled = MODE_TO_LOW_POWER[mode];
-  const caseResults = [];
+  const caseResults: RenderDragCaseResult[] = [];
 
   try {
     await page.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
 
-    for (let i = 0; i < workload.cases.length; i += 1) {
-      const workloadCase = workload.cases[i];
+    for (const workloadCase of workload.cases) {
       await primeBootState(page, {
         infiniteIndex: workloadCase.infiniteIndex,
         lowPowerEnabled,

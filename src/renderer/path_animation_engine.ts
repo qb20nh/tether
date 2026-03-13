@@ -1,4 +1,8 @@
-// @ts-nocheck
+import type {
+  GridPoint,
+  InteractionModel,
+  PathTipArrivalHint,
+} from '../contracts/ports.ts';
 import {
   angleDeltaSigned,
   cellDistance,
@@ -32,7 +36,244 @@ const PATH_TIP_ARRIVAL_BEZIER_Y1 = 0.9;
 const PATH_TIP_ARRIVAL_BEZIER_X2 = 0.1;
 const PATH_TIP_ARRIVAL_BEZIER_Y2 = 1;
 
-const hasShiftedPathPrefixMatch = (longerPath, shorterPath, shiftCount) => {
+type PathSide = 'start' | 'end';
+type MaybePath = readonly GridPoint[] | null | undefined;
+type AnimationFrameHandle = number | ReturnType<typeof setTimeout>;
+type RequestFrame = (callback: (timestamp: number) => void) => AnimationFrameHandle;
+type CancelFrame = (handle: AnimationFrameHandle) => void;
+type DrawHook = (...args: unknown[]) => unknown;
+
+interface DirectionVector {
+  x: number;
+  y: number;
+}
+
+interface PathTipArrivalState {
+  mode: 'arrive' | 'retract';
+  startTimeMs: number;
+  offsetX: number;
+  offsetY: number;
+  targetR: number;
+  targetC: number;
+  cutoffMs: number;
+}
+
+interface PathFlowVisibilityState {
+  mode: 'appear' | 'disappear';
+  startTimeMs: number;
+}
+
+interface PathStartPinPresenceState {
+  mode: 'appear' | 'disappear';
+  startTimeMs: number;
+  anchorR: number;
+  anchorC: number;
+}
+
+interface PathFlowFreezeState {
+  startTimeMs: number;
+  fromMix: number;
+  toMix: number;
+}
+
+interface PathRotateState {
+  startTimeMs: number;
+  targetR: number;
+  targetC: number;
+  neighborR: number;
+  neighborC: number;
+  fromAngle: number;
+  deltaAngle: number;
+  cutoffMs: number;
+}
+
+interface PathReverseTipSwapState {
+  startTimeMs: number;
+  headR: number;
+  headC: number;
+  tailR: number;
+  tailC: number;
+}
+
+interface PathReverseGradientBlendState {
+  startTimeMs: number;
+  headR: number;
+  headC: number;
+  tailR: number;
+  tailC: number;
+  pathLength: number;
+  fromFlowOffset: number;
+  toFlowOffset: number;
+  fromTravelSpan: number;
+}
+
+interface PathOverlapCandidate {
+  nextStart: number;
+  prevStart: number;
+  overlap: number;
+  headShiftAbs: number;
+  headCost: number;
+}
+
+interface PathOverlapWindow {
+  shiftCount: number;
+  nextStart: number;
+  prevStart: number;
+  overlap: number;
+  isFullLengthOverlap: boolean;
+  isPureHeadShift: boolean;
+}
+
+interface MixState {
+  mix: number;
+  active: boolean;
+}
+
+interface StartPinPresenceScaleState {
+  scale: number;
+  active: boolean;
+  mode: 'none' | 'appear' | 'disappear';
+  anchorR: number;
+  anchorC: number;
+}
+
+interface DirectionState extends DirectionVector {
+  active: boolean;
+}
+
+interface ReverseTipScaleState {
+  inScale: number;
+  outScale: number;
+  active: boolean;
+}
+
+interface ReverseGradientBlendResolvedState {
+  blend: number;
+  fromFlowOffset: number;
+  toFlowOffset: number;
+  fromTravelSpan: number;
+  active: boolean;
+}
+
+interface TipArrivalOffsetState extends DirectionState {
+  mode: 'none' | 'arrive' | 'retract';
+  remain: number;
+  progress: number;
+  linearRemain: number;
+  linearProgress: number;
+}
+
+interface AdjacentTipArrivalMove {
+  dr: number;
+  dc: number;
+  length: number;
+}
+
+interface PathAnimationFramePayload {
+  timestamp: number;
+  nowMs: number;
+  interactiveResizeActive: boolean;
+  pathFlowFrozen: boolean;
+}
+
+interface DrawAnimatedPathCallbacks {
+  drawAnimatedPathInternal?: DrawHook;
+}
+
+interface PathAnimationEngineOptions {
+  requestFrame?: RequestFrame;
+  cancelFrame?: CancelFrame;
+  nowFn?: () => number;
+  isReducedMotionPreferred?: () => boolean;
+  onResetForCacheElements?: (refs: unknown) => void;
+  onSetInteractionModel?: (interactionModel: InteractionModel | null | undefined) => void;
+  onDrawAll?: DrawHook;
+  onDrawAnimatedPath?: DrawHook;
+  onUpdatePathLayoutMetrics?: (offset: { x: number; y: number }, cell: number, gap: number, pad: number) => unknown;
+  onNotifyInteractiveResize?: () => void;
+  onSetPathFlowFreezeImmediate?: (isFrozen: boolean) => void;
+  onAnimationFrame?: (payload: PathAnimationFramePayload) => boolean;
+}
+
+interface PathAnimationEngine {
+  resetForCacheElements: (refs: unknown) => void;
+  resetTransitionState: (options?: { preserveFlowFreeze?: boolean }) => void;
+  syncPathFlowFreezeTarget: (isFrozen: boolean, nowMs?: number) => void;
+  resolvePathFlowFreezeMix: (nowMs?: number, out?: MixState) => MixState;
+  updatePathTipArrivalStates: (
+    prevPath: MaybePath,
+    nextPath: MaybePath,
+    cellSize: number,
+    cellStep: number,
+    nowMs?: number,
+    tipArrivalHint?: PathTipArrivalHint | null,
+  ) => void;
+  resolvePathTipArrivalOffset: (
+    side: PathSide,
+    tip: GridPoint | null | undefined,
+    nowMs?: number,
+    out?: TipArrivalOffsetState,
+  ) => TipArrivalOffsetState;
+  hasActivePathTipArrivals: (nowMs?: number) => boolean;
+  updatePathFlowVisibilityState: (prevPath: MaybePath, nextPath: MaybePath, nowMs?: number) => void;
+  resolvePathFlowVisibilityMix: (path: MaybePath, nowMs?: number, out?: MixState) => MixState;
+  hasActivePathFlowVisibility: (path: MaybePath, nowMs?: number, out?: MixState) => boolean;
+  updatePathStartPinPresenceState: (prevPath: MaybePath, nextPath: MaybePath, nowMs?: number) => void;
+  resolvePathStartPinPresenceScale: (path: MaybePath, nowMs?: number, out?: StartPinPresenceScaleState) => StartPinPresenceScaleState;
+  hasActivePathStartPinPresence: (path: MaybePath, nowMs?: number, out?: StartPinPresenceScaleState) => boolean;
+  updatePathEndArrowRotateState: (prevPath: MaybePath, nextPath: MaybePath, nowMs?: number) => void;
+  resolvePathEndArrowDirection: (path: MaybePath, nowMs?: number, out?: DirectionState) => DirectionState;
+  hasActivePathEndArrowRotate: (path: MaybePath, nowMs?: number) => boolean;
+  updatePathStartFlowRotateState: (prevPath: MaybePath, nextPath: MaybePath, nowMs?: number) => void;
+  resolvePathStartFlowDirection: (path: MaybePath, nowMs?: number, out?: DirectionState) => DirectionState;
+  hasActivePathStartFlowRotate: (path: MaybePath, nowMs?: number) => boolean;
+  updatePathReverseTipSwapState: (prevPath: MaybePath, nextPath: MaybePath, nowMs?: number) => void;
+  resolvePathReverseTipSwapScale: (path: MaybePath, nowMs?: number, out?: ReverseTipScaleState) => ReverseTipScaleState;
+  hasActivePathReverseTipSwap: (path: MaybePath, nowMs?: number) => boolean;
+  beginPathReverseGradientBlend: (
+    path: MaybePath,
+    fromFlowOffset: number,
+    fromTravelSpan: number,
+    toFlowOffset: number,
+    cycle?: number,
+    nowMs?: number,
+  ) => void;
+  resolvePathReverseGradientBlend: (
+    path: MaybePath,
+    cycle?: number,
+    nowMs?: number,
+    out?: ReverseGradientBlendResolvedState,
+  ) => ReverseGradientBlendResolvedState;
+  hasActivePathReverseGradientBlend: (path: MaybePath, cycle?: number, nowMs?: number) => boolean;
+  setInteractionModel: (interactionModel: InteractionModel | null | undefined) => void;
+  drawAll: (
+    snapshot: unknown,
+    refs: unknown,
+    statuses: unknown,
+    completionModel: unknown,
+    tutorialFlags: unknown,
+    drawAllInternal?: DrawHook,
+  ) => unknown;
+  drawAnimatedPath: (
+    snapshot: unknown,
+    refs: unknown,
+    statuses: unknown,
+    flowOffset: number,
+    completionModel: unknown,
+    tutorialFlags: unknown,
+    callbacks?: DrawAnimatedPathCallbacks,
+  ) => unknown;
+  updatePathLayoutMetrics: (
+    offset: { x: number; y: number },
+    cell: number,
+    gap: number,
+    pad: number,
+  ) => unknown;
+  notifyInteractiveResize: () => void;
+  setPathFlowFreezeImmediate: (isFrozen?: boolean) => void;
+}
+
+const hasShiftedPathPrefixMatch = (longerPath: MaybePath, shorterPath: MaybePath, shiftCount: number): boolean => {
   if (!Array.isArray(longerPath) || !Array.isArray(shorterPath)) return false;
   if (!Number.isInteger(shiftCount) || shiftCount <= 0) return false;
   if (longerPath.length !== shorterPath.length + shiftCount) return false;
@@ -43,37 +284,39 @@ const hasShiftedPathPrefixMatch = (longerPath, shorterPath, shiftCount) => {
   return true;
 };
 
-const isPathSide = (side) => side === 'start' || side === 'end';
+const isPathSide = (side: unknown): side is PathSide => side === 'start' || side === 'end';
 
-const hasIntegerPointCoordinates = (point) => (
-  Number.isInteger(point?.r) && Number.isInteger(point?.c)
+const hasIntegerPointCoordinates = (point: unknown): point is GridPoint => {
+  if (!point || typeof point !== 'object') return false;
+  const maybePoint = point as Partial<GridPoint>;
+  return Number.isInteger(maybePoint.r) && Number.isInteger(maybePoint.c);
+};
+
+const clonePoint = (point: GridPoint): GridPoint => ({ r: point.r, c: point.c });
+
+const getPathTipForSide = (path: MaybePath, side: PathSide): GridPoint | undefined => (
+  side === 'start' ? path?.[0] : path?.at(-1)
 );
 
-const clonePoint = (point) => ({ r: point.r, c: point.c });
-
-const getPathTipForSide = (path, side) => (
-  side === 'start' ? path[0] : path.at(-1)
+const getPathTipNeighborForSide = (path: MaybePath, side: PathSide): GridPoint | undefined => (
+  side === 'start' ? path?.[1] : path?.at(-2)
 );
 
-const getPathTipNeighborForSide = (path, side) => (
-  side === 'start' ? path[1] : path.at(-2)
-);
-
-const trimPathTipForSide = (path, side) => (
+const trimPathTipForSide = (path: readonly GridPoint[], side: PathSide): GridPoint[] => (
   side === 'start' ? path.slice(1) : path.slice(0, -1)
 );
 
-const insertPointAtPathTipForSide = (path, side, point) => (
+const insertPointAtPathTipForSide = (path: readonly GridPoint[], side: PathSide, point: GridPoint): GridPoint[] => (
   side === 'start'
     ? [clonePoint(point), ...path]
     : [...path, clonePoint(point)]
 );
 
-const pathContainsPoint = (path, point) => (
+const pathContainsPoint = (path: MaybePath, point: GridPoint): boolean => (
   Array.isArray(path) && path.some((node) => pointsMatch(node, point))
 );
 
-const pathsSharePrefixMatch = (leftPath, rightPath, compareLength) => {
+const pathsSharePrefixMatch = (leftPath: readonly GridPoint[], rightPath: readonly GridPoint[], compareLength: number): boolean => {
   for (let i = 0; i < compareLength; i += 1) {
     if (!pointsMatch(leftPath[i], rightPath[i])) return false;
   }
@@ -81,10 +324,10 @@ const pathsSharePrefixMatch = (leftPath, rightPath, compareLength) => {
 };
 
 const resolveTipArrivalSyntheticPrevPathFromHint = (
-  side,
-  nextPath,
-  tipArrivalHint = null,
-) => {
+  side: PathSide,
+  nextPath: MaybePath,
+  tipArrivalHint: PathTipArrivalHint | null = null,
+): GridPoint[] | null => {
   if (!isPathSide(side) || !Array.isArray(nextPath)) return null;
   if (!tipArrivalHint || tipArrivalHint.side !== side) return null;
 
@@ -103,7 +346,11 @@ const resolveTipArrivalSyntheticPrevPathFromHint = (
   return insertPointAtPathTipForSide(nextPath, side, from);
 };
 
-const resolveEqualLengthTipArrivalSyntheticPrevPath = (side, prevPath, nextPath) => {
+const resolveEqualLengthTipArrivalSyntheticPrevPath = (
+  side: PathSide,
+  prevPath: readonly GridPoint[],
+  nextPath: readonly GridPoint[],
+): GridPoint[] | null => {
   if (nextPath.length <= 1) return null;
 
   const prevTip = getPathTipForSide(prevPath, side);
@@ -112,7 +359,10 @@ const resolveEqualLengthTipArrivalSyntheticPrevPath = (side, prevPath, nextPath)
   return trimPathTipForSide(nextPath, side);
 };
 
-const resolveEndTipArrivalSyntheticPrevPath = (prevPath, nextPath) => {
+const resolveEndTipArrivalSyntheticPrevPath = (
+  prevPath: readonly GridPoint[],
+  nextPath: readonly GridPoint[],
+): GridPoint[] | null => {
   const delta = nextPath.length - prevPath.length;
   const sharedLen = Math.min(prevPath.length, nextPath.length);
   if (!pathsSharePrefixMatch(prevPath, nextPath, sharedLen)) return null;
@@ -123,7 +373,10 @@ const resolveEndTipArrivalSyntheticPrevPath = (prevPath, nextPath) => {
   return restored ? insertPointAtPathTipForSide(nextPath, 'end', restored) : null;
 };
 
-const resolveStartTipArrivalSyntheticPrevPath = (prevPath, nextPath) => {
+const resolveStartTipArrivalSyntheticPrevPath = (
+  prevPath: readonly GridPoint[],
+  nextPath: readonly GridPoint[],
+): GridPoint[] | null => {
   if (nextPath.length > prevPath.length) {
     const stepCount = nextPath.length - prevPath.length;
     if (stepCount <= 1) return null;
@@ -140,11 +393,11 @@ const resolveStartTipArrivalSyntheticPrevPath = (prevPath, nextPath) => {
 };
 
 export const resolveTipArrivalSyntheticPrevPath = (
-  side,
-  prevPath,
-  nextPath,
-  tipArrivalHint = null,
-) => {
+  side: PathSide,
+  prevPath: MaybePath,
+  nextPath: MaybePath,
+  tipArrivalHint: PathTipArrivalHint | null = null,
+): GridPoint[] | null => {
   if (!isPathSide(side) || !Array.isArray(prevPath) || !Array.isArray(nextPath)) return null;
 
   const fromHint = resolveTipArrivalSyntheticPrevPathFromHint(side, nextPath, tipArrivalHint);
@@ -161,7 +414,12 @@ export const resolveTipArrivalSyntheticPrevPath = (
     : resolveStartTipArrivalSyntheticPrevPath(prevPath, nextPath);
 };
 
-const resolvePathOverlapLength = (nextPath, previousPath, nextStart, prevStart) => {
+const resolvePathOverlapLength = (
+  nextPath: readonly GridPoint[],
+  previousPath: readonly GridPoint[],
+  nextStart: number,
+  prevStart: number,
+): number => {
   let overlap = 0;
   const maxCompare = Math.min(previousPath.length - prevStart, nextPath.length - nextStart);
   while (
@@ -174,24 +432,24 @@ const resolvePathOverlapLength = (nextPath, previousPath, nextStart, prevStart) 
 };
 
 const isBetterShiftConstrainedOverlapCandidate = (
-  overlap,
-  headCost,
-  bestOverlap,
-  bestHeadCost,
-) => {
+  overlap: number,
+  headCost: number,
+  bestOverlap: number,
+  bestHeadCost: number,
+): boolean => {
   if (overlap > bestOverlap) return true;
   if (overlap < bestOverlap) return false;
   return headCost < bestHeadCost;
 };
 
 const isBetterRelaxedOverlapCandidate = (
-  overlap,
-  headShiftAbs,
-  headCost,
-  bestOverlap,
-  bestHeadShiftAbs,
-  bestHeadCost,
-) => {
+  overlap: number,
+  headShiftAbs: number,
+  headCost: number,
+  bestOverlap: number,
+  bestHeadShiftAbs: number,
+  bestHeadCost: number,
+): boolean => {
   if (overlap > bestOverlap) return true;
   if (overlap < bestOverlap) return false;
   if (headShiftAbs < bestHeadShiftAbs) return true;
@@ -200,13 +458,13 @@ const isBetterRelaxedOverlapCandidate = (
 };
 
 const resolvePathOverlapCandidate = (
-  nextPath,
-  previousPath,
-  nextStart,
-  prevStart,
-  minOverlap,
-  shiftCount,
-) => {
+  nextPath: readonly GridPoint[],
+  previousPath: readonly GridPoint[],
+  nextStart: number,
+  prevStart: number,
+  minOverlap: number,
+  shiftCount: number | null,
+): PathOverlapCandidate | null => {
   if (Number.isInteger(shiftCount) && (nextStart - prevStart) !== shiftCount) return null;
 
   const overlap = resolvePathOverlapLength(nextPath, previousPath, nextStart, prevStart);
@@ -222,12 +480,12 @@ const resolvePathOverlapCandidate = (
 };
 
 const isBetterPathOverlapCandidate = (
-  candidate,
-  bestOverlap,
-  bestHeadShiftAbs,
-  bestHeadCost,
-  shiftCount,
-) => {
+  candidate: PathOverlapCandidate,
+  bestOverlap: number,
+  bestHeadShiftAbs: number,
+  bestHeadCost: number,
+  shiftCount: number | null,
+): boolean => {
   if (Number.isInteger(shiftCount)) {
     return isBetterShiftConstrainedOverlapCandidate(
       candidate.overlap,
@@ -248,11 +506,11 @@ const isBetterPathOverlapCandidate = (
 };
 
 const resolveBestPathOverlap = (
-  nextPath,
-  previousPath,
+  nextPath: MaybePath,
+  previousPath: MaybePath,
   minOverlap = 1,
-  shiftCount = null,
-) => {
+  shiftCount: number | null = null,
+): Pick<PathOverlapWindow, 'nextStart' | 'prevStart' | 'overlap'> | null => {
   if (!Array.isArray(nextPath) || !Array.isArray(previousPath)) return null;
   const nextLen = nextPath.length;
   const prevLen = previousPath.length;
@@ -300,7 +558,7 @@ const resolveBestPathOverlap = (
   };
 };
 
-export const resolveHeadShiftStepCount = (nextPath, previousPath) => {
+export const resolveHeadShiftStepCount = (nextPath: MaybePath, previousPath: MaybePath): number => {
   if (!Array.isArray(nextPath) || !Array.isArray(previousPath)) return 0;
 
   const nextLen = nextPath.length;
@@ -325,7 +583,7 @@ export const resolveHeadShiftStepCount = (nextPath, previousPath) => {
   return overlap.nextStart - overlap.prevStart;
 };
 
-export const resolveHeadShiftTransitionWindow = (nextPath, previousPath) => {
+export const resolveHeadShiftTransitionWindow = (nextPath: MaybePath, previousPath: MaybePath): PathOverlapWindow | null => {
   if (!Array.isArray(nextPath) || !Array.isArray(previousPath)) return null;
   const nextLen = nextPath.length;
   const prevLen = previousPath.length;
@@ -370,17 +628,17 @@ export const resolveHeadShiftTransitionWindow = (nextPath, previousPath) => {
   };
 };
 
-const cubicBezierAxisAt = (t, p1, p2) => {
+const cubicBezierAxisAt = (t: number, p1: number, p2: number): number => {
   const omt = 1 - t;
   return (3 * p1 * omt * omt * t) + (3 * p2 * omt * t * t) + (t * t * t);
 };
 
-const cubicBezierAxisSlopeAt = (t, p1, p2) => {
+const cubicBezierAxisSlopeAt = (t: number, p1: number, p2: number): number => {
   const omt = 1 - t;
   return (3 * p1 * omt * omt) + (6 * (p2 - p1) * omt * t) + (3 * (1 - p2) * t * t);
 };
 
-const sampleCubicBezierYAtX = (x, x1, y1, x2, y2) => {
+const sampleCubicBezierYAtX = (x: number, x1: number, y1: number, x2: number, y2: number): number => {
   const safeX = clampUnit(x);
   if (safeX <= 0) return 0;
   if (safeX >= 1) return 1;
@@ -409,47 +667,48 @@ const sampleCubicBezierYAtX = (x, x1, y1, x2, y2) => {
   return cubicBezierAxisAt(t, y1, y2);
 };
 
-const easeOutCubic = (unit) => {
+const easeOutCubic = (unit: number): number => {
   const t = clampUnit(unit);
   const inv = 1 - t;
   return 1 - (inv * inv * inv);
 };
 
-const resolveNow = () => {
+const resolveNow = (): number => {
   if (typeof performance !== 'undefined' && typeof performance.now === 'function') {
     return performance.now();
   }
   return Date.now();
 };
 
-const resolveRequestFrame = () => {
+const resolveRequestFrame = (): RequestFrame => {
   if (typeof requestAnimationFrame === 'function') return requestAnimationFrame;
   return (cb) => setTimeout(() => cb(resolveNow()), 16);
 };
 
-const resolveCancelFrame = () => {
-  if (typeof cancelAnimationFrame === 'function') return cancelAnimationFrame;
-  return (id) => clearTimeout(id);
+const resolveCancelFrame = (): CancelFrame => {
+  if (typeof cancelAnimationFrame === 'function') return (id) => cancelAnimationFrame(id as number);
+  return (id) => clearTimeout(id as ReturnType<typeof setTimeout>);
 };
 
-const normalizeShouldAnimate = (value) => {
+const normalizeShouldAnimate = (value: unknown): boolean | null => {
   if (typeof value === 'boolean') return value;
-  if (value && typeof value === 'object' && typeof value.shouldAnimate === 'boolean') {
-    return value.shouldAnimate;
+  if (value && typeof value === 'object' && 'shouldAnimate' in value) {
+    const shouldAnimate = (value as { shouldAnimate?: unknown }).shouldAnimate;
+    if (typeof shouldAnimate === 'boolean') return shouldAnimate;
   }
   return null;
 };
 
-const resolveDefaultReducedMotionQuery = () => {
+const resolveDefaultReducedMotionQuery = (): (() => boolean) => {
   return () => readReducedMotionPreference();
 };
 
-const getPathSegmentCount = (path) => {
+const getPathSegmentCount = (path: MaybePath): number => {
   const pathLength = Array.isArray(path) ? path.length : 0;
   return pathLength > 1 ? pathLength - 1 : 0;
 };
 
-const normalizeDirectionInto = (dx, dy, out) => {
+const normalizeDirectionInto = (dx: number, dy: number, out: DirectionVector): DirectionVector | null => {
   const len = Math.hypot(dx, dy);
   if (len <= 0) return null;
   out.x = dx / len;
@@ -457,7 +716,7 @@ const normalizeDirectionInto = (dx, dy, out) => {
   return out;
 };
 
-export function createPathAnimationEngine(options = {}) {
+export function createPathAnimationEngine(options: PathAnimationEngineOptions = {}): PathAnimationEngine {
   const requestFrame = typeof options.requestFrame === 'function'
     ? options.requestFrame
     : resolveRequestFrame();
@@ -480,51 +739,51 @@ export function createPathAnimationEngine(options = {}) {
   const onSetPathFlowFreezeImmediate = options.onSetPathFlowFreezeImmediate;
   const onAnimationFrame = options.onAnimationFrame;
 
-  let animationFrameId = 0;
+  let animationFrameId: AnimationFrameHandle | 0 = 0;
   let latestFrameTimestamp = 0;
   let interactiveResizeActive = false;
   let pathFlowFrozen = false;
 
-  let pathStartArrivalState = null;
-  let pathEndArrivalState = null;
-  let pathStartPinPresenceState = null;
-  let pathFlowVisibilityState = null;
-  let pathFlowFreezeState = null;
+  let pathStartArrivalState: PathTipArrivalState | null = null;
+  let pathEndArrivalState: PathTipArrivalState | null = null;
+  let pathStartPinPresenceState: PathStartPinPresenceState | null = null;
+  let pathFlowVisibilityState: PathFlowVisibilityState | null = null;
+  let pathFlowFreezeState: PathFlowFreezeState | null = null;
   let pathFlowFreezeMix = 1;
   let lastPathFlowFrozen = false;
-  let pathReverseTipSwapState = null;
-  let pathReverseGradientBlendState = null;
-  let pathEndArrowRotateState = null;
-  let pathStartFlowRotateState = null;
+  let pathReverseTipSwapState: PathReverseTipSwapState | null = null;
+  let pathReverseGradientBlendState: PathReverseGradientBlendState | null = null;
+  let pathEndArrowRotateState: PathRotateState | null = null;
+  let pathStartFlowRotateState: PathRotateState | null = null;
 
-  const flowFreezeMixScratch = { mix: 1, active: false };
-  const flowVisibilityMixScratch = { mix: 1, active: false };
-  const startPinPresenceScaleScratch = {
+  const flowFreezeMixScratch: MixState = { mix: 1, active: false };
+  const flowVisibilityMixScratch: MixState = { mix: 1, active: false };
+  const startPinPresenceScaleScratch: StartPinPresenceScaleState = {
     scale: 1,
     active: false,
     mode: 'none',
     anchorR: Number.NaN,
     anchorC: Number.NaN,
   };
-  const endArrowDirectionScratch = { x: Number.NaN, y: Number.NaN, active: false };
-  const startFlowDirectionScratch = { x: Number.NaN, y: Number.NaN, active: false };
-  const reverseTipScaleScratch = { inScale: 1, outScale: 0, active: false };
-  const reverseGradientBlendScratch = {
+  const endArrowDirectionScratch: DirectionState = { x: Number.NaN, y: Number.NaN, active: false };
+  const startFlowDirectionScratch: DirectionState = { x: Number.NaN, y: Number.NaN, active: false };
+  const reverseTipScaleScratch: ReverseTipScaleState = { inScale: 1, outScale: 0, active: false };
+  const reverseGradientBlendScratch: ReverseGradientBlendResolvedState = {
     blend: 1,
     fromFlowOffset: 0,
     toFlowOffset: 0,
     fromTravelSpan: 0,
     active: false,
   };
-  const normalizeDirectionScratchA = { x: 0, y: 0 };
-  const normalizeDirectionScratchB = { x: 0, y: 0 };
+  const normalizeDirectionScratchA: DirectionVector = { x: 0, y: 0 };
+  const normalizeDirectionScratchB: DirectionVector = { x: 0, y: 0 };
 
   const clearPathTipArrivalStates = () => {
     pathStartArrivalState = null;
     pathEndArrivalState = null;
   };
 
-  const clearSinglePathTipArrivalState = (side) => {
+  const clearSinglePathTipArrivalState = (side: PathSide): void => {
     if (side === 'start') pathStartArrivalState = null;
     else if (side === 'end') pathEndArrivalState = null;
   };
@@ -553,7 +812,7 @@ export function createPathAnimationEngine(options = {}) {
     pathStartFlowRotateState = null;
   };
 
-  const clearPathRotateState = (side) => {
+  const clearPathRotateState = (side: PathSide): void => {
     if (side === 'start') {
       clearPathStartFlowRotateState();
       return;
@@ -563,7 +822,7 @@ export function createPathAnimationEngine(options = {}) {
     }
   };
 
-  const setPathRotateState = (side, state) => {
+  const setPathRotateState = (side: PathSide, state: PathRotateState | null): void => {
     if (side === 'start') {
       pathStartFlowRotateState = state;
       return;
@@ -573,13 +832,13 @@ export function createPathAnimationEngine(options = {}) {
     }
   };
 
-  const getPathRotateState = (side) => (
+  const getPathRotateState = (side: PathSide): PathRotateState | null => (
     side === 'start'
       ? pathStartFlowRotateState
       : pathEndArrowRotateState
   );
 
-  const resetTransitionState = ({ preserveFlowFreeze = false } = {}) => {
+  const resetTransitionState = ({ preserveFlowFreeze = false }: { preserveFlowFreeze?: boolean } = {}): void => {
     clearPathTipArrivalStates();
     clearPathStartPinPresenceState();
     clearPathFlowVisibilityState();
@@ -599,7 +858,7 @@ export function createPathAnimationEngine(options = {}) {
   const resolvePathFlowFreezeMix = (
     nowMs = nowFn(),
     out = flowFreezeMixScratch,
-  ) => {
+  ): MixState => {
     out.mix = pathFlowFreezeMix;
     out.active = false;
 
@@ -621,7 +880,7 @@ export function createPathAnimationEngine(options = {}) {
     return out;
   };
 
-  const syncPathFlowFreezeTarget = (isFrozen, nowMs = nowFn()) => {
+  const syncPathFlowFreezeTarget = (isFrozen: boolean, nowMs = nowFn()): void => {
     if (lastPathFlowFrozen === Boolean(isFrozen)) return;
     lastPathFlowFrozen = Boolean(isFrozen);
 
@@ -641,11 +900,11 @@ export function createPathAnimationEngine(options = {}) {
   };
 
   const updatePathRotateState = (
-    side,
-    prevPath,
-    nextPath,
+    side: PathSide,
+    prevPath: MaybePath,
+    nextPath: MaybePath,
     nowMs = nowFn(),
-  ) => {
+  ): void => {
     if (isReducedMotionPreferred()) {
       clearPathRotateState(side);
       return;
@@ -660,12 +919,16 @@ export function createPathAnimationEngine(options = {}) {
       clearPathRotateState(side);
       return;
     }
+    if (!prevPath || !nextPath) {
+      clearPathRotateState(side);
+      return;
+    }
 
     const retractedTip = isStartSide
       ? prevPath[prevPath.length - nextPath.length - 1]
       : prevPath[nextPath.length];
     const nextTip = getPathTipFromPath(nextPath, side);
-    let neighbor = null;
+    let neighbor: GridPoint | null = null;
     if (Array.isArray(nextPath)) {
       neighbor = isStartSide ? nextPath[1] : nextPath.at(-2);
     }
@@ -720,11 +983,11 @@ export function createPathAnimationEngine(options = {}) {
   };
 
   const resolvePathRotateDirection = (
-    side,
-    path,
-    nowMs,
-    out,
-  ) => {
+    side: PathSide,
+    path: MaybePath,
+    nowMs: number,
+    out: DirectionState,
+  ): DirectionState => {
     out.x = Number.NaN;
     out.y = Number.NaN;
     out.active = false;
@@ -737,7 +1000,7 @@ export function createPathAnimationEngine(options = {}) {
     const state = getPathRotateState(side);
     if (!state) return out;
     const pathLength = Array.isArray(path) ? path.length : 0;
-    if (pathLength < 2) {
+    if (!path || pathLength < 2) {
       clearPathRotateState(side);
       return out;
     }
@@ -775,45 +1038,48 @@ export function createPathAnimationEngine(options = {}) {
   };
 
   const updatePathEndArrowRotateState = (
-    prevPath,
-    nextPath,
+    prevPath: MaybePath,
+    nextPath: MaybePath,
     nowMs = nowFn(),
-  ) => updatePathRotateState('end', prevPath, nextPath, nowMs);
+  ): void => updatePathRotateState('end', prevPath, nextPath, nowMs);
 
   const resolvePathEndArrowDirection = (
-    path,
+    path: MaybePath,
     nowMs = nowFn(),
     out = endArrowDirectionScratch,
-  ) => resolvePathRotateDirection('end', path, nowMs, out);
+  ): DirectionState => resolvePathRotateDirection('end', path, nowMs, out);
 
   const hasActivePathEndArrowRotate = (
-    path,
+    path: MaybePath,
     nowMs = nowFn(),
-  ) => resolvePathEndArrowDirection(path, nowMs, endArrowDirectionScratch).active;
+  ): boolean => resolvePathEndArrowDirection(path, nowMs, endArrowDirectionScratch).active;
 
   const updatePathStartFlowRotateState = (
-    prevPath,
-    nextPath,
+    prevPath: MaybePath,
+    nextPath: MaybePath,
     nowMs = nowFn(),
-  ) => updatePathRotateState('start', prevPath, nextPath, nowMs);
+  ): void => updatePathRotateState('start', prevPath, nextPath, nowMs);
 
   const resolvePathStartFlowDirection = (
-    path,
+    path: MaybePath,
     nowMs = nowFn(),
     out = startFlowDirectionScratch,
-  ) => resolvePathRotateDirection('start', path, nowMs, out);
+  ): DirectionState => resolvePathRotateDirection('start', path, nowMs, out);
 
   const hasActivePathStartFlowRotate = (
-    path,
+    path: MaybePath,
     nowMs = nowFn(),
-  ) => resolvePathStartFlowDirection(path, nowMs, startFlowDirectionScratch).active;
+  ): boolean => resolvePathStartFlowDirection(path, nowMs, startFlowDirectionScratch).active;
 
-  const setSinglePathTipArrivalState = (side, state) => {
+  const setSinglePathTipArrivalState = (side: PathSide, state: PathTipArrivalState | null): void => {
     if (side === 'start') pathStartArrivalState = state;
     else if (side === 'end') pathEndArrivalState = state;
   };
 
-  const resolveAdjacentTipArrivalMove = (prevTip, nextTip) => {
+  const resolveAdjacentTipArrivalMove = (
+    prevTip: GridPoint,
+    nextTip: GridPoint,
+  ): AdjacentTipArrivalMove | null => {
     const dr = prevTip.r - nextTip.r;
     const dc = prevTip.c - nextTip.c;
     const length = Math.hypot(dc, dr);
@@ -821,7 +1087,11 @@ export function createPathAnimationEngine(options = {}) {
     return { dr, dc, length };
   };
 
-  const resolveSinglePathTipArrivalMode = (side, prevPath, nextPath) => {
+  const resolveSinglePathTipArrivalMode = (
+    side: PathSide,
+    prevPath: MaybePath,
+    nextPath: MaybePath,
+  ): PathTipArrivalState['mode'] | null => {
     if (side === 'start') {
       if (isStartRetractTransition(prevPath, nextPath)) return 'retract';
       return isStartAdvanceTransition(prevPath, nextPath) ? 'arrive' : null;
@@ -830,7 +1100,14 @@ export function createPathAnimationEngine(options = {}) {
     return isEndAdvanceTransition(prevPath, nextPath) ? 'arrive' : null;
   };
 
-  const buildPathTipArrivalState = (mode, nextTip, move, cellSize, cellStep, nowMs) => {
+  const buildPathTipArrivalState = (
+    mode: PathTipArrivalState['mode'],
+    nextTip: GridPoint,
+    move: AdjacentTipArrivalMove,
+    cellSize: number,
+    cellStep: number,
+    nowMs: number,
+  ): PathTipArrivalState => {
     if (mode === 'retract') {
       const step = Number.isFinite(cellStep) && cellStep > 0 ? cellStep : Number(cellSize) || 0;
       return {
@@ -857,13 +1134,13 @@ export function createPathAnimationEngine(options = {}) {
   };
 
   const updateSinglePathTipArrivalState = (
-    side,
-    prevPath,
-    nextPath,
-    cellSize,
-    cellStep,
-    nowMs,
-  ) => {
+    side: PathSide,
+    prevPath: MaybePath,
+    nextPath: MaybePath,
+    cellSize: number,
+    cellStep: number,
+    nowMs: number,
+  ): void => {
     if (!isPathSide(side)) return;
     const clearState = () => clearSinglePathTipArrivalState(side);
     const prevTip = getPathTipFromPath(prevPath, side);
@@ -893,13 +1170,13 @@ export function createPathAnimationEngine(options = {}) {
   };
 
   const updatePathTipArrivalStates = (
-    prevPath,
-    nextPath,
-    cellSize,
-    cellStep,
+    prevPath: MaybePath,
+    nextPath: MaybePath,
+    cellSize: number,
+    cellStep: number,
     nowMs = nowFn(),
-    tipArrivalHint = null,
-  ) => {
+    tipArrivalHint: PathTipArrivalHint | null = null,
+  ): void => {
     if (isReducedMotionPreferred()) {
       clearPathTipArrivalStates();
       return;
@@ -951,7 +1228,21 @@ export function createPathAnimationEngine(options = {}) {
     );
   };
 
-  const resolvePathTipArrivalOffset = (side, tip, nowMs, out) => {
+  const resolvePathTipArrivalOffset = (
+    side: PathSide,
+    tip: GridPoint | null | undefined,
+    nowMs = nowFn(),
+    out: TipArrivalOffsetState = {
+      x: 0,
+      y: 0,
+      active: false,
+      mode: 'none',
+      remain: 1,
+      progress: 0,
+      linearRemain: 1,
+      linearProgress: 0,
+    },
+  ): TipArrivalOffsetState => {
     const state = side === 'start' ? pathStartArrivalState : pathEndArrivalState;
     out.x = 0;
     out.y = 0;
@@ -1004,7 +1295,7 @@ export function createPathAnimationEngine(options = {}) {
     return out;
   };
 
-  const hasActivePathTipArrivals = (nowMs = nowFn()) => {
+  const hasActivePathTipArrivals = (nowMs = nowFn()): boolean => {
     if (isReducedMotionPreferred()) {
       clearPathTipArrivalStates();
       return false;
@@ -1034,10 +1325,10 @@ export function createPathAnimationEngine(options = {}) {
   };
 
   const updatePathFlowVisibilityState = (
-    prevPath,
-    nextPath,
+    prevPath: MaybePath,
+    nextPath: MaybePath,
     nowMs = nowFn(),
-  ) => {
+  ): void => {
     if (isReducedMotionPreferred()) {
       clearPathFlowVisibilityState();
       return;
@@ -1065,10 +1356,10 @@ export function createPathAnimationEngine(options = {}) {
   };
 
   const resolvePathFlowVisibilityMix = (
-    path,
+    path: MaybePath,
     nowMs = nowFn(),
     out = flowVisibilityMixScratch,
-  ) => {
+  ): MixState => {
     out.mix = 1;
     out.active = false;
 
@@ -1102,15 +1393,15 @@ export function createPathAnimationEngine(options = {}) {
     return out;
   };
 
-  const hasActivePathFlowVisibility = (path, nowMs, out = flowVisibilityMixScratch) => (
+  const hasActivePathFlowVisibility = (path: MaybePath, nowMs?: number, out = flowVisibilityMixScratch): boolean => (
     resolvePathFlowVisibilityMix(path, nowMs ?? nowFn(), out).active
   );
 
   const updatePathStartPinPresenceState = (
-    prevPath,
-    nextPath,
+    prevPath: MaybePath,
+    nextPath: MaybePath,
     nowMs = nowFn(),
-  ) => {
+  ): void => {
     if (isReducedMotionPreferred()) {
       clearPathStartPinPresenceState();
       return;
@@ -1155,10 +1446,10 @@ export function createPathAnimationEngine(options = {}) {
   };
 
   const resolvePathStartPinPresenceScale = (
-    path,
+    path: MaybePath,
     nowMs = nowFn(),
     out = startPinPresenceScaleScratch,
-  ) => {
+  ): StartPinPresenceScaleState => {
     out.scale = 1;
     out.active = false;
     out.mode = 'none';
@@ -1205,20 +1496,24 @@ export function createPathAnimationEngine(options = {}) {
     return out;
   };
 
-  const hasActivePathStartPinPresence = (path, nowMs, out = startPinPresenceScaleScratch) => (
+  const hasActivePathStartPinPresence = (
+    path: MaybePath,
+    nowMs?: number,
+    out = startPinPresenceScaleScratch,
+  ): boolean => (
     resolvePathStartPinPresenceScale(path, nowMs ?? nowFn(), out).active
   );
 
   const beginPathReverseGradientBlend = (
-    path,
-    fromFlowOffset,
-    fromTravelSpan,
-    toFlowOffset,
+    path: MaybePath,
+    fromFlowOffset: number,
+    fromTravelSpan: number,
+    toFlowOffset: number,
     cycle = PATH_FLOW_CYCLE,
     nowMs = nowFn(),
-  ) => {
+  ): void => {
     const pathLength = Array.isArray(path) ? path.length : 0;
-    if (isReducedMotionPreferred() || pathLength < 2) {
+    if (isReducedMotionPreferred() || !path || pathLength < 2) {
       clearPathReverseGradientBlendState();
       return;
     }
@@ -1242,11 +1537,11 @@ export function createPathAnimationEngine(options = {}) {
   };
 
   const resolvePathReverseGradientBlend = (
-    path,
+    path: MaybePath,
     cycle = PATH_FLOW_CYCLE,
     nowMs = nowFn(),
     out = reverseGradientBlendScratch,
-  ) => {
+  ): ReverseGradientBlendResolvedState => {
     out.blend = 1;
     out.fromFlowOffset = 0;
     out.toFlowOffset = 0;
@@ -1261,7 +1556,7 @@ export function createPathAnimationEngine(options = {}) {
     const state = pathReverseGradientBlendState;
     if (!state) return out;
     const pathLength = Array.isArray(path) ? path.length : 0;
-    if (pathLength !== state.pathLength || pathLength < 2) {
+    if (!path || pathLength !== state.pathLength || pathLength < 2) {
       clearPathReverseGradientBlendState();
       return out;
     }
@@ -1294,12 +1589,12 @@ export function createPathAnimationEngine(options = {}) {
   };
 
   const hasActivePathReverseGradientBlend = (
-    path,
+    path: MaybePath,
     cycle = PATH_FLOW_CYCLE,
     nowMs = nowFn(),
-  ) => resolvePathReverseGradientBlend(path, cycle, nowMs, reverseGradientBlendScratch).active;
+  ): boolean => resolvePathReverseGradientBlend(path, cycle, nowMs, reverseGradientBlendScratch).active;
 
-  const updatePathReverseTipSwapState = (prevPath, nextPath, nowMs = nowFn()) => {
+  const updatePathReverseTipSwapState = (prevPath: MaybePath, nextPath: MaybePath, nowMs = nowFn()): void => {
     if (isReducedMotionPreferred()) {
       clearPathReverseTipSwapState();
       return;
@@ -1318,7 +1613,11 @@ export function createPathAnimationEngine(options = {}) {
     };
   };
 
-  const resolvePathReverseTipSwapScale = (path, nowMs = nowFn(), out = reverseTipScaleScratch) => {
+  const resolvePathReverseTipSwapScale = (
+    path: MaybePath,
+    nowMs = nowFn(),
+    out = reverseTipScaleScratch,
+  ): ReverseTipScaleState => {
     out.inScale = 1;
     out.outScale = 0;
     out.active = false;
@@ -1363,7 +1662,7 @@ export function createPathAnimationEngine(options = {}) {
     return out;
   };
 
-  const hasActivePathReverseTipSwap = (path, nowMs = nowFn()) => (
+  const hasActivePathReverseTipSwap = (path: MaybePath, nowMs = nowFn()): boolean => (
     resolvePathReverseTipSwapScale(path, nowMs, reverseTipScaleScratch).active
   );
 
@@ -1374,7 +1673,7 @@ export function createPathAnimationEngine(options = {}) {
     latestFrameTimestamp = 0;
   };
 
-  const runAnimationFrame = (timestamp) => {
+  const runAnimationFrame = (timestamp: number): void => {
     animationFrameId = 0;
     latestFrameTimestamp = Number.isFinite(timestamp) ? timestamp : 0;
 
@@ -1393,7 +1692,7 @@ export function createPathAnimationEngine(options = {}) {
     }
   };
 
-  const maybeScheduleAnimationFrame = (shouldAnimate) => {
+  const maybeScheduleAnimationFrame = (shouldAnimate: boolean | null): void => {
     if (shouldAnimate === true) {
       if (!animationFrameId) {
         latestFrameTimestamp = 0;
@@ -1496,7 +1795,7 @@ export function createPathAnimationEngine(options = {}) {
       return undefined;
     },
 
-    updatePathLayoutMetrics(offset, cell, gap, pad) {
+    updatePathLayoutMetrics(offset: { x: number; y: number }, cell: number, gap: number, pad: number) {
       if (typeof onUpdatePathLayoutMetrics === 'function') {
         return onUpdatePathLayoutMetrics(offset, cell, gap, pad);
       }

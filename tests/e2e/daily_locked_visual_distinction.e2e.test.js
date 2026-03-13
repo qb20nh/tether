@@ -6,6 +6,7 @@ const DAILY_LOCK_SETTLE_MS = 1200;
 
 const installControllableClock = async (page) => {
   await page.addInitScript(() => {
+    const runtimeGlobal = /** @type {any} */ (globalThis);
     const RealDate = Date;
     let nowMs = RealDate.now();
 
@@ -15,7 +16,7 @@ const installControllableClock = async (page) => {
           super(nowMs);
           return;
         }
-        super(...args);
+        super(.../** @type {ConstructorParameters<typeof Date>} */ (args));
       }
 
       static now() {
@@ -26,13 +27,13 @@ const installControllableClock = async (page) => {
     MockDate.UTC = RealDate.UTC;
     MockDate.parse = RealDate.parse;
 
-    globalThis.__setTestNow = (value) => {
+    runtimeGlobal.__setTestNow = (value) => {
       nowMs = Number(value) || nowMs;
       return nowMs;
     };
 
-    globalThis.__getTestNow = () => nowMs;
-    globalThis.Date = MockDate;
+    runtimeGlobal.__getTestNow = () => nowMs;
+    runtimeGlobal.Date = /** @type {DateConstructor} */ (MockDate);
   });
 };
 
@@ -51,7 +52,7 @@ test('e2e: daily locked board keeps walls and path tips visually distinct', asyn
   try {
     browser = await chromium.launch({ headless: true });
   } catch (error) {
-    t.skip(`playwright could not launch in this environment: ${error?.message || error}`);
+    t.skip(`playwright could not launch in this environment: ${/** @type {any} */ (error)?.message || error}`);
     return;
   }
 
@@ -65,7 +66,7 @@ test('e2e: daily locked board keeps walls and path tips visually distinct', asyn
     await page.waitForSelector('#grid', { timeout: 10000 });
 
     const dailyValue = await page.$eval('#levelSel', (select) => {
-      const options = Array.from(select.options);
+      const options = Array.from((/** @type {HTMLSelectElement} */ (select)).options);
       const dailyOption = options.at(-1) || null;
       return dailyOption?.value || null;
     });
@@ -94,10 +95,11 @@ test('e2e: daily locked board keeps walls and path tips visually distinct', asyn
       return Number(payload?.hardInvalidateAtUtcMs) || null;
     });
     assert.equal(Number.isInteger(lockAtUtcMs), true);
+    assert.notEqual(lockAtUtcMs, null);
 
     await page.evaluate((lockAt) => {
-      window.__setTestNow(lockAt + 2000);
-    }, lockAtUtcMs);
+      /** @type {any} */ (window).__setTestNow(lockAt + 2000);
+    }, /** @type {number} */ (lockAtUtcMs));
 
     await page.waitForFunction(() => {
       const boardWrap = document.getElementById('grid')?.parentElement || null;

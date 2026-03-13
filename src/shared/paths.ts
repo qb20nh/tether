@@ -1,4 +1,3 @@
-// @ts-nocheck
 export const DAILY_DIR = 'daily';
 export const DAILY_PAYLOAD_FILE = `${DAILY_DIR}/today.json`;
 export const DAILY_HISTORY_FILE = `${DAILY_DIR}/history.json`;
@@ -15,4 +14,4 @@ export const INFINITE_OVERRIDES_MODULE_FILE = './generated/infinite_overrides.bi
 export const BUILD_IDENTITY_IGNORED_REPO_FILES = Object.freeze([
   PUBLIC_DAILY_PAYLOAD_REPO_FILE,
   PUBLIC_DAILY_HISTORY_REPO_FILE,
-]);
+]) as readonly string[];

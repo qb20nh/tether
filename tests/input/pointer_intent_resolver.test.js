@@ -92,7 +92,7 @@ test('chooseSlipperyPathDragStep selects legal stitched diagonal when nearest', 
       const dc = Math.abs(a.c - b.c);
       if (dr + dc === 1) return true;
       if (dr === 1 && dc === 1) {
-        return snapshot.stitchSet.has(`${Math.max(a.r, b.r)},${Math.max(a.c, b.c)}`);
+        return snapshot.stitchSet?.has(`${Math.max(a.r, b.r)},${Math.max(a.c, b.c)}`) === true;
       }
       return false;
     },
@@ -127,7 +127,7 @@ test('chooseSlipperyPathDragStep crosses stitched bridge when pointer crosses op
       const dc = Math.abs(a.c - b.c);
       if (dr + dc === 1) return true;
       if (dr === 1 && dc === 1) {
-        return snapshot.stitchSet.has(`${Math.max(a.r, b.r)},${Math.max(a.c, b.c)}`);
+        return snapshot.stitchSet?.has(`${Math.max(a.r, b.r)},${Math.max(a.c, b.c)}`) === true;
       }
       return false;
     },
@@ -162,7 +162,7 @@ test('chooseSlipperyPathDragStep holds inside stitched circle before crossing br
       const dc = Math.abs(a.c - b.c);
       if (dr + dc === 1) return true;
       if (dr === 1 && dc === 1) {
-        return snapshot.stitchSet.has(`${Math.max(a.r, b.r)},${Math.max(a.c, b.c)}`);
+        return snapshot.stitchSet?.has(`${Math.max(a.r, b.r)},${Math.max(a.c, b.c)}`) === true;
       }
       return false;
     },

@@ -5,14 +5,20 @@ import {
   BUILD_IDENTITY_IGNORED_REPO_FILES,
 } from '../src/shared/paths.ts';
 
-const buildExcludeArgs = () => BUILD_IDENTITY_IGNORED_REPO_FILES.map((filePath) => `:(exclude)${filePath}`);
+const buildExcludeArgs = (): string[] =>
+  BUILD_IDENTITY_IGNORED_REPO_FILES.map((filePath) => `:(exclude)${filePath}`);
 
-const runGit = (args) => execFileSync('git', args, {
+const runGit = (args: readonly string[]): string => execFileSync('git', [...args], {
   encoding: 'utf8',
   stdio: ['ignore', 'pipe', 'pipe'],
 }).trim();
 
-export const resolveBuildIdentity = () => {
+interface BuildIdentity {
+  buildNumber: number;
+  buildLabel: string;
+}
+
+export const resolveBuildIdentity = (): BuildIdentity => {
   const excludeArgs = buildExcludeArgs();
   const nonDailyCountRaw = runGit(['rev-list', '--count', 'HEAD', '--', '.', ...excludeArgs]);
   if (!/^\d+$/.test(nonDailyCountRaw)) {
@@ -28,7 +34,7 @@ export const resolveBuildIdentity = () => {
   };
 };
 
-const main = () => {
+const main = (): void => {
   const { buildNumber, buildLabel } = resolveBuildIdentity();
   process.stdout.write(`VITE_BUILD_NUMBER=${buildNumber}\n`);
   process.stdout.write(`VITE_BUILD_LABEL=${buildLabel}\n`);

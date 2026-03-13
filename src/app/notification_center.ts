@@ -1,10 +1,15 @@
-// @ts-nocheck
 import { createNotificationDialogController } from './notification_dialog_controller.ts';
 import { createNotificationHistoryController } from './notification_history_controller.ts';
 import { normalizeNotificationToggleOptions } from './notification_options.ts';
 import { createNotificationToggleController } from './notification_toggle_controller.ts';
+import type {
+  NotificationCenter,
+  NotificationCenterOptions,
+} from '../contracts/ports.ts';
 
-export function createNotificationCenter(options = {}) {
+export function createNotificationCenter(
+  options: NotificationCenterOptions,
+): NotificationCenter {
   const {
     swMessageTypes,
     localBuildNumber = 0,

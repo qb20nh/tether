@@ -1,7 +1,19 @@
-// @ts-nocheck
 import { CELL_TYPES, ELEMENT_IDS } from '../config.ts';
 import { cellCenter, getCellSize, vertexPos } from '../geometry.ts';
 import { ICONS } from '../icons.ts';
+import type {
+  BoardLayoutMetrics,
+  CanvasElementLike,
+  ElementLike,
+  EvaluateResult,
+  GameSnapshot,
+  GridPoint,
+  InteractionModel,
+  RendererRefs,
+  RuntimeData,
+  TutorialFlags,
+  UiRenderModel,
+} from '../contracts/ports.ts';
 import {
   angleDeltaSigned,
   cellDistance,
@@ -11,7 +23,12 @@ import {
 } from '../math.ts';
 import { isReducedMotionPreferred as readReducedMotionPreference } from '../reduced_motion.ts';
 import { keyOf } from '../utils.ts';
-import { buildBoardCellViewModel } from './board_view_model.ts';
+import {
+  buildBoardCellViewModel,
+} from './board_view_model.ts';
+import type {
+  BoardCellViewState,
+} from './board_view_model.ts';
 import {
   createPathAnimationEngine,
   resolveHeadShiftTransitionWindow
@@ -27,15 +44,275 @@ import {
   pathsMatch
 } from './path_transition_utils.ts';
 import { applyCanvasElementSize, resolveCanvasSize } from './canvas_size_utils.ts';
-import { createPathWebglRenderer } from './path_webgl_renderer.ts';
+import {
+  createPathWebglRenderer,
+} from './path_webgl_renderer.ts';
+import type {
+  PathFramePayload,
+  PathRenderer,
+} from './path_webgl_renderer.ts';
+
+interface BoardRendererCoreOptions {
+  icons?: Record<string, string>;
+  iconX?: string;
+  debugCounters?: Record<string, number> | null;
+}
+
+interface CompletionModel {
+  isSolved: boolean;
+  isCompleting: boolean;
+  startTimeMs: number;
+  durationMs: number;
+}
+
+interface RgbColor {
+  r: number;
+  g: number;
+  b: number;
+}
+
+interface Point2D {
+  x: number;
+  y: number;
+}
+
+interface PathLayoutMetricsState {
+  ready: boolean;
+  version: number;
+  offsetX: number;
+  offsetY: number;
+  cell: number;
+  gap: number;
+  pad: number;
+}
+
+interface RetainedArcState {
+  side: 'start' | 'end';
+  startTimeMs: number;
+  settleStartTimeMs: number;
+  cornerR: number;
+  cornerC: number;
+  movingR: number;
+  movingC: number;
+  arcInR: number;
+  arcInC: number;
+  arcOutR: number;
+  arcOutC: number;
+  geometryTokenSeed: number;
+}
+
+interface RetainedArcRenderData {
+  retainedStartArcPoints: Point2D[];
+  retainedStartArcGeometryToken: number;
+  retainedEndArcPoints: Point2D[];
+  retainedEndArcGeometryToken: number;
+}
+
+interface RetainedArcRenderResult {
+  points: Point2D[];
+  geometryToken: number;
+  active: boolean;
+}
+
+interface TipMotion {
+  moving: boolean;
+  centerX: number;
+  centerY: number;
+}
+
+interface DirectionState {
+  x: number;
+  y: number;
+  active: boolean;
+}
+
+interface FlowFreezeMixState {
+  mix: number;
+  active: boolean;
+}
+
+interface StartPinPresenceScaleState {
+  scale: number;
+  active: boolean;
+  mode: 'none' | 'appear' | 'disappear';
+  anchorR: number;
+  anchorC: number;
+}
+
+interface ReverseTipScaleState {
+  inScale: number;
+  outScale: number;
+  active: boolean;
+}
+
+interface ReverseGradientBlendState {
+  blend: number;
+  fromFlowOffset: number;
+  toFlowOffset: number;
+  fromTravelSpan: number;
+  active: boolean;
+}
+
+interface TipArrivalOffsetState {
+  x: number;
+  y: number;
+  active: boolean;
+  mode: 'none' | 'arrive' | 'retract';
+  remain: number;
+  progress: number;
+  linearRemain: number;
+  linearProgress: number;
+}
+
+interface TipHoverScaleState {
+  fromScale: number;
+  toScale: number;
+  startTimeMs: number;
+}
+
+interface TipHoverScaleResolvedState {
+  scale: number;
+  active: boolean;
+}
+
+interface TipHoverScalePair {
+  startScale: number;
+  endScale: number;
+  active: boolean;
+}
+
+interface PendingRenderState {
+  snapshot: GameSnapshot;
+  evaluation: EvaluateResult;
+  completion: CompletionModel | null;
+  uiModel: UiRenderModel;
+}
+
+interface StatusSets {
+  badHint: Set<string>;
+  goodHint: Set<string>;
+  badRps: Set<string>;
+  goodRps: Set<string>;
+  badBlocked: Set<string>;
+}
+
+type EvaluateResultLike = Partial<EvaluateResult> | null | undefined;
+
+interface PathCanvasSwap {
+  previousCanvas: CanvasElementLike;
+  nextCanvas: CanvasElementLike;
+}
+
+interface InteractiveResizePayload {
+  refs: RendererRefs;
+  cssWidth: number;
+  cssHeight: number;
+  dpr: number;
+  offset: Point2D;
+  cell: number;
+  gap: number;
+  pad: number;
+}
+
+interface GridRefsLike {
+  gridEl?: ElementLike | null;
+}
+
+interface GridCanvasRefsLike extends GridRefsLike {
+  boardWrap?: ElementLike | null;
+}
+
+interface TravelContext {
+  nextPath: GridPoint[];
+  previousPath: GridPoint[];
+  refs: GridRefsLike;
+  offset: Point2D;
+  flowWidth: number;
+}
+
+interface HeadShiftTransitionWindow {
+  shiftCount: number;
+  nextStart: number;
+  prevStart: number;
+  overlap: number;
+  isFullLengthOverlap: boolean;
+  isPureHeadShift: boolean;
+}
+
+interface PathFlowMetrics {
+  cycle: number;
+  pulse: number;
+  speed: number;
+}
+
+interface PathRenderPointsResult extends RetainedArcRenderData {
+  points: Point2D[];
+  geometryToken: number;
+  flowTravelCompensation: number;
+  segmentRetractTipScale: number;
+}
+
+interface BoardNavMarkerTarget {
+  r: number;
+  c: number;
+  variant: 'cursor' | 'selected';
+}
+
+interface EndpointPathDelta {
+  side: 'start' | 'end';
+  prevChanged: GridPoint[];
+  nextChanged: GridPoint[];
+}
+
+interface PathSizing {
+  width: number;
+  arrowLength: number;
+  startRadius: number;
+  endHalfWidth: number;
+}
+
+interface LineSegment {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+}
+
+type DebugCounterFn = (amount?: number) => void;
+type GridCells = Array<Array<ElementLike | null>>;
+type BoardCellViewModel = BoardCellViewState[][];
+type MaybePath = GridPoint[] | null | undefined;
+type LegendIconKey =
+  | 'bTurn'
+  | 'bCW'
+  | 'bCCW'
+  | 'bStraight'
+  | 'bH'
+  | 'bV'
+  | 'bX'
+  | 'bSc'
+  | 'bRo'
+  | 'bPa'
+  | 'bMoveWall';
+
+const readInteger = (value: unknown): number | null => (
+  Number.isInteger(value) ? value as number : null
+);
 
 const DEBUG_COUNTER_NOOP = () => { };
-const ZERO_OFFSET = Object.freeze({ x: 0, y: 0 });
+const ZERO_OFFSET: Readonly<Point2D> = Object.freeze({ x: 0, y: 0 });
 const RGB_HEX_RE = /^#[0-9a-f]{6}$/i;
-const CSS_ANGLE_UNITS = ['deg', 'rad', 'turn'];
+const CSS_ANGLE_UNITS: readonly string[] = ['deg', 'rad', 'turn'];
 const IS_TETHER_DEV_RUNTIME = typeof __TETHER_DEV__ === 'boolean' ? __TETHER_DEV__ : true;
+const asDomElement = (element: ElementLike | Element | null | undefined): Element | null => (
+  element instanceof Element ? element : null
+);
 
-const parseCssFunctionArguments = (value, functionName, expectedCount = null) => {
+const parseCssFunctionArguments = (
+  value: unknown,
+  functionName: string,
+  expectedCount: number | null = null,
+): string[] | null => {
   if (typeof value !== 'string') return null;
   const trimmed = value.trim();
   const openIndex = trimmed.indexOf('(');
@@ -52,7 +329,7 @@ const parseCssFunctionArguments = (value, functionName, expectedCount = null) =>
   return args;
 };
 
-const isSignedNumberString = (value) => {
+const isSignedNumberString = (value: unknown): boolean => {
   const trimmed = String(value).trim();
   if (!trimmed) return false;
 
@@ -78,12 +355,12 @@ const isSignedNumberString = (value) => {
   return sawDigit && trimmed.at(-1) !== '.';
 };
 
-const isCssPercentageValue = (value) => {
+const isCssPercentageValue = (value: unknown): boolean => {
   const trimmed = String(value).trim();
   return trimmed.endsWith('%') && isSignedNumberString(trimmed.slice(0, -1));
 };
 
-const isCssAngleValue = (value) => {
+const isCssAngleValue = (value: unknown): boolean => {
   const trimmed = String(value).trim().toLowerCase();
   for (const unit of CSS_ANGLE_UNITS) {
     if (trimmed.endsWith(unit)) {
@@ -93,27 +370,36 @@ const isCssAngleValue = (value) => {
   return isSignedNumberString(trimmed);
 };
 
-const resolveOpaqueFunctionColor = (value, sourceName, targetName, validators) => {
+const resolveOpaqueFunctionColor = (
+  value: unknown,
+  sourceName: string,
+  targetName: string,
+  validators: Array<(value: string) => boolean>,
+): string | null => {
   const args = parseCssFunctionArguments(value, sourceName, validators.length);
   if (!args) return null;
   if (!validators.every((validator, index) => validator(args[index]))) return null;
   return `${targetName}(${args[0]}, ${args[1]}, ${args[2]})`;
 };
 
-const resolveRgbColorParts = (value) => {
+const resolveRgbColorParts = (value: unknown): [string, string, string] | null => {
   const rgbArgs = parseCssFunctionArguments(value, 'rgb', 3);
   if (rgbArgs?.every((part) => isSignedNumberString(part))) {
-    return rgbArgs;
+    return [rgbArgs[0], rgbArgs[1], rgbArgs[2]];
   }
   const rgbaArgs = parseCssFunctionArguments(value, 'rgba', 4);
   if (rgbaArgs?.slice(0, 3).every((part) => isSignedNumberString(part))) {
-    return rgbaArgs.slice(0, 3);
+    return [rgbaArgs[0], rgbaArgs[1], rgbaArgs[2]];
   }
   return null;
 };
 
-function setLegendIcons(icons, refs, iconX) {
-  const map = {
+function setLegendIcons(
+  icons: Record<string, string>,
+  refs: RendererRefs | null,
+  iconX: string,
+): void {
+  const map: Record<LegendIconKey, string> = {
     bTurn: icons['t'],
     bCW: icons['r'],
     bCCW: icons['l'],
@@ -127,12 +413,15 @@ function setLegendIcons(icons, refs, iconX) {
     bMoveWall: icons['m'],
   };
 
-  Object.keys(map).forEach((id) => {
-    if (refs[id]) refs[id].innerHTML = map[id] || '';
+  (Object.keys(map) as LegendIconKey[]).forEach((id: LegendIconKey) => {
+    const refEl = refs?.[id] || null;
+    if (refEl) refEl.innerHTML = map[id] || '';
   });
 }
 
-const createDebugCounterFnsDev = (debugCounters = null) => {
+const createDebugCounterFnsDev = (
+  debugCounters: Record<string, number> | null = null,
+): [DebugCounterFn, DebugCounterFn, DebugCounterFn, DebugCounterFn, DebugCounterFn] => {
   if (!debugCounters) {
     return [
       DEBUG_COUNTER_NOOP,
@@ -143,23 +432,23 @@ const createDebugCounterFnsDev = (debugCounters = null) => {
     ];
   }
 
-  const increment = (name, amount = 1) => {
+  const increment = (name: string, amount: number = 1): void => {
     const previous = Number(debugCounters[name]) || 0;
     debugCounters[name] = previous + amount;
   };
 
   return [
-    (amount = 1) => increment('heavyFrameRenders', amount),
-    (amount = 1) => increment('pathDraws', amount),
-    (amount = 1) => increment('incrementalCellPatches', amount),
-    (amount = 1) => increment('fullCellRebuilds', amount),
-    (amount = 1) => increment('symbolRedraws', amount),
+    (amount: number = 1) => increment('heavyFrameRenders', amount),
+    (amount: number = 1) => increment('pathDraws', amount),
+    (amount: number = 1) => increment('incrementalCellPatches', amount),
+    (amount: number = 1) => increment('fullCellRebuilds', amount),
+    (amount: number = 1) => increment('symbolRedraws', amount),
   ];
 };
 
 const createDebugCounterFns = IS_TETHER_DEV_RUNTIME
   ? createDebugCounterFnsDev
-  : () => [
+  : (): [DebugCounterFn, DebugCounterFn, DebugCounterFn, DebugCounterFn, DebugCounterFn] => [
     DEBUG_COUNTER_NOOP,
     DEBUG_COUNTER_NOOP,
     DEBUG_COUNTER_NOOP,
@@ -167,7 +456,7 @@ const createDebugCounterFns = IS_TETHER_DEV_RUNTIME
     DEBUG_COUNTER_NOOP,
   ];
 
-export function createBoardRendererCore(options = {}) {
+export function createBoardRendererCore(options: BoardRendererCoreOptions = {}) {
   const icons = options.icons || {};
   const iconX = options.iconX || '';
   const [
@@ -177,28 +466,28 @@ export function createBoardRendererCore(options = {}) {
     countFullCellRebuilds,
     countSymbolRedraws,
   ] = createDebugCounterFns(options.debugCounters || null);
-  let refs = null;
-  let gridCells = [];
-  let lastDropTargetKey = null;
-  let lastPathTipDragHoverCell = null;
-  let lastPathTipDragSelectedCell = null;
-  let boardNavMarkerEl = null;
-  let wallGhostEl = null;
-  let cachedBoardWrap = null;
+  let refs: RendererRefs | null = null;
+  let gridCells: GridCells = [];
+  let lastDropTargetKey: string | null = null;
+  let lastPathTipDragHoverCell: ElementLike | null = null;
+  let lastPathTipDragSelectedCell: ElementLike | null = null;
+  let boardNavMarkerEl: ElementLike | null = null;
+  let wallGhostEl: ElementLike | null = null;
+  let cachedBoardWrap: ElementLike | null = null;
   let activeBoardSize = { rows: 0, cols: 0 };
   let pathAnimationOffset = 0;
   let pathAnimationFrame = 0;
   let pathAnimationLastTs = 0;
-  let latestPathSnapshot = null;
-  let latestPathRefs = null;
-  let latestPathStatuses = null;
-  let latestPathStatusSets = null;
-  let latestCompletionModel = null;
-  let latestTutorialFlags = null;
-  let latestInteractionModel = null;
-  let latestMessageKind = null;
+  let latestPathSnapshot: GameSnapshot | null = null;
+  let latestPathRefs: RendererRefs | null = null;
+  let latestPathStatuses: EvaluateResult | null = null;
+  let latestPathStatusSets: StatusSets | null = null;
+  let latestCompletionModel: CompletionModel | null = null;
+  let latestTutorialFlags: TutorialFlags | null = null;
+  let latestInteractionModel: InteractionModel | null = null;
+  let latestMessageKind: string | null = null;
   let latestMessageHtml = '';
-  let pendingRenderState = null;
+  let pendingRenderState: PendingRenderState | null = null;
   const pendingRenderDirty = {
     cells: false,
     path: false,
@@ -206,12 +495,12 @@ export function createBoardRendererCore(options = {}) {
     message: false,
     interaction: false,
   };
-  let pendingPathCanvasSwap = null;
+  let pendingPathCanvasSwap: PathCanvasSwap | null = null;
   let latestPathMainFlowTravel = 0;
-  let colorParserCtx = null;
-  let reusablePathPoints = [];
-  let reusableTutorialBracketPoints = [];
-  let reusableCellViewModel = null;
+  let colorParserCtx: CanvasRenderingContext2D | null = null;
+  let reusablePathPoints: Point2D[] = [];
+  let reusableTutorialBracketPoints: Point2D[] = [];
+  let reusableCellViewModel: BoardCellViewModel | null = null;
   let resizeCanvasSignature = '';
   let lastFlowMetricCell = Number.NaN;
   let pathThemeCacheInitialized = false;
@@ -224,28 +513,28 @@ export function createBoardRendererCore(options = {}) {
   let pathThemeCornerPending = '#ffffff';
   let pathThemeCornerFill = 'rgb(11, 15, 20)';
   let pathGeometryToken = 0;
-  let cachedPathRef = null;
+  let cachedPathRef: GridPoint[] | null = null;
   let cachedPathLength = -1;
   let cachedPathHeadR = Number.NaN;
   let cachedPathHeadC = Number.NaN;
   let cachedPathTailR = Number.NaN;
   let cachedPathTailC = Number.NaN;
   let cachedPathLayoutVersion = -1;
-  let pathStartRetainedArcState = null;
-  let pathEndRetainedArcState = null;
+  let pathStartRetainedArcState: RetainedArcState | null = null;
+  let pathEndRetainedArcState: RetainedArcState | null = null;
   let pathRetainedArcTokenSeed = 0;
   let tutorialBracketSignature = '';
   let tutorialBracketGeometryToken = 0;
   let lowPowerModeEnabled = false;
-  let lowPowerFrameDelayTimer = 0;
+  let lowPowerFrameDelayTimer: ReturnType<typeof setTimeout> | 0 = 0;
   let lastPresentedFrameTimestamp = 0;
   let wallGhostOffsetLeft = 0;
   let wallGhostOffsetTop = 0;
   let lastPathRendererRecoveryAttemptMs = 0;
   let interactiveResizeActive = false;
-  let interactiveResizeTimer = 0;
-  let pendingInteractiveResizePayload = null;
-  const pathFlowMetricsCache = { cycle: 128, pulse: 64, speed: -32 };
+  let interactiveResizeTimer: ReturnType<typeof window.setTimeout> | 0 = 0;
+  let pendingInteractiveResizePayload: InteractiveResizePayload | null = null;
+  const pathFlowMetricsCache: PathFlowMetrics = { cycle: 128, pulse: 64, speed: -32 };
   const gridOffsetScratch = { x: 0, y: 0 };
   const boardNavPointScratch = { x: 0, y: 0 };
   const headOffsetScratch = { x: 0, y: 0 };
@@ -253,13 +542,13 @@ export function createBoardRendererCore(options = {}) {
   const headPointScratchB = { x: 0, y: 0 };
   const headPointScratchC = { x: 0, y: 0 };
   const keyParseScratch = { r: 0, c: 0 };
-  const EMPTY_MAP = new Map();
-  const TUTORIAL_BRACKET_COLOR_RGB = { r: 120, g: 190, b: 255 };
-  const FROZEN_PATH_GRAY_RGB = { r: 156, g: 156, b: 156 };
-  const tutorialBracketColorScratch = { r: 120, g: 190, b: 255 };
-  const pathFlowFreezeMixScratch = { mix: 1, active: false };
+  const EMPTY_MAP = new Map<string, unknown>();
+  const TUTORIAL_BRACKET_COLOR_RGB: RgbColor = { r: 120, g: 190, b: 255 };
+  const FROZEN_PATH_GRAY_RGB: RgbColor = { r: 156, g: 156, b: 156 };
+  const tutorialBracketColorScratch: RgbColor = { r: 120, g: 190, b: 255 };
+  const pathFlowFreezeMixScratch: FlowFreezeMixState = { mix: 1, active: false };
   const themeColorScratch = { r: 0, g: 0, b: 0 };
-  const pathLayoutMetrics = {
+  const pathLayoutMetrics: PathLayoutMetricsState = {
     ready: false,
     version: 0,
     offsetX: 0,
@@ -284,7 +573,7 @@ export function createBoardRendererCore(options = {}) {
     scrollX: 0,
     scrollY: 0,
   };
-  const pathFramePayload = {
+  const pathFramePayload: PathFramePayload = {
     points: [],
     geometryToken: 0,
     width: 0,
@@ -300,8 +589,8 @@ export function createBoardRendererCore(options = {}) {
     startRadius: 0,
     arrowLength: 0,
     endHalfWidth: 0,
-    mainColorRgb: null,
-    completeColorRgb: null,
+    mainColorRgb: undefined,
+    completeColorRgb: undefined,
     isCompletionSolved: false,
     completionProgress: 0,
     flowEnabled: false,
@@ -317,7 +606,7 @@ export function createBoardRendererCore(options = {}) {
     tutorialBracketGeometryToken: 0,
     tutorialBracketCellSize: 0,
     tutorialBracketPulseEnabled: false,
-    tutorialBracketColorRgb: null,
+    tutorialBracketColorRgb: undefined,
     drawTutorialBracketsInPathLayer: false,
     endArrowDirX: Number.NaN,
     endArrowDirY: Number.NaN,
@@ -352,62 +641,64 @@ export function createBoardRendererCore(options = {}) {
   const PATH_TIP_HOVER_SCALE_EPSILON = 1e-4;
   const FLOW_TRAVEL_ANGLE_TOLERANCE = 1e-4;
   const RETAINED_ARC_COVERAGE_EPSILON_PX = 0.5;
-  const arrivalOffsetScratchA = {
+  const arrivalOffsetScratchA: TipArrivalOffsetState = {
     x: 0,
     y: 0,
-    active: false,
-    remain: 1,
-    progress: 0,
-    linearRemain: 1,
-    linearProgress: 0,
-  };
-  const arrivalOffsetScratchB = {
-    x: 0,
-    y: 0,
-    active: false,
-    remain: 1,
-    progress: 0,
-    linearRemain: 1,
-    linearProgress: 0,
-  };
-  let reusableArrivalPathPoints = [];
-  const startPinPresenceScaleScratch = {
-    scale: 1,
     active: false,
     mode: 'none',
+    remain: 1,
+    progress: 0,
+    linearRemain: 1,
+    linearProgress: 0,
+  };
+  const arrivalOffsetScratchB: TipArrivalOffsetState = {
+    x: 0,
+    y: 0,
+    active: false,
+    mode: 'none',
+    remain: 1,
+    progress: 0,
+    linearRemain: 1,
+    linearProgress: 0,
+  };
+  let reusableArrivalPathPoints: Point2D[] = [];
+  const startPinPresenceScaleScratch: StartPinPresenceScaleState = {
+    scale: 1,
+    active: false,
+    mode: 'none' as const,
     anchorR: Number.NaN,
     anchorC: Number.NaN,
   };
-  const flowVisibilityMixScratch = { mix: 1, active: false };
-  const pathTipHoverScaleScratch = { startScale: 1, endScale: 1, active: false };
+  const flowVisibilityMixScratch: FlowFreezeMixState = { mix: 1, active: false };
+  const pathTipHoverScaleScratch: TipHoverScalePair = { startScale: 1, endScale: 1, active: false };
   const reusableStartPinPresencePoint = { x: 0, y: 0 };
   const reusableStartPinPresencePoints = [reusableStartPinPresencePoint];
   const frozenMainColorScratch = { r: 255, g: 255, b: 255 };
   const frozenCompleteColorScratch = { r: 34, g: 197, b: 94 };
-  const reverseTipScaleScratch = { inScale: 1, outScale: 0, active: false };
-  const reverseGradientBlendScratch = {
+  const reverseTipScaleScratch: ReverseTipScaleState = { inScale: 1, outScale: 0, active: false };
+  const reverseGradientBlendScratch: ReverseGradientBlendState = {
     blend: 1,
     fromFlowOffset: 0,
     toFlowOffset: 0,
     fromTravelSpan: 0,
     active: false,
   };
-  const endArrowDirectionScratch = { x: Number.NaN, y: Number.NaN, active: false };
-  const startFlowDirectionScratch = { x: Number.NaN, y: Number.NaN, active: false };
-  const retainedArcRenderScratchA = {
+  const endArrowDirectionScratch: DirectionState = { x: Number.NaN, y: Number.NaN, active: false };
+  const startFlowDirectionScratch: DirectionState = { x: Number.NaN, y: Number.NaN, active: false };
+  const retainedArcRenderScratchA: RetainedArcRenderResult = {
     points: [],
     geometryToken: Number.NaN,
     active: false,
   };
-  const retainedArcRenderScratchB = {
+  const retainedArcRenderScratchB: RetainedArcRenderResult = {
     points: [],
     geometryToken: Number.NaN,
     active: false,
   };
-  let reusableStartRetainedArcPoints = [];
-  let reusableEndRetainedArcPoints = [];
-  const pathStartTipHoverScaleState = { fromScale: 1, toScale: 1, startTimeMs: Number.NaN };
-  const pathEndTipHoverScaleState = { fromScale: 1, toScale: 1, startTimeMs: Number.NaN };
+  let reusableStartRetainedArcPoints: Point2D[] = [];
+  let reusableEndRetainedArcPoints: Point2D[] = [];
+  const pathStartTipHoverScaleState: TipHoverScaleState = { fromScale: 1, toScale: 1, startTimeMs: Number.NaN };
+  const pathEndTipHoverScaleState: TipHoverScaleState = { fromScale: 1, toScale: 1, startTimeMs: Number.NaN };
 
   const clearPendingRenderDirty = () => {
     pendingRenderDirty.cells = false;
@@ -443,21 +734,28 @@ export function createBoardRendererCore(options = {}) {
     lowPowerFrameDelayTimer = 0;
   };
 
-  const easeOutCubic = (unit) => {
+  const easeOutCubic = (unit: number) => {
     const t = clampUnit(unit);
     const inv = 1 - t;
     return 1 - (inv * inv * inv);
   };
 
-  const mixRgb = (from, to, mixUnit, out = null) => {
+  const mixRgb = (
+    from: RgbColor | null | undefined,
+    to: RgbColor | null | undefined,
+    mixUnit: number,
+    out: RgbColor | null = null,
+  ): RgbColor => {
     const unit = clampUnit(mixUnit);
     const target = out || { r: 0, g: 0, b: 0 };
-    const fromR = Number.isFinite(Number(from?.r)) ? Number(from.r) : 0;
-    const fromG = Number.isFinite(Number(from?.g)) ? Number(from.g) : 0;
-    const fromB = Number.isFinite(Number(from?.b)) ? Number(from.b) : 0;
-    const toR = Number.isFinite(Number(to?.r)) ? Number(to.r) : 0;
-    const toG = Number.isFinite(Number(to?.g)) ? Number(to.g) : 0;
-    const toB = Number.isFinite(Number(to?.b)) ? Number(to.b) : 0;
+    const safeFrom = from || null;
+    const safeTo = to || null;
+    const fromR = Number.isFinite(Number(safeFrom?.r)) ? Number(safeFrom?.r) : 0;
+    const fromG = Number.isFinite(Number(safeFrom?.g)) ? Number(safeFrom?.g) : 0;
+    const fromB = Number.isFinite(Number(safeFrom?.b)) ? Number(safeFrom?.b) : 0;
+    const toR = Number.isFinite(Number(safeTo?.r)) ? Number(safeTo?.r) : 0;
+    const toG = Number.isFinite(Number(safeTo?.g)) ? Number(safeTo?.g) : 0;
+    const toB = Number.isFinite(Number(safeTo?.b)) ? Number(safeTo?.b) : 0;
     target.r = Math.max(0, Math.min(255, Math.round(fromR + ((toR - fromR) * unit))));
     target.g = Math.max(0, Math.min(255, Math.round(fromG + ((toG - fromG) * unit))));
     target.b = Math.max(0, Math.min(255, Math.round(fromB + ((toB - fromB) * unit))));
@@ -465,11 +763,11 @@ export function createBoardRendererCore(options = {}) {
   };
 
   const resolvePathFlowFreezeMix = (
-    nowMs = getNowMs(),
+    nowMs: number = getNowMs(),
     out = pathFlowFreezeMixScratch,
   ) => pathAnimationEngine.resolvePathFlowFreezeMix(nowMs, out);
 
-  const syncPathFlowFreezeTarget = (isFrozen, nowMs = getNowMs()) => (
+  const syncPathFlowFreezeTarget = (isFrozen: boolean, nowMs: number = getNowMs()) => (
     pathAnimationEngine.syncPathFlowFreezeTarget(isFrozen, nowMs)
   );
 
@@ -479,13 +777,13 @@ export function createBoardRendererCore(options = {}) {
   };
 
   const recordPathTransitionCompensation = (
-    previousSnapshot,
-    nextSnapshot,
-    refs = null,
+    previousSnapshot: GameSnapshot,
+    nextSnapshot: GameSnapshot,
+    refs: RendererRefs | null = null,
   ) => transitionCompensationBuffer.record(previousSnapshot, nextSnapshot, refs);
 
   const consumePathTransitionCompensation = (
-    path,
+    path: MaybePath,
     flowCycle = PATH_FLOW_CYCLE,
   ) => {
     const result = transitionCompensationBuffer.consume(path, pathAnimationOffset, flowCycle);
@@ -517,23 +815,23 @@ export function createBoardRendererCore(options = {}) {
   };
 
   const updatePathEndArrowRotateState = (
-    prevPath,
-    nextPath,
-    nowMs = getNowMs(),
+    prevPath: MaybePath,
+    nextPath: MaybePath,
+    nowMs: number = getNowMs(),
   ) => pathAnimationEngine.updatePathEndArrowRotateState(prevPath, nextPath, nowMs);
 
   const resolvePathEndArrowDirection = (
-    path,
-    nowMs = getNowMs(),
+    path: MaybePath,
+    nowMs: number = getNowMs(),
     out = endArrowDirectionScratch,
   ) => pathAnimationEngine.resolvePathEndArrowDirection(path, nowMs, out);
 
   const hasActivePathEndArrowRotate = (
-    path,
-    nowMs = getNowMs(),
+    path: MaybePath,
+    nowMs: number = getNowMs(),
   ) => pathAnimationEngine.hasActivePathEndArrowRotate(path, nowMs);
 
-  const applyPathEndArrowDirectionToPayload = (path, nowMs = getNowMs()) => {
+  const applyPathEndArrowDirectionToPayload = (path: MaybePath, nowMs: number = getNowMs()) => {
     const direction = resolvePathEndArrowDirection(path, nowMs, endArrowDirectionScratch);
     pathFramePayload.endArrowDirX = direction.active ? direction.x : Number.NaN;
     pathFramePayload.endArrowDirY = direction.active ? direction.y : Number.NaN;
@@ -541,39 +839,39 @@ export function createBoardRendererCore(options = {}) {
   };
 
   const updatePathStartFlowRotateState = (
-    prevPath,
-    nextPath,
-    nowMs = getNowMs(),
+    prevPath: MaybePath,
+    nextPath: MaybePath,
+    nowMs: number = getNowMs(),
   ) => pathAnimationEngine.updatePathStartFlowRotateState(prevPath, nextPath, nowMs);
 
   const resolvePathStartFlowDirection = (
-    path,
-    nowMs = getNowMs(),
+    path: MaybePath,
+    nowMs: number = getNowMs(),
     out = startFlowDirectionScratch,
   ) => pathAnimationEngine.resolvePathStartFlowDirection(path, nowMs, out);
 
   const hasActivePathStartFlowRotate = (
-    path,
-    nowMs = getNowMs(),
+    path: MaybePath,
+    nowMs: number = getNowMs(),
   ) => pathAnimationEngine.hasActivePathStartFlowRotate(path, nowMs);
 
-  const applyPathStartFlowDirectionToPayload = (path, nowMs = getNowMs()) => {
+  const applyPathStartFlowDirectionToPayload = (path: MaybePath, nowMs: number = getNowMs()) => {
     const direction = resolvePathStartFlowDirection(path, nowMs, startFlowDirectionScratch);
     pathFramePayload.startFlowDirX = direction.active ? direction.x : Number.NaN;
     pathFramePayload.startFlowDirY = direction.active ? direction.y : Number.NaN;
     return direction.active;
   };
 
-  const clearSinglePathRetainedArcState = (side) => {
+  const clearSinglePathRetainedArcState = (side: 'start' | 'end') => {
     if (side === 'start') clearPathStartRetainedArcState();
     else if (side === 'end') clearPathEndRetainedArcState();
   };
 
   const updateSinglePathRetainedArcState = (
-    side,
-    prevPath,
-    nextPath,
-    nowMs = getNowMs(),
+    side: 'start' | 'end',
+    prevPath: MaybePath,
+    nextPath: MaybePath,
+    nowMs: number = getNowMs(),
     pathChanged = true,
   ) => {
     if (side !== 'start' && side !== 'end') return;
@@ -626,9 +924,9 @@ export function createBoardRendererCore(options = {}) {
   };
 
   const updatePathRetainedArcStates = (
-    prevPath,
-    nextPath,
-    nowMs = getNowMs(),
+    prevPath: MaybePath,
+    nextPath: MaybePath,
+    nowMs: number = getNowMs(),
   ) => {
     if (isReducedMotionPreferred()) {
       clearPathRetainedArcStates();
@@ -641,7 +939,7 @@ export function createBoardRendererCore(options = {}) {
     updateSinglePathRetainedArcState('end', prevPath, nextPath, nowMs, pathChanged);
   };
 
-  const isRetainedArcStateCompatibleWithPath = (state, path) => {
+  const isRetainedArcStateCompatibleWithPath = (state: RetainedArcState | null, path: MaybePath): boolean => {
     if (!state || !Array.isArray(path) || path.length <= 0) return false;
     if (state.side === 'start') {
       const head = path[0];
@@ -651,7 +949,7 @@ export function createBoardRendererCore(options = {}) {
     return Boolean(tail && tail.r === state.cornerR && tail.c === state.cornerC);
   };
 
-  const getCellPointFromLayout = (r, c, out = headPointScratchA) => {
+  const getCellPointFromLayout = (r: number, c: number, out = headPointScratchA) => {
     if (!pathLayoutMetrics.ready) return null;
     const row = Number(r);
     const col = Number(c);
@@ -670,11 +968,11 @@ export function createBoardRendererCore(options = {}) {
     return out;
   };
 
-  const clearArcPointPool = (points) => {
+  const clearArcPointPool = (points: Point2D[]) => {
     if (Array.isArray(points)) points.length = 0;
   };
 
-  const ensureArcPointPoolLength = (points, length) => {
+  const ensureArcPointPoolLength = (points: Point2D[], length: number) => {
     if (!Array.isArray(points)) return;
     if (points.length < length) {
       for (let i = points.length; i < length; i++) {
@@ -685,11 +983,11 @@ export function createBoardRendererCore(options = {}) {
   };
 
   const buildRetainedArcPolyline = (
-    state,
-    width,
-    outPoints,
+    state: RetainedArcState | null,
+    width: number,
+    outPoints: Point2D[],
     settleUnit = 0,
-  ) => {
+  ): Point2D[] | null => {
     clearArcPointPool(outPoints);
     if (!state || width <= 0) return null;
     const p0 = getCellPointFromLayout(state.arcInR, state.arcInC, headPointScratchA);
@@ -748,9 +1046,9 @@ export function createBoardRendererCore(options = {}) {
   };
 
   const getMaxDistancePointToPoints = (
-    px,
-    py,
-    points,
+    px: number,
+    py: number,
+    points: Point2D[],
   ) => {
     if (!Array.isArray(points) || points.length <= 0) return Infinity;
     let maxDistance = 0;
@@ -764,22 +1062,26 @@ export function createBoardRendererCore(options = {}) {
     return maxDistance;
   };
 
-  const resetRetainedArcRenderResult = (out) => {
+  const resetRetainedArcRenderResult = (out: RetainedArcRenderResult): RetainedArcRenderResult => {
     out.points = [];
     out.geometryToken = Number.NaN;
     out.active = false;
     return out;
   };
 
-  const getRetainedArcStateForSide = (side) => (
+  const getRetainedArcStateForSide = (side: 'start' | 'end') => (
     side === 'start' ? pathStartRetainedArcState : pathEndRetainedArcState
   );
 
-  const getRetainedArcPointPool = (side) => (
+  const getRetainedArcPointPool = (side: 'start' | 'end') => (
     side === 'start' ? reusableStartRetainedArcPoints : reusableEndRetainedArcPoints
   );
 
-  const syncRetainedArcSettleStartTime = (state, tipMotion, nowMs) => {
+  const syncRetainedArcSettleStartTime = (
+    state: RetainedArcState,
+    tipMotion: TipMotion | null | undefined,
+    nowMs: number,
+  ): void => {
     if (tipMotion?.moving) {
       state.settleStartTimeMs = Number.NaN;
       return;
@@ -789,7 +1091,7 @@ export function createBoardRendererCore(options = {}) {
     }
   };
 
-  const getRetainedArcAnimationUnits = (state, nowMs) => ({
+  const getRetainedArcAnimationUnits = (state: RetainedArcState, nowMs: number) => ({
     settleUnit: Number.isFinite(state.settleStartTimeMs)
       ? clampUnit((nowMs - state.settleStartTimeMs) / PATH_RETAINED_ARC_SETTLE_DURATION_MS)
       : 0,
@@ -798,13 +1100,20 @@ export function createBoardRendererCore(options = {}) {
       : 0,
   });
 
-  const isRetainedArcFullyCovered = (tipMotion, coverageRadius, width, arcPoints) => {
-    if (!Number.isFinite(tipMotion?.centerX) || !Number.isFinite(tipMotion?.centerY) || coverageRadius <= 0) {
+  const isRetainedArcFullyCovered = (
+    tipMotion: TipMotion | null | undefined,
+    coverageRadius: number,
+    width: number,
+    arcPoints: Point2D[],
+  ): boolean => {
+    const centerX = tipMotion?.centerX;
+    const centerY = tipMotion?.centerY;
+    if (!Number.isFinite(centerX) || !Number.isFinite(centerY) || coverageRadius <= 0) {
       return false;
     }
     const maxCenterlineDistance = getMaxDistancePointToPoints(
-      tipMotion.centerX,
-      tipMotion.centerY,
+      centerX as number,
+      centerY as number,
       arcPoints,
     );
     const fullyCoveredDistance = coverageRadius - (width * 0.5) - RETAINED_ARC_COVERAGE_EPSILON_PX;
@@ -812,14 +1121,14 @@ export function createBoardRendererCore(options = {}) {
   };
 
   const resolveSinglePathRetainedArc = (
-    side,
-    path,
-    width,
-    coverageRadius,
-    nowMs,
-    tipMotion,
-    out,
-  ) => {
+    side: 'start' | 'end',
+    path: MaybePath,
+    width: number,
+    coverageRadius: number,
+    nowMs: number,
+    tipMotion: TipMotion | null | undefined,
+    out: RetainedArcRenderResult,
+  ): RetainedArcRenderResult => {
     resetRetainedArcRenderResult(out);
 
     if (isReducedMotionPreferred()) {
@@ -864,7 +1173,7 @@ export function createBoardRendererCore(options = {}) {
     return out;
   };
 
-  const hasActivePathRetainedArc = (path) => {
+  const hasActivePathRetainedArc = (path: MaybePath) => {
     if (isReducedMotionPreferred()) {
       clearPathRetainedArcStates();
       return false;
@@ -879,11 +1188,11 @@ export function createBoardRendererCore(options = {}) {
   };
 
   const updatePathTipArrivalStates = (
-    prevPath,
-    nextPath,
-    cellSize,
-    cellStep,
-    nowMs = getNowMs(),
+    prevPath: MaybePath,
+    nextPath: MaybePath,
+    cellSize: number,
+    cellStep: number,
+    nowMs: number = getNowMs(),
   ) => pathAnimationEngine.updatePathTipArrivalStates(
     prevPath,
     nextPath,
@@ -893,54 +1202,62 @@ export function createBoardRendererCore(options = {}) {
     latestInteractionModel?.pathTipArrivalHint || null,
   );
 
-  const resolvePathTipArrivalOffset = (side, tip, nowMs, out) => (
+  const resolvePathTipArrivalOffset = (
+    side: 'start' | 'end',
+    tip: GridPoint | null | undefined,
+    nowMs: number,
+    out: TipArrivalOffsetState,
+  ): TipArrivalOffsetState => (
     pathAnimationEngine.resolvePathTipArrivalOffset(side, tip, nowMs, out)
   );
 
-  const hasActivePathTipArrivals = (nowMs = getNowMs()) => (
+  const hasActivePathTipArrivals = (nowMs: number = getNowMs()) => (
     pathAnimationEngine.hasActivePathTipArrivals(nowMs)
   );
 
   const updatePathFlowVisibilityState = (
-    prevPath,
-    nextPath,
-    nowMs = getNowMs(),
+    prevPath: MaybePath,
+    nextPath: MaybePath,
+    nowMs: number = getNowMs(),
   ) => pathAnimationEngine.updatePathFlowVisibilityState(prevPath, nextPath, nowMs);
 
   const resolvePathFlowVisibilityMix = (
-    path,
-    nowMs = getNowMs(),
+    path: MaybePath,
+    nowMs: number = getNowMs(),
     out = flowVisibilityMixScratch,
   ) => pathAnimationEngine.resolvePathFlowVisibilityMix(path, nowMs, out);
 
-  const hasActivePathFlowVisibility = (path, nowMs = getNowMs()) => (
+  const hasActivePathFlowVisibility = (path: MaybePath, nowMs: number = getNowMs()) => (
     pathAnimationEngine.hasActivePathFlowVisibility(path, nowMs, flowVisibilityMixScratch)
   );
 
   const updatePathStartPinPresenceState = (
-    prevPath,
-    nextPath,
-    nowMs = getNowMs(),
+    prevPath: MaybePath,
+    nextPath: MaybePath,
+    nowMs: number = getNowMs(),
   ) => pathAnimationEngine.updatePathStartPinPresenceState(prevPath, nextPath, nowMs);
 
   const resolvePathStartPinPresenceScale = (
-    path,
-    nowMs = getNowMs(),
+    path: MaybePath,
+    nowMs: number = getNowMs(),
     out = startPinPresenceScaleScratch,
   ) => pathAnimationEngine.resolvePathStartPinPresenceScale(path, nowMs, out);
 
-  const hasActivePathStartPinPresence = (path, nowMs = getNowMs()) => (
+  const hasActivePathStartPinPresence = (path: MaybePath, nowMs: number = getNowMs()) => (
     pathAnimationEngine.hasActivePathStartPinPresence(path, nowMs, startPinPresenceScaleScratch)
   );
 
-  const applyPathStartPinPresenceToPayload = (path, nowMs = getNowMs()) => {
+  const applyPathStartPinPresenceToPayload = (path: MaybePath, nowMs: number = getNowMs()) => {
     const presence = resolvePathStartPinPresenceScale(path, nowMs, startPinPresenceScaleScratch);
     const currentStartRadius = Number(pathFramePayload.startRadius) || 0;
     pathFramePayload.startRadius = currentStartRadius * Math.max(0, presence.scale);
     return presence.active;
   };
 
-  const resolvePathTipHoverScaleValue = (state, nowMs = getNowMs()) => {
+  const resolvePathTipHoverScaleValue = (
+    state: TipHoverScaleState,
+    nowMs: number = getNowMs(),
+  ): TipHoverScaleResolvedState => {
     const fromScale = Number.isFinite(state?.fromScale) ? state.fromScale : 1;
     const toScale = Number.isFinite(state?.toScale) ? state.toScale : 1;
     const startTimeMs = Number(state?.startTimeMs);
@@ -974,7 +1291,11 @@ export function createBoardRendererCore(options = {}) {
     return { scale, active: true };
   };
 
-  const updatePathTipHoverScaleTarget = (state, targetScale, nowMs = getNowMs()) => {
+  const updatePathTipHoverScaleTarget = (
+    state: TipHoverScaleState,
+    targetScale: number,
+    nowMs: number = getNowMs(),
+  ): void => {
     const safeTarget = Number.isFinite(targetScale) && targetScale > 0 ? targetScale : 1;
     if (Math.abs(safeTarget - (Number(state?.toScale) || 1)) <= PATH_TIP_HOVER_SCALE_EPSILON) return;
     const resolved = resolvePathTipHoverScaleValue(state, nowMs);
@@ -983,14 +1304,14 @@ export function createBoardRendererCore(options = {}) {
     state.startTimeMs = nowMs;
   };
 
-  const isCellCurrentlyHovered = (cell) => Boolean(cell?.matches?.(':hover'));
+  const isCellCurrentlyHovered = (cell: ElementLike | null | undefined): boolean => Boolean(cell?.matches?.(':hover'));
 
   const resolvePathTipHoverScales = (
-    path,
-    interactionModel = latestInteractionModel,
-    nowMs = getNowMs(),
-    out = pathTipHoverScaleScratch,
-  ) => {
+    path: MaybePath,
+    interactionModel: InteractionModel | null = latestInteractionModel,
+    nowMs: number = getNowMs(),
+    out: TipHoverScalePair = pathTipHoverScaleScratch,
+  ): TipHoverScalePair => {
     out.startScale = 1;
     out.endScale = 1;
     out.active = false;
@@ -1022,14 +1343,14 @@ export function createBoardRendererCore(options = {}) {
   };
 
   const hasActivePathTipHoverScale = (
-    path,
-    interactionModel = latestInteractionModel,
-    nowMs = getNowMs(),
+    path: MaybePath,
+    interactionModel: InteractionModel | null = latestInteractionModel,
+    nowMs: number = getNowMs(),
   ) => resolvePathTipHoverScales(path, interactionModel, nowMs, pathTipHoverScaleScratch).active;
 
   const resolveStartPinDisappearRenderPoints = (
-    path,
-    nowMs = getNowMs(),
+    path: MaybePath,
+    nowMs: number = getNowMs(),
   ) => {
     const presence = resolvePathStartPinPresenceScale(path, nowMs, startPinPresenceScaleScratch);
     if (!presence.active || presence.mode !== 'disappear') return null;
@@ -1052,12 +1373,12 @@ export function createBoardRendererCore(options = {}) {
   };
 
   const beginPathReverseGradientBlend = (
-    path,
-    fromFlowOffset,
-    fromTravelSpan,
-    toFlowOffset,
+    path: MaybePath,
+    fromFlowOffset: number,
+    fromTravelSpan: number,
+    toFlowOffset: number,
     cycle = PATH_FLOW_CYCLE,
-    nowMs = getNowMs(),
+    nowMs: number = getNowMs(),
   ) => pathAnimationEngine.beginPathReverseGradientBlend(
     path,
     fromFlowOffset,
@@ -1068,25 +1389,25 @@ export function createBoardRendererCore(options = {}) {
   );
 
   const resolvePathReverseGradientBlend = (
-    path,
+    path: MaybePath,
     cycle = PATH_FLOW_CYCLE,
-    nowMs = getNowMs(),
+    nowMs: number = getNowMs(),
     out = reverseGradientBlendScratch,
   ) => pathAnimationEngine.resolvePathReverseGradientBlend(path, cycle, nowMs, out);
 
   const hasActivePathReverseGradientBlend = (
-    path,
+    path: MaybePath,
     cycle = PATH_FLOW_CYCLE,
-    nowMs = getNowMs(),
+    nowMs: number = getNowMs(),
   ) => pathAnimationEngine.hasActivePathReverseGradientBlend(path, cycle, nowMs);
 
   const applyPathReverseGradientBlendToPayload = (
-    path,
+    path: MaybePath,
     cycle = PATH_FLOW_CYCLE,
-    nowMs = getNowMs(),
+    nowMs: number = getNowMs(),
   ) => {
     const reverseBlend = resolvePathReverseGradientBlend(path, cycle, nowMs, reverseGradientBlendScratch);
-    const currentFlowOffset = normalizeFlowOffset(pathFramePayload.flowOffset, cycle);
+    const currentFlowOffset = normalizeFlowOffset(pathFramePayload.flowOffset || 0, cycle);
     const reverseFromFlowOffset = reverseBlend.active
       ? normalizeFlowOffset(
         reverseBlend.fromFlowOffset + reverseBlend.toFlowOffset - currentFlowOffset,
@@ -1101,19 +1422,19 @@ export function createBoardRendererCore(options = {}) {
     return reverseBlend.active;
   };
 
-  const updatePathReverseTipSwapState = (prevPath, nextPath, nowMs = getNowMs()) => (
+  const updatePathReverseTipSwapState = (prevPath: MaybePath, nextPath: MaybePath, nowMs: number = getNowMs()) => (
     pathAnimationEngine.updatePathReverseTipSwapState(prevPath, nextPath, nowMs)
   );
 
-  const resolvePathReverseTipSwapScale = (path, nowMs = getNowMs(), out = reverseTipScaleScratch) => (
+  const resolvePathReverseTipSwapScale = (path: MaybePath, nowMs: number = getNowMs(), out = reverseTipScaleScratch) => (
     pathAnimationEngine.resolvePathReverseTipSwapScale(path, nowMs, out)
   );
 
-  const hasActivePathReverseTipSwap = (path, nowMs = getNowMs()) => (
+  const hasActivePathReverseTipSwap = (path: MaybePath, nowMs: number = getNowMs()) => (
     pathAnimationEngine.hasActivePathReverseTipSwap(path, nowMs)
   );
 
-  const applyPathReverseTipSwapToPayload = (path, nowMs = getNowMs()) => {
+  const applyPathReverseTipSwapToPayload = (path: MaybePath, nowMs: number = getNowMs()) => {
     const reverseTipScale = resolvePathReverseTipSwapScale(path, nowMs, reverseTipScaleScratch);
     const inScale = reverseTipScale.inScale;
     const outScale = reverseTipScale.outScale;
@@ -1130,12 +1451,12 @@ export function createBoardRendererCore(options = {}) {
   };
 
   const buildPathRenderPointsResult = (
-    points,
-    geometryToken,
-    retainedArcs,
+    points: Point2D[],
+    geometryToken: number,
+    retainedArcs: RetainedArcRenderData,
     flowTravelCompensation = 0,
     segmentRetractTipScale = 1,
-  ) => ({
+  ): PathRenderPointsResult => ({
     points,
     geometryToken,
     flowTravelCompensation,
@@ -1144,14 +1465,14 @@ export function createBoardRendererCore(options = {}) {
   });
 
   const resolveRetainedArcRenderData = (
-    path,
-    resolvedWidth,
-    startCoverageRadius,
-    endCoverageRadius,
-    nowMs,
-    startTipMotion = null,
-    endTipMotion = null,
-  ) => {
+    path: MaybePath,
+    resolvedWidth: number,
+    startCoverageRadius: number,
+    endCoverageRadius: number,
+    nowMs: number,
+    startTipMotion: TipMotion | null = null,
+    endTipMotion: TipMotion | null = null,
+  ): RetainedArcRenderData => {
     const startArc = resolveSinglePathRetainedArc(
       'start',
       path,
@@ -1179,12 +1500,12 @@ export function createBoardRendererCore(options = {}) {
   };
 
   const resolveFallbackPathRenderPoints = (
-    path,
-    pathLength,
-    nowMs,
-    resolvedWidth,
-    startCoverageRadius,
-    endCoverageRadius,
+    path: MaybePath,
+    pathLength: number,
+    nowMs: number,
+    resolvedWidth: number,
+    startCoverageRadius: number,
+    endCoverageRadius: number,
   ) => {
     const retainedArcs = resolveRetainedArcRenderData(
       path,
@@ -1202,7 +1523,12 @@ export function createBoardRendererCore(options = {}) {
     return buildPathRenderPointsResult(reusablePathPoints, pathGeometryToken, retainedArcs);
   };
 
-  const resolveTipCenterCoordinate = (targetPoint, axis, offset, hasRetract) => {
+  const resolveTipCenterCoordinate = (
+    targetPoint: Point2D | null | undefined,
+    axis: 'x' | 'y',
+    offset: TipArrivalOffsetState,
+    hasRetract: boolean,
+  ): number => {
     if (!targetPoint) return Number.NaN;
     const baseValue = Number(targetPoint?.[axis]);
     if (!Number.isFinite(baseValue)) return Number.NaN;
@@ -1210,7 +1536,7 @@ export function createBoardRendererCore(options = {}) {
     return baseValue + delta;
   };
 
-  const ensureArrivalPathPointPoolLength = (length) => {
+  const ensureArrivalPathPointPoolLength = (length: number) => {
     if (reusableArrivalPathPoints.length < length) {
       for (let i = reusableArrivalPathPoints.length; i < length; i++) {
         reusableArrivalPathPoints.push({ x: 0, y: 0 });
@@ -1220,12 +1546,12 @@ export function createBoardRendererCore(options = {}) {
   };
 
   const buildArrivalPathRenderPoints = (
-    pathLength,
-    startOffset,
-    endOffset,
-    startHasRetract,
-    endHasRetract,
-  ) => {
+    pathLength: number,
+    startOffset: TipArrivalOffsetState,
+    endOffset: TipArrivalOffsetState,
+    startHasRetract: boolean,
+    endHasRetract: boolean,
+  ): Point2D[] => {
     const renderLength = pathLength + (startHasRetract ? 1 : 0) + (endHasRetract ? 1 : 0);
     ensureArrivalPathPointPoolLength(renderLength);
     let writeIndex = 0;
@@ -1265,10 +1591,10 @@ export function createBoardRendererCore(options = {}) {
   };
 
   const resolvePathFlowTravelCompensation = (
-    pathLength,
-    startOffset,
-    resolvedWidth,
-  ) => {
+    pathLength: number,
+    startOffset: TipArrivalOffsetState,
+    resolvedWidth: number,
+  ): number => {
     if (pathLength <= 1 || !startOffset.active) return 0;
     const baseTravel = getPathMainTravelFromPoints(reusablePathPoints, resolvedWidth);
     const renderTravel = getPathMainTravelFromPoints(reusableArrivalPathPoints, resolvedWidth);
@@ -1277,12 +1603,12 @@ export function createBoardRendererCore(options = {}) {
   };
 
   const resolvePathSegmentRetractTipScale = (
-    pathLength,
-    startHasRetract,
-    endHasRetract,
-    startOffset,
-    endOffset,
-  ) => {
+    pathLength: number,
+    startHasRetract: boolean,
+    endHasRetract: boolean,
+    startOffset: TipArrivalOffsetState,
+    endOffset: TipArrivalOffsetState,
+  ): number => {
     if (pathLength !== 1) return 1;
     let segmentRetractTipScale = 1;
     if (startHasRetract) {
@@ -1301,12 +1627,12 @@ export function createBoardRendererCore(options = {}) {
   };
 
   const getPathRenderPointsForFrame = (
-    path,
-    nowMs = getNowMs(),
-    flowWidth = pathFramePayload.width,
-    startRadius = pathFramePayload.startRadius,
-    endHalfWidth = pathFramePayload.endHalfWidth,
-  ) => {
+    path: MaybePath,
+    nowMs: number = getNowMs(),
+    flowWidth: number | undefined = pathFramePayload.width,
+    startRadius: number | undefined = pathFramePayload.startRadius,
+    endHalfWidth: number | undefined = pathFramePayload.endHalfWidth,
+  ): PathRenderPointsResult => {
     if (isReducedMotionPreferred()) {
       pathAnimationEngine.resetTransitionState({ preserveFlowFreeze: true });
       clearPathRetainedArcStates();
@@ -1319,7 +1645,7 @@ export function createBoardRendererCore(options = {}) {
     }
 
     const pathLength = Array.isArray(path) ? path.length : 0;
-    const resolvedWidth = Number.isFinite(flowWidth) && flowWidth > 0
+    const resolvedWidth = typeof flowWidth === 'number' && Number.isFinite(flowWidth) && flowWidth > 0
       ? flowWidth
       : Math.max(1, Number(pathFramePayload.width) || 1);
     const startCoverageRadius = Math.max(0, Number(startRadius) || 0);
@@ -1420,7 +1746,7 @@ export function createBoardRendererCore(options = {}) {
     return scaledTimeAccumulatorMs;
   };
 
-  const getCompletionProgress = (completionModel = latestCompletionModel) => {
+  const getCompletionProgress = (completionModel: CompletionModel | null = latestCompletionModel) => {
     if (!completionModel?.isSolved) return 0;
     if (!completionModel.isCompleting) return 1;
 
@@ -1433,10 +1759,14 @@ export function createBoardRendererCore(options = {}) {
     return clampUnit(elapsedMs / durationMs);
   };
 
-  const getPathFlowMetrics = (refs = latestPathRefs, out = null, cellSize = null) => {
-    const cell = Number.isFinite(cellSize) && cellSize > 0
+  const getPathFlowMetrics = (
+    refs: RendererRefs | null = latestPathRefs,
+    out: PathFlowMetrics | null = null,
+    cellSize: number | null = null,
+  ): PathFlowMetrics => {
+    const cell = typeof cellSize === 'number' && Number.isFinite(cellSize) && cellSize > 0
       ? cellSize
-      : getCellSize(refs?.gridEl);
+      : getCellSize(asDomElement(refs?.gridEl));
     const scale = Number.isFinite(cell) && cell > 0
       ? cell / PATH_FLOW_BASE_CELL
       : 1;
@@ -1453,12 +1783,12 @@ export function createBoardRendererCore(options = {}) {
   };
 
   const populatePathSegmentMetrics = (
-    points,
-    segmentCount,
-    segmentLengths,
-    segmentUx,
-    segmentUy,
-  ) => {
+    points: Point2D[],
+    segmentCount: number,
+    segmentLengths: number[],
+    segmentUx: number[],
+    segmentUy: number[],
+  ): void => {
     for (let i = 0; i < segmentCount; i++) {
       const start = points[i];
       const end = points[i + 1];
@@ -1485,14 +1815,14 @@ export function createBoardRendererCore(options = {}) {
   };
 
   const populatePathCornerMetrics = (
-    pointCount,
-    cornerRadius,
-    segmentLengths,
-    segmentUx,
-    segmentUy,
-    cornerTangents,
-    cornerArcs,
-  ) => {
+    pointCount: number,
+    cornerRadius: number,
+    segmentLengths: number[],
+    segmentUx: number[],
+    segmentUy: number[],
+    cornerTangents: number[],
+    cornerArcs: number[],
+  ): void => {
     for (let i = 1; i < pointCount - 1; i++) {
       const inLen = segmentLengths[i - 1];
       const outLen = segmentLengths[i];
@@ -1521,11 +1851,15 @@ export function createBoardRendererCore(options = {}) {
     }
   };
 
-  const getPathMainTravelFromPoints = (points, flowWidth, maxSegments = null) => {
+  const getPathMainTravelFromPoints = (
+    points: Point2D[],
+    flowWidth: number | null | undefined,
+    maxSegments: number | null = null,
+  ): number => {
     const pointCount = Array.isArray(points) ? points.length : 0;
     if (pointCount < 2) return 0;
 
-    const width = Number.isFinite(flowWidth) && flowWidth > 0 ? flowWidth : 1;
+    const width = typeof flowWidth === 'number' && Number.isFinite(flowWidth) && flowWidth > 0 ? flowWidth : 1;
     const cornerRadius = width * 0.5;
     const segmentCount = pointCount - 1;
     const segmentLengths = new Array(segmentCount).fill(0);
@@ -1545,7 +1879,7 @@ export function createBoardRendererCore(options = {}) {
       cornerArcs,
     );
 
-    const segmentLimit = Number.isInteger(maxSegments)
+    const segmentLimit = typeof maxSegments === 'number' && Number.isInteger(maxSegments)
       ? Math.max(0, Math.min(segmentCount, maxSegments))
       : segmentCount;
 
@@ -1565,16 +1899,23 @@ export function createBoardRendererCore(options = {}) {
     return flowTravel;
   };
 
-  const resolveCompensationFlowWidth = (gridEl = null, flowWidth = null) => {
-    if (Number.isFinite(flowWidth) && flowWidth > 0) return flowWidth;
+  const resolveCompensationFlowWidth = (
+    gridEl: ElementLike | null = null,
+    flowWidth: number | null = null,
+  ): number => {
+    if (typeof flowWidth === 'number' && Number.isFinite(flowWidth) && flowWidth > 0) return flowWidth;
     const cell = pathLayoutMetrics.ready
       ? pathLayoutMetrics.cell
-      : getCellSize(gridEl);
+      : getCellSize(asDomElement(gridEl));
     const deviceScale = getDevicePixelScale();
     return Math.max(7, snapCssToDevicePixel(Math.floor(cell * 0.15), deviceScale));
   };
 
-  const createPathPointListFromCells = (path, refs, offset) => {
+  const createPathPointListFromCells = (
+    path: GridPoint[],
+    refs: GridRefsLike,
+    offset: Point2D,
+  ): Point2D[] => {
     const { gridEl } = refs;
     const points = new Array(path.length);
     for (let i = 0; i < path.length; i += 1) {
@@ -1586,12 +1927,12 @@ export function createBoardRendererCore(options = {}) {
   };
 
   const getPathPrefixTravelFromCells = (
-    path,
-    prefixLength,
-    refs = {},
+    path: MaybePath,
+    prefixLength: number,
+    refs: GridRefsLike = {},
     offset = ZERO_OFFSET,
-    flowWidth = null,
-  ) => {
+    flowWidth: number | null = null,
+  ): number => {
     if (!Array.isArray(path) || path.length < 2) return 0;
     const safePrefixLength = Math.min(path.length, Math.max(0, Number(prefixLength) || 0));
     if (safePrefixLength < 2) return 0;
@@ -1605,12 +1946,12 @@ export function createBoardRendererCore(options = {}) {
   };
 
   const getPathTravelToSegmentStartFromCells = (
-    path,
-    segmentStartIndex,
-    refs = {},
+    path: MaybePath,
+    segmentStartIndex: number,
+    refs: GridRefsLike = {},
     offset = ZERO_OFFSET,
-    flowWidth = null,
-  ) => {
+    flowWidth: number | null = null,
+  ): number => {
     if (!Array.isArray(path) || path.length < 2) return 0;
     const safeSegmentStartIndex = Math.min(
       path.length - 1,
@@ -1626,30 +1967,32 @@ export function createBoardRendererCore(options = {}) {
     return getPathMainTravelFromPoints(points, resolvedWidth, safeSegmentStartIndex);
   };
 
-  const resolveTravelShift = (previousTravel, nextTravel) => {
+  const resolveTravelShift = (previousTravel: number, nextTravel: number): number => {
     const shift = previousTravel - nextTravel;
     return Number.isFinite(shift) && shift !== 0 ? shift : 0;
   };
 
   const resolvePureHeadShiftDelta = (
-    nextPath,
-    previousPath,
-    refs,
-    offset,
-    flowWidth,
-    isPureHeadShift,
-  ) => {
+    nextPath: MaybePath,
+    previousPath: MaybePath,
+    refs: GridRefsLike,
+    offset: Point2D,
+    flowWidth: number,
+    isPureHeadShift: boolean,
+  ): number => {
     if (!isPureHeadShift) return 0;
+    const safePreviousPath = previousPath as GridPoint[];
+    const safeNextPath = nextPath as GridPoint[];
     const previousTravel = getPathPrefixTravelFromCells(
-      previousPath,
-      previousPath.length,
+      safePreviousPath,
+      safePreviousPath.length,
       refs,
       offset,
       flowWidth,
     );
     const nextTravel = getPathPrefixTravelFromCells(
-      nextPath,
-      nextPath.length,
+      safeNextPath,
+      safeNextPath.length,
       refs,
       offset,
       flowWidth,
@@ -1658,9 +2001,9 @@ export function createBoardRendererCore(options = {}) {
   };
 
   const resolveSegmentAnchorHeadShiftDelta = (
-    travelContext,
-    transitionWindow,
-  ) => {
+    travelContext: TravelContext,
+    transitionWindow: HeadShiftTransitionWindow,
+  ): number => {
     const {
       nextPath,
       previousPath,
@@ -1700,9 +2043,9 @@ export function createBoardRendererCore(options = {}) {
   };
 
   const resolveNodeAnchorHeadShiftDelta = (
-    travelContext,
-    transitionWindow,
-  ) => {
+    travelContext: TravelContext,
+    transitionWindow: HeadShiftTransitionWindow,
+  ): number => {
     const {
       nextPath,
       previousPath,
@@ -1730,36 +2073,41 @@ export function createBoardRendererCore(options = {}) {
   };
 
   const resolveFallbackHeadShiftDelta = (
-    headShiftStepCount,
-    safeCell,
-    nextPath,
-    previousPath,
-  ) => {
-    const fallbackStep = (path) => Math.max(1, cellDistance(path?.[0], path?.[1]) * safeCell);
+    headShiftStepCount: number,
+    safeCell: number,
+    nextPath: MaybePath,
+    previousPath: MaybePath,
+  ): number => {
+    const fallbackStep = (path: MaybePath) => Math.max(1, cellDistance(path?.[0], path?.[1]) * safeCell);
     const stepCount = Math.abs(headShiftStepCount);
     return headShiftStepCount > 0
       ? -(fallbackStep(nextPath) * stepCount)
       : (fallbackStep(previousPath) * stepCount);
   };
 
-  const getHeadShiftDelta = (nextPath, previousPath, refs = {}, offset = ZERO_OFFSET) => {
+  const getHeadShiftDelta = (
+    nextPath: MaybePath,
+    previousPath: MaybePath,
+    refs: GridRefsLike = {},
+    offset: Point2D = ZERO_OFFSET,
+  ): number => {
     const { gridEl } = refs;
     if (!Array.isArray(nextPath) || !Array.isArray(previousPath)) return 0;
 
-    const transitionWindow = resolveHeadShiftTransitionWindow(nextPath, previousPath);
+    const transitionWindow = resolveHeadShiftTransitionWindow(nextPath, previousPath) as HeadShiftTransitionWindow | null;
     if (!transitionWindow) return 0;
     const {
       shiftCount: headShiftStepCount,
       isPureHeadShift,
     } = transitionWindow;
 
-    const resolvedCell = getCellSize(gridEl);
+    const resolvedCell = getCellSize(asDomElement(gridEl));
     const safeCell = Number.isFinite(resolvedCell) && resolvedCell > 0
       ? resolvedCell
       : PATH_FLOW_BASE_CELL;
 
     const flowWidth = resolveCompensationFlowWidth(gridEl);
-    const travelContext = {
+    const travelContext: TravelContext = {
       nextPath,
       previousPath,
       refs,
@@ -1792,12 +2140,16 @@ export function createBoardRendererCore(options = {}) {
   };
 
   const transitionCompensationBuffer = createPathTransitionCompensationBuffer({
-    resolveShift: (nextPath, previousPath, refs = null) => {
-      const activeRefs = refs || latestPathRefs || null;
+    resolveShift: (
+      nextPath: readonly GridPoint[],
+      previousPath: readonly GridPoint[],
+      refs: unknown = null,
+    ) => {
+      const activeRefs = (refs as RendererRefs | null) || latestPathRefs || null;
       if (!pathLayoutMetrics.ready && !activeRefs?.gridEl) return 0;
       const shift = getHeadShiftDelta(
-        nextPath,
-        previousPath,
+        [...nextPath],
+        [...previousPath],
         activeRefs || {},
         getGridCanvasOffset(activeRefs || {}, headOffsetScratch),
       );
@@ -1809,9 +2161,9 @@ export function createBoardRendererCore(options = {}) {
 
 
   const shouldAnimatePathFlow = (
-    snapshot,
-    completionModel = latestCompletionModel,
-    tutorialFlags = latestTutorialFlags,
+    snapshot: GameSnapshot,
+    completionModel: CompletionModel | null = latestCompletionModel,
+    tutorialFlags: TutorialFlags | null = latestTutorialFlags,
   ) => {
     if (isReducedMotionPreferred()) return false;
     if (snapshot && snapshot.path.length > 1) return true;
@@ -1824,16 +2176,16 @@ export function createBoardRendererCore(options = {}) {
     pathAnimationLastTs = 0;
   };
 
-  const advancePathFlowOffset = (timestamp, flowMix, shouldAnimateFlow) => {
+  const advancePathFlowOffset = (timestamp: number, flowMix: number, shouldAnimateFlow: boolean): void => {
     if (!shouldAnimateFlow || flowMix <= PATH_FLOW_FREEZE_EPSILON || pathAnimationLastTs <= 0) return;
     const dt = Math.max(0, (timestamp - pathAnimationLastTs) / 1000);
     if (!Number.isFinite(dt)) return;
-    const baseFlowSpeed = Number.isFinite(pathFramePayload.flowBaseSpeed)
+    const baseFlowSpeed = typeof pathFramePayload.flowBaseSpeed === 'number' && Number.isFinite(pathFramePayload.flowBaseSpeed)
       ? pathFramePayload.flowBaseSpeed
       : PATH_FLOW_SPEED;
     const flowSpeed = baseFlowSpeed * clampUnit(flowMix);
     pathFramePayload.flowSpeed = flowSpeed;
-    const flowCycle = Number.isFinite(pathFramePayload.flowCycle) && pathFramePayload.flowCycle > 0
+    const flowCycle = typeof pathFramePayload.flowCycle === 'number' && Number.isFinite(pathFramePayload.flowCycle) && pathFramePayload.flowCycle > 0
       ? pathFramePayload.flowCycle
       : PATH_FLOW_CYCLE;
     pathAnimationOffset = normalizeFlowOffset(
@@ -1842,7 +2194,7 @@ export function createBoardRendererCore(options = {}) {
     );
   };
 
-  const flushPendingRenderFrame = (timestamp) => {
+  const flushPendingRenderFrame = (timestamp: number) => {
     const frame = pendingRenderState;
     pendingRenderState = null;
     if (!frame || !refs) {
@@ -1870,6 +2222,7 @@ export function createBoardRendererCore(options = {}) {
     if (
       pendingRenderDirty.message
       && Object.hasOwn(frame.uiModel || {}, 'messageHtml')
+      && refs.msgEl
     ) {
       setMessage(refs.msgEl, frame.uiModel.messageKind || null, frame.uiModel.messageHtml || '');
     }
@@ -1901,10 +2254,10 @@ export function createBoardRendererCore(options = {}) {
   };
 
   const resolvePathAnimationActivity = (
-    path,
-    nowMs,
+    path: MaybePath,
+    nowMs: number,
     flowCycle = pathFramePayload.flowCycle,
-    interactionModel = latestInteractionModel,
+    interactionModel: InteractionModel | null = latestInteractionModel,
   ) => {
     const animateTipArrivals = hasActivePathTipArrivals(nowMs);
     const animateRetainedArc = hasActivePathRetainedArc(path);
@@ -1936,7 +2289,7 @@ export function createBoardRendererCore(options = {}) {
     };
   };
 
-  const runAnimationOnlyFrame = (timestamp) => {
+  const runAnimationOnlyFrame = (timestamp: number) => {
     const nowMs = getNowMs();
 
     if (!latestPathSnapshot || !latestPathRefs) {
@@ -1971,14 +2324,16 @@ export function createBoardRendererCore(options = {}) {
 
     if (!shouldContinue) {
       pathAnimationLastTs = 0;
-      drawAllInternal(
-        latestPathSnapshot,
-        latestPathRefs,
-        latestPathStatuses,
-        0,
-        latestCompletionModel,
-        latestTutorialFlags,
-      );
+      if (latestPathSnapshot && latestPathRefs && latestPathStatuses) {
+        drawAllInternal(
+          latestPathSnapshot,
+          latestPathRefs,
+          latestPathStatuses,
+          0,
+          latestCompletionModel,
+          latestTutorialFlags,
+        );
+      }
       return false;
     }
 
@@ -1990,7 +2345,7 @@ export function createBoardRendererCore(options = {}) {
     return true;
   };
 
-  const runRendererFrame = (timestamp) => {
+  const runRendererFrame = (timestamp: number) => {
     pathAnimationFrame = 0;
     lastPresentedFrameTimestamp = Number.isFinite(timestamp) ? timestamp : getNowMs();
     let shouldContinue = false;
@@ -2039,8 +2394,8 @@ export function createBoardRendererCore(options = {}) {
 
 
 
-  const parsePx = (value) => {
-    const parsed = Number.parseFloat(value);
+  const parsePx = (value: string | null | undefined): number => {
+    const parsed = Number.parseFloat(value || '');
     return Number.isFinite(parsed) ? parsed : 0;
   };
 
@@ -2053,12 +2408,14 @@ export function createBoardRendererCore(options = {}) {
     return safeDpr;
   };
 
-  const snapCssToDevicePixel = (value, scale = getDevicePixelScale()) => {
+  const snapCssToDevicePixel = (value: number, scale: number = getDevicePixelScale()): number => {
     const safeScale = scale > 0 ? scale : 1;
     return Math.round((Number(value) || 0) * safeScale) / safeScale;
   };
 
-  const getCanvasScale = (ctx) => {
+  const getCanvasScale = (
+    ctx: CanvasRenderingContext2D | null,
+  ): { x: number; y: number; min: number } => {
     if (!ctx || typeof ctx.getTransform !== 'function') {
       return { x: 1, y: 1, min: 1 };
     }
@@ -2072,13 +2429,19 @@ export function createBoardRendererCore(options = {}) {
     };
   };
 
-  const snapCanvasLength = (value, scale) => {
+  const snapCanvasLength = (value: number, scale: number): number => {
     const safeScale = scale > 0 ? scale : 1;
     return Math.max(1, Math.round(Math.max(0, Number(value) || 0) * safeScale)) / safeScale;
   };
 
 
-  const configureHiDPICanvas = (canvas, ctx, cssWidth, cssHeight, dpr = getDevicePixelScale()) => {
+  const configureHiDPICanvas = (
+    canvas: CanvasElementLike | HTMLCanvasElement | null,
+    ctx: CanvasRenderingContext2D | null,
+    cssWidth: number,
+    cssHeight: number,
+    dpr: number = getDevicePixelScale(),
+  ): void => {
     const {
       safeCssWidth,
       safeCssHeight,
@@ -2088,6 +2451,7 @@ export function createBoardRendererCore(options = {}) {
       scaleY,
     } = resolveCanvasSize(cssWidth, cssHeight, dpr);
 
+    if (!canvas || !ctx) return;
     applyCanvasElementSize(canvas, safeCssWidth, safeCssHeight, pixelWidth, pixelHeight);
 
     ctx.setTransform(
@@ -2101,15 +2465,18 @@ export function createBoardRendererCore(options = {}) {
     ctx.imageSmoothingEnabled = false;
   };
 
-  const clearCanvas = (ctx, canvas) => {
+  const clearCanvas = (
+    ctx: CanvasRenderingContext2D | null,
+    canvas: CanvasElementLike | HTMLCanvasElement | null,
+  ): void => {
     if (!ctx || !canvas) return;
     ctx.save();
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.clearRect(0, 0, Number(canvas.width) || 0, Number(canvas.height) || 0);
     ctx.restore();
   };
 
-  const forceOpaqueColor = (color) => {
+  const forceOpaqueColor = (color: string) => {
     if (typeof color !== 'string') return '#ffffff';
     const trimmed = color.trim();
     return resolveOpaqueFunctionColor(
@@ -2127,7 +2494,7 @@ export function createBoardRendererCore(options = {}) {
       || trimmed;
   };
 
-  const parseColorToRgb = (color, out = null) => {
+  const parseColorToRgb = (color: string, out: RgbColor | null = null): RgbColor | null => {
     if (typeof color !== 'string' || typeof document === 'undefined') return null;
     if (!colorParserCtx) {
       const canvas = document.createElement('canvas');
@@ -2168,10 +2535,13 @@ export function createBoardRendererCore(options = {}) {
     return null;
   };
 
-  const resolveThemeGoodColor = (styles, fallback = '#16a34a') => {
+  const resolveThemeGoodColor = (
+    styles: CSSStyleDeclaration | null,
+    fallback = '#16a34a',
+  ): string => {
     if (!styles) return fallback;
 
-    const goodRgbRaw = styles.getPropertyValue('--good-rgb').trim();
+    const goodRgbRaw = String(styles.getPropertyValue('--good-rgb') || '').trim();
     if (goodRgbRaw) {
       const goodFromRgb = `rgb(${goodRgbRaw})`;
       if (parseColorToRgb(goodFromRgb, themeColorScratch)) {
@@ -2179,7 +2549,7 @@ export function createBoardRendererCore(options = {}) {
       }
     }
 
-    const goodRaw = forceOpaqueColor(styles.getPropertyValue('--good').trim());
+    const goodRaw = forceOpaqueColor(String(styles.getPropertyValue('--good') || '').trim());
     if (goodRaw && parseColorToRgb(goodRaw, themeColorScratch)) {
       return goodRaw;
     }
@@ -2187,8 +2557,8 @@ export function createBoardRendererCore(options = {}) {
     return fallback;
   };
 
-  const updatePathThemeCache = (refs = latestPathRefs) => {
-    const styleTarget = refs?.boardWrap || document.documentElement;
+  const updatePathThemeCache = (refs: RendererRefs | null = latestPathRefs) => {
+    const styleTarget = asDomElement(refs?.boardWrap) || document.documentElement;
     if (!styleTarget || typeof getComputedStyle !== 'function') return;
     const styles = getComputedStyle(styleTarget);
     const nextLineRaw = forceOpaqueColor(styles.getPropertyValue('--line').trim());
@@ -2214,10 +2584,13 @@ export function createBoardRendererCore(options = {}) {
     pathThemeCacheInitialized = true;
   };
 
-  const getCachedPathFlowMetrics = (refs = latestPathRefs, cellSize = null) => {
-    const resolvedCell = Number.isFinite(cellSize) && cellSize > 0
+  const getCachedPathFlowMetrics = (
+    refs: RendererRefs | null = latestPathRefs,
+    cellSize: number | null = null,
+  ): PathFlowMetrics => {
+    const resolvedCell = typeof cellSize === 'number' && Number.isFinite(cellSize) && cellSize > 0
       ? cellSize
-      : getCellSize(refs?.gridEl);
+      : getCellSize(asDomElement(refs?.gridEl));
     if (resolvedCell !== lastFlowMetricCell) {
       const prevCycle = Number(pathFlowMetricsCache.cycle);
       getPathFlowMetrics(refs, pathFlowMetricsCache, resolvedCell);
@@ -2242,12 +2615,17 @@ export function createBoardRendererCore(options = {}) {
     return readReducedMotionPreference();
   };
 
-  const updatePathLayoutMetrics = (offset, cell, gap, pad) => {
+  const updatePathLayoutMetrics = (
+    offset: Point2D | null | undefined,
+    cell: number,
+    gap: number,
+    pad: number,
+  ) => {
     const nextOffsetX = Number(offset?.x) || 0;
     const nextOffsetY = Number(offset?.y) || 0;
-    const nextCell = Number.isFinite(cell) && cell > 0 ? cell : pathLayoutMetrics.cell;
-    const nextGap = Number.isFinite(gap) ? gap : pathLayoutMetrics.gap;
-    const nextPad = Number.isFinite(pad) ? pad : pathLayoutMetrics.pad;
+    const nextCell = typeof cell === 'number' && Number.isFinite(cell) && cell > 0 ? cell : pathLayoutMetrics.cell;
+    const nextGap = typeof gap === 'number' && Number.isFinite(gap) ? gap : pathLayoutMetrics.gap;
+    const nextPad = typeof pad === 'number' && Number.isFinite(pad) ? pad : pathLayoutMetrics.pad;
     const changed = (
       !pathLayoutMetrics.ready
       || pathLayoutMetrics.offsetX !== nextOffsetX
@@ -2269,23 +2647,23 @@ export function createBoardRendererCore(options = {}) {
     return pathLayoutMetrics;
   };
 
-  const updateBoardLayoutMetrics = (metrics = {}) => {
-    const nextRows = Number.isInteger(metrics.rows) ? metrics.rows : activeBoardSize.rows;
-    const nextCols = Number.isInteger(metrics.cols) ? metrics.cols : activeBoardSize.cols;
+  const updateBoardLayoutMetrics = (metrics: Partial<BoardLayoutMetrics> = {}) => {
+    const nextRows = typeof metrics.rows === 'number' && Number.isInteger(metrics.rows) ? metrics.rows : activeBoardSize.rows;
+    const nextCols = typeof metrics.cols === 'number' && Number.isInteger(metrics.cols) ? metrics.cols : activeBoardSize.cols;
     const nextLeft = Number(metrics.left) || 0;
     const nextTop = Number(metrics.top) || 0;
     const nextRight = Number(metrics.right) || nextLeft;
     const nextBottom = Number(metrics.bottom) || nextTop;
-    const nextSize = Number.isFinite(metrics.size) && metrics.size > 0
+    const nextSize = typeof metrics.size === 'number' && Number.isFinite(metrics.size) && metrics.size > 0
       ? metrics.size
       : boardLayoutMetrics.size;
-    const nextGap = Number.isFinite(metrics.gap) ? metrics.gap : boardLayoutMetrics.gap;
-    const nextPad = Number.isFinite(metrics.pad) ? metrics.pad : boardLayoutMetrics.pad;
-    const nextStep = Number.isFinite(metrics.step) && metrics.step > 0
+    const nextGap = typeof metrics.gap === 'number' && Number.isFinite(metrics.gap) ? metrics.gap : boardLayoutMetrics.gap;
+    const nextPad = typeof metrics.pad === 'number' && Number.isFinite(metrics.pad) ? metrics.pad : boardLayoutMetrics.pad;
+    const nextStep = typeof metrics.step === 'number' && Number.isFinite(metrics.step) && metrics.step > 0
       ? metrics.step
       : (nextSize + nextGap);
-    const nextScrollX = Number.isFinite(metrics.scrollX) ? metrics.scrollX : boardLayoutMetrics.scrollX;
-    const nextScrollY = Number.isFinite(metrics.scrollY) ? metrics.scrollY : boardLayoutMetrics.scrollY;
+    const nextScrollX = typeof metrics.scrollX === 'number' && Number.isFinite(metrics.scrollX) ? metrics.scrollX : boardLayoutMetrics.scrollX;
+    const nextScrollY = typeof metrics.scrollY === 'number' && Number.isFinite(metrics.scrollY) ? metrics.scrollY : boardLayoutMetrics.scrollY;
     const changed = (
       !boardLayoutMetrics.ready
       || boardLayoutMetrics.rows !== nextRows
@@ -2335,21 +2713,23 @@ export function createBoardRendererCore(options = {}) {
     boardLayoutMetrics.scrollY = 0;
   };
 
-  const ensurePathLayoutMetrics = (refs) => {
+  const ensurePathLayoutMetrics = (refs: RendererRefs | null) => {
     if (pathLayoutMetrics.ready) return pathLayoutMetrics;
     const offset = getGridCanvasOffset(refs, gridOffsetScratch);
-    const cell = getCellSize(refs?.gridEl);
-    const gridStyles = refs?.gridEl ? getComputedStyle(refs.gridEl) : null;
+    const cell = getCellSize(asDomElement(refs?.gridEl));
+    const gridEl = asDomElement(refs?.gridEl);
+    const gridStyles = gridEl ? getComputedStyle(gridEl) : null;
     const gap = parsePx(gridStyles?.columnGap || gridStyles?.gap || '0');
     const pad = parsePx(gridStyles?.paddingLeft || gridStyles?.padding || '0');
     return updatePathLayoutMetrics(offset, cell, gap, pad);
   };
 
   const drawIdleAnimatedPath = (
-    flowOffset = 0,
-    completionModel = latestCompletionModel,
-    nowMs = getNowMs(),
+    flowOffset: number = 0,
+    completionModel: CompletionModel | null = latestCompletionModel,
+    nowMs: number = getNowMs(),
   ) => {
+    if (!latestPathRefs) return;
     const pathRenderer = ensurePathRenderer({
       refs: latestPathRefs,
       allowRecovery: !interactiveResizeActive,
@@ -2475,19 +2855,25 @@ export function createBoardRendererCore(options = {}) {
     commitPendingPathCanvasSwap();
 
     if (latestTutorialFlags?.path || latestTutorialFlags?.movable) {
+      if (!latestPathSnapshot || !latestPathRefs || !latestPathStatuses) return;
       drawStaticSymbols(latestPathSnapshot, latestPathRefs, latestPathStatuses);
       drawTutorialBracketsOnSymbolCanvas(latestPathRefs, latestTutorialFlags, flowOffset);
     }
   };
 
-  const ensureTutorialBracketPoint = (index) => {
+  const ensureTutorialBracketPoint = (index: number): Point2D => {
     if (!reusableTutorialBracketPoints[index]) {
       reusableTutorialBracketPoints[index] = { x: 0, y: 0 };
     }
     return reusableTutorialBracketPoints[index];
   };
 
-  const visitTutorialBracketCells = (snapshot, pathEnabled, movableEnabled, visitor) => {
+  const visitTutorialBracketCells = (
+    snapshot: GameSnapshot,
+    pathEnabled: boolean,
+    movableEnabled: boolean,
+    visitor: (r: number, c: number) => void,
+  ): void => {
     if (pathEnabled && snapshot.path.length > 0) {
       const head = snapshot.path[0];
       visitor(head.r, head.c);
@@ -2506,12 +2892,16 @@ export function createBoardRendererCore(options = {}) {
     }
   };
 
-  const resolveTutorialBracketColor = (snapshot, pathEnabled, movableEnabled) => {
-    let firstCell = null;
-    let hoveredCell = null;
-    let activeCell = null;
+  const resolveTutorialBracketColor = (
+    snapshot: GameSnapshot,
+    pathEnabled: boolean,
+    movableEnabled: boolean,
+  ): RgbColor => {
+    let firstCell: ElementLike | null = null;
+    let hoveredCell: ElementLike | null = null;
+    let activeCell: ElementLike | null = null;
 
-    visitTutorialBracketCells(snapshot, pathEnabled, movableEnabled, (r, c) => {
+    visitTutorialBracketCells(snapshot, pathEnabled, movableEnabled, (r: number, c: number) => {
       const cell = gridCells[r]?.[c];
       if (!cell) return;
       if (!firstCell) firstCell = cell;
@@ -2522,12 +2912,16 @@ export function createBoardRendererCore(options = {}) {
 
     const sourceCell = activeCell || hoveredCell || firstCell;
     if (!sourceCell || typeof getComputedStyle !== 'function') return TUTORIAL_BRACKET_COLOR_RGB;
-    const cssColor = getComputedStyle(sourceCell).getPropertyValue('--interactive-corner-color');
+    const cssColor = getComputedStyle(asDomElement(sourceCell) as Element).getPropertyValue('--interactive-corner-color');
     const parsed = parseColorToRgb(cssColor, tutorialBracketColorScratch);
     return parsed || TUTORIAL_BRACKET_COLOR_RGB;
   };
 
-  const updateTutorialBracketPayload = (snapshot, layout, tutorialFlags = null) => {
+  const updateTutorialBracketPayload = (
+    snapshot: GameSnapshot,
+    layout: PathLayoutMetricsState,
+    tutorialFlags: TutorialFlags | null = null,
+  ) => {
     const pathEnabled = Boolean(tutorialFlags?.path);
     const movableEnabled = Boolean(tutorialFlags?.movable);
     const step = layout.cell + layout.gap;
@@ -2535,7 +2929,7 @@ export function createBoardRendererCore(options = {}) {
     let count = 0;
     let signature = `${layout.version}|${pathEnabled ? 1 : 0}|${movableEnabled ? 1 : 0}|`;
 
-    visitTutorialBracketCells(snapshot, pathEnabled, movableEnabled, (r, c) => {
+    visitTutorialBracketCells(snapshot, pathEnabled, movableEnabled, (r: number, c: number) => {
       const point = ensureTutorialBracketPoint(count);
       point.x = layout.offsetX + layout.pad + (c * step) + half;
       point.y = layout.offsetY + layout.pad + (r * step) + half;
@@ -2563,29 +2957,34 @@ export function createBoardRendererCore(options = {}) {
   };
 
 
-  const syncBoardCellSize = (refs, rows = activeBoardSize.rows, cols = activeBoardSize.cols) => {
+  const syncBoardCellSize = (
+    refs: RendererRefs,
+    rows = activeBoardSize.rows,
+    cols = activeBoardSize.cols,
+  ) => {
     if (!refs.boardWrap || !refs.gridEl) return;
     if (!rows || !cols || rows <= 0 || cols <= 0) return;
 
-    const boardStyles = getComputedStyle(refs.boardWrap);
+    const boardWrapEl = asDomElement(refs.boardWrap) ?? (refs.boardWrap as unknown as Element);
+    const boardStyles = getComputedStyle(boardWrapEl);
     const gap = parsePx(boardStyles.getPropertyValue('--gap')) || 2;
     const boardBorderInline =
       parsePx(boardStyles.borderLeftWidth) + parsePx(boardStyles.borderRightWidth);
     const parent = refs.boardWrap.parentElement;
     const parentInline = (() => {
-      if (!parent) return refs.boardWrap.clientWidth;
-      const styles = getComputedStyle(parent);
+      if (!parent) return refs.boardWrap.clientWidth || 0;
+      const styles = getComputedStyle(asDomElement(parent) ?? (parent as unknown as Element));
       return Math.max(
         0,
-        parent.clientWidth - parsePx(styles.paddingLeft) - parsePx(styles.paddingRight),
+        (parent.clientWidth || 0) - parsePx(styles.paddingLeft) - parsePx(styles.paddingRight),
       );
     })();
     const appInline = (() => {
       if (!refs.app) return Infinity;
-      const styles = getComputedStyle(refs.app);
+      const styles = getComputedStyle(asDomElement(refs.app) ?? (refs.app as unknown as Element));
       return Math.max(
         0,
-        refs.app.clientWidth - parsePx(styles.paddingLeft) - parsePx(styles.paddingRight),
+        (refs.app.clientWidth || 0) - parsePx(styles.paddingLeft) - parsePx(styles.paddingRight),
       );
     })();
     const viewportInline = Math.max(
@@ -2596,7 +2995,7 @@ export function createBoardRendererCore(options = {}) {
     const maxBlock = (() => {
       const viewportHeight = window.visualViewport?.height || window.innerHeight || document.documentElement.clientHeight || 0;
       if (refs.app) {
-        const appStyles = getComputedStyle(refs.app);
+        const appStyles = getComputedStyle(asDomElement(refs.app) ?? (refs.app as unknown as Element));
         const reservedUiBlock =
           parsePx(appStyles.getPropertyValue('--ui-reserve')) +
           parsePx(appStyles.paddingTop) +
@@ -2663,11 +3062,21 @@ export function createBoardRendererCore(options = {}) {
     interactiveResizeTimer = 0;
   };
 
-  const applyCanvasCssSize = (canvas, cssWidth, cssHeight) => {
+  const applyCanvasCssSize = (
+    canvas: CanvasElementLike | HTMLCanvasElement | null,
+    cssWidth: number,
+    cssHeight: number,
+  ): void => {
+    if (!canvas) return;
     applyCanvasElementSize(canvas, cssWidth, cssHeight);
   };
 
-  const applyScaledSymbolCanvasTransform = (canvas, ctx, cssWidth, cssHeight) => {
+  const applyScaledSymbolCanvasTransform = (
+    canvas: CanvasElementLike | HTMLCanvasElement | null,
+    ctx: CanvasRenderingContext2D | null,
+    cssWidth: number,
+    cssHeight: number,
+  ): void => {
     if (!canvas || !ctx) return;
     const {
       safeCssWidth,
@@ -2691,11 +3100,13 @@ export function createBoardRendererCore(options = {}) {
     ctx.imageSmoothingEnabled = false;
   };
 
-  const createReplacementPathCanvas = (canvas) => {
+  const createReplacementPathCanvas = (
+    canvas: CanvasElementLike | HTMLCanvasElement,
+  ): HTMLCanvasElement => {
     const replacement = document.createElement('canvas');
-    replacement.id = canvas.id;
-    replacement.className = canvas.className;
-    replacement.style.cssText = canvas.style.cssText;
+    replacement.id = canvas.id || '';
+    replacement.className = canvas.className || '';
+    replacement.style.cssText = (canvas as HTMLCanvasElement).style.cssText;
     replacement.width = canvas.width || 1;
     replacement.height = canvas.height || 1;
     return replacement;
@@ -2703,11 +3114,11 @@ export function createBoardRendererCore(options = {}) {
 
   const shouldPathRendererUseAntialias = () => !lowPowerModeEnabled;
 
-  const createPathRenderer = (canvas) => createPathWebglRenderer(canvas, {
+  const createPathRenderer = (canvas: HTMLCanvasElement): PathRenderer => createPathWebglRenderer(canvas, {
     antialias: shouldPathRendererUseAntialias(),
   });
 
-  const pathRendererAntialiasMismatch = (renderer) => (
+  const pathRendererAntialiasMismatch = (renderer: PathRenderer | null | undefined): boolean => (
     typeof renderer?.antialiasEnabled === 'boolean'
     && renderer.antialiasEnabled !== shouldPathRendererUseAntialias()
   );
@@ -2716,26 +3127,30 @@ export function createBoardRendererCore(options = {}) {
     if (!pendingPathCanvasSwap) return;
     const { previousCanvas, nextCanvas } = pendingPathCanvasSwap;
     if (previousCanvas?.parentElement && typeof previousCanvas.replaceWith === 'function') {
-      previousCanvas.replaceWith(nextCanvas);
+      previousCanvas.replaceWith(nextCanvas as unknown as Node);
     }
     pendingPathCanvasSwap = null;
   };
 
-  const canSwapPathCanvas = (canvas) => (
+  const canSwapPathCanvas = (canvas: CanvasElementLike | HTMLCanvasElement | null | undefined): boolean => (
     Boolean(canvas?.parentElement && typeof canvas.replaceWith === 'function')
   );
 
-  const shouldReusePathRenderer = (renderer, rendererLost, antialiasMismatch) => (
+  const shouldReusePathRenderer = (
+    renderer: PathRenderer | null | undefined,
+    rendererLost: boolean,
+    antialiasMismatch: boolean,
+  ): boolean => (
     Boolean(renderer && !rendererLost && !antialiasMismatch)
   );
 
   const shouldSkipPathRendererRecovery = (
-    allowRecovery,
-    currentRenderer,
-    currentCanvas,
-    rendererLost,
-    antialiasMismatch,
-  ) => {
+    allowRecovery: boolean,
+    currentRenderer: PathRenderer | null | undefined,
+    currentCanvas: CanvasElementLike | HTMLCanvasElement | null | undefined,
+    rendererLost: boolean,
+    antialiasMismatch: boolean,
+  ): PathRenderer | null | undefined => {
     if (shouldReusePathRenderer(currentRenderer, rendererLost, antialiasMismatch)) {
       return currentRenderer;
     }
@@ -2745,7 +3160,7 @@ export function createBoardRendererCore(options = {}) {
     return undefined;
   };
 
-  const beginPathRendererRecovery = (antialiasMismatch) => {
+  const beginPathRendererRecovery = (antialiasMismatch: boolean) => {
     if (antialiasMismatch) return true;
     const currentNow = nowMs();
     const elapsedMs = currentNow - lastPathRendererRecoveryAttemptMs;
@@ -2755,11 +3170,11 @@ export function createBoardRendererCore(options = {}) {
   };
 
   const replacePathCanvasForRecovery = (
-    targetRefs,
-    currentCanvas,
-    rendererLost,
-    antialiasMismatch,
-  ) => {
+    targetRefs: RendererRefs,
+    currentCanvas: HTMLCanvasElement,
+    rendererLost: boolean,
+    antialiasMismatch: boolean,
+  ): HTMLCanvasElement => {
     if (!(rendererLost || antialiasMismatch) || !canSwapPathCanvas(currentCanvas)) {
       return currentCanvas;
     }
@@ -2772,7 +3187,10 @@ export function createBoardRendererCore(options = {}) {
     return replacement;
   };
 
-  const destroyPathRendererInstance = (targetRefs, currentRenderer) => {
+  const destroyPathRendererInstance = (
+    targetRefs: RendererRefs,
+    currentRenderer: PathRenderer | null | undefined,
+  ): void => {
     if (!currentRenderer) return;
     try {
       currentRenderer.destroy?.();
@@ -2782,22 +3200,25 @@ export function createBoardRendererCore(options = {}) {
     targetRefs.pathRenderer = null;
   };
 
-  const initializePathRenderer = (targetRefs, canvas) => {
+  const initializePathRenderer = (targetRefs: RendererRefs, canvas: HTMLCanvasElement): PathRenderer | null => {
     try {
-      targetRefs.pathRenderer = createPathRenderer(canvas);
+      const nextRenderer = createPathRenderer(canvas);
+      targetRefs.pathRenderer = nextRenderer;
       resizeCanvasSignature = '';
-      return targetRefs.pathRenderer;
+      return nextRenderer;
     } catch {
       return null;
     }
   };
 
-  const ensurePathRenderer = (refs) => {
-    const allowRecovery = refs?.allowRecovery !== false;
-    const targetRefs = refs?.refs || refs;
+  const ensurePathRenderer = (
+    refs: RendererRefs | { refs: RendererRefs; allowRecovery?: boolean } | null,
+  ): PathRenderer | null | undefined => {
+    const allowRecovery = !(refs && 'allowRecovery' in refs && refs.allowRecovery === false);
+    const targetRefs = refs && 'refs' in refs ? refs.refs : refs;
     if (!targetRefs) return null;
-    const currentRenderer = targetRefs.pathRenderer || null;
-    const currentCanvas = targetRefs.canvas || null;
+    const currentRenderer = (targetRefs.pathRenderer as PathRenderer | null | undefined) || null;
+    const currentCanvas = (targetRefs.canvas as HTMLCanvasElement | null) || null;
     if (!currentCanvas) return currentRenderer;
 
     const rendererLost = Boolean(currentRenderer?.isContextLost?.());
@@ -2846,7 +3267,7 @@ export function createBoardRendererCore(options = {}) {
     if (pathRenderer) pathRenderer.resize(cssWidth, cssHeight, dpr);
     configureHiDPICanvas(refs.symbolCanvas, refs.symbolCtx, cssWidth, cssHeight, dpr);
 
-    if (refs === latestPathRefs && latestPathSnapshot) {
+    if (refs === latestPathRefs && latestPathSnapshot && latestPathStatuses) {
       drawAllInternal(
         latestPathSnapshot,
         refs,
@@ -2858,17 +3279,17 @@ export function createBoardRendererCore(options = {}) {
     }
   };
 
-  const scheduleInteractiveResizeFlush = (payload) => {
+  const scheduleInteractiveResizeFlush = (payload: InteractiveResizePayload): void => {
     pendingInteractiveResizePayload = payload;
     clearInteractiveResizeTimer();
-    interactiveResizeTimer = window.setTimeout(() => {
+    interactiveResizeTimer = setTimeout(() => {
       interactiveResizeTimer = 0;
       flushInteractiveResize();
     }, INTERACTIVE_RESIZE_IDLE_MS);
   };
 
   function cacheElements() {
-    const get = (id) => document.getElementById(id);
+    const get = (id: string): HTMLElement | null => document.getElementById(id);
 
     const result = {
       app: get(ELEMENT_IDS.APP),
@@ -2924,17 +3345,17 @@ export function createBoardRendererCore(options = {}) {
       bPa: get(ELEMENT_IDS.B_PAPER),
       bMoveWall: get(ELEMENT_IDS.B_MOVE_WALL),
       reverseBtn: get(ELEMENT_IDS.REVERSE_BTN),
-    };
+    } as unknown as RendererRefs;
 
     if (result.canvas) {
       try {
-        result.pathRenderer = createPathRenderer(result.canvas);
+        result.pathRenderer = createPathRenderer(result.canvas as unknown as HTMLCanvasElement);
       } catch {
         result.pathRenderer = null;
       }
     }
     if (result.symbolCanvas) {
-      result.symbolCtx = result.symbolCanvas.getContext('2d');
+      result.symbolCtx = (result.symbolCanvas as unknown as HTMLCanvasElement).getContext('2d');
     }
     cachedBoardWrap = result.boardWrap;
     resizeCanvasSignature = '';
@@ -3019,35 +3440,44 @@ export function createBoardRendererCore(options = {}) {
     return result;
   }
 
-  const createGhost = () => {
+  const createGhost = (): HTMLDivElement => {
     const ghost = document.createElement('div');
     ghost.className = 'wallDragGhost';
     ghost.innerHTML = `<div class="wallDragGhostMark">${ICONS.m || ''}</div>`;
     return ghost;
   };
 
-  const getGridCanvasOffset = (refs, out = null) => {
+  const getGridCanvasOffset = (
+    refs: GridCanvasRefsLike | null,
+    out: Point2D | null = null,
+  ): Point2D => {
     const target = out || { x: 0, y: 0 };
     if (pathLayoutMetrics.ready) {
       target.x = pathLayoutMetrics.offsetX;
       target.y = pathLayoutMetrics.offsetY;
       return target;
     }
-    if (!refs.gridEl || !refs.boardWrap) {
+    if (!refs?.gridEl || !refs?.boardWrap) {
       target.x = 0;
       target.y = 0;
       return target;
     }
     const gridRect = refs.gridEl.getBoundingClientRect();
     const boardRect = refs.boardWrap.getBoundingClientRect();
-    const innerLeft = boardRect.left + refs.boardWrap.clientLeft;
-    const innerTop = boardRect.top + refs.boardWrap.clientTop;
+    const innerLeft = boardRect.left + (refs.boardWrap.clientLeft || 0);
+    const innerTop = boardRect.top + (refs.boardWrap.clientTop || 0);
     target.x = gridRect.left - innerLeft;
     target.y = gridRect.top - innerTop;
     return target;
   };
 
-  const getCellPoint = (r, c, refs, offset = ZERO_OFFSET, out = null) => {
+  const getCellPoint = (
+    r: number,
+    c: number,
+    refs: GridRefsLike,
+    offset: Point2D = ZERO_OFFSET,
+    out: Point2D | null = null,
+  ): Point2D => {
     const target = out || { x: 0, y: 0 };
     if (pathLayoutMetrics.ready) {
       const step = pathLayoutMetrics.cell + pathLayoutMetrics.gap;
@@ -3055,13 +3485,20 @@ export function createBoardRendererCore(options = {}) {
       target.y = pathLayoutMetrics.pad + (r * step) + (pathLayoutMetrics.cell * 0.5) + offset.y;
       return target;
     }
-    const p = cellCenter(r, c, refs.gridEl);
+    const p = cellCenter(r, c, asDomElement(refs.gridEl) as Element);
     target.x = p.x + offset.x;
     target.y = p.y + offset.y;
     return target;
   };
 
-  const getVertexPoint = (r, c, refs, offset = ZERO_OFFSET, out = null, dpr = 0) => {
+  const getVertexPoint = (
+    r: number,
+    c: number,
+    refs: GridRefsLike,
+    offset: Point2D = ZERO_OFFSET,
+    out: Point2D | null = null,
+    dpr: number = 0,
+  ): Point2D => {
     const target = out || { x: 0, y: 0 };
     if (pathLayoutMetrics.ready) {
       const step = pathLayoutMetrics.cell + pathLayoutMetrics.gap;
@@ -3079,29 +3516,29 @@ export function createBoardRendererCore(options = {}) {
       }
       return target;
     }
-    const p = vertexPos(r, c, refs.gridEl);
+    const p = vertexPos(r, c, asDomElement(refs.gridEl) as Element);
     target.x = p.x + offset.x;
     target.y = p.y + offset.y;
     return target;
   };
 
-  const ensureWallGhostEl = () => {
+  const ensureWallGhostEl = (): ElementLike | null => {
     if (!cachedBoardWrap) return null;
     if (wallGhostEl) return wallGhostEl;
 
     wallGhostEl = createGhost();
-    cachedBoardWrap.appendChild(wallGhostEl);
+    cachedBoardWrap.appendChild(wallGhostEl as unknown as Node);
     return wallGhostEl;
   };
 
   const refreshWallGhostOffset = () => {
     if (!cachedBoardWrap) return;
     const rect = cachedBoardWrap.getBoundingClientRect();
-    wallGhostOffsetLeft = rect.left + cachedBoardWrap.clientLeft;
-    wallGhostOffsetTop = rect.top + cachedBoardWrap.clientTop;
+    wallGhostOffsetLeft = rect.left + (cachedBoardWrap.clientLeft || 0);
+    wallGhostOffsetTop = rect.top + (cachedBoardWrap.clientTop || 0);
   };
 
-  const showWallDragGhost = (x, y) => {
+  const showWallDragGhost = (x: number, y: number): void => {
     const ghost = ensureWallGhostEl();
     if (!ghost || !cachedBoardWrap) return;
     refreshWallGhostOffset();
@@ -3109,7 +3546,7 @@ export function createBoardRendererCore(options = {}) {
     moveWallDragGhost(x, y);
   };
 
-  const moveWallDragGhost = (x, y) => {
+  const moveWallDragGhost = (x: number, y: number): void => {
     if (!wallGhostEl || !cachedBoardWrap) return;
     wallGhostEl.style.left = `${x - wallGhostOffsetLeft}px`;
     wallGhostEl.style.top = `${y - wallGhostOffsetTop}px`;
@@ -3117,13 +3554,13 @@ export function createBoardRendererCore(options = {}) {
 
   const hideWallDragGhost = () => {
     if (!wallGhostEl) return;
-    wallGhostEl.remove();
+    wallGhostEl.remove?.();
     wallGhostEl = null;
     wallGhostOffsetLeft = 0;
     wallGhostOffsetTop = 0;
   };
 
-  function setMessage(msgEl, kind, nextHtml = '') {
+  function setMessage(msgEl: ElementLike, kind: string | null | undefined, nextHtml = ''): void {
     const nextKind = kind || null;
     if (latestMessageKind === nextKind && latestMessageHtml === nextHtml) return;
 
@@ -3138,14 +3575,20 @@ export function createBoardRendererCore(options = {}) {
     }
   }
 
-  const resolveCellMarkHtml = (code, icons = ICONS) => {
+  const resolveCellMarkHtml = (code: string, icons: Record<string, string> = ICONS) => {
     if (code === 'm') return icons.m || '';
     if (code === '#') return '';
     return icons[code] || '';
   };
 
-  function buildGrid(snapshot, refs, icons, iconX) {
+  function buildGrid(
+    snapshot: GameSnapshot,
+    refs: RendererRefs,
+    icons: Record<string, string>,
+    iconX: string,
+  ) {
     const { boardWrap, gridEl } = refs;
+    if (!gridEl) return;
     activeBoardSize = { rows: snapshot.rows, cols: snapshot.cols };
     syncBoardCellSize(refs);
 
@@ -3159,8 +3602,9 @@ export function createBoardRendererCore(options = {}) {
     gridCells = Array.from({ length: snapshot.rows }, () => new Array(snapshot.cols).fill(null));
 
     gridEl.innerHTML = '';
-    gridEl.style.gridTemplateColumns = `repeat(var(--grid-cols), var(--cell))`;
-    gridEl.style.gridTemplateRows = `repeat(var(--grid-rows), var(--cell))`;
+    const gridStyle = gridEl.style as CSSStyleDeclaration;
+    gridStyle.gridTemplateColumns = `repeat(var(--grid-cols), var(--cell))`;
+    gridStyle.gridTemplateRows = `repeat(var(--grid-rows), var(--cell))`;
 
     for (let r = 0; r < snapshot.rows; r++) {
       for (let c = 0; c < snapshot.cols; c++) {
@@ -3190,7 +3634,7 @@ export function createBoardRendererCore(options = {}) {
 
         cell.appendChild(mark);
         cell.style.setProperty('--diag-order', String(r + c));
-        gridEl.appendChild(cell);
+        gridEl.appendChild(cell as unknown as Node);
         gridCells[r][c] = cell;
       }
     }
@@ -3217,9 +3661,17 @@ export function createBoardRendererCore(options = {}) {
     boardNavMarkerEl.classList.toggle('isLowPowerMode', lowPowerModeEnabled);
   }
 
-  function getBoardNavMarkerHost() {
+  function getBoardNavMarkerHost(): ElementLike | null {
     if (!refs?.boardWrap) return null;
-    return refs.boardWrap.parentElement || refs.boardWrap;
+    const parent = refs.boardWrap.parentElement;
+    if (
+      parent
+      && typeof (parent as ElementLike).appendChild === 'function'
+      && 'style' in parent
+    ) {
+      return parent as ElementLike;
+    }
+    return refs.boardWrap;
   }
 
   function syncBoardNavMarkerFrame() {
@@ -3231,9 +3683,9 @@ export function createBoardRendererCore(options = {}) {
     const boardRect = refs.boardWrap.getBoundingClientRect();
     const hostInnerLeft = hostRect.left + (markerHost.clientLeft || 0);
     const hostInnerTop = hostRect.top + (markerHost.clientTop || 0);
-    const boardInnerLeft = boardRect.left + refs.boardWrap.clientLeft;
-    const boardInnerTop = boardRect.top + refs.boardWrap.clientTop;
-    const boardStyles = getComputedStyle(refs.boardWrap);
+    const boardInnerLeft = boardRect.left + (refs.boardWrap.clientLeft || 0);
+    const boardInnerTop = boardRect.top + (refs.boardWrap.clientTop || 0);
+    const boardStyles = getComputedStyle(asDomElement(refs.boardWrap) ?? (refs.boardWrap as unknown as Element));
 
     boardNavMarkerEl.style.left = `${boardInnerLeft - hostInnerLeft}px`;
     boardNavMarkerEl.style.top = `${boardInnerTop - hostInnerTop}px`;
@@ -3267,7 +3719,7 @@ export function createBoardRendererCore(options = {}) {
     boardNavMarkerEl = document.createElement('div');
     boardNavMarkerEl.className = 'boardNavMarker';
     if (!markerHost.style.position) markerHost.style.position = 'relative';
-    markerHost.appendChild(boardNavMarkerEl);
+    markerHost.appendChild(boardNavMarkerEl as unknown as Node);
     syncBoardNavMarkerLowPowerMode();
     syncBoardNavMarkerFrame();
     return boardNavMarkerEl;
@@ -3278,7 +3730,7 @@ export function createBoardRendererCore(options = {}) {
     boardNavMarkerEl = null;
   }
 
-  const parseGridKey = (value, out = keyParseScratch) => {
+  const parseGridKey = (value: unknown, out: GridPoint = keyParseScratch): GridPoint | null => {
     if (typeof value !== 'string') return null;
     const commaIndex = value.indexOf(',');
     if (commaIndex <= 0 || commaIndex >= value.length - 1) return null;
@@ -3302,12 +3754,12 @@ export function createBoardRendererCore(options = {}) {
       const cell = gridCells[r][c];
       cell.classList.remove('dropTarget', 'wallDropPreview');
       const preview = cell.querySelector('.wallGhostPreviewMarker');
-      if (preview) preview.remove();
+      preview?.remove?.();
     }
     lastDropTargetKey = null;
   }
 
-  function setDropTarget(r, c) {
+  function setDropTarget(r: number, c: number) {
     clearDropTarget();
     const key = keyOf(r, c);
     if (gridCells[r]?.[c]) {
@@ -3331,55 +3783,66 @@ export function createBoardRendererCore(options = {}) {
     boardNavMarkerEl.classList.remove('isActive', 'isCursor', 'isSelected', 'isInvalidSelection');
   }
 
-  function resolveBoardNavMarkerTarget(interactionModel = null) {
+  function resolveBoardNavMarkerTarget(
+    interactionModel: InteractionModel | null = null,
+  ): BoardNavMarkerTarget | null {
     if (interactionModel?.isBoardNavActive !== true || interactionModel?.isDailyLocked === true) {
       return null;
     }
 
     const selection = interactionModel?.boardSelection;
     const cursor = interactionModel?.boardCursor;
+    const cursorRow = readInteger(cursor?.r);
+    const cursorCol = readInteger(cursor?.c);
+    const selectionRow = readInteger(selection?.r);
+    const selectionCol = readInteger(selection?.c);
     if (
       selection?.kind === 'wall'
-      && Number.isInteger(cursor?.r)
-      && Number.isInteger(cursor?.c)
-      && gridCells[cursor.r]?.[cursor.c]
+      && cursorRow !== null
+      && cursorCol !== null
+      && gridCells[cursorRow]?.[cursorCol]
       && !pointsMatch(selection, cursor)
     ) {
-      return { r: cursor.r, c: cursor.c, variant: 'cursor' };
+      return { r: cursorRow, c: cursorCol, variant: 'cursor' };
     }
     if (
-      Number.isInteger(selection?.r)
-      && Number.isInteger(selection?.c)
-      && gridCells[selection.r]?.[selection.c]
+      selectionRow !== null
+      && selectionCol !== null
+      && gridCells[selectionRow]?.[selectionCol]
     ) {
-      return { r: selection.r, c: selection.c, variant: 'selected' };
+      return { r: selectionRow, c: selectionCol, variant: 'selected' };
     }
 
     if (
-      Number.isInteger(cursor?.r)
-      && Number.isInteger(cursor?.c)
-      && gridCells[cursor.r]?.[cursor.c]
+      cursorRow !== null
+      && cursorCol !== null
+      && gridCells[cursorRow]?.[cursorCol]
     ) {
-      return { r: cursor.r, c: cursor.c, variant: 'cursor' };
+      return { r: cursorRow, c: cursorCol, variant: 'cursor' };
     }
 
     return null;
   }
 
-  function isBoardNavSelectionInteractive(snapshot, selection = null) {
+  function isBoardNavSelectionInteractive(
+    snapshot: GameSnapshot | null,
+    selection: InteractionModel['boardSelection'] | null = null,
+  ): boolean {
+    const selectionRow = readInteger(selection?.r);
+    const selectionCol = readInteger(selection?.c);
     if (
       !snapshot
-      || !Number.isInteger(selection?.r)
-      || !Number.isInteger(selection?.c)
-      || selection.r < 0
-      || selection.c < 0
-      || selection.r >= snapshot.rows
-      || selection.c >= snapshot.cols
+      || selectionRow === null
+      || selectionCol === null
+      || selectionRow < 0
+      || selectionCol < 0
+      || selectionRow >= snapshot.rows
+      || selectionCol >= snapshot.cols
     ) {
       return false;
     }
 
-    const cellType = snapshot.gridData?.[selection.r]?.[selection.c];
+    const cellType = snapshot.gridData?.[selectionRow]?.[selectionCol];
     if (selection?.kind === 'wall') return cellType === CELL_TYPES.MOVABLE_WALL;
     if (cellType === CELL_TYPES.MOVABLE_WALL) return true;
 
@@ -3396,17 +3859,19 @@ export function createBoardRendererCore(options = {}) {
     return false;
   }
 
-  function resolveBoardSelectionInteractiveState(interactionModel = null) {
+  function resolveBoardSelectionInteractiveState(interactionModel: InteractionModel | null = null) {
     if (typeof interactionModel?.boardSelectionInteractive === 'boolean') {
       return interactionModel.boardSelectionInteractive;
     }
+    const snapshot = pendingRenderState?.snapshot || latestPathSnapshot;
+    if (!snapshot) return false;
     return isBoardNavSelectionInteractive(
-      pendingRenderState?.snapshot || latestPathSnapshot,
+      snapshot,
       interactionModel?.boardSelection,
     );
   }
 
-  function syncBoardNavHighlights(interactionModel = null) {
+  function syncBoardNavHighlights(interactionModel: InteractionModel | null = null) {
     const marker = ensureBoardNavMarker();
     if (!marker || !refs?.gridEl) return;
 
@@ -3421,13 +3886,15 @@ export function createBoardRendererCore(options = {}) {
     const point = getCellPoint(target.r, target.c, refs, offset, boardNavPointScratch);
     const cellSize = pathLayoutMetrics.ready
       ? pathLayoutMetrics.cell
-      : getCellSize(refs.gridEl);
+      : getCellSize(asDomElement(refs.gridEl));
     const previewDelta = interactionModel?.boardNavPreviewDelta;
-    if (Number.isInteger(previewDelta?.r) && Number.isInteger(previewDelta?.c)) {
-      const previewMagnitude = Math.hypot(previewDelta.r, previewDelta.c) || 1;
+    const previewRow = readInteger(previewDelta?.r);
+    const previewCol = readInteger(previewDelta?.c);
+    if (previewRow !== null && previewCol !== null) {
+      const previewMagnitude = Math.hypot(previewRow, previewCol) || 1;
       const previewOffset = cellSize * 0.15;
-      point.x += (previewDelta.c / previewMagnitude) * previewOffset;
-      point.y += (previewDelta.r / previewMagnitude) * previewOffset;
+      point.x += (previewCol / previewMagnitude) * previewOffset;
+      point.y += (previewRow / previewMagnitude) * previewOffset;
     }
     const markerScale = target.variant === 'selected' ? 0.94 : 1.06;
     let selectionIsInteractive = true;
@@ -3443,8 +3910,8 @@ export function createBoardRendererCore(options = {}) {
     marker.style.transform = `translate3d(${point.x}px, ${point.y}px, 0) translate(-50%, -50%) scale(${markerScale})`;
   }
 
-  const statusKeySet = (keys) => {
-    const set = new Set();
+  const statusKeySet = (keys: unknown): Set<string> => {
+    const set = new Set<string>();
     if (!Array.isArray(keys)) return set;
     for (const element of keys) {
       const key = element;
@@ -3453,24 +3920,27 @@ export function createBoardRendererCore(options = {}) {
     return set;
   };
 
-  const addStatusDeltaKeys = (nextSet, prevSet, out) => {
-    nextSet.forEach((key) => {
+  const addStatusDeltaKeys = (nextSet: Set<string>, prevSet: Set<string>, out: Set<string>): void => {
+    nextSet.forEach((key: string) => {
       if (!prevSet.has(key)) out.add(key);
     });
-    prevSet.forEach((key) => {
+    prevSet.forEach((key: string) => {
       if (!nextSet.has(key)) out.add(key);
     });
   };
 
-  const buildStatusSets = (results = {}) => ({
-    badHint: statusKeySet(results.hintStatus?.badKeys),
-    goodHint: statusKeySet(results.hintStatus?.goodKeys),
-    badRps: statusKeySet(results.rpsStatus?.badKeys),
-    goodRps: statusKeySet(results.rpsStatus?.goodKeys),
-    badBlocked: statusKeySet(results.blockedStatus?.badKeys),
-  });
+  const buildStatusSets = (results: EvaluateResultLike = {}): StatusSets => {
+    const safeResults = results || {};
+    return {
+      badHint: statusKeySet(safeResults.hintStatus?.badKeys),
+      goodHint: statusKeySet(safeResults.hintStatus?.goodKeys),
+      badRps: statusKeySet(safeResults.rpsStatus?.badKeys),
+      goodRps: statusKeySet(safeResults.rpsStatus?.goodKeys),
+      badBlocked: statusKeySet(safeResults.blockedStatus?.badKeys),
+    };
+  };
 
-  const addPathKeys = (path, out) => {
+  const addPathKeys = (path: MaybePath, out: Set<string>): void => {
     if (!Array.isArray(path)) return;
     for (const element of path) {
       const point = element;
@@ -3479,7 +3949,10 @@ export function createBoardRendererCore(options = {}) {
     }
   };
 
-  const resolveEndpointPathDelta = (prevPath, nextPath) => {
+  const resolveEndpointPathDelta = (
+    prevPath: MaybePath,
+    nextPath: MaybePath,
+  ): EndpointPathDelta | null => {
     if (!Array.isArray(prevPath) || !Array.isArray(nextPath)) return null;
     const prevLen = prevPath.length;
     const nextLen = nextPath.length;
@@ -3527,7 +4000,7 @@ export function createBoardRendererCore(options = {}) {
     return null;
   };
 
-  const appendSnapshotPathEndpointClasses = (classes, snapshot, r, c) => {
+  const appendSnapshotPathEndpointClasses = (classes: string[], snapshot: GameSnapshot, r: number, c: number): void => {
     if (snapshot.path.length === 0) return;
     const head = snapshot.path[0];
     if (head && head.r === r && head.c === c) classes.push('pathStart');
@@ -3536,7 +4009,7 @@ export function createBoardRendererCore(options = {}) {
     if (tail && tail.r === r && tail.c === c) classes.push('pathEnd');
   };
 
-  const appendSnapshotStatusClasses = (classes, key, statusSets) => {
+  const appendSnapshotStatusClasses = (classes: string[], key: string, statusSets: StatusSets): void => {
     if (statusSets.badHint.has(key)) classes.push('badHint');
     if (statusSets.goodHint.has(key)) classes.push('goodHint');
     if (statusSets.badRps.has(key)) {
@@ -3547,7 +4020,13 @@ export function createBoardRendererCore(options = {}) {
     if (statusSets.badBlocked.has(key)) classes.push('badBlocked');
   };
 
-  const collectSnapshotCellClasses = (snapshot, r, c, key, statusSets) => {
+  const collectSnapshotCellClasses = (
+    snapshot: GameSnapshot,
+    r: number,
+    c: number,
+    key: string,
+    statusSets: StatusSets,
+  ): string[] => {
     const classes = ['cell'];
     const code = snapshot.gridData[r][c];
     if (code === 'm') classes.push('wall', 'movable');
@@ -3559,7 +4038,7 @@ export function createBoardRendererCore(options = {}) {
     return classes;
   };
 
-  const syncCellPathOrderValue = (cell, idxText) => {
+  const syncCellPathOrderValue = (cell: ElementLike, idxText: string | number | null | undefined): void => {
     const pathOrderValue = idxText ? String(Math.max(0, Number(idxText) - 1)) : '';
     const currentPathOrder = cell.style.getPropertyValue('--path-order');
     if (pathOrderValue) {
@@ -3573,7 +4052,7 @@ export function createBoardRendererCore(options = {}) {
     }
   };
 
-  const applyCellSnapshotState = (snapshot, r, c, statusSets) => {
+  const applyCellSnapshotState = (snapshot: GameSnapshot, r: number, c: number, statusSets: StatusSets) => {
     const cell = gridCells[r]?.[c];
     if (!cell) return;
     const key = keyOf(r, c);
@@ -3582,8 +4061,9 @@ export function createBoardRendererCore(options = {}) {
       cell.className = targetClass;
     }
 
-    const idxText = snapshot.idxByKey.has(key)
-      ? String(snapshot.idxByKey.get(key) + 1)
+    const idxValue = snapshot.idxByKey.get(key);
+    const idxText = snapshot.idxByKey.has(key) && typeof idxValue === 'number'
+      ? String(idxValue + 1)
       : '';
     const idxEl = cell.firstElementChild;
     if (idxEl && idxEl.textContent !== idxText) {
@@ -3604,7 +4084,7 @@ export function createBoardRendererCore(options = {}) {
     lastPathTipDragSelectedCell = null;
   };
 
-  const resolvePathTipDragEndpointCell = (interactionModel = null, cells = gridCells) => {
+  const resolvePathTipDragEndpointCell = (interactionModel: InteractionModel | null = null, cells = gridCells) => {
     if (!interactionModel?.isPathDragging) return null;
     const snapshot = pendingRenderState?.snapshot || latestPathSnapshot;
     const path = Array.isArray(snapshot?.path) ? snapshot.path : [];
@@ -3620,7 +4100,7 @@ export function createBoardRendererCore(options = {}) {
     return null;
   };
 
-  const resolveBoardNavSelectedCell = (interactionModel = null, cells = gridCells) => {
+  const resolveBoardNavSelectedCell = (interactionModel: InteractionModel | null = null, cells = gridCells) => {
     const selection = interactionModel?.boardSelection;
     if (interactionModel?.isBoardNavActive !== true || !selection) return null;
 
@@ -3636,13 +4116,13 @@ export function createBoardRendererCore(options = {}) {
     return cell || null;
   };
 
-  const resolvePathTipDragSelectedCell = (interactionModel = null, cells = gridCells) => {
+  const resolvePathTipDragSelectedCell = (interactionModel: InteractionModel | null = null, cells = gridCells) => {
     return resolvePathTipDragEndpointCell(interactionModel, cells)
       || resolveBoardNavSelectedCell(interactionModel, cells);
   };
 
-  const syncPathTipDragHoverCell = (interactionModel = null, cells = gridCells) => {
-    let nextCell = null;
+  const syncPathTipDragHoverCell = (interactionModel: InteractionModel | null = null, cells = gridCells) => {
+    let nextCell: ElementLike | Element | null = null;
     if (interactionModel?.isPathDragging) {
       const cursor = interactionModel.pathDragCursor;
       const cursorR = Number(cursor?.r);
@@ -3667,7 +4147,7 @@ export function createBoardRendererCore(options = {}) {
     lastPathTipDragHoverCell = nextCell;
   };
 
-  const syncPathTipDragSelectedCell = (interactionModel = null, cells = gridCells) => {
+  const syncPathTipDragSelectedCell = (interactionModel: InteractionModel | null = null, cells = gridCells) => {
     const nextCell = resolvePathTipDragSelectedCell(interactionModel, cells);
     if (nextCell === lastPathTipDragSelectedCell) {
       if (nextCell && !nextCell.classList.contains('pathTipDragSelected')) {
@@ -3681,12 +4161,19 @@ export function createBoardRendererCore(options = {}) {
     lastPathTipDragSelectedCell = nextCell;
   };
 
-  const addPathEndpointKeys = (path, out) => {
+  const addPathEndpointKeys = (path: MaybePath, out: Set<string>): void => {
     if (!Array.isArray(path) || path.length <= 0) return;
-    addPathKeys([path[0], path.at(-1)], out);
+    const head = path[0];
+    const tail = path[path.length - 1];
+    addPathKeys([head, tail], out);
   };
 
-  const addTouchedKeysForEndpointDelta = (delta, prevPath, nextPath, out) => {
+  const addTouchedKeysForEndpointDelta = (
+    delta: EndpointPathDelta,
+    prevPath: MaybePath,
+    nextPath: MaybePath,
+    out: Set<string>,
+  ): void => {
     if (delta.side === 'start' && delta.prevChanged.length !== delta.nextChanged.length) {
       addPathKeys(prevPath, out);
       addPathKeys(nextPath, out);
@@ -3698,8 +4185,8 @@ export function createBoardRendererCore(options = {}) {
     addPathEndpointKeys(nextPath, out);
   };
 
-  const applyTouchedKeysToSnapshot = (snapshot, statusSets, touchedKeys) => {
-    touchedKeys.forEach((key) => {
+  const applyTouchedKeysToSnapshot = (snapshot: GameSnapshot, statusSets: StatusSets, touchedKeys: Set<string>) => {
+    touchedKeys.forEach((key: string) => {
       const parsed = parseGridKey(key);
       if (!parsed) return;
       const r = parsed.r;
@@ -3710,11 +4197,11 @@ export function createBoardRendererCore(options = {}) {
   };
 
   const collectIncrementalPathTouchedKeys = (
-    prevSnapshot,
-    snapshot,
-    statusSets,
-    prevSets,
-  ) => {
+    prevSnapshot: GameSnapshot | null,
+    snapshot: GameSnapshot,
+    statusSets: StatusSets,
+    prevSets: StatusSets,
+  ): Set<string> | null => {
     if (!prevSnapshot) return null;
     if (snapshot.rows !== prevSnapshot.rows || snapshot.cols !== prevSnapshot.cols) return null;
     if (snapshot.gridData !== prevSnapshot.gridData) return null;
@@ -3722,7 +4209,7 @@ export function createBoardRendererCore(options = {}) {
     const delta = resolveEndpointPathDelta(prevSnapshot.path, snapshot.path);
     if (!delta) return null;
 
-    const touchedKeys = new Set();
+    const touchedKeys = new Set<string>();
     addTouchedKeysForEndpointDelta(delta, prevSnapshot.path, snapshot.path, touchedKeys);
     addStatusDeltaKeys(statusSets.badHint, prevSets.badHint, touchedKeys);
     addStatusDeltaKeys(statusSets.goodHint, prevSets.goodHint, touchedKeys);
@@ -3733,7 +4220,7 @@ export function createBoardRendererCore(options = {}) {
     return touchedKeys;
   };
 
-  const tryApplyIncrementalPathUpdate = (snapshot, results) => {
+  const tryApplyIncrementalPathUpdate = (snapshot: GameSnapshot, results: EvaluateResult): boolean => {
     const prevSnapshot = latestPathSnapshot;
     const statusSets = buildStatusSets(results);
     const prevSets = latestPathStatusSets || buildStatusSets(latestPathStatuses || {});
@@ -3751,10 +4238,10 @@ export function createBoardRendererCore(options = {}) {
   };
 
   const previewLowPowerPathDragCells = (
-    previousSnapshot,
-    snapshot,
-    statusSets,
-  ) => {
+    previousSnapshot: GameSnapshot,
+    snapshot: GameSnapshot,
+    statusSets: StatusSets,
+  ): boolean => {
     if (!refs || !statusSets) return false;
     const prevSets = latestPathStatusSets || buildStatusSets(latestPathStatuses || {});
     const touchedKeys = collectIncrementalPathTouchedKeys(
@@ -3769,7 +4256,8 @@ export function createBoardRendererCore(options = {}) {
     return true;
   };
 
-  const applyCellViewState = (cell, state) => {
+  const applyCellViewState = (cell: ElementLike | null, state: BoardCellViewState): void => {
+    if (!cell) return;
     const targetStr = state.classes.join(' ');
     if (cell.className !== targetStr) {
       cell.className = targetStr;
@@ -3788,7 +4276,7 @@ export function createBoardRendererCore(options = {}) {
     syncCellPathOrderValue(cell, state.idx);
   };
 
-  const applyFullCellViewModel = (snapshot, desired) => {
+  const applyFullCellViewModel = (snapshot: GameSnapshot, desired: BoardCellViewModel): void => {
     for (let r = 0; r < snapshot.rows; r++) {
       for (let c = 0; c < snapshot.cols; c++) {
         applyCellViewState(gridCells[r][c], desired[r][c]);
@@ -3797,23 +4285,33 @@ export function createBoardRendererCore(options = {}) {
   };
 
   function updateCells(
-    snapshot,
-    results,
-    refs,
-    completionModel = null,
-    interactionModel = null,
-    tutorialFlags = null,
+    snapshot: GameSnapshot,
+    results: EvaluateResult,
+    refs: RendererRefs,
+    completionModel: CompletionModel | null = null,
+    interactionModel: InteractionModel | null = null,
+    tutorialFlags: TutorialFlags | null = null,
   ) {
     const { hintStatus, rpsStatus, blockedStatus } = results;
     const usedIncremental = tryApplyIncrementalPathUpdate(
       snapshot,
-      { hintStatus, rpsStatus, blockedStatus },
+      {
+        hintStatus,
+        stitchStatus: results.stitchStatus || null,
+        rpsStatus,
+        blockedStatus,
+      },
     );
     if (!usedIncremental) {
       countFullCellRebuilds();
       reusableCellViewModel = buildBoardCellViewModel(
         snapshot,
-        { hintStatus, rpsStatus, blockedStatus },
+        {
+          hintStatus,
+          stitchStatus: results.stitchStatus || null,
+          rpsStatus,
+          blockedStatus,
+        },
         resolveCellMarkHtml,
         reusableCellViewModel,
       );
@@ -3823,7 +4321,12 @@ export function createBoardRendererCore(options = {}) {
     pathAnimationEngine.setInteractionModel(interactionModel);
   }
 
-  const updatePathTransitionStates = (previousPath, nextPath, layout, nowMs) => {
+  const updatePathTransitionStates = (
+    previousPath: MaybePath,
+    nextPath: MaybePath,
+    layout: PathLayoutMetricsState,
+    nowMs: number,
+  ): void => {
     updatePathTipArrivalStates(
       previousPath,
       nextPath,
@@ -3839,7 +4342,7 @@ export function createBoardRendererCore(options = {}) {
     updatePathReverseTipSwapState(previousPath, nextPath, nowMs);
   };
 
-  const applyReversePathFlowOffset = (path, flow, nowMs) => {
+  const applyReversePathFlowOffset = (path: MaybePath, flow: PathFlowMetrics, nowMs: number): void => {
     clearPathTransitionCompensationBuffer();
     const reverseFromFlowOffset = pathAnimationOffset;
     const reverseTravel = latestPathMainFlowTravel;
@@ -3864,7 +4367,12 @@ export function createBoardRendererCore(options = {}) {
     );
   };
 
-  const applyHeadShiftPathFlowOffset = (path, previousPath, refs, flow) => {
+  const applyHeadShiftPathFlowOffset = (
+    path: MaybePath,
+    previousPath: MaybePath,
+    refs: RendererRefs,
+    flow: PathFlowMetrics,
+  ): void => {
     const consumedCompensation = consumePathTransitionCompensation(path, flow.cycle);
     if (consumedCompensation.consumed) return;
     const shift = getHeadShiftDelta(
@@ -3882,13 +4390,13 @@ export function createBoardRendererCore(options = {}) {
   };
 
   const syncPathAnimationOffsetForTransition = (
-    path,
-    previousPath,
-    refs,
-    flow,
-    pathChanged,
-    nowMs,
-  ) => {
+    path: MaybePath,
+    previousPath: MaybePath,
+    refs: RendererRefs,
+    flow: PathFlowMetrics,
+    pathChanged: boolean,
+    nowMs: number,
+  ): void => {
     if (isPathReversed(path, previousPath)) {
       applyReversePathFlowOffset(path, flow, nowMs);
       return;
@@ -3903,12 +4411,12 @@ export function createBoardRendererCore(options = {}) {
   };
 
   const cacheLatestPathRenderState = (
-    snapshot,
-    refs,
-    statuses,
-    completionModel,
-    tutorialFlags,
-  ) => {
+    snapshot: GameSnapshot,
+    refs: RendererRefs,
+    statuses: EvaluateResult,
+    completionModel: CompletionModel | null,
+    tutorialFlags: TutorialFlags | null,
+  ): void => {
     latestPathSnapshot = snapshot;
     latestPathRefs = refs;
     latestPathStatuses = statuses;
@@ -3918,11 +4426,11 @@ export function createBoardRendererCore(options = {}) {
   };
 
   function drawAllImpl(
-    snapshot,
-    refs,
-    statuses,
-    completionModel = null,
-    tutorialFlags = null,
+    snapshot: GameSnapshot,
+    refs: RendererRefs,
+    statuses: EvaluateResult,
+    completionModel: CompletionModel | null = null,
+    tutorialFlags: TutorialFlags | null = null,
   ) {
     const previousPath = latestPathSnapshot?.path || null;
     const pathChanged = !pathsMatch(previousPath, snapshot.path);
@@ -3965,18 +4473,32 @@ export function createBoardRendererCore(options = {}) {
     );
   }
 
-  function drawStaticSymbols(snapshot, refs, statuses) {
+  function drawStaticSymbols(snapshot: GameSnapshot, refs: RendererRefs, statuses: EvaluateResult) {
     const { symbolCtx, symbolCanvas } = refs;
     if (!symbolCtx || !symbolCanvas) return;
 
     countSymbolRedraws();
     clearCanvas(symbolCtx, symbolCanvas);
 
-    drawCornerCounts(snapshot, refs, symbolCtx, statuses?.hintStatus?.cornerVertexStatus);
-    drawCrossStitches(snapshot, refs, symbolCtx, statuses?.stitchStatus?.vertexStatus);
+    drawCornerCounts(
+      snapshot,
+      refs,
+      symbolCtx,
+      (statuses?.hintStatus?.cornerVertexStatus as Map<string, unknown> | undefined) || EMPTY_MAP,
+    );
+    drawCrossStitches(
+      snapshot,
+      refs,
+      symbolCtx,
+      (statuses?.stitchStatus?.vertexStatus as Map<string, unknown> | undefined) || EMPTY_MAP,
+    );
   }
 
-  function drawTutorialBracketsOnSymbolCanvas(refs, tutorialFlags = null, flowOffset = pathFramePayload.flowOffset) {
+  function drawTutorialBracketsOnSymbolCanvas(
+    refs: RendererRefs,
+    tutorialFlags: TutorialFlags | null = null,
+    flowOffset: number = pathFramePayload.flowOffset,
+  ) {
     if (!tutorialFlags?.path && !tutorialFlags?.movable) return;
     const { symbolCtx } = refs;
     if (!symbolCtx) return;
@@ -4045,19 +4567,24 @@ export function createBoardRendererCore(options = {}) {
     symbolCtx.restore();
   }
 
-  const syncPathGeometryCache = (path, layout, deviceScale) => {
-    const pathLength = path.length;
-    const head = pathLength > 0 ? path[0] : null;
-    const tail = pathLength > 0 ? path[pathLength - 1] : null;
+  const syncPathGeometryCache = (
+    path: MaybePath,
+    layout: PathLayoutMetricsState,
+    deviceScale: number,
+  ): void => {
+    const safePath = Array.isArray(path) ? path : [];
+    const pathLength = safePath.length;
+    const head = pathLength > 0 ? safePath[0] : null;
+    const tail = pathLength > 0 ? safePath[pathLength - 1] : null;
     if (pathLength > 0) {
       const pointsChanged = (
-        cachedPathRef !== path
+        cachedPathRef !== safePath
         || cachedPathLayoutVersion !== layout.version
         || cachedPathLength !== pathLength
-        || cachedPathHeadR !== head.r
-        || cachedPathHeadC !== head.c
-        || cachedPathTailR !== tail.r
-        || cachedPathTailC !== tail.c
+        || cachedPathHeadR !== (head?.r ?? Number.NaN)
+        || cachedPathHeadC !== (head?.c ?? Number.NaN)
+        || cachedPathTailR !== (tail?.r ?? Number.NaN)
+        || cachedPathTailC !== (tail?.c ?? Number.NaN)
       );
       if (!pointsChanged && reusablePathPoints.length === pathLength) {
         return;
@@ -4072,7 +4599,7 @@ export function createBoardRendererCore(options = {}) {
       const step = layout.cell + layout.gap;
       const half = layout.cell * 0.5;
       for (let i = 0; i < pathLength; i++) {
-        const point = path[i];
+        const point = safePath[i];
         const pooled = reusablePathPoints[i];
         pooled.x = snapCssToDevicePixel(
           layout.offsetX + layout.pad + (point.c * step) + half,
@@ -4084,13 +4611,13 @@ export function createBoardRendererCore(options = {}) {
         );
       }
 
-      cachedPathRef = path;
+      cachedPathRef = safePath;
       cachedPathLayoutVersion = layout.version;
       cachedPathLength = pathLength;
-      cachedPathHeadR = head.r;
-      cachedPathHeadC = head.c;
-      cachedPathTailR = tail.r;
-      cachedPathTailC = tail.c;
+      cachedPathHeadR = head?.r ?? Number.NaN;
+      cachedPathHeadC = head?.c ?? Number.NaN;
+      cachedPathTailR = tail?.r ?? Number.NaN;
+      cachedPathTailC = tail?.c ?? Number.NaN;
       pathGeometryToken += 1;
       return;
     }
@@ -4099,10 +4626,10 @@ export function createBoardRendererCore(options = {}) {
     const emptyGeometryChanged = (
       cachedPathLength !== 0
       || cachedPathLayoutVersion !== layout.version
-      || cachedPathRef !== path
+      || cachedPathRef !== safePath
     );
     if (!emptyGeometryChanged) return;
-    cachedPathRef = path;
+    cachedPathRef = safePath;
     cachedPathLayoutVersion = layout.version;
     cachedPathLength = 0;
     cachedPathHeadR = Number.NaN;
@@ -4112,7 +4639,12 @@ export function createBoardRendererCore(options = {}) {
     pathGeometryToken += 1;
   };
 
-  const setPathFrameBaseState = (renderPoints, sizing, path, nowMs) => {
+  const setPathFrameBaseState = (
+    renderPoints: PathRenderPointsResult,
+    sizing: PathSizing,
+    path: MaybePath,
+    nowMs: number,
+  ): boolean => {
     pathFramePayload.baseStartRadius = sizing.startRadius;
     pathFramePayload.baseArrowLength = sizing.arrowLength;
     pathFramePayload.baseEndHalfWidth = sizing.endHalfWidth;
@@ -4134,12 +4666,12 @@ export function createBoardRendererCore(options = {}) {
   };
 
   const applyPathFrameTipAnimationState = (
-    path,
-    nowMs,
-    renderPoints,
-    sizing,
-    reverseTipSwapActive,
-  ) => {
+    path: MaybePath,
+    nowMs: number,
+    renderPoints: PathRenderPointsResult,
+    sizing: PathSizing,
+    reverseTipSwapActive: boolean,
+  ): void => {
     const startPinPresenceActive = applyPathStartPinPresenceToPayload(path, nowMs);
     const endArrowRotateActive = applyPathEndArrowDirectionToPayload(path, nowMs);
     const startFlowRotateActive = applyPathStartFlowDirectionToPayload(path, nowMs);
@@ -4183,13 +4715,13 @@ export function createBoardRendererCore(options = {}) {
   );
 
   const syncPathFrameFlowState = (
-    path,
-    renderPoints,
-    flowOffset,
-    flowMetrics,
-    flowFreezeMix,
-    nowMs,
-  ) => {
+    path: MaybePath,
+    renderPoints: PathRenderPointsResult,
+    flowOffset: number,
+    flowMetrics: PathFlowMetrics,
+    flowFreezeMix: number,
+    nowMs: number,
+  ): void => {
     const flowVisibility = resolvePathFlowVisibilityMix(path, nowMs, flowVisibilityMixScratch);
     const flowMix = clampUnit(Number.isFinite(flowVisibility.mix) ? flowVisibility.mix : 1);
     const effectiveFlowMix = flowMix * flowFreezeMix;
@@ -4214,12 +4746,12 @@ export function createBoardRendererCore(options = {}) {
   };
 
   function drawAnimatedPathImpl(
-    snapshot,
-    refs,
-    statuses,
-    flowOffset = 0,
-    completionModel = null,
-    tutorialFlags = null,
+    snapshot: GameSnapshot,
+    refs: RendererRefs,
+    statuses: EvaluateResult,
+    flowOffset: number = 0,
+    completionModel: CompletionModel | null = null,
+    tutorialFlags: TutorialFlags | null = null,
   ) {
     const pathRenderer = ensurePathRenderer({
       refs,
@@ -4294,10 +4826,10 @@ export function createBoardRendererCore(options = {}) {
   const pathAnimationEngine = createPathAnimationEngine({
     nowFn: getNowMs,
     isReducedMotionPreferred: () => isReducedMotionPreferred(),
-    onSetInteractionModel: (interactionModel) => {
-      latestInteractionModel = interactionModel;
+    onSetInteractionModel: (interactionModel: InteractionModel | null | undefined) => {
+      latestInteractionModel = interactionModel || null;
     },
-    onUpdatePathLayoutMetrics: (offset, cell, gap, pad) =>
+    onUpdatePathLayoutMetrics: (offset, cell: number, gap: number, pad: number) =>
       updatePathLayoutMetrics(offset, cell, gap, pad),
     onNotifyInteractiveResize: () => {
       interactiveResizeActive = true;
@@ -4305,12 +4837,12 @@ export function createBoardRendererCore(options = {}) {
   });
 
   function drawAnimatedPath(
-    snapshot,
-    refs,
-    statuses,
-    flowOffset = 0,
-    completionModel = null,
-    tutorialFlags = null,
+    snapshot: GameSnapshot,
+    refs: RendererRefs,
+    statuses: EvaluateResult,
+    flowOffset: number = 0,
+    completionModel: CompletionModel | null = null,
+    tutorialFlags: TutorialFlags | null = null,
   ) {
     return pathAnimationEngine.drawAnimatedPath(
       snapshot,
@@ -4319,24 +4851,38 @@ export function createBoardRendererCore(options = {}) {
       flowOffset,
       completionModel,
       tutorialFlags,
-      { drawAnimatedPathInternal: drawAnimatedPathImpl },
+      {
+        drawAnimatedPathInternal: (...args: unknown[]) => drawAnimatedPathImpl(
+          args[0] as GameSnapshot,
+          args[1] as RendererRefs,
+          args[2] as EvaluateResult,
+          args[3] as number,
+          (args[4] as CompletionModel | null | undefined) || null,
+          (args[5] as TutorialFlags | null | undefined) || null,
+        ),
+      },
     );
   }
 
   function drawAllInternal(
-    snapshot,
-    refs,
-    statuses,
-    flowOffset = 0,
-    completionModel = null,
-    tutorialFlags = null,
+    snapshot: GameSnapshot,
+    refs: RendererRefs,
+    statuses: EvaluateResult,
+    flowOffset: number = 0,
+    completionModel: CompletionModel | null = null,
+    tutorialFlags: TutorialFlags | null = null,
   ) {
     drawStaticSymbols(snapshot, refs, statuses);
     drawAnimatedPath(snapshot, refs, statuses, flowOffset, completionModel, tutorialFlags);
     drawTutorialBracketsOnSymbolCanvas(refs, tutorialFlags, flowOffset);
   }
 
-  function drawCrossStitches(snapshot, refs, ctx, vertexStatus = EMPTY_MAP) {
+  function drawCrossStitches(
+    snapshot: GameSnapshot,
+    refs: RendererRefs,
+    ctx: CanvasRenderingContext2D,
+    vertexStatus: Map<string, unknown> = EMPTY_MAP,
+  ) {
     ctx.save();
     ctx.globalAlpha = 1;
 
@@ -4352,19 +4898,23 @@ export function createBoardRendererCore(options = {}) {
     const colorPending = '#ffffff';
     const shadowOpaque = pathThemeStitchShadowRaw || '#0a111b';
 
-    const resolveDiagStatus = (entry, key) => {
+    const resolveDiagStatus = (entry: unknown, key: 'diagA' | 'diagB'): string => {
       if (typeof entry === 'string') return entry;
-      return entry?.[key] || 'pending';
+      if (entry && typeof entry === 'object' && key in entry) {
+        const value = (entry as Record<string, unknown>)[key];
+        return typeof value === 'string' ? value : 'pending';
+      }
+      return 'pending';
     };
 
-    const buildUnsnappedLine = (x1, y1, x2, y2) => ({
+    const buildUnsnappedLine = (x1: number, y1: number, x2: number, y2: number) => ({
       x1,
       y1,
       x2,
       y2,
     });
 
-    const drawLine = (line, color, width) => {
+    const drawLine = (line: LineSegment, color: string, width: number) => {
       const snappedWidth = snapCanvasLength(width, canvasScale.min);
       ctx.strokeStyle = color;
       ctx.lineWidth = snappedWidth;
@@ -4375,7 +4925,7 @@ export function createBoardRendererCore(options = {}) {
       ctx.stroke();
     };
 
-    const buildStitchLines = (centerX, centerY) => ({
+    const buildStitchLines = (centerX: number, centerY: number) => ({
       diagALine: buildUnsnappedLine(
         centerX - stitchLineHalf,
         centerY - stitchLineHalf,
@@ -4397,7 +4947,7 @@ export function createBoardRendererCore(options = {}) {
       drawLine(diagBLine, shadowOpaque, stitchWidth * 2);
     }
 
-    const drawStatePass = (state, color) => {
+    const drawStatePass = (state: string, color: string) => {
       for (const [vr, vc] of snapshot.stitches) {
         const vk = keyOf(vr, vc);
         const entry = vertexStatus.get(vk) || 'pending';
@@ -4421,7 +4971,12 @@ export function createBoardRendererCore(options = {}) {
     ctx.restore();
   }
 
-  function drawCornerCounts(snapshot, refs, ctx, cornerVertexStatus = EMPTY_MAP) {
+  function drawCornerCounts(
+    snapshot: GameSnapshot,
+    refs: RendererRefs,
+    ctx: CanvasRenderingContext2D,
+    cornerVertexStatus: Map<string, unknown> = EMPTY_MAP,
+  ) {
     if (!snapshot.cornerCounts || snapshot.cornerCounts.length === 0) return;
 
     const layout = ensurePathLayoutMetrics(refs);
@@ -4471,7 +5026,7 @@ export function createBoardRendererCore(options = {}) {
     ctx.restore();
   }
 
-  function resizeCanvas(refs) {
+  function resizeCanvas(refs: RendererRefs) {
     const { boardWrap, canvas, symbolCanvas, symbolCtx } = refs;
     if (!boardWrap || !canvas || !symbolCanvas || !symbolCtx || !refs.gridEl) return;
     const dpr = getDevicePixelScale();
@@ -4503,20 +5058,22 @@ export function createBoardRendererCore(options = {}) {
 
     syncBoardCellSize(refs);
 
-    const styles = getComputedStyle(boardWrap);
+    const boardWrapEl = asDomElement(boardWrap) ?? (boardWrap as unknown as Element);
+    const styles = getComputedStyle(boardWrapEl);
     const borderLeft = Number.parseFloat(styles.borderLeftWidth || '0') || 0;
     const borderRight = Number.parseFloat(styles.borderRightWidth || '0') || 0;
     const borderTop = Number.parseFloat(styles.borderTopWidth || '0') || 0;
     const borderBottom = Number.parseFloat(styles.borderBottomWidth || '0') || 0;
-    const cw = Math.max(0, wrapRect.width - borderLeft - borderRight);
-    const ch = Math.max(0, wrapRect.height - borderTop - borderBottom);
-    const innerLeft = wrapRect.left + boardWrap.clientLeft;
-    const innerTop = wrapRect.top + boardWrap.clientTop;
+    const cw = Math.max(0, (wrapRect.width || 0) - borderLeft - borderRight);
+    const ch = Math.max(0, (wrapRect.height || 0) - borderTop - borderBottom);
+    const innerLeft = wrapRect.left + (boardWrap.clientLeft || 0);
+    const innerTop = wrapRect.top + (boardWrap.clientTop || 0);
     const offset = {
       x: gridRect.left - innerLeft,
       y: gridRect.top - innerTop,
     };
-    const gridStyles = getComputedStyle(refs.gridEl);
+    const gridEl = asDomElement(refs.gridEl) ?? (refs.gridEl as unknown as Element);
+    const gridStyles = getComputedStyle(gridEl);
     const gap = parsePx(gridStyles.columnGap || gridStyles.gap || '0');
     const pad = parsePx(gridStyles.paddingLeft || gridStyles.padding || '0');
     const cellFromStyle = parsePx(
@@ -4524,7 +5081,7 @@ export function createBoardRendererCore(options = {}) {
       || refs.gridEl.style.getPropertyValue('--cell')
       || styles.getPropertyValue('--cell'),
     );
-    const cell = cellFromStyle > 0 ? cellFromStyle : getCellSize(refs.gridEl);
+    const cell = cellFromStyle > 0 ? cellFromStyle : getCellSize(gridEl);
     updateBoardLayoutMetrics({
       rows: activeBoardSize.rows,
       cols: activeBoardSize.cols,
@@ -4570,19 +5127,22 @@ export function createBoardRendererCore(options = {}) {
     pathAnimationEngine.notifyInteractiveResize();
   }
 
-  const setPathFlowFreezeImmediate = (isFrozen = false) => {
+  const setPathFlowFreezeImmediate = (isFrozen: boolean = false) => {
     pathAnimationEngine.setPathFlowFreezeImmediate(isFrozen);
   };
 
-  const applyImmediateInteractionState = (interactionModel = {}) => {
+  const applyImmediateInteractionState = (interactionModel: InteractionModel | null = null): void => {
     if (!refs) return;
-    if (interactionModel.dropTarget && Number.isInteger(interactionModel.dropTarget.r) && Number.isInteger(interactionModel.dropTarget.c)) {
-      setDropTarget(interactionModel.dropTarget.r, interactionModel.dropTarget.c);
+    const dropTarget = interactionModel?.dropTarget;
+    const dropRow = readInteger(dropTarget?.r);
+    const dropCol = readInteger(dropTarget?.c);
+    if (dropRow !== null && dropCol !== null) {
+      setDropTarget(dropRow, dropCol);
     } else {
       clearDropTarget();
     }
 
-    const ghost = interactionModel.wallGhost;
+    const ghost = interactionModel?.wallGhost;
     if (ghost?.visible) {
       showWallDragGhost(ghost.x || 0, ghost.y || 0);
       moveWallDragGhost(ghost.x || 0, ghost.y || 0);
@@ -4591,7 +5151,7 @@ export function createBoardRendererCore(options = {}) {
     }
   };
 
-  const applyInteractionState = (interactionModel = {}) => {
+  const applyInteractionState = (interactionModel: InteractionModel | null = null): void => {
     if (!refs) return;
     applyImmediateInteractionState(interactionModel);
     syncPathTipDragHoverCell(interactionModel);
@@ -4691,7 +5251,7 @@ export function createBoardRendererCore(options = {}) {
       return boardLayoutMetrics.ready ? boardLayoutMetrics : null;
     },
 
-    rebuildGrid(snapshot) {
+    rebuildGrid(snapshot: GameSnapshot) {
       if (!refs) return;
       buildGrid(snapshot, refs, icons, iconX);
       syncBoardNavHighlights(latestInteractionModel || {});
@@ -4703,6 +5263,12 @@ export function createBoardRendererCore(options = {}) {
       completion = null,
       uiModel = {},
       interactionModel = {},
+    }: {
+      snapshot: GameSnapshot;
+      evaluation: EvaluateResult;
+      completion?: CompletionModel | null;
+      uiModel?: UiRenderModel;
+      interactionModel?: InteractionModel;
     }) {
       if (!refs) return;
       latestInteractionModel = interactionModel;
@@ -4722,7 +5288,7 @@ export function createBoardRendererCore(options = {}) {
       scheduleRendererFrame();
     },
 
-    updateInteraction(interactionModel = {}) {
+    updateInteraction(interactionModel: InteractionModel | null = {}) {
       latestInteractionModel = interactionModel;
       pathAnimationEngine.setInteractionModel(interactionModel);
       applyImmediateInteractionState(interactionModel);
@@ -4745,7 +5311,7 @@ export function createBoardRendererCore(options = {}) {
       }
     },
 
-    setLowPowerMode(enabled = false) {
+    setLowPowerMode(enabled: boolean = false) {
       const nextEnabled = Boolean(enabled);
       if (nextEnabled === lowPowerModeEnabled) return;
       lowPowerModeEnabled = nextEnabled;
@@ -4780,11 +5346,11 @@ export function createBoardRendererCore(options = {}) {
       notifyInteractiveResize();
     },
 
-    setPathFlowFreezeImmediate(isFrozen = false) {
+    setPathFlowFreezeImmediate(isFrozen: boolean = false) {
       setPathFlowFreezeImmediate(isFrozen);
     },
 
-    recordPathTransition(previousSnapshot, nextSnapshot, interactionModel = null) {
+    recordPathTransition(previousSnapshot: GameSnapshot, nextSnapshot: GameSnapshot, interactionModel: InteractionModel | null = null) {
       if (!refs) return;
       recordPathTransitionCompensation(previousSnapshot, nextSnapshot, refs);
       if (!lowPowerModeEnabled || !interactionModel?.isPathDragging) return;
@@ -4796,7 +5362,7 @@ export function createBoardRendererCore(options = {}) {
       clearPathTransitionCompensationBuffer();
     },
 
-    destroy(options = {}) {
+    destroy(options: RuntimeData & { releaseWebglContext?: boolean } = {}) {
       clearDropTarget();
       hideWallDragGhost();
       syncPathTipDragHoverCell({ isPathDragging: false, pathDragCursor: null }, []);

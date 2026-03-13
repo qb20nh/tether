@@ -309,7 +309,7 @@ test('tip-arrival hint enables mixed end transition arrival state', () => {
     { r: 2, c: 3 },
   ];
   const tip = { r: 2, c: 3 };
-  const out = {
+  const out = /** @type {any} */ ({
     x: 0,
     y: 0,
     active: false,
@@ -318,7 +318,7 @@ test('tip-arrival hint enables mixed end transition arrival state', () => {
     progress: 0,
     linearRemain: 1,
     linearProgress: 0,
-  };
+  });
 
   engine.updatePathTipArrivalStates(previousPath, nextPath, 20, 20, 0, null);
   const withoutHint = engine.resolvePathTipArrivalOffset('end', tip, 0, out);
@@ -340,13 +340,13 @@ test('flow visibility and start-pin presence transition state resolves as expect
     isReducedMotionPreferred: () => false,
   });
   const flowOut = { mix: 1, active: false };
-  const pinOut = {
+  const pinOut = /** @type {any} */ ({
     scale: 1,
     active: false,
     mode: 'none',
     anchorR: Number.NaN,
     anchorC: Number.NaN,
-  };
+  });
 
   const oneNode = [{ r: 0, c: 0 }];
   const twoNodes = [{ r: 0, c: 0 }, { r: 0, c: 1 }];
