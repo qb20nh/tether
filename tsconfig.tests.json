@@ -1,11 +1,8 @@
 {
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
-    "allowJs": true,
-    "checkJs": true,
     "lib": ["DOM", "DOM.Iterable", "ES2023"],
-    "noImplicitAny": false,
-    "types": ["node", "vite/client"]
+    "types": ["node", "vite/client", "vitest"]
   },
-  "include": ["tests/**/*.js", "tests/**/*.ts", "src/**/*.d.ts"]
+  "include": ["tests/**/*.ts", "src/**/*.d.ts"]
 }

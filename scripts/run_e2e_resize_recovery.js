@@ -38,7 +38,7 @@ const runE2e = async () => {
 
   try {
     await waitForServer(BASE_URL, SERVER_READY_TIMEOUT_MS, SERVER_POLL_INTERVAL_MS);
-    await runCommand('node', ['--test', 'tests/e2e/resize_recovery.e2e.test.js'], {
+    await runCommand('pnpm', ['exec', 'vitest', 'run', '--config', 'vitest.e2e.config.ts', 'tests/e2e/resize_recovery.e2e.test.ts'], {
       env: {
         ...process.env,
         E2E_BASE_URL: BASE_URL,

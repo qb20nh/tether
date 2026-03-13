@@ -1,0 +1,536 @@
+import assert from 'node:assert/strict';
+import test from '../test.ts';
+import { createDefaultCore } from '../../src/core/default_core.ts';
+import { createLevelProvider } from '../../src/core/level_provider.ts';
+import { createMemoryPersistence } from '../../src/persistence/memory_persistence.ts';
+import { createHeadlessRuntime, createRuntime } from '../../src/runtime/create_runtime.ts';
+import { GAME_COMMANDS, INTENT_TYPES } from '../../src/runtime/intents.ts';
+import { createGameStateStore } from '../../src/state/game_state_store.ts';
+import type { HeadlessRuntime, LevelDefinition, RuntimeController, TranslateVars } from '../../src/contracts/ports.ts';
+
+const globalObject = (globalThis as any);
+
+const CAMPAIGN_LEVEL = {
+  name: 'Campaign',
+  grid: [
+    '..',
+    '..',
+  ],
+  stitches: [],
+  cornerCounts: [],
+};
+
+const DAILY_LEVEL = {
+  name: 'Daily',
+  grid: [
+    '..',
+    '..',
+  ],
+  stitches: [],
+  cornerCounts: [],
+};
+
+const DAILY_SESSION_LEVEL = {
+  name: 'Daily Session',
+  grid: [
+    'm.',
+    '..',
+  ],
+  stitches: [],
+  cornerCounts: [],
+};
+
+const INFINITE_SCORE_LEVEL = {
+  name: 'Infinite Score',
+  grid: [
+    '...',
+    '.s.',
+    '...',
+  ],
+  stitches: [],
+  cornerCounts: [],
+};
+
+const createClassList = () => {
+  const tokens = new Set<string>();
+  return ({
+    add: (...values: string[]) => values.forEach((value) => tokens.add(value)),
+    remove: (...values: string[]) => values.forEach((value) => tokens.delete(value)),
+    toggle: (value: string, force?: boolean) => {
+      const shouldHave = force === undefined ? !tokens.has(value) : Boolean(force);
+      if (shouldHave) tokens.add(value);
+      else tokens.delete(value);
+      return shouldHave;
+    },
+    contains: (value: string) => tokens.has(value),
+  } as any);
+};
+
+const createElement = () => ({
+  hidden: false,
+  disabled: false,
+  textContent: '',
+  innerHTML: '',
+  value: '',
+  dataset: {},
+  style: {},
+  classList: createClassList(),
+  setAttribute() { },
+  removeAttribute() { },
+  querySelector() {
+    return createElement();
+  },
+  closest() {
+    return createElement();
+  },
+} as any);
+
+const createRefs = () => {
+  const infiniteItem = createElement();
+  const dailyItem = createElement();
+  const separator = createElement();
+  const scoreMeta = createElement();
+  scoreMeta.querySelector = () => separator;
+
+  const infiniteScoreLabel = createElement();
+  infiniteScoreLabel.closest = () => infiniteItem;
+  const dailyScoreLabel = createElement();
+  dailyScoreLabel.closest = () => dailyItem;
+
+  const levelSelectGroup = createElement();
+  levelSelectGroup.parentElement = createElement();
+
+  return ({
+    boardWrap: createElement(),
+    gridEl: createElement(),
+    legend: createElement(),
+    guidePanel: createElement(),
+    guideToggleBtn: createElement(),
+    legendPanel: createElement(),
+    legendToggleBtn: createElement(),
+    levelSel: createElement(),
+    levelSelectGroup,
+    infiniteSel: createElement(),
+    prevInfiniteBtn: createElement(),
+    nextLevelBtn: createElement(),
+    scoreMeta,
+    infiniteScoreLabel,
+    dailyScoreLabel,
+    infiniteScoreValue: createElement(),
+    dailyScoreValue: createElement(),
+    dailyMeta: createElement(),
+    dailyDateValue: createElement(),
+    dailyCountdownValue: createElement(),
+    settingsPanel: createElement(),
+    settingsToggle: createElement(),
+    themeSwitchMessage: createElement(),
+    themeSwitchDialog: createElement(),
+    resetBtn: createElement(),
+    reverseBtn: createElement(),
+    langSel: createElement(),
+    msgEl: createElement(),
+  } as any);
+};
+
+const installBrowserEnv = (t: { after: (cleanup: () => void) => void }) => {
+  const originalWindow = globalThis.window;
+  const originalDocument = globalThis.document;
+  const originalResizeObserver = globalThis.ResizeObserver;
+  const originalRaf = globalThis.requestAnimationFrame;
+  const originalCancelRaf = globalThis.cancelAnimationFrame;
+  const originalSetTimeout = globalThis.setTimeout;
+  const originalClearTimeout = globalThis.clearTimeout;
+  const originalSetInterval = globalThis.setInterval;
+  const originalClearInterval = globalThis.clearInterval;
+
+  const listeners = new Map<string, Set<(...args: unknown[]) => void>>();
+  const ensureListeners = (eventName: string) => {
+    if (!listeners.has(eventName)) listeners.set(eventName, new Set());
+    return listeners.get(eventName)!;
+  };
+
+  const rafCallbacks = new Map<number, (timestamp: number) => void>();
+  let nextRafId = 1;
+  const timeoutCallbacks = new Map<number, () => void>();
+  let nextTimeoutId = 1;
+  const intervalCallbacks = new Map<number, () => void>();
+  let nextIntervalId = 1;
+
+  class FakeResizeObserver {
+    callback: () => void;
+
+    constructor(callback: () => void) {
+      this.callback = callback;
+    }
+
+    observe() {
+      // noop
+    }
+
+    disconnect() {
+      // noop
+    }
+  }
+
+  globalObject.window = ({
+    addEventListener(eventName: string, handler: (...args: unknown[]) => void) {
+      ensureListeners(eventName).add(handler);
+    },
+    removeEventListener(eventName: string, handler: (...args: unknown[]) => void) {
+      ensureListeners(eventName).delete(handler);
+    },
+    setInterval(callback: () => void) {
+      const id = nextIntervalId;
+      nextIntervalId += 1;
+      intervalCallbacks.set(id, callback);
+      return id;
+    },
+    clearInterval(id: number) {
+      intervalCallbacks.delete(id);
+    },
+  } as any);
+  globalObject.document = ({
+    documentElement: {
+      lang: '',
+      dataset: {},
+      classList: createClassList(),
+      setAttribute() { },
+    },
+    body: null,
+  } as any);
+  globalObject.ResizeObserver = (FakeResizeObserver as any);
+  globalObject.requestAnimationFrame = (callback: (timestamp: number) => void) => {
+    const id = nextRafId;
+    nextRafId += 1;
+    rafCallbacks.set(id, (...args) => {
+      rafCallbacks.delete(id);
+      return callback(...args);
+    });
+    return id;
+  };
+  globalObject.cancelAnimationFrame = (id: number) => {
+    rafCallbacks.delete(id);
+  };
+  globalObject.setTimeout = (callback: () => void) => {
+    const id = nextTimeoutId;
+    nextTimeoutId += 1;
+    timeoutCallbacks.set(id, (...args) => {
+      timeoutCallbacks.delete(id);
+      return callback(...args);
+    });
+    return id;
+  };
+  globalObject.clearTimeout = (id: number) => {
+    timeoutCallbacks.delete(id);
+  };
+  globalObject.setInterval = globalObject.window.setInterval;
+  globalObject.clearInterval = globalObject.window.clearInterval;
+
+  t.after(() => {
+    globalObject.window = originalWindow;
+    globalObject.document = originalDocument;
+    globalObject.ResizeObserver = originalResizeObserver;
+    globalObject.requestAnimationFrame = originalRaf;
+    globalObject.cancelAnimationFrame = originalCancelRaf;
+    globalObject.setTimeout = originalSetTimeout;
+    globalObject.clearTimeout = originalClearTimeout;
+    globalObject.setInterval = originalSetInterval;
+    globalObject.clearInterval = originalClearInterval;
+  });
+
+  return {
+    rafCallbacks,
+    timeoutCallbacks,
+    intervalCallbacks,
+    listeners,
+  };
+};
+
+function flushCallbacks(callbackMap: Map<number, () => void>): void;
+function flushCallbacks<T>(callbackMap: Map<number, (arg: T) => void>, arg: T): void;
+function flushCallbacks<T>(callbackMap: Map<number, ((arg: T) => void) | (() => void)>, arg?: T) {
+  let guard = 0;
+  while (callbackMap.size > 0 && guard < 20) {
+    const callbacks = [...callbackMap.values()];
+    callbacks.forEach((callback) => {
+      if (arg === undefined) {
+        (callback as () => void)();
+        return;
+      }
+      (callback as (value: T) => void)(arg);
+    });
+    guard += 1;
+  }
+}
+
+const createUiHarness = ({
+  levels,
+  infiniteMaxLevels = 4,
+  generateInfiniteLevel,
+  dailyLevel = null,
+  dailyId = null,
+}: {
+  levels: LevelDefinition[];
+  infiniteMaxLevels?: number;
+  generateInfiniteLevel: (index: number) => LevelDefinition;
+  dailyLevel?: LevelDefinition | null;
+  dailyId?: string | null;
+}, t: { after: (cleanup: () => void) => void }) => {
+  const env = installBrowserEnv(t);
+  const levelProvider = createLevelProvider({
+    levels,
+    infiniteMaxLevels,
+    generateInfiniteLevel,
+    dailyLevel,
+    dailyId,
+  });
+  const core = createDefaultCore(levelProvider);
+  const state = createGameStateStore((index) => core.getLevel(index));
+  const persistence = createMemoryPersistence({}, {
+    dailyAbsIndex: core.getDailyAbsIndex(),
+    activeDailyId: core.getDailyId(),
+  });
+  const refs = (createRefs() as any);
+
+  const runtime = createRuntime({
+    appEl: ({
+      querySelectorAll: () => [],
+    } as any),
+    core,
+    state,
+    persistence,
+    renderer: {
+      mount() { },
+      getRefs() {
+        return refs;
+      },
+      rebuildGrid() { },
+      renderFrame() { },
+      resize() { },
+      notifyResizeInteraction() { },
+      unmount() { },
+      recordPathTransition() { },
+      clearPathTransitionCompensation() { },
+      updateInteraction() { },
+      setPathFlowFreezeImmediate() { },
+    },
+    input: {
+      bind() { },
+      setKeyboardGamepadControlsEnabled() { },
+      setBoardControlSuppressed() { },
+      syncSnapshot() { },
+      unbind() { },
+    },
+    i18n: {
+      initialize: async () => 'en',
+      resolveLocale: () => 'en',
+      createTranslator: () => (key: string, vars: TranslateVars = {}) => {
+        if (key === 'ui.infiniteLevelOption') return `Infinite ${vars.n ?? ''}`.trim();
+        if (key === 'ui.dailyLevelOptionWithDate') return `${vars.label} ${vars.date}`.trim();
+        return key;
+      },
+      getLocale: () => 'en',
+      setLocale: async () => 'en',
+      getLocaleOptions: () => [{ value: 'en', label: 'English' }],
+      translateNow: (key: string, vars: TranslateVars = {}) => {
+        if (key === 'ui.infiniteLevelOption') return `Infinite ${vars.n ?? ''}`.trim();
+        if (key === 'ui.dailyLevelOptionWithDate') return `${vars.label} ${vars.date}`.trim();
+        return key;
+      },
+      preloadAllLocales: async () => [{ value: 'en', label: 'English' }],
+      isOnline: () => true,
+    },
+    ui: {
+      buildLegendTemplate: () => '',
+      badgeDefinitions: {},
+      icons: {},
+      iconX: '',
+    },
+  });
+
+  return {
+    env,
+    runtime,
+    core,
+    state,
+    persistence,
+  };
+};
+
+const createHeadlessHarness = ({
+  levels,
+  infiniteMaxLevels = 4,
+  generateInfiniteLevel,
+  dailyLevel = null,
+  dailyId = null,
+}: {
+  levels: LevelDefinition[];
+  infiniteMaxLevels?: number;
+  generateInfiniteLevel: (index: number) => LevelDefinition;
+  dailyLevel?: LevelDefinition | null;
+  dailyId?: string | null;
+}) => {
+  const levelProvider = createLevelProvider({
+    levels,
+    infiniteMaxLevels,
+    generateInfiniteLevel,
+    dailyLevel,
+    dailyId,
+  });
+  const core = createDefaultCore(levelProvider);
+  const state = createGameStateStore((index) => core.getLevel(index));
+  const persistence = createMemoryPersistence({}, {
+    dailyAbsIndex: core.getDailyAbsIndex(),
+    activeDailyId: core.getDailyId(),
+  });
+  const runtime = createHeadlessRuntime({ core, state, persistence });
+
+  return {
+    runtime,
+    core,
+    state,
+    persistence,
+  };
+};
+
+const emitUiPath = (runtime: RuntimeController, cells: Array<[number, number]>) => {
+  for (const element of cells) {
+    runtime.emitIntent({
+      type: INTENT_TYPES.GAME_COMMAND,
+      payload: {
+        commandType: GAME_COMMANDS.START_OR_STEP,
+        r: element[0],
+        c: element[1],
+      },
+    });
+  }
+  runtime.emitIntent({
+    type: INTENT_TYPES.GAME_COMMAND,
+    payload: { commandType: GAME_COMMANDS.FINALIZE_PATH },
+  });
+};
+
+const dispatchHeadlessPath = (runtime: HeadlessRuntime, cells: Array<[number, number]>, finalize = true) => {
+  for (const element of cells) {
+    runtime.dispatch('path/start-or-step', { r: element[0], c: element[1] });
+  }
+  if (finalize) runtime.dispatch('path/finalize-after-pointer', {});
+};
+
+test('ui and headless runtimes keep daily solve score and solved date in parity', (t) => {
+  const options = ({
+    levels: [CAMPAIGN_LEVEL],
+    generateInfiniteLevel: () => CAMPAIGN_LEVEL,
+    dailyLevel: DAILY_LEVEL,
+    dailyId: '2026-03-08',
+  } as any);
+  const ui = createUiHarness(options, t);
+  const headless = createHeadlessHarness(options);
+  const dailyIndex = ui.core.getDailyAbsIndex();
+
+  ui.runtime.start();
+  ui.state.dispatch({ type: GAME_COMMANDS.LOAD_LEVEL, payload: { levelIndex: dailyIndex } });
+  emitUiPath(ui.runtime, [
+    [0, 0],
+    [0, 1],
+    [1, 1],
+    [1, 0],
+  ]);
+  flushCallbacks(ui.env.rafCallbacks, 16);
+  flushCallbacks(ui.env.timeoutCallbacks);
+
+  headless.runtime.start(dailyIndex);
+  dispatchHeadlessPath(headless.runtime, [
+    [0, 0],
+    [0, 1],
+    [1, 1],
+    [1, 0],
+  ]);
+
+  const uiBoot = ui.persistence.readBootState();
+  const headlessBoot = headless.persistence.readBootState();
+
+  assert.equal(uiBoot.dailySolvedDate, '2026-03-08');
+  assert.equal(headlessBoot.dailySolvedDate, '2026-03-08');
+  assert.equal(uiBoot.campaignProgress, headlessBoot.campaignProgress);
+  assert.equal(uiBoot.infiniteProgress, headlessBoot.infiniteProgress);
+  assert.deepEqual(uiBoot.scoreState, headlessBoot.scoreState);
+  ui.runtime.destroy();
+});
+
+test('ui and headless runtimes keep infinite solve score and progress in parity', (t) => {
+  const options = {
+    levels: [CAMPAIGN_LEVEL],
+    generateInfiniteLevel: () => INFINITE_SCORE_LEVEL,
+  };
+  const ui = createUiHarness(options, t);
+  const headless = createHeadlessHarness(options);
+  const infiniteIndex = ui.core.ensureInfiniteAbsIndex(0);
+  const path: Array<[number, number]> = [
+    [0, 0], [0, 1], [0, 2], [1, 2], [1, 1], [1, 0], [2, 0], [2, 1], [2, 2],
+  ];
+
+  ui.runtime.start();
+  ui.state.dispatch({ type: GAME_COMMANDS.LOAD_LEVEL, payload: { levelIndex: infiniteIndex } });
+  emitUiPath(ui.runtime, path);
+  flushCallbacks(ui.env.rafCallbacks, 16);
+  flushCallbacks(ui.env.timeoutCallbacks);
+
+  headless.runtime.start(infiniteIndex);
+  dispatchHeadlessPath(headless.runtime, path);
+
+  const uiBoot = ui.persistence.readBootState();
+  const headlessBoot = headless.persistence.readBootState();
+
+  assert.equal(uiBoot.infiniteProgress, headlessBoot.infiniteProgress);
+  assert.deepEqual(uiBoot.scoreState, headlessBoot.scoreState);
+  ui.runtime.destroy();
+});
+
+test('ui and headless runtimes serialize session boards identically', (t) => {
+  const options = ({
+    levels: [CAMPAIGN_LEVEL],
+    generateInfiniteLevel: () => CAMPAIGN_LEVEL,
+    dailyLevel: DAILY_SESSION_LEVEL,
+    dailyId: '2026-03-08',
+  } as any);
+  const ui = createUiHarness(options, t);
+  const headless = createHeadlessHarness(options);
+  const dailyIndex = ui.core.getDailyAbsIndex();
+
+  ui.runtime.start();
+  ui.state.dispatch({ type: GAME_COMMANDS.LOAD_LEVEL, payload: { levelIndex: dailyIndex } });
+  ui.runtime.emitIntent({
+    type: INTENT_TYPES.GAME_COMMAND,
+    payload: {
+      commandType: GAME_COMMANDS.START_OR_STEP,
+      r: 1,
+      c: 0,
+    },
+  });
+  ui.runtime.emitIntent({
+    type: INTENT_TYPES.GAME_COMMAND,
+    payload: {
+      commandType: GAME_COMMANDS.START_OR_STEP,
+      r: 1,
+      c: 1,
+    },
+  });
+  flushCallbacks(ui.env.rafCallbacks, 16);
+  flushCallbacks(ui.env.timeoutCallbacks);
+
+  headless.runtime.start(dailyIndex);
+  dispatchHeadlessPath(headless.runtime, [
+    [1, 0],
+    [1, 1],
+  ], false);
+
+  assert.deepEqual(ui.persistence.readBootState().sessionBoard, headless.persistence.readBootState().sessionBoard);
+  assert.deepEqual(ui.persistence.readBootState().sessionBoard, {
+    levelIndex: dailyIndex,
+    path: [[1, 0], [1, 1]],
+    movableWalls: [[0, 0]],
+    dailyId: '2026-03-08',
+  });
+  ui.runtime.destroy();
+});

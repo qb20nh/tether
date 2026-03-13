@@ -1,0 +1,70 @@
+import assert from 'node:assert/strict';
+import test from '../test.ts';
+import { createRenderDragWorkload } from '../../scripts/lib/render_drag_workload.ts';
+import { createDefaultCore } from '../../src/core/default_core.ts';
+import { createLevelProvider } from '../../src/core/level_provider.ts';
+import { createGameStateStore } from '../../src/state/game_state_store.ts';
+import { isUsableCell } from '../../src/state/snapshot_rules.ts';
+
+const buildBoardSnapshot = (infiniteIndex: number) => {
+  const levelProvider = createLevelProvider();
+  const core = createDefaultCore(levelProvider);
+  const state = createGameStateStore((levelIndex) => core.getLevel(levelIndex));
+  state.loadLevel(core.ensureInfiniteAbsIndex(infiniteIndex));
+  return state.getSnapshot();
+};
+
+test('render drag workload is deterministic for the same seed', () => {
+  const first = createRenderDragWorkload({
+    seed: 'stable-seed',
+    boards: 3,
+  });
+  const second = createRenderDragWorkload({
+    seed: 'stable-seed',
+    boards: 3,
+  });
+
+  assert.deepEqual(second, first);
+});
+
+test('render drag workload changes when the seed changes', () => {
+  const first = createRenderDragWorkload({
+    seed: 'seed-a',
+    boards: 3,
+  });
+  const second = createRenderDragWorkload({
+    seed: 'seed-b',
+    boards: 3,
+  });
+
+  assert.notDeepEqual(second, first);
+});
+
+test('render drag workload paths stay usable orthogonal and non-revisiting', () => {
+  const workload = createRenderDragWorkload({
+    seed: 'validate-paths',
+    boards: 4,
+  });
+
+  for (const element of workload.cases) {
+    const workloadCase = element;
+    const snapshot = buildBoardSnapshot(workloadCase.infiniteIndex);
+    const visited = new Set();
+
+    assert.equal(workloadCase.pathCells.length >= 14, true);
+    assert.equal(workloadCase.pathCells.length <= 22, true);
+
+    for (let j = 0; j < workloadCase.pathCells.length; j += 1) {
+      const [r, c] = workloadCase.pathCells[j];
+      assert.equal(isUsableCell(snapshot, r, c), true);
+      const key = `${r},${c}`;
+      assert.equal(visited.has(key), false);
+      visited.add(key);
+
+      if (j === 0) continue;
+      const [prevR, prevC] = workloadCase.pathCells[j - 1];
+      const manhattanDistance = Math.abs(prevR - r) + Math.abs(prevC - c);
+      assert.equal(manhattanDistance, 1);
+    }
+  }
+});

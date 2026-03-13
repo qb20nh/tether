@@ -13,14 +13,15 @@
     "dev": "vite",
     "build": "vite build",
     "build:native": "NATIVE_BUILD=1 vite build",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.scripts.json --noEmit && tsc -p tsconfig.sw.json --noEmit && tsc -p tsconfig.tests.json --noEmit",
+    "typecheck:tests": "tsc -p tsconfig.tests.json --noEmit",
     "verify:duplication": "jscpd --config .jscpd.json src scripts src-tauri/src vite.config.ts",
     "verify:release-no-debug": "node --import tsx scripts/verify_release_no_debug_artifacts.ts",
     "preview": "vite preview",
     "tauri": "pnpm run build:native && env NO_STRIP=1 tauri",
-    "test": "node --import tsx --test \"tests/contracts/*.test.js\" \"tests/core/*.test.js\" \"tests/input/*.test.js\" \"tests/persistence/*.test.js\" \"tests/renderer/*.test.js\" \"tests/rules/*.test.js\" \"tests/runtime/*.test.js\" \"tests/scripts/*.test.js\" \"tests/state/*.test.js\"",
+    "test": "vitest run",
     "test:e2e": "node --import tsx scripts/run_e2e_resize_recovery.js",
-    "test:coverage": "node --import tsx --experimental-test-coverage --test-coverage-include=\"src/**\" --test-coverage-include=\"scripts/**\" --test-coverage-exclude=\"tests/**\" --test \"tests/contracts/*.test.js\" \"tests/core/*.test.js\" \"tests/input/*.test.js\" \"tests/persistence/*.test.js\" \"tests/renderer/*.test.js\" \"tests/rules/*.test.js\" \"tests/runtime/*.test.js\" \"tests/scripts/*.test.js\" \"tests/state/*.test.js\""
+    "test:coverage": "vitest run --coverage"
   },
   "bugs": {
     "url": "https://github.com/qb20nh/tether/issues"
@@ -33,13 +34,15 @@
     "@tailwindcss/vite": "^4.2.1",
     "@tauri-apps/cli": "^2.10.0",
     "@types/node": "^25.4.0",
+    "@vitest/coverage-v8": "^4.1.0",
     "jscpd": "^4.0.8",
     "playwright": "^1.58.2",
     "tailwindcss": "^4.2.1",
     "terser": "^5.46.0",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3",
-    "vite": "^7.3.1"
+    "vite": "^7.3.1",
+    "vitest": "^4.1.0"
   },
   "dependencies": {
     "@capacitor/android": "^8.1.0",
