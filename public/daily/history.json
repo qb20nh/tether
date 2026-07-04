@@ -896,6 +896,13 @@
       "canonicalKey": "fdd00934fa817f12e6f3e5187d700210",
       "poolVersion": "v1",
       "publishedAtUtcMs": 1783036801000
+    },
+    {
+      "dailyId": "2026-07-04",
+      "dailySlot": 9600,
+      "canonicalKey": "f9f52c078a13e3350a1bb7cc081ebf77",
+      "poolVersion": "v1",
+      "publishedAtUtcMs": 1783123201000
     }
   ]
 }
