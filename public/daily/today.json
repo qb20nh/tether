@@ -1,31 +1,27 @@
 {
   "schemaVersion": 1,
   "poolVersion": "v1",
-  "dailyId": "2026-09-23",
-  "dailySlot": 1088,
-  "canonicalKey": "7fdb1d80a770992906094ed07db2f8cb",
-  "generatedAtUtcMs": 1790121601000,
-  "hardInvalidateAtUtcMs": 1790208000000,
+  "dailyId": "2026-09-24",
+  "dailySlot": 21659,
+  "canonicalKey": "d31981fc4e9e37e4599798fd2228f416",
+  "generatedAtUtcMs": 1790208001000,
+  "hardInvalidateAtUtcMs": 1790294400000,
   "level": {
-    "name": "Daily 2026-09-23",
+    "name": "Daily 2026-09-24",
     "grid": [
-      "..##..",
+      "......",
       ".##...",
-      "....vb",
-      "..p.g.",
-      "......"
+      ".##.vg",
+      "......",
+      "#....s",
+      "##...b"
     ],
     "stitches": [],
     "cornerCounts": [
       [
         1,
-        4,
+        3,
         1
-      ],
-      [
-        4,
-        4,
-        2
       ]
     ]
   }
